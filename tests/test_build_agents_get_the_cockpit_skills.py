@@ -25,9 +25,9 @@ _NAMED_SKILL = re.compile(r"zručnos\w*\s+`([a-z0-9-]+)`")
 
 
 def _front_matter(text: str) -> dict:
-    assert text.startswith("---\n"), "zručnosť nezačína hlavičkou (---)"
+    assert text.startswith("---\n"), "skill does not start with a header (---)"
     front, end, _body = text[len("---\n") :].partition("\n---\n")
-    assert end, "hlavička zručnosti nie je uzavretá (---)"
+    assert end, "the skill header is not closed (---)"
     return yaml.safe_load(front)
 
 
@@ -49,14 +49,14 @@ def _project_skills(root: Path) -> dict[str, str]:
 def test_every_shipped_skill_has_the_shape_claude_code_loads():
     entries = sorted(cps.SKILLS_TEMPLATE_DIR.iterdir())
 
-    assert entries, "kokpit nedodáva ani jednu zručnosť — šablóny templates/skills/ chýbajú"
+    assert entries, "the cockpit ships no skill at all — the templates/skills/ templates are missing"
     for entry in entries:
-        assert entry.is_dir(), f"{entry.name}: voľný súbor Claude Code nenačíta — zručnosť je priečinok so SKILL.md"
+        assert entry.is_dir(), f"{entry.name}: Claude Code ignores a loose file — a skill is a folder with SKILL.md"
         template = entry / cps.SKILL_FILE
-        assert template.is_file(), f"{entry.name}: chýba {cps.SKILL_FILE}"
+        assert template.is_file(), f"{entry.name}: {cps.SKILL_FILE} is missing"
         front = _front_matter(template.read_text(encoding="utf-8"))
-        assert front.get("name") == entry.name, f"{entry.name}: meno v hlavičke sa nezhoduje s priečinkom"
-        assert str(front.get("description") or "").strip(), f"{entry.name}: bez opisu agent nevie, kedy ju použiť"
+        assert front.get("name") == entry.name, f"{entry.name}: the name in the header does not match the folder"
+        assert str(front.get("description") or "").strip(), f"{entry.name}: no description, unclear when to use it"
 
 
 def test_a_new_project_gets_every_skill_in_loadable_form(tmp_path):
@@ -70,10 +70,10 @@ def test_a_new_project_gets_every_skill_in_loadable_form(tmp_path):
 
     assert _project_skills(root) == cps.cockpit_skills()
     leftovers = [p.name for p in (root / ".claude" / "skills").iterdir() if p.is_file()]
-    assert leftovers == [], f"voľné súbory starej šablóny ostali v projekte: {leftovers}"
+    assert leftovers == [], f"loose files of the old template remained in the project: {leftovers}"
     for name, text in _project_skills(root).items():
-        assert _front_matter(text)["name"] == name, f"{name}: značka kokpitu pokazila hlavičku"
-        assert cps.COCKPIT_SKILL_MARKER in text, f"{name}: bez značky ju obnova nespozná ako zručnosť kokpitu"
+        assert _front_matter(text)["name"] == name, f"{name}: the cockpit marker broke the header"
+        assert cps.COCKPIT_SKILL_MARKER in text, f"{name}: no marker: refresh cannot tell it is a cockpit skill"
 
 
 def test_refresh_brings_the_skills_up_to_date_and_retires_only_its_own(tmp_path):
@@ -94,7 +94,7 @@ def test_refresh_brings_the_skills_up_to_date_and_retires_only_its_own(tmp_path)
     cps.refresh_v2_agent_charters(root, "projekt")
 
     assert _project_skills(root) == {**cps.cockpit_skills(), "projects-own": own}
-    assert not (skills_dir / "tdd.md").exists(), "voľný súbor starej šablóny prežil obnovu"
+    assert not (skills_dir / "tdd.md").exists(), "a loose file of the old template survived the refresh"
 
 
 def test_every_skill_the_instructions_name_is_shipped_and_every_shipped_skill_is_named():
@@ -111,10 +111,10 @@ def test_every_skill_the_instructions_name_is_shipped_and_every_shipped_skill_is
     named_by_charters = {name for text in texts for name in _NAMED_SKILL.findall(text)}
     named_by_skills = {name for text in shipped.values() for name in _NAMED_SKILL.findall(text)}
 
-    assert named_by_charters - set(shipped) == set(), "pravidlá odkazujú na zručnosť, ktorú kokpit nedodáva"
-    assert named_by_skills - set(shipped) == set(), "zručnosť odkazuje na zručnosť, ktorú kokpit nedodáva"
+    assert named_by_charters - set(shipped) == set(), "the rules refer to a skill the cockpit does not ship"
+    assert named_by_skills - set(shipped) == set(), "a skill refers to a skill the cockpit does not ship"
     assert set(shipped) - named_by_charters == set(), (
-        "kokpit dodáva zručnosť, na ktorú charta neodkazuje — agent sa o nej dozvie len náhodou z opisu"
+        "the cockpit ships a skill the charter never names — the agent finds out only by chance"
     )
 
 

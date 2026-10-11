@@ -39,7 +39,7 @@ def poradca(monkeypatch, tmp_path):
             return 0, "https://github.com/rauschiccsk/nex-inbox.git\n"
         if argv[:3] == ["gh", "run", "view"]:
             return 0, "\n".join(f"riadok {i}" for i in range(500)) + "\nASSERTION FAILED: front vrátil 504"
-        raise AssertionError(f"neočakávaný príkaz {argv}")
+        raise AssertionError(f"unexpected command {argv}")
 
     monkeypatch.setattr(tools, "_run", _run)
     tool = tools.PoradcaTools(project_id=uuid.uuid4(), version_id=None, user_id=uuid.uuid4())
@@ -75,8 +75,8 @@ async def test_a_red_build_comes_with_its_run_and_the_end_of_the_failed_log(pora
     out = await tool.ci({})
 
     assert "CI zlyhalo (postup Release smoke gate, beh 38042619283, failure)" in out
-    assert RUN in out, "Poradca nevie povedať, kde sa beh dá pozrieť"
-    assert "ASSERTION FAILED: front vrátil 504" in out, "chýba koniec logu zlyhaného kroku"
+    assert RUN in out, "Poradca cannot say where the run can be viewed"
+    assert "ASSERTION FAILED: front vrátil 504" in out, "the end of the failed step's log is missing"
     assert ["gh", "run", "view", "38042619283", "-R", "rauschiccsk/nex-inbox", "--log-failed"] in commands
 
 
@@ -118,6 +118,6 @@ def test_the_tool_reads_only_what_the_answer_carries():
     }
     fields = {f.name for f in dataclasses.fields(ci_status.StavZostavenia)}
 
-    assert snapshot_names, "stráž nenašla odpoveď o CI v nástroji — nič by nestrážila"
-    assert read, "stráž nenašla jediné čítanie odpovede — nič by nestrážila"
-    assert read <= fields, f"nástroj číta polia, ktoré odpoveď nemá: {sorted(read - fields)}"
+    assert snapshot_names, "the guard found no CI answer in the tool — it would guard nothing"
+    assert read, "the guard found not a single read of the answer — it would guard nothing"
+    assert read <= fields, f"the tool reads fields the answer does not have: {sorted(read - fields)}"

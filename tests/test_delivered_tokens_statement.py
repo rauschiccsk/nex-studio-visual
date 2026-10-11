@@ -57,7 +57,7 @@ def test_counting_never_reaches_for_the_network(monkeypatch):
     import tiktoken.registry
 
     def _no_network(*_a, **_k):
-        raise AssertionError("tokenizér siahol na internet")
+        raise AssertionError("the tokenizer reached out to the internet")
 
     monkeypatch.setattr(tiktoken.load, "read_file", _no_network)
     monkeypatch.setattr(tiktoken.load, "read_file_cached", _no_network)
@@ -249,7 +249,7 @@ def test_the_first_version_counts_what_it_delivered_since_its_build_began(projec
         "frontend/src/api.generated.ts": (None, dt.EXCLUDED_GENERATED),
         "MEMORY.md": (None, dt.EXCLUDED_AGENT_NOTES),
         "frontend/logo.png": (None, dt.EXCLUDED_BINARY),
-    }, "šablóna zo založenia (README, template.py, CI) sa do prvej verzie nesmie rátať"
+    }, "the template from project creation (README, template.py, CI) must not count towards the first version"
     code = APP_V1 + "def vat(x):\n    return x * 0.23"
     assert p.count.tokens(dt.KIND_CODE) == dt.count_tokens(code)
     assert sum(f.tokens for f in p.count.files if f.excluded) == 0
@@ -264,7 +264,7 @@ def test_the_next_version_counts_only_added_and_changed_lines_from_the_previous_
     rows = {f.path: (f.kind, f.lines, f.tokens) for f in p.count.files}
     changed = "    return round(sum(i.price for i in items), 2)"
     assert rows == {"backend/app/invoices.py": (dt.KIND_CODE, 1, dt.count_tokens(changed))}, (
-        "zmazané riadky a premenovaný súbor sa rátali"
+        "deleted lines and a renamed file were counted"
     )
 
 
@@ -294,7 +294,7 @@ def test_a_fix_of_our_own_error_is_issued_at_zero(project):
         Decimal("0.00"),
         Decimal("0.00"),
     )
-    assert row.tokens_code > 0, "aj oprava zadarmo ukáže, čo sa dodalo"
+    assert row.tokens_code > 0, "even a free fix shows what was delivered"
 
 
 def test_a_change_is_billed_by_tokens_and_the_issued_statement_keeps_its_rates(project):
@@ -304,7 +304,7 @@ def test_a_change_is_billed_by_tokens_and_the_issued_statement_keeps_its_rates(p
     row = st.issue(db, v010, root, owner.id)
     code = (Decimal(row.tokens_code + row.tokens_tests) / 1000 * Decimal("4.0")).quantize(Decimal("0.01"))
     docs = (Decimal(row.tokens_docs) / 1000 * Decimal("1.5")).quantize(Decimal("0.01"))
-    assert row.work_kind == "change", "nová verzia je nová práca"
+    assert row.work_kind == "change", "a new version is new work"
     assert (row.amount_code_eur, row.amount_docs_eur, row.amount_eur) == (code, docs, code + docs)
     assert (row.rate_code, row.rate_docs) == (Decimal("4.0"), Decimal("1.5"))
 
@@ -315,7 +315,7 @@ def test_a_change_is_billed_by_tokens_and_the_issued_statement_keeps_its_rates(p
         code,
         docs,
         code + docs,
-    ), "neskoršia zmena sadzby prepočítala už vydaný súpis"
+    ), "a later rate change recalculated an already issued statement"
     assert st.preview(db, v010, root).rate_code == Decimal("10.0")
 
 
@@ -333,7 +333,7 @@ def test_without_rates_the_statement_is_shown_but_not_issued(project):
 def test_the_delivered_state_is_the_sign_off_then_the_pass_then_the_tag(project):
     db, root, _owner, v010, _v011, delivered_010, delivered_011 = project
     _git(root, "tag", "-a", "v0.1.0", "-m", "iná značka", _git(root, "rev-parse", f"{delivered_010}~1").strip())
-    assert st.delivered_commit(db, v010, root) == (delivered_010, "verifikacia"), "značka prebila Verifikáciu"
+    assert st.delivered_commit(db, v010, root) == (delivered_010, "verifikacia"), "the tag overrode Verifikácia"
 
     orchestrator._record_message(
         db,
@@ -470,7 +470,7 @@ def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
         Decimal("347.78"),
         Decimal("76.09"),
         Decimal("423.87"),
-    ), "prvý vydaný súpis (NEX Inbox 1.7.0)"
+    ), "the first issued statement (NEX Inbox 1.7.0)"
 
     # Half a cent on each line: rounding the total alone would bill 0,01 € while the lines show 0,01 € + 0,01 €.
     halves = st.amounts("change", 5, 0, 5, Decimal("1"), Decimal("1"))

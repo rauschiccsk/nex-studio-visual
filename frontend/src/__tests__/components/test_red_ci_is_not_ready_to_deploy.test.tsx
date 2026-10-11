@@ -62,26 +62,26 @@ function strip(ci: CiStatus | null, verifiedProvenance: string | null = "hotovo_
 }
 
 describe("pruh stavu pri hotovej verzii", () => {
-  it("⚠️ pri červených kontrolách nepovie „pripravené na nasadenie“", () => {
+  it("⚠️ with red checks it does not say „pripravené na nasadenie“", () => {
     render(strip(RED));
 
     expect(screen.getByText(/kontroly projektu zlyhali, nasadenie je zastavené/)).toBeInTheDocument();
     expect(screen.queryByText(/pripravené na nasadenie/)).not.toBeInTheDocument();
   });
 
-  it("pri bežiacich kontrolách povie, že nasadenie počká", () => {
+  it("with running checks it says the deployment will wait", () => {
     render(strip(RUNNING));
 
     expect(screen.getByText(/kontroly projektu ešte bežia, nasadenie počká/)).toBeInTheDocument();
   });
 
-  it.each([GREEN, null])("pri zelených alebo neznámych kontrolách je verzia pripravená (%#)", (ci) => {
+  it.each([GREEN, null])("with green or unknown checks the version is ready (%#)", (ci) => {
     render(strip(ci));
 
     expect(screen.getByText("Hotovo — pripravené na nasadenie")).toBeInTheDocument();
   });
 
-  it("zmenený kód má prednosť — rieši sa najprv znovuoverenie", () => {
+  it("changed code takes precedence — re-verification is handled first", () => {
     render(strip(RED, "hotovo_drift"));
 
     expect(screen.getByText(/kód sa odvtedy zmenil/)).toBeInTheDocument();
@@ -98,26 +98,26 @@ function rail(ci: CiStatus | null) {
   return <PlanUlohRail versionId="v1" messages={[]} board={board} onBoard={() => {}} ci={ci} />;
 }
 
-describe("pravý panel pri hotovej verzii", () => {
+describe("the right panel for a finished version", () => {
   beforeEach(() => {
     vi.mocked(getTaskPlan).mockResolvedValue({ plan: [], epic_count: 0, feat_count: 0, task_count: 0 });
   });
 
-  it("⚠️ pri červených kontrolách nesľúbi nasadenie", async () => {
+  it("⚠️ with red checks it does not promise deployment", async () => {
     render(rail(RED));
 
     expect(await screen.findByText(/Kontroly projektu na kóde, ktorý by sa nasadil, zlyhali/)).toBeInTheDocument();
     expect(screen.queryByText(/pripravená na nasadenie/)).not.toBeInTheDocument();
   });
 
-  it("pri bežiacich kontrolách povie, že sa nasadenie odomkne", async () => {
+  it("with running checks it says the deployment will unlock", async () => {
     render(rail(RUNNING));
 
     expect(await screen.findByText(/Kontroly projektu ešte bežia/)).toBeInTheDocument();
     expect(screen.queryByText(/pripravená na nasadenie/)).not.toBeInTheDocument();
   });
 
-  it("pri zelených kontrolách je verzia pripravená", async () => {
+  it("with green checks the version is ready", async () => {
     render(rail(GREEN));
 
     expect(await screen.findByText(/Verzia je hotová a pripravená na nasadenie/)).toBeInTheDocument();
@@ -136,10 +136,10 @@ function block(cause: DeployBlock["cause"], ci: CiStatus, fix: Partial<DeployBlo
   };
 }
 
-describe("obrazovka nasadenia povie, prečo je „Nasadiť“ zavreté", () => {
+describe("the deployment screen says why „Nasadiť“ is closed", () => {
   beforeEach(() => navigateMock.mockReset());
 
-  it("⚠️ zlyhané kontroly: ktorá a kde ju vidieť, a cesta k oprave", async () => {
+  it("⚠️ failed checks: which one and where to see it, and the path to a fix", async () => {
     render(<DeployBlockNotice block={block("ci_red", RED)} projectSlug="nex-inbox" onReverifyStarted={vi.fn()} />);
 
     expect(screen.getByText(/Nasadenie je zastavené — kontroly projektu zlyhali/)).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe("obrazovka nasadenia povie, prečo je „Nasadiť“ zavreté", () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox?rychla-oprava=1"));
   });
 
-  it("⚠️ zlyhané kontroly a oprava už beží: vedie k nej, druhú neponúkne (DEV-57)", async () => {
+  it("⚠️ failed checks and a fix already running: it leads to it, offers no second one (DEV-57)", async () => {
     render(
       <DeployBlockNotice
         block={block("ci_red", RED, { next_version_id: "ver-171", next_version_number: "1.7.1", dedo_brief: "fast_fix" })}
@@ -167,7 +167,7 @@ describe("obrazovka nasadenia povie, prečo je „Nasadiť“ zavreté", () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox/versions/ver-171"));
   });
 
-  it("⚠️ zlyhané kontroly a čaká Dedovo zadanie: vedie k nemu (DEV-57)", async () => {
+  it("⚠️ failed checks and Dedo's brief is awaited: it leads to it (DEV-57)", async () => {
     render(
       <DeployBlockNotice
         block={block("ci_red", RED, { dedo_brief: "fast_fix" })}
@@ -181,7 +181,7 @@ describe("obrazovka nasadenia povie, prečo je „Nasadiť“ zavreté", () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox#zadanie-od-deda"));
   });
 
-  it("bežiace kontroly: počká sa, nič netreba stláčať", () => {
+  it("running checks: wait, nothing needs to be pressed", () => {
     render(
       <DeployBlockNotice block={block("ci_running", RUNNING)} projectSlug="nex-inbox" onReverifyStarted={vi.fn()} />,
     );

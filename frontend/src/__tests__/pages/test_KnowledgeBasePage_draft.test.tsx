@@ -39,7 +39,7 @@ beforeEach(() => {
   apiMock.post.mockResolvedValue({});
 });
 
-describe("DEV-32 — Znalostná báza: rozpísaný dokument", () => {
+describe("DEV-32 — Knowledge Base: a draft document", () => {
   it("comes back when he opens „Nový“ again, says it is his, and is forgotten after saving", async () => {
     const first = render(<KnowledgeBasePage />);
     await userEvent.click(await screen.findByRole("button", { name: /Nový/ }));

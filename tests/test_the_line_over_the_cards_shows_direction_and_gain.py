@@ -118,7 +118,7 @@ def test_findings_stored_as_sentences_still_count_by_their_marker(db_session):
     direction = orchestrator.consultation_direction(db_session, v)
 
     assert direction["blocking_by_round"] == [1]
-    assert direction["last_round"] == {"findings": 3, "blocking": 1, "escaped": None}, "veta nehovorí o skúškach"
+    assert direction["last_round"] == {"findings": 3, "blocking": 1, "escaped": None}, "sentence omits tests"
 
 
 def test_the_round_says_how_many_would_have_reached_the_customer(db_session):
@@ -162,7 +162,7 @@ def test_the_board_carries_it_while_a_decision_is_offered(db_session):
     assert "decide" in board.available_actions
     assert board.consultation_direction.blocking_by_round == [5, 1, 0, 1, 0]
     assert board.consultation_direction.closed == 12
-    assert not any(m.kind == "verdict" for m in board.recent_messages[:5]), "príprava: prvé kolá sú mimo chvosta"
+    assert not any(m.kind == "verdict" for m in board.recent_messages[:5]), "Príprava: early rounds are off the tail"
 
 
 # --- the agent says it for every new finding ------------------------------------------------------------------

@@ -184,7 +184,7 @@ def test_a_feat_and_an_epic_add_up_their_children_and_stay_honest_about_gaps(pla
     # 2.4724 + 0.40 = 2.8724 € → 2.88 €, still marked incomplete because of the uncaptured turn below it.
     assert (epic["spend"]["seconds"], epic["spend"]["eur"], epic["spend"]["eur_complete"]) == (300.5, 2.88, False)
     assert epic["spend"]["tokens"]["total"] == 3_096_000 + 20000
-    assert epic["spend"]["turns"] == 4, "plán z Návrhu (ťah bez úlohy) sa do úloh nepočíta"
+    assert epic["spend"]["turns"] == 4, "the plan pass from Návrh (a turn without a task) is not counted in the tasks"
 
 
 def test_the_plan_and_naklady_read_a_turn_the_same_way(plan):

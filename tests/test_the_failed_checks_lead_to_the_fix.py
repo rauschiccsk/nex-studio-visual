@@ -72,7 +72,7 @@ def test_a_fix_already_begun_is_where_the_screen_leads(db_session):
 
     matrix = deploy_service.build_matrix(db_session, project, ci=_ci("red"))
 
-    assert _fix_fields(matrix) == (fix.id, "1.7.2", None), "vedie k najnovšej rozpracovanej verzii"
+    assert _fix_fields(matrix) == (fix.id, "1.7.2", None), "leads to the newest version in progress"
 
 
 def test_a_finished_newer_version_is_not_a_fix_in_progress(db_session):
@@ -104,7 +104,7 @@ def test_running_checks_say_nothing_about_a_fix(db_session):
     matrix = deploy_service.build_matrix(db_session, project, ci=running)
 
     assert matrix["deployability"]["cause"] == "ci_running"
-    assert "next_version_id" not in matrix["deployability"], "kontroly ešte bežia — o oprave nie je reč"
+    assert "next_version_id" not in matrix["deployability"], "checks are still running — no talk of a fix yet"
 
 
 def test_the_deploy_screen_gets_where_the_fix_is(client, db_session, monkeypatch):

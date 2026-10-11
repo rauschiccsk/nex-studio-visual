@@ -126,7 +126,7 @@ async def test_the_release_check_asks_the_frontend_by_its_role_not_by_the_name_f
     monkeypatch.setattr(orchestrator, "_compose_smoke_step", containers)
     compose = "services:\n  backend:\n    build: .\n  web:\n    build: ./frontend\n    ports:\n      - '13000:3000'\n"
     stack = _smoke_stack(tmp_path, compose)
-    assert stack.roles["frontend"] == "web", "príprava: služba web má byť frontend"
+    assert stack.roles["frontend"] == "web", "setup: the web service must be the frontend"
 
     ok, _detail = await orchestrator._run_app_starts_smoke(stack)
 

@@ -90,7 +90,7 @@ async def test_a_new_session_gets_the_current_rules(project, turns):
 
     assert _charter_given(turns[-1]) == _current_charter("ai-agent")
     skills = {p.parent.name: p.read_text(encoding="utf-8") for p in (root / ".claude" / "skills").glob("*/SKILL.md")}
-    assert skills == cps.cockpit_skills(), "zručnosti v projekte ostali staré"
+    assert skills == cps.cockpit_skills(), "the skills in the project stayed old"
 
 
 async def test_an_adopted_project_gets_the_current_rules_and_keeps_its_own_aside(project, turns):
@@ -103,7 +103,7 @@ async def test_an_adopted_project_gets_the_current_rules_and_keeps_its_own_aside
         "ai-agent"
     )
     kept = root / ".claude" / "agents" / "ai-agent" / "CLAUDE.md.pre-nex-studio"
-    assert kept.read_text(encoding="utf-8") == "vlastné pravidlá projektu", "pôvodné pravidlá z prevzatia zmizli"
+    assert kept.read_text(encoding="utf-8") == "vlastné pravidlá projektu", "the original takeover rules vanished"
 
 
 async def test_a_resumed_session_is_left_alone(project, turns):
@@ -113,7 +113,7 @@ async def test_a_resumed_session_is_left_alone(project, turns):
 
     assert "--resume" in turns[-1] and _charter_given(turns[-1]) is None
     charter = (root / ".claude" / "agents" / "ai-agent" / "CLAUDE.md").read_text(encoding="utf-8")
-    assert charter == "stará charta ai-agent", "pokračujúce sedenie prepisovalo pravidlá, ktoré už nečíta"
+    assert charter == "stará charta ai-agent", "a continuing session overwrote rules it no longer reads"
 
 
 async def test_a_replacement_for_a_lost_session_gets_the_current_rules(project, monkeypatch):
@@ -138,7 +138,7 @@ async def test_a_replacement_for_a_lost_session_gets_the_current_rules(project, 
     resumed, replacement = seen
     assert "--resume" in resumed and _charter_given(resumed) is None
     assert "--session-id" in replacement and "--resume" not in replacement
-    assert _charter_given(replacement) == _current_charter("ai-agent"), "náhradné sedenie beží bez pravidiel"
+    assert _charter_given(replacement) == _current_charter("ai-agent"), "the replacement session runs without rules"
 
 
 async def test_a_turn_without_a_known_charter_still_resumes(turns, tmp_path, monkeypatch):
@@ -160,7 +160,7 @@ async def test_a_failed_refresh_does_not_cost_the_turn(project, turns, monkeypat
         m.setattr(cps, "refresh_v2_agent_charters", _broken)
         await _turn(root, new_session=True)
 
-    assert _charter_given(turns[-1]) == "stará charta ai-agent", "ťah mal bežať na pravidlách, ktoré projekt má"
+    assert _charter_given(turns[-1]) == "stará charta ai-agent", "the turn should have run on the rules the project has"
 
 
 async def test_a_refresh_never_moves_the_project_head(project, turns):
@@ -175,7 +175,7 @@ async def test_a_refresh_never_moves_the_project_head(project, turns):
 
     assert subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout == head
     changed = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, check=True).stdout
-    assert ".claude/agents/ai-agent/CLAUDE.md" in changed, "obnova sa neudiala — skúška by nič nedokazovala"
+    assert ".claude/agents/ai-agent/CLAUDE.md" in changed, "the refresh did not happen — the test would prove nothing"
 
 
 def test_every_orchestrator_turn_names_its_charter_and_says_whether_it_resumes():
@@ -194,6 +194,6 @@ def test_every_orchestrator_turn_names_its_charter_and_says_whether_it_resumes()
                 given = {kw.arg for kw in node.keywords}
                 calls.append((node.lineno, "charter_path" in given and (not resumes or "resume" in given)))
 
-    assert calls, "v orchestrátore sa nenašlo ani jedno spustenie agenta — stráž by nič nestrážila"
+    assert calls, "no agent launch found in the orchestrator — the guard would guard nothing"
     offenders = sorted({line for line, ok in calls if not ok})
     assert offenders == [], f"spustenie agenta bez charty roly alebo bez resume= v orchestrator.py, riadky {offenders}"

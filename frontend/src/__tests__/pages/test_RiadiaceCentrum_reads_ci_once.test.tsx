@@ -70,8 +70,8 @@ vi.mock("@/components/riadiace/PlanUlohRail", () => ({
   },
 }));
 
-describe("Riadiace centrum — jeden stav CI pre celú stránku", () => {
-  it("⚠️ riadok pri fázach, pruh stavu aj pravý panel dostanú tú istú odpoveď z jedného dopytu", async () => {
+describe("Riadiace centrum — one CI state for the whole page", () => {
+  it("⚠️ the phase row, the status bar and the right panel get the same answer from one query", async () => {
     render(<RiadiaceCentrumPage />);
 
     await waitFor(() => expect(seen.strip.at(-1)).toEqual(red));

@@ -90,7 +90,7 @@ async def test_a_running_frontend_that_does_not_answer_brings_its_own_log(monkey
     ok, detail = await orchestrator._boot_leg(_smoke_stack(tmp_path))
 
     assert ok is False
-    assert stack.asked_logs == ["frontend"], "záznam sa má pýtať od služby, ktorá neodpovedala, a len od nej"
+    assert stack.asked_logs == ["frontend"], "request the log from the service that did not respond, and only from it"
     assert detail == (
         f"frontend 'frontend' not serving within {orchestrator.ACCEPTANCE_SMOKE_READY_TIMEOUT}s: port 80: err refused"
         "\n\n--- frontend (state: running) ---\n"
@@ -153,7 +153,7 @@ async def test_the_one_click_fix_asks_for_nothing_the_fix_turn_cannot_do(db_sess
         return (False, measured), None
 
     async def _no_auditor(*_a, **_k):
-        raise AssertionError("pri zlyhanom spustení Auditor nebeží")
+        raise AssertionError("the Auditor does not run when the start fails")
 
     monkeypatch.setattr(orchestrator, "_run_release_smoke", _smoke)
     monkeypatch.setattr(orchestrator, "_write_release_note_to_disk", lambda *a, **k: None)

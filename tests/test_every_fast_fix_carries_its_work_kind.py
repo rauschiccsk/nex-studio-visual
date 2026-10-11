@@ -44,9 +44,9 @@ def test_dedos_brief_starts_a_fast_fix_only_with_the_work_kind(client, db_sessio
     refused = _posli(client, user, project.id, brief["id"], work_kind=None)
 
     assert (refused.status_code, refused.json()["detail"]) == (400, fast_fix.WORK_KIND_REQUIRED)
-    assert _numbers(db_session, project.id) == before and no_dispatch == [], "bez druhu práce vznikla oprava"
+    assert _numbers(db_session, project.id) == before and no_dispatch == [], "a fix was created without a work kind"
     waiting = client.get(f"/api/v1/projects/{project.id}/dedo-proposal", headers=_bearer(user)).json()
-    assert waiting["id"] == brief["id"], "odmietnuté spustenie zadanie zavrelo — Manažér by ho už nespustil"
+    assert waiting["id"] == brief["id"], "the rejected start closed the brief — the Manažér could no longer start it"
 
     started = _posli(client, user, project.id, brief["id"], work_kind="change")
 
@@ -113,6 +113,6 @@ def test_every_place_that_creates_a_fast_fix_passes_the_managers_work_kind():
                 kind = {k.arg: k.value for k in node.keywords}.get("work_kind")
                 calls.append((f"{path.relative_to(REPO)}:{node.lineno}", ast.unparse(kind) if kind else None))
 
-    assert calls, "stráž nenašla ani jedno založenie rýchlej opravy — hľadá zle"
+    assert calls, "the guard found no fast-fix creation at all — it looks in the wrong place"
     unchosen = [(where, kind) for where, kind in calls if kind is None or not kind.endswith(".work_kind")]
-    assert unchosen == [], f"rýchla oprava vzniká bez voľby Manažéra: {unchosen}"
+    assert unchosen == [], f"a fast fix is created without the Manažér's choice: {unchosen}"

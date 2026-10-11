@@ -65,8 +65,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("Súpis dodaných tokenov", () => {
-  it("ukáže dodaný kód, skúšky a dokumentáciu, sadzby, sumu a čo stála práca agenta", async () => {
+describe("Statement of delivered tokens", () => {
+  it("shows delivered code, tests and documentation, rates, the amount and the agent's work cost", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(view());
 
     render(<DeliveryStatementPanel versionId="v-160" />);
@@ -82,7 +82,7 @@ describe("Súpis dodaných tokenov", () => {
     expect(screen.getByRole("button", { name: "Vydať súpis" })).toBeEnabled();
   });
 
-  it("⚠️ súbory, ktoré sa nerátajú, ukáže aj s dôvodom", async () => {
+  it("⚠️ files that are not counted are shown with the reason", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(view());
     render(<DeliveryStatementPanel versionId="v-160" />);
 
@@ -91,7 +91,7 @@ describe("Súpis dodaných tokenov", () => {
     expect(screen.getByTestId("statement-files")).toHaveTextContent("neráta sa — Zadanie — napísal ho zákazník");
   });
 
-  it("⚠️ rýchlu opravu bez určeného druhu vydať nedá a ponúkne ho určiť", async () => {
+  it("⚠️ a quick fix without a set kind cannot be issued and it offers to set one", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(
       view({
         work_kind: null,
@@ -113,14 +113,14 @@ describe("Súpis dodaných tokenov", () => {
     expect(getDeliveryStatement).toHaveBeenCalledTimes(2);
   });
 
-  it("oprava chyby v dodanom kóde má sumu 0 € a povie prečo", async () => {
+  it("a bug fix in delivered code has an amount of 0 € and says why", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(view({ work_kind: "fix", amount_code_eur: "0.00", amount_docs_eur: "0.00", amount_eur: "0.00" }));
     render(<DeliveryStatementPanel versionId="v-151" />);
 
     expect(await screen.findByTestId("statement-amount")).toHaveTextContent("0,00 €oprava chyby v dodanom kóde — neúčtuje sa");
   });
 
-  it("vydá súpis a vydaný sa dá stiahnuť", async () => {
+  it("issues the statement and the issued one can be downloaded", async () => {
     const issued = {
       id: "s-1",
       created_at: "2026-10-10T12:30:00Z",
@@ -153,7 +153,7 @@ describe("Súpis dodaných tokenov", () => {
     expect(screen.getByTestId("issued-statement")).toHaveTextContent("81 424 tokenov · 228,71 €");
   });
 
-  it("verzia, ktorá ešte nie je hotová, povie len prečo súpis nie je", async () => {
+  it("a version that is not finished yet only says why there is no statement", async () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(
       view({ blocked: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", code: null }),
     );
@@ -163,7 +163,7 @@ describe("Súpis dodaných tokenov", () => {
     expect(screen.queryByRole("button", { name: "Vydať súpis" })).not.toBeInTheDocument();
   });
 
-  describe("jedna verzia — jeden platný súpis (DEV-54)", () => {
+  describe("one version — one valid statement (DEV-54)", () => {
     const valid = {
       id: "s-2",
       created_at: "2026-10-10T13:47:36Z",
@@ -194,7 +194,7 @@ describe("Súpis dodaných tokenov", () => {
       replaced_at: "2026-10-10T13:47:36Z",
     };
 
-    it("⚠️ nový súpis sa vydá až po potvrdení, že nahradí ten platný", async () => {
+    it("⚠️ a new statement is issued only after confirming it replaces the valid one", async () => {
       vi.mocked(getDeliveryStatement).mockResolvedValue(view({}, [valid, replaced]));
       vi.mocked(issueDeliveryStatement).mockResolvedValue(valid);
       const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -210,7 +210,7 @@ describe("Súpis dodaných tokenov", () => {
       confirm.mockRestore();
     });
 
-    it("platný súpis je označený, nahradený zašednutý s dátumom nahradenia", async () => {
+    it("the valid statement is marked, a replaced one is greyed out with the replacement date", async () => {
       vi.mocked(getDeliveryStatement).mockResolvedValue(view({}, [valid, replaced]));
       render(<DeliveryStatementPanel versionId="v-170" />);
 

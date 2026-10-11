@@ -51,8 +51,8 @@ def test_the_database_answers_people_in_local_time_and_the_cockpit_computes_in_u
         .scalars()
         .all()
     )
-    assert f"TimeZone={settings.display_timezone}" in default, "databáza nemá miestne pásmo ako predvolené"
-    assert db_session.execute(text("SHOW timezone")).scalar() == "UTC", "spojenie kokpitu nie je pripnuté na UTC"
+    assert f"TimeZone={settings.display_timezone}" in default, "database lacks the local time zone default"
+    assert db_session.execute(text("SHOW timezone")).scalar() == "UTC", "the cockpit connection is not pinned to UTC"
 
     stored = db_session.execute(text("SELECT TIMESTAMPTZ '2026-10-10 18:22:58+00'")).scalar()
     assert stored.utcoffset().total_seconds() == 0 and stored.hour == 18
@@ -142,5 +142,5 @@ def test_every_time_the_backend_formats_is_local_or_says_it_is_utc():
             names_zone = isinstance(fmt, str) and (fmt.endswith("Z") or "%z" in fmt or "%Z" in fmt)
             if not (local or names_zone):
                 wrong.append(f"{path.relative_to(REPO)}:{node.lineno}")
-    assert found >= 5, "stráž nenašla formátovanie času — hľadá zle"
+    assert found >= 5, "the guard found no time formatting — it is searching wrongly"
     assert wrong == []

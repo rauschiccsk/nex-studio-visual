@@ -41,14 +41,14 @@ function spend(over: Partial<NodeSpend> = {}): NodeSpend {
   };
 }
 
-describe("riadok útraty — ako ho povie obrazovka", () => {
-  it("úloha 2.1.3 Career Asistenta, ako ju Director dostal v návrhu", () => {
+describe("spend line — as the screen words it", () => {
+  it("task 2.1.3 of Career Asistent, as the Director got it in the proposal", () => {
     expect(spendLine(spend())).toBe(
       "Trvalo 11 min 24 s · cena 4,05 € · 12,3 mil. tokenov",
     );
   });
 
-  it("⚠️ cena s medzerou je „aspoň“, nie celá", () => {
+  it("⚠️ a price with a gap is „at least“, not the whole", () => {
     expect(spendLine(spend({ eur: 3.29, eur_complete: false }))).toContain(
       "cena aspoň 3,29 €",
     );
@@ -67,7 +67,7 @@ describe("riadok útraty — ako ho povie obrazovka", () => {
     expect(formatTokens(n)).toBe(text);
   });
 
-  it("pri podržaní myši rozpíše tokeny ako Náklady a povie, prečo cena nie je celá", () => {
+  it("on hover breaks the tokens down as Náklady and says why the price is not the whole", () => {
     const detail = spendDetail(
       spend({
         eur_complete: false,
@@ -155,12 +155,12 @@ function rail() {
   );
 }
 
-describe("Plán úloh — útrata pri každom uzle", () => {
+describe("Plán úloh — spend at every node", () => {
   beforeEach(() => {
     vi.mocked(getTaskPlan).mockResolvedValue(PLAN);
   });
 
-  it("úloha, FEAT aj EPIC nesú svoj riadok; nezačatá úloha žiadny", async () => {
+  it("task, FEAT and EPIC carry their own line; a task not started carries none", async () => {
     render(rail());
 
     expect(await screen.findByTestId("planrail-spend-t1")).toHaveTextContent(
@@ -175,7 +175,7 @@ describe("Plán úloh — útrata pri každom uzle", () => {
     expect(screen.queryByTestId("planrail-spend-t2")).not.toBeInTheDocument();
   });
 
-  it("zbalený EPIC svoj súčet ukazuje ďalej", async () => {
+  it("a collapsed EPIC still shows its total", async () => {
     render(rail());
     fireEvent.click(await screen.findByTestId("planrail-chevron-e1"));
 

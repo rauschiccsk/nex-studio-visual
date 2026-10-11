@@ -57,10 +57,10 @@ def test_the_check_runs_in_the_project_with_a_scratch_folder_docker_sees(tmp_pat
 
     assert rc == 0, out
     lines = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
-    assert lines["PWD"] == str(script.parent), "C1: skript beží mimo priečinka projektu"
+    assert lines["PWD"] == str(script.parent), "C1: the script runs outside the project folder"
     scratch = Path(lines["TMP"])
-    assert scratch.parent == smoke_scratch.scratch_root(), "C2: dočasné súbory mimo priečinka, ktorý vidí Docker"
-    assert not scratch.exists(), "dočasný priečinok po behu ostal"
+    assert scratch.parent == smoke_scratch.scratch_root(), "C2: temporary files outside the folder Docker can see"
+    assert not scratch.exists(), "the temporary folder remained after the run"
 
 
 def test_without_the_folder_docker_sees_the_check_does_not_run_blind(tmp_path, monkeypatch):
@@ -71,7 +71,7 @@ def test_without_the_folder_docker_sees_the_check_does_not_run_blind(tmp_path, m
     rc, out = _run(script)
 
     assert rc == 126 and "v PROD compose kokpitu chýba jeho pripojenie" in out
-    assert not marker.exists(), "skript bežal bez priečinka, ktorý vidí Docker"
+    assert not marker.exists(), "the script ran without a folder Docker can see"
 
 
 def _disk(monkeypatch, free_values: list[int]) -> None:
@@ -102,14 +102,14 @@ def test_a_check_that_takes_more_than_the_budget_is_stopped_with_its_children(tm
     started = time.monotonic()
     rc, out = _run(script)
 
-    assert time.monotonic() - started < 20, "strážca disku nezastavil previerku"
+    assert time.monotonic() - started < 20, "the disk guard did not stop the check"
     assert rc == 125
     assert out.splitlines()[-1] == (
         "Previerka zastavená strážcom disku: od začiatku zabrala na disku servera 40,0 GB, viac než dovolených "
         "30,0 GB (voľné miesto kleslo z 100,0 na 60,0 GB). Skúšky projektu nesmú zaplniť server — over, čo v nich "
         "toľko zapisuje."
     )
-    assert not _alive(int(pid_file.read_text())), "proces, ktorý previerka spustila, beží ďalej"
+    assert not _alive(int(pid_file.read_text())), "the process the check started is still running"
 
 
 def test_a_server_below_the_floor_stops_the_check_even_within_the_budget(tmp_path, monkeypatch):

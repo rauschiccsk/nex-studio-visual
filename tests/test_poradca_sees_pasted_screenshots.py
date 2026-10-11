@@ -119,8 +119,8 @@ def test_a_stored_image_is_found_only_by_its_own_id(tmp_path, monkeypatch):
 
     path = attachments.path_of(cid, meta)
     assert path.parent == sandbox.attachments_dir(cid) and path.read_bytes() == _png()
-    assert path.stat().st_mode & 0o777 == 0o444, "snímku nesmie nikto prepísať"
-    assert meta["name"] == "../../etc/passwd.png", "meno je len popis — súbor sa volá podľa id"
+    assert path.stat().st_mode & 0o777 == 0o444, "nobody may overwrite the screenshot"
+    assert meta["name"] == "../../etc/passwd.png", "the name is only a description — the file is named by id"
     assert attachments.path_of(cid, {**meta, "id": "../" + meta["id"][3:]}) is None
     assert attachments.path_of(cid, {**meta, "mime": "text/html"}) is None
 
@@ -141,7 +141,7 @@ def test_a_question_with_a_screenshot_records_it_and_tells_poradca_where_it_is(d
     [meta] = human["attachments"]
     assert (meta["name"], meta["mime"], meta["size_bytes"]) == ("Snímka 2026-10-10.png", "image/png", len(_png()))
     assert attachments.path_of(cid, meta).read_bytes() == _png()
-    assert human["content"] == "Čo je na snímke?", "poznámka pre Poradcu nie je text otázky"
+    assert human["content"] == "Čo je na snímke?", "the note for the Poradca is not the question text"
     [asked] = poradca
     assert asked.startswith("Čo je na snímke?\n\n[Manažér k otázke priložil snímky obrazovky.")
     assert f"{sandbox.CONTAINER_ATTACHMENTS_DIR}/{meta['id']}.png („Snímka 2026-10-10.png“)" in asked
@@ -171,7 +171,7 @@ def test_the_image_is_given_only_to_whoever_may_read_the_conversation(db_session
     mine = c.get(url)
     assert (mine.status_code, mine.headers["content-type"], mine.content) == (200, "image/png", _png())
     stranger = _client(db_session, _user(db_session))
-    assert stranger.get(url).status_code == 404, "cudzí rozhovor"
+    assert stranger.get(url).status_code == 404, "someone else's conversation"
     assert c.get(f"/api/v1/poradca/conversations/{other['id']}/attachments/{meta['id']}").status_code == 404
     assert c.get(f"/api/v1/poradca/conversations/{first['id']}/attachments/..%2F..%2Fempty").status_code == 404
 
@@ -230,7 +230,7 @@ def test_the_container_reads_its_own_conversations_images_and_nothing_more(proje
     ]
     at = argv.index("--add-dir")
     assert argv[at + 1] == sandbox.CONTAINER_ATTACHMENTS_DIR and argv[at + 2].startswith("--"), (
-        "--add-dir berie viac priečinkov — za ním musí byť prepínač, inak pohltí text otázky"
+        "--add-dir takes several folders — a flag must follow it, otherwise it swallows the question text"
     )
     assert argv[-1] == "otázka"
 
@@ -290,4 +290,4 @@ def test_the_cockpit_nginx_lets_through_every_upload_the_backend_accepts():
         settings.private_file_max_bytes,
         math.ceil(settings.poradca_attachments_max_total_bytes * 4 / 3) + 64 * 1024,  # base64 + the question
     )
-    assert allowed >= largest, f"nginx pustí {allowed} B, backend prijme až {largest} B"
+    assert allowed >= largest, f"nginx lets through {allowed} B, the backend accepts up to {largest} B"

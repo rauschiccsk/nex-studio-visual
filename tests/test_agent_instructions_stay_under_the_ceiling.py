@@ -65,8 +65,8 @@ def test_every_agent_reads_less_than_the_ceiling(tmp_path):
 
     over = {agent: size for agent, size in sizes.items() if size > CEILING}
     assert over == {}, (
-        f"pokyny agenta prerástli hranicu {CEILING} znakov: {over} — skráť text (Director 09.10.2026, DEV-45), "
-        "hranicu neposúvaj"
+        f"agent instructions exceed {CEILING} characters: {over} — shorten (Director 09.10.2026, DEV-45), "
+        "do not raise the ceiling"
     )
 
 
@@ -78,10 +78,10 @@ def test_the_measure_covers_every_part_an_agent_reads(tmp_path):
     assert set(texts) == {"ai-agent", "auditor", "poradca"}
     for role in create_project_postscaffold._V2_AGENTS:
         charter, project_md, skills = texts[role]
-        assert first_line in charter, f"{role}: spoločný základ chýba v meranej charte"
+        assert first_line in charter, f"{role}: the common base is missing from the measured charter"
         role_template, _settings = create_project_postscaffold._V2_AGENTS[role]
         role_first = (create_project_postscaffold.NEX_STUDIO_TEMPLATES / role_template).read_text(encoding="utf-8")
-        assert role_first.strip().splitlines()[0] in charter, f"{role}: charta roly chýba v meranej charte"
-        assert "Projekt" in project_md and len(project_md) > 1000, "koreňový CLAUDE.md projektu chýba v meraní"
+        assert role_first.strip().splitlines()[0] in charter, f"{role}: role charter is missing from the measured one"
+        assert "Projekt" in project_md and len(project_md) > 1000, "the root CLAUDE.md is not in the measurement"
         shipped = create_project_postscaffold.cockpit_skills()
-        assert shipped and all(f"{name}: " in skills for name in shipped), "opisy zručností chýbajú v meraní"
+        assert shipped and all(f"{name}: " in skills for name in shipped), "skill descriptions not in the measurement"

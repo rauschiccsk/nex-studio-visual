@@ -69,7 +69,7 @@ def test_the_writers_schema_demands_the_origin_and_whether_a_finding_blocks():
     defs = PIPELINE_STATUS_JSON_SCHEMA["$defs"]
     assert "origin" in defs["ConsultDecision"]["required"]
     assert defs["ConsultDecision"]["properties"]["origin"]["enum"] == ["objav", "dosledok", "odklad"]
-    assert "anyOf" not in defs["ConsultDecision"]["properties"]["origin"], "pôvod nesmie byť null"
+    assert "anyOf" not in defs["ConsultDecision"]["properties"]["origin"], "origin must not be null"
     assert "blocking" in defs["Finding"]["required"]
     assert "default" not in defs["Finding"]["properties"]["blocking"]
 
@@ -145,7 +145,7 @@ def test_cards_and_findings_stored_before_still_read():
     assert stored.decisions[0].origin is None
 
     old_verdict = PipelineStatusBlock.model_validate(_verdict("Chýba strážca disku", "Preklep v nadpise (neblokujúce)"))
-    assert [f.blocking for f in old_verdict.findings] == [True, False], "starý záznam: závažnosť z vety"
+    assert [f.blocking for f in old_verdict.findings] == [True, False], "old record: severity from the sentence"
 
 
 # ── every card the cockpit makes itself, every instruction ───────────────────
@@ -164,7 +164,7 @@ def _calls(name: str):
 
 def test_every_card_the_cockpit_makes_itself_says_where_it_came_from():
     calls = list(_calls("ConsultDecision"))
-    assert calls, "stráž nenašla ani jednu kartu — hľadá zle"
+    assert calls, "the guard found no card at all — it is searching wrongly"
     missing = [f"{p}:{n.lineno}" for p, n in calls if "origin" not in {k.arg for k in n.keywords}]
     assert missing == []
 
@@ -202,7 +202,7 @@ def test_every_instruction_that_asks_for_findings_or_cards_states_the_rule():
                 asked[rule] += 1
                 if rule not in names:
                     unstated.append(f"riadok {stmt.lineno} → {rule}")
-    assert asked["FINDINGS_AS_DATA_RULE"] >= 4 and asked["ORIGIN_RULE"] >= 1, f"stráž nenašla pokyny: {asked}"
+    assert asked["FINDINGS_AS_DATA_RULE"] >= 4 and asked["ORIGIN_RULE"] >= 1, f"guard found no instructions: {asked}"
     assert unstated == []
 
 

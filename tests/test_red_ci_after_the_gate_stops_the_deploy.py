@@ -130,9 +130,9 @@ async def test_the_incident_the_gate_waits_for_the_tags_own_run_and_sees_it_fail
 
     state, detail = await orchestrator._ci_status_for_head(root, release_tag=TAG)
 
-    assert state == "red", f"brána vyhlásila „{detail}“ z behov spred hodiny"
+    assert state == "red", f"the gate declared „{detail}“ from runs older than an hour"
     assert "38042619283" in detail and "Release smoke gate" in detail
-    assert len(asked) == len(INCIDENT), "brána sa prestala pýtať skôr, než beh značky dobehol"
+    assert len(asked) == len(INCIDENT), "the gate stopped asking before the tag run finished"
 
 
 async def test_without_the_tag_the_gate_is_what_it_was_on_10_october(tmp_path, monkeypatch):
@@ -152,7 +152,7 @@ async def test_a_project_whose_tag_starts_nothing_is_not_kept_waiting(tmp_path, 
     state, _detail = await orchestrator._ci_status_for_head(root, release_tag=TAG)
 
     assert state == "green"
-    assert len(asked) == 1, "brána čakala na beh, ktorý značka nespustí"
+    assert len(asked) == 1, "the gate waited for a run the tag does not start"
 
 
 async def test_a_tag_run_that_never_appears_is_named_not_mistaken_for_green(tmp_path, monkeypatch):
@@ -181,7 +181,7 @@ def test_the_gate_names_the_tag_only_when_it_is_on_the_commit_being_judged(tmp_p
     assert orchestrator._release_tag_at_head(root, "1.6.0") is None
 
     _git(root, "commit", "-q", "--allow-empty", "-m", "neskôr")
-    assert orchestrator._release_tag_at_head(root, "1.7.0") is None, "značka iného commitu sa nečaká"
+    assert orchestrator._release_tag_at_head(root, "1.7.0") is None, "a tag of another commit is not awaited"
 
 
 async def test_the_verdict_settle_hands_the_tag_to_the_gate(db_session, monkeypatch):
@@ -269,11 +269,11 @@ def _finished_version(db) -> tuple[Project, Version]:
 )
 def test_red_or_running_ci_closes_nasadit_and_says_why(db_session, ci, cause):
     project, version = _finished_version(db_session)
-    assert deploy_service.list_verified_versions(db_session, project.id) == ["1.7.0"], "príprava: verzia je hotová"
+    assert deploy_service.list_verified_versions(db_session, project.id) == ["1.7.0"], "setup: the version is ready"
 
     matrix = deploy_service.build_matrix(db_session, project, ci=ci)
 
-    assert matrix["verified_versions"] == [], "červené CI, a verzia sa dá nasadiť"
+    assert matrix["verified_versions"] == [], "red CI, and the version can be deployed"
     block = matrix["deployability"]
     assert (block["cause"], block["version_number"], block["version_id"]) == (cause, "1.7.0", version.id)
     assert block["ci_detail"] == ci.detail and block["ci_url"] == ci.url
@@ -338,7 +338,7 @@ async def test_the_deploy_asks_github_fresh_about_the_projects_own_code(db_sessi
     outcome, ran, asked = await _deploy(db_session, monkeypatch, _ci("green", detail="CI zelené"), tmp_path=tmp_path)
 
     assert ran == [1] and list(outcome.warnings) == []
-    assert asked and asked[0]["cerstvy"] is True, "nasadenie sa rozhodlo podľa zapamätanej odpovede"
+    assert asked and asked[0]["cerstvy"] is True, "the deploy decided on a remembered answer"
     assert asked[0]["root"].name.startswith("ci-red-")
 
 

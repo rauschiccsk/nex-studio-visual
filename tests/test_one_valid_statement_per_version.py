@@ -36,7 +36,7 @@ def test_issuing_again_needs_the_confirmation_of_the_valid_statement(project):  
     db, root, owner, v010, _v011, _, _ = project
     _rates(db, owner, 4.0, 1.5)
     first = st.issue(db, v010, root, owner.id)
-    assert (first.replaces_id, first.replaced_at) == (None, None), "prvý súpis verzie platí"
+    assert (first.replaces_id, first.replaced_at) == (None, None), "the first statement of the version is valid"
 
     with pytest.raises(st.CannotIssue) as refused:
         st.issue(db, v010, root, owner.id)
@@ -44,7 +44,7 @@ def test_issuing_again_needs_the_confirmation_of_the_valid_statement(project):  
     message = str(refused.value)
     assert message.startswith("Verzia už má platný súpis z ")
     assert message.endswith(f" za {str(first.amount_eur).replace('.', ',')} € — nový ho nahradí, len keď to potvrdíš.")
-    assert _count(db, v010) == 1, "nepotvrdené vydanie aj tak zapísalo súpis"
+    assert _count(db, v010) == 1, "an unconfirmed issue wrote the statement anyway"
 
 
 def test_a_confirmed_statement_replaces_the_valid_one_which_stays_marked(project):  # noqa: F811
@@ -58,9 +58,9 @@ def test_a_confirmed_statement_replaces_the_valid_one_which_stays_marked(project
 
     assert second.replaces_id == first.id and second.replaced_at is None
     assert first.replaced_at is not None and first.replaced_at == second.created_at
-    assert first.amount_eur != second.amount_eur, "nahradený súpis si drží svoje čísla"
+    assert first.amount_eur != second.amount_eur, "the replaced statement keeps its own numbers"
     assert st.valid_statement(db, v010.id).id == second.id
-    assert _count(db, v010) == 2, "nahradený súpis sa nezmazal"
+    assert _count(db, v010) == 2, "the replaced statement was not deleted"
 
 
 def test_a_stale_confirmation_replaces_nothing(project):  # noqa: F811
@@ -119,7 +119,7 @@ def test_the_screen_issues_a_replacement_only_when_confirmed(client, project):  
     assert first.status_code == 201, first.text
     again = client.post(url, json={})
     assert again.status_code == 409 and again.json()["detail"].endswith("len keď to potvrdíš.")
-    assert client.post(url).status_code == 409, "bez tela je to to isté ako bez potvrdenia"
+    assert client.post(url).status_code == 409, "without a body it is the same as without confirmation"
 
     second = client.post(url, json={"replace": first.json()["id"]})
     assert second.status_code == 201, second.text
@@ -128,7 +128,7 @@ def test_the_screen_issues_a_replacement_only_when_confirmed(client, project):  
     assert [(s["id"], s["replaces_id"], s["replaced_at"] is None) for s in issued] == [
         (second.json()["id"], first.json()["id"], True),
         (first.json()["id"], None, False),
-    ], "platný hore, nahradený pod ním"
+    ], "valid on top, replaced below it"
 
     csv = client.get(f"/api/v1/delivery-statements/{first.json()['id']}/csv")
     assert csv.status_code == 200 and "-nahradeny.csv" in csv.headers["content-disposition"]

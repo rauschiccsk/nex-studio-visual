@@ -1,9 +1,9 @@
 /**
- * DEV-34 — karta povie, s ktorou inou kartou jej voľba súvisí a prečo.
+ * DEV-34 — the card says which other card its choice relates to and why.
  *
- * NEX Inbox 1.7.0, 08.10.2026: dve rozhodnuté karty si odporovali (karta 7 × 9, karta 1 × 2) a nikto to nevidel,
- * kým to nenašla ďalšia previerka alebo Poradca. Agent teraz súvislosť zapíše pri písaní kariet (`related`)
- * a karta ju Manažérovi ukáže číslom a otázkou tej druhej karty — pri rozhodovaní, nie po ňom.
+ * NEX Inbox 1.7.0, 08.10.2026: two decided cards contradicted each other (card 7 × 9, card 1 × 2) and nobody saw it,
+ * until the next review or the Poradca found it. The agent now records the relation when writing the cards (`related`)
+ * and the card shows it to the Manažér as the other card's number and question — when deciding, not after.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -46,8 +46,8 @@ function board(related: unknown[] | undefined): PipelineBoard {
   } as unknown as PipelineBoard;
 }
 
-describe("Rozhodovacia karta — súvisiace karty (DEV-34)", () => {
-  it("menuje druhú kartu číslom a otázkou a povie prečo", () => {
+describe("Decision card — related cards (DEV-34)", () => {
+  it("names the other card by number and question and says why", () => {
     render(
       <DecisionCardsBar
         board={board([{ key: "kopia", why: "Nové podmienky výpadku nesmú zachytiť chybu miestnej kópie." }])}
@@ -62,7 +62,7 @@ describe("Rozhodovacia karta — súvisiace karty (DEV-34)", () => {
     ).toBeInTheDocument();
   });
 
-  it("karta bez súvislostí nič také nepíše", () => {
+  it("a card without relations writes nothing of the kind", () => {
     render(<DecisionCardsBar board={board(undefined)} versionId="v1" onBoard={vi.fn()} />);
     expect(screen.queryByText(/Súvisí s kartou/)).not.toBeInTheDocument();
   });

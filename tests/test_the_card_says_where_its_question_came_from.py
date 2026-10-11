@@ -169,7 +169,7 @@ def test_the_board_carries_the_context_while_a_decision_is_offered(db_session):
     assert board.decision_context["chyby"].origin_of_question == "Koľko položiek na stranu?"
     assert board.decision_context["rozsah"].reopens_closed == 1
     seqs = [m.seq for m in board.recent_messages]
-    assert len(seqs) == pipeline_routes._DEFAULT_RECENT, "príprava: tabuľa nesie len chvost správ"
+    assert len(seqs) == pipeline_routes._DEFAULT_RECENT, "setup: the board carries only the tail of the messages"
     assert not any(m.payload and m.payload.get("consultation_decision") for m in board.recent_messages), (
-        "príprava: odpovede z druhého kola majú ležať mimo chvosta, inak skúška nedokazuje čítanie celého záznamu"
+        "setup: second-round answers must lie outside the tail, otherwise the test does not prove reading the whole log"
     )
