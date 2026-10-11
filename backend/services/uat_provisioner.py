@@ -436,19 +436,25 @@ def resolve_be_health_path(be_svc: Optional[dict[str, Any]], project_path: Path)
     return "/health"
 
 
+def container_ports(svc: dict[str, Any]) -> list[int]:
+    """Every container-side port a service declares — its ``ports`` mappings, then its ``expose`` list — in
+    that order, each once; unparseable entries (port ranges) are left out.
+
+    A service may listen on only some of them (DEV-60: Career Asistent's frontend declares HTTPS 443 and HTTP 80
+    and, without a certificate, serves HTTP on 80 alone), so whoever asks "does it serve?" asks all of them."""
+    found: list[int] = []
+    for entry in [*(svc.get("ports", []) or []), *(svc.get("expose", []) or [])]:
+        port = _container_port(entry)
+        if port is not None and port not in found:
+            found.append(port)
+    return found
+
+
 def detect_internal_port(svc: dict[str, Any], default: int) -> int:
-    """The container-side port a service listens on — first ``ports`` mapping, else ``expose[0]``,
-    else ``default`` (FE 80 / BE 8000)."""
-    for mapping in svc.get("ports", []) or []:
-        port = _container_port(mapping)
-        if port is not None:
-            return port
-    for exposed in svc.get("expose", []) or []:
-        if isinstance(exposed, int):
-            return exposed
-        if isinstance(exposed, str) and exposed.isdigit():
-            return int(exposed)
-    return default
+    """The container-side port a service listens on — the first one it declares (:func:`container_ports`),
+    else ``default`` (FE 80 / BE 8000). Traefik routing and the loopback debug ports use this one port."""
+    ports = container_ports(svc)
+    return ports[0] if ports else default
 
 
 # ---------------------------------------------------------------------------

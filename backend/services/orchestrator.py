@@ -6067,14 +6067,14 @@ async def _verify_uat_serves(
     # does not). nginx ships no Python, so it cannot probe itself.
     fe_role = roles["frontend"]
     if fe_role is not None:
-        fe_port = uat_provisioner.detect_internal_port(services[fe_role], 80)
+        fe_ports = _frontend_ports(services[fe_role])
         name_base = (
             (f"{customer_slug}-{app}" if environment == "prod" else f"uat-{customer_slug}-{app}")
             if customer_slug
             else f"uat-{uat_slug}"
         )
         fe_host = f"{name_base}-{fe_role}"
-        fe_ready, fe_last = await _await_http_ready(base, be_role, fe_port, host=fe_host, path="/", env=env_ciela)
+        fe_ready, fe_last = await _await_http_ready(base, be_role, fe_ports, host=fe_host, path="/", env=env_ciela)
         if not fe_ready:
             return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
         # The checks above prove the app serves IN-network; they do NOT prove the PUBLIC Traefik route works.
@@ -6423,6 +6423,7 @@ SMOKE_STOP_GRACE = 10
 # budget BEFORE the suite so the first acceptance request never races the boot into a false FAIL.
 ACCEPTANCE_SMOKE_READY_TIMEOUT = 120  # bounded wait for the app to answer /health after ``up``.
 ACCEPTANCE_SMOKE_READY_INTERVAL = 3  # seconds between readiness polls.
+ACCEPTANCE_SMOKE_PROBE_TIMEOUT = 5  # seconds one port may take to answer one readiness probe.
 
 
 async def _compose_smoke_step(cmd: list[str], timeout: int, env: Optional[dict[str, str]] = None) -> tuple[int, str]:
@@ -6584,37 +6585,47 @@ def _compose_backend_port(compose_path: Path) -> Optional[int]:
     return int(container) if container.isdigit() else None
 
 
-def _readiness_probe_src(port: int, *, host: str = "localhost", path: str = "/health") -> str:
+def _probe_ports(port: int | Sequence[int]) -> list[int]:
+    """One port or several, as the list the readiness probe asks in order."""
+    return [port] if isinstance(port, int) else list(port)
+
+
+def _readiness_probe_src(port: int | Sequence[int], *, host: str = "localhost", path: str = "/health") -> str:
     """In-container stdlib Python probe (the same interpreter that runs the app — no curl dependency;
     slim Python images like asistent's ``python:3.12-slim`` ship no curl). Probes
     ``http://{host}:{port}{path}`` — ``host`` defaults to ``localhost`` (probe the own container) but can
     target a SIBLING service over the compose network (e.g. the frontend nginx, which has no Python of its
-    own) by passing its service/container name.
+    own) by passing its service/container name. Given several ports it asks them in order and the server is
+    READY as soon as one of them answers (DEV-60: a frontend declares HTTPS and HTTP and, without a
+    certificate, serves only HTTP).
 
     Exit ``0`` = **READY**: the server returned an HTTP response with status ``< 500`` — a 2xx/3xx success
     OR a 4xx (e.g. 404, where the probe path simply isn't a declared route — irrelevant; the app's real
     routes are exercised separately). Exit ``1`` = **keep polling**: status ``>= 500`` (server up but
     signalling starting/unavailable) OR no HTTP response at all (connection refused / reset / DNS /
-    timeout). Path-agnostic (v0.7.7) — a 404 at the probe path now means "up", so a versioned health route
-    (nex-asistent's ``/api/v1/health``) no longer false-FAILs the gate. Prints ``status <code>`` / ``err
-    <e>`` so the caller can surface the last observation."""
-    url = f"http://{host}:{port}{path}"
+    timeout) on every port. Path-agnostic (v0.7.7) — a 404 at the probe path now means "up", so a versioned
+    health route (nex-asistent's ``/api/v1/health``) no longer false-FAILs the gate. Prints one line per port
+    asked — ``port <p>: status <code>`` / ``port <p>: err <e>`` — so the caller can surface what each answered."""
+    targets = tuple((p, f"http://{host}:{p}{path}") for p in _probe_ports(port))
     return (
         "import sys, urllib.request, urllib.error\n"
-        "try:\n"
-        f"    r = urllib.request.urlopen('{url}', timeout=5)\n"
-        "    print('status', getattr(r, 'status', 200)); sys.exit(0)\n"
-        "except urllib.error.HTTPError as e:\n"
-        "    print('status', e.code); sys.exit(0 if e.code < 500 else 1)\n"
-        "except Exception as e:\n"
-        "    print('err', e); sys.exit(1)\n"
+        f"for port, url in {targets!r}:\n"
+        "    try:\n"
+        f"        r = urllib.request.urlopen(url, timeout={ACCEPTANCE_SMOKE_PROBE_TIMEOUT})\n"
+        "        print(f'port {port}: status', getattr(r, 'status', 200)); sys.exit(0)\n"
+        "    except urllib.error.HTTPError as e:\n"
+        "        print(f'port {port}: status', e.code)\n"
+        "        if e.code < 500: sys.exit(0)\n"
+        "    except Exception as e:\n"
+        "        print(f'port {port}: err', e)\n"
+        "sys.exit(1)\n"
     )
 
 
 async def _await_http_ready(
     base: list[str],
     exec_service: str,
-    port: int,
+    port: int | Sequence[int],
     *,
     host: str = "localhost",
     path: str = "/health",
@@ -6628,17 +6639,21 @@ async def _await_http_ready(
     ``exec_service`` is the compose service whose container runs the probe (it must have Python — a
     backend); ``host``/``port``/``path`` are the probe TARGET. With ``host=localhost`` the service probes
     itself; with ``host=<sibling>`` it probes another service over the compose network (used to reach the
-    frontend nginx, which ships no Python). Returns ``(True, last)`` once the server responds, else
-    ``(False, last)`` on timeout. The status ``< 500`` classification lives in :func:`_readiness_probe_src`
-    (it runs in-container); here exit 0 is READY and a non-zero exit keeps polling."""
+    frontend nginx, which ships no Python). ``port`` may be several ports: the server is ready as soon as one
+    of them answers, and ``last`` says what each one answered (DEV-60). Returns ``(True, last)`` once the
+    server responds, else ``(False, last)`` on timeout. The status ``< 500`` classification lives in
+    :func:`_readiness_probe_src` (it runs in-container); here exit 0 is READY and a non-zero exit keeps polling."""
     cmd = base + ["exec", "-T", exec_service, "python", "-c", _readiness_probe_src(port, host=host, path=path)]
+    # Every port may take its full probe timeout; the step must outlast them all.
+    step_timeout = 25 + ACCEPTANCE_SMOKE_PROBE_TIMEOUT * len(_probe_ports(port))
     attempts = max(1, timeout // interval)
     last = "no response"
     for i in range(attempts):
-        rc, out = await _compose_smoke_step(cmd, 30, env=env)
+        rc, out = await _compose_smoke_step(cmd, step_timeout, env=env)
+        observed = "; ".join(line.strip()[-200:] for line in out.strip().splitlines() if line.strip())
         if rc == 0:
-            return True, out.strip()[-200:] or "ready"
-        last = out.strip()[-200:] or f"exit {rc}"
+            return True, observed or "ready"
+        last = observed or f"exit {rc}"
         if i < attempts - 1:
             await asyncio.sleep(interval)
     return False, last
@@ -6708,24 +6723,16 @@ async def _verify_public_route(base: list[str], exec_service: str, public_host: 
     return ("down" if last_rc == 1 else "skip"), last
 
 
-def _compose_frontend_port(compose_path: Path) -> Optional[int]:
-    """The CONTAINER port the ``frontend`` service listens on, from its first ``ports`` entry — the
-    target for the in-network frontend reachability probe (the nginx analog of
-    :func:`_compose_backend_port`). Handles the short forms (``"port"`` / ``"host:port"`` /
-    ``"ip:host:port"``, optional ``/proto``) and the long form (``{target: …}``). Returns ``None`` when
-    undeterminable (no ``frontend`` service / no ``ports`` / unparseable) → the caller falls back to the
-    nginx default (80) rather than guess a wrong port."""
-    data = yaml.safe_load(compose_path.read_text()) or {}
-    frontend = (data.get("services") or {}).get("frontend") or {}
-    ports = frontend.get("ports") or []
-    if not ports:
-        return None
-    entry = ports[0]
-    if isinstance(entry, dict):  # long syntax: {target: 80, published: …}
-        target = entry.get("target")
-        return int(target) if isinstance(target, int) or (isinstance(target, str) and target.isdigit()) else None
-    container = str(entry).split("/", 1)[0].split(":")[-1]  # short syntax: container port is last colon segment
-    return int(container) if container.isdigit() else None
+#: Where a frontend that declares no port is asked — nginx's own port.
+FRONTEND_DEFAULT_PORT = 80
+
+
+def _frontend_ports(service: dict[str, Any]) -> list[int]:
+    """Every CONTAINER port the frontend service declares — the targets of the in-network "does the web
+    frontend serve?" probe, in the release check and after a deploy alike. All of them, not the first one
+    (DEV-60): Career Asistent's frontend declares HTTPS 443 first and, without a certificate, serves only
+    HTTP on 80 — asking 443 alone failed an app that ran. No declared port → nginx's own."""
+    return uat_provisioner.container_ports(service) or [FRONTEND_DEFAULT_PORT]
 
 
 @dataclass
@@ -6900,8 +6907,9 @@ async def _run_app_starts_smoke(stack: _SmokeStack) -> tuple[bool, str]:
     # means "serving" (<500). This catches a frontend that built but never serves.
     fe_role = roles["frontend"]
     if fe_role is not None and roles["backend"] is not None:
-        fe_port = _compose_frontend_port(compose) or 80
-        fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_port, host=fe_role, path="/")
+        services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+        fe_ports = _frontend_ports(services.get(fe_role) or {})
+        fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_ports, host=fe_role, path="/")
         if not fe_ready:
             return False, (f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}")
     return True, _APP_RESPONDS

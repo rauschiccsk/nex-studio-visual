@@ -33,6 +33,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from backend.services import orchestrator
 
@@ -686,20 +687,19 @@ def test_compose_backend_port_extraction(tmp_path) -> None:
     assert orchestrator._compose_backend_port(noports) is None
 
 
-def test_compose_frontend_port_extraction(tmp_path) -> None:
-    """The frontend reachability target = the ``frontend`` service's CONTAINER port (nginx analog of the
-    backend-port helper); ``None`` when undeterminable so the caller falls back to nginx 80."""
-    short = tmp_path / "short.yml"
-    short.write_text(COMPOSE_YML)  # frontend ports "10181:80" → container port 80
-    assert orchestrator._compose_frontend_port(short) == 80
+def test_frontend_ports_extraction() -> None:
+    """The frontend reachability targets = EVERY container port the frontend service declares (DEV-60 — not
+    only the first); no declared port → nginx's own 80."""
+    services = yaml.safe_load(COMPOSE_YML)["services"]
+    assert orchestrator._frontend_ports(services["frontend"]) == [80]  # "10181:80" → container port 80
 
-    longform = tmp_path / "long.yml"
-    longform.write_text("services:\n  frontend:\n    ports:\n      - target: 80\n        published: 18081\n")
-    assert orchestrator._compose_frontend_port(longform) == 80
+    longform = {"ports": [{"target": 80, "published": 18081}]}
+    assert orchestrator._frontend_ports(longform) == [80]
 
-    nofe = tmp_path / "nofe.yml"
-    nofe.write_text(COMPOSE_YML_NO_FRONTEND)
-    assert orchestrator._compose_frontend_port(nofe) is None
+    https_then_http = {"ports": ["10250:443", "10251:80"]}
+    assert orchestrator._frontend_ports(https_then_http) == [443, 80]
+
+    assert orchestrator._frontend_ports({}) == [orchestrator.FRONTEND_DEFAULT_PORT] == [80]
 
 
 # ---------------------------------------------------------------------------
