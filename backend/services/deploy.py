@@ -850,6 +850,11 @@ async def _default_deploy_runner(
     except (FileNotFoundError, ValueError) as exc:
         return RunnerResult(False, f"provision failed: {exc}", None)
 
+    # DEV-67: how the running installation reports its health BEFORE the new version replaces it — after the deploy
+    # a check that was working and is not any more is said out loud, not hidden behind „Nasadené“.
+    health_before = await orchestrator.instance_health(
+        result.compose_path, project_slug, deploy_host if is_prod else None
+    )
     if is_prod:
         ok, detail = await orchestrator._run_prod_deploy(
             project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
@@ -881,6 +886,16 @@ async def _default_deploy_runner(
     if ok and private_network and not (is_prod and deploy_host):
         _nb, host = uat_provisioner._instance_naming(environment, uat_slug, customer_slug, app, private=True)
         warnings.extend(await asyncio.to_thread(private_access.check, result.compose_path, host))
+    if ok:
+        worse = await orchestrator.health_regressions(
+            result.compose_path, project_slug, health_before, deploy_host if is_prod else None
+        )
+        if worse:
+            warnings.append(
+                "⚠️ Po nasadení aplikácia hlási problém, ktorý predtým nemala: "
+                + "; ".join(worse)
+                + ". Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
+            )
     if warnings:
         detail = f"{detail} | warnings: {'; '.join(warnings)}"
     return RunnerResult(ok, detail, url, warnings)

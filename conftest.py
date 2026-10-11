@@ -68,6 +68,23 @@ def _isolate_smoke_scratch(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(settings, "release_smoke_tmp_root", str(tmp_path_factory.mktemp("smoke-scratch")))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_instance_health(monkeypatch):
+    """Keep the suite from asking a LIVE installation how it is (DEV-67).
+
+    Every deploy asks the installation's backend for its health before and after the new version starts —
+    ``docker compose exec`` into a container. The test job runs on ANDROS next to live installations, and a runner
+    test that fakes provisioning may name a real installation's compose. Here the health is unreadable, which the
+    deploy treats as "nothing to compare". Tests about the health check stub its Docker step explicitly.
+    """
+    from backend.services import orchestrator
+
+    async def _unreadable(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orchestrator, "instance_health", _unreadable)
+
+
 #: Skutočný pracovný priečinok. Počas skúšok doň nesmie ukazovať ŽIADNY modul.
 _SKUTOCNY_PROJECTS_ROOT = Path("/opt/projects")
 

@@ -24,6 +24,7 @@ The four load-bearing safety invariants (all tested here):
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -297,6 +298,7 @@ def test_default_runner_passes_rotate_secrets_through(monkeypatch):
     class _Result:
         warnings: list[str] = []
         fe_service = "frontend"
+        compose_path = Path("/nonexistent/docker-compose.yml")
 
     def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["rotate_secrets"] = rotate_secrets

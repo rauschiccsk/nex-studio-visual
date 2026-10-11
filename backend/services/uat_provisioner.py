@@ -1361,6 +1361,103 @@ def _chybajuce_env(
     return chyba
 
 
+def _mount_targets(svc: Any, *, writable_only: bool = False) -> list[str]:
+    """Container paths a service has a volume mounted at (short or long form) — with ``writable_only`` only those
+    it may write to. ``tmpfs`` is not storage: what lands there is gone with the container."""
+    if not isinstance(svc, dict):
+        return []
+    targets: list[str] = []
+    for entry in svc.get("volumes") or []:
+        if isinstance(entry, dict):
+            target, read_only = entry.get("target"), bool(entry.get("read_only"))
+        else:
+            parts = str(entry).split(":")
+            target = parts[1] if len(parts) >= 2 else parts[0]
+            read_only = len(parts) >= 3 and "ro" in parts[2].split(",")
+        if writable_only and read_only:
+            continue
+        if isinstance(target, str) and target.startswith("/"):
+            targets.append(target.rstrip("/") or "/")
+    return targets
+
+
+def _under(path: str, targets: list[str]) -> bool:
+    return any(path == t or path.startswith(t.rstrip("/") + "/") for t in targets)
+
+
+@dataclass(frozen=True)
+class PathWithoutStorage:
+    """A variable the installation would run with that points where the project keeps storage and it has none."""
+
+    service: str
+    key: str
+    value: str
+    mounted: tuple[str, ...]
+
+
+def paths_without_storage(
+    installation: dict[str, Any], source: Optional[dict[str, Any]], env_file: Optional[dict[str, str]] = None
+) -> list[PathWithoutStorage]:
+    """DEV-67: variables of the redeployed installation whose value is a path the PROJECT mounts storage at for that
+    service, while the INSTALLATION mounts nothing there.
+
+    Measured 11.10.2026 on NEX Inbox 1.7.1: version 1.7.0 moved the Genesis share to a parent folder mounted at
+    ``/var/lib/inbox/genesis`` (the project mounts it, ``SMB_MOUNT_DIR=/var/lib/inbox/genesis/inbox``); the UAT
+    installation still had the share at ``/var/lib/inbox/genesis-out``. The redeploy added the variable (ICCINT-104)
+    and reported „Nasadené“ — the application then wrote outside every mount and delivered nothing for hours.
+
+    The values are the ones the installation would RUN with: its ``.env`` (``env_file``), overlaid by its compose
+    ``environment``, plus what the redeploy adds from the project (:func:`_chybajuce_env`). Only absolute paths
+    without interpolation are judged. Storage is a volume the project's service may WRITE to: a read-only mount is
+    configuration, not a place for data (the project mounts its Claude settings read-only, an installation passes a
+    token instead), and a path the project mounts nothing at is not this rule's business (an image's own folder)."""
+    source_services = ((source or {}).get("services") or {}) if source else {}
+    inst_services = installation.get("services") or {}
+    if not source_services or not inst_services:
+        return []
+    source_roles = identify_service_roles(source_services)
+    inst_roles = identify_service_roles(inst_services)
+    found: list[PathWithoutStorage] = []
+    for role, source_name in source_roles.items():
+        inst_name = inst_roles.get(role)
+        if not source_name or not inst_name:
+            continue
+        source_svc, inst_svc = source_services.get(source_name) or {}, inst_services.get(inst_name) or {}
+        source_env = _env_mapa(source_svc)
+        running = {**(env_file or {}), **_env_mapa(inst_svc)}
+        running.update({k: v for k, v in source_env.items() if k not in running})  # what the redeploy adds
+        source_mounts, inst_mounts = _mount_targets(source_svc, writable_only=True), _mount_targets(inst_svc)
+        for key, raw in sorted(running.items()):
+            value = str(raw).strip() if raw is not None else ""
+            if not value.startswith("/") or "$" in value:
+                continue
+            if _under(value, source_mounts) and not _under(value, inst_mounts):
+                found.append(PathWithoutStorage(inst_name, key, value, tuple(inst_mounts)))
+    return found
+
+
+class StorageNotMountedError(ValueError):
+    """DEV-67: the new version would keep data where the installation has no storage mounted.
+
+    Raised BEFORE any file is written, like :class:`UndeployableImageError`: the cockpit runner turns it into the
+    refusal on the deploy screen, and the running installation stays untouched."""
+
+
+def storage_refusal(found: list[PathWithoutStorage]) -> str:
+    """The sentence the manager reads when the deploy stops on :func:`paths_without_storage`."""
+    places = "; ".join(
+        f"služba {f.service} má podľa novej verzie ukladať do {f.value} (premenná {f.key}), "
+        f"no inštalácia tam priečinok pripojený nemá (pripojené má: {', '.join(f.mounted) or 'nič'})"
+        for f in found
+    )
+    return (
+        f"Nasadenie zastavené — inštalácia nie je pripravená na novú verziu: {places}. Aplikácia by zapisovala mimo "
+        "pripojených priečinkov a dáta by nikto nenašiel (napríklad faktúry by sa nedoručovali). Inštaláciu treba "
+        "najprv prestaviť podľa postupu novej verzie — to robí technický tím; pošli mu túto vetu. Inštalácia ostala "
+        "nedotknutá."
+    )
+
+
 def env_keys_missing_against_source(instance_dir: Path, source: Optional[dict[str, Any]]) -> dict[str, list[str]]:
     """Premenné, ktoré projekt deklaruje a nasadená inštalácia ich nemá. Prázdne = sedí to.
 
@@ -2579,6 +2676,15 @@ def provision_uat(
                 f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
                 "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
             )
+        # DEV-67 — before anything is written: a variable the installation would run with may point where the
+        # project keeps storage and the installation has none (NEX Inbox 1.7.0 moved its Genesis share).
+        unmounted = paths_without_storage(
+            yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {},
+            source,
+            _parse_env_file(env_path),
+        )
+        if unmounted:
+            raise StorageNotMountedError(storage_refusal(unmounted))
         doplnene = env_keys_missing_against_source(uat_dir, source)
         if doplnene:
             # ICCINT-104 — doplnenie sa NESMIE stať ticho. Chýbajúcu premennú dopĺňame (bez nej nová

@@ -6155,6 +6155,100 @@ async def _run_post_up_migration(
     return False, f"migrácia zlyhala (backend sa nespustil včas): {detail}"
 
 
+#: DEV-67: what an application's health check calls "not working". Compared before and after a deploy; a check that
+#: is still starting (``unknown``, ``pending``) is not claimed to be broken.
+HEALTH_BAD = frozenset({"degraded", "error", "down", "fail", "failed", "critical", "unhealthy", "unavailable"})
+#: A check that is bad right after the start may only be waiting for its first probe — ask again this many times.
+HEALTH_SETTLE_ATTEMPTS = 6
+HEALTH_SETTLE_INTERVAL = 10
+
+
+def _health_probe_src(port: int, path: str) -> str:
+    """In-container probe: ``{check: [status, message]}`` from the application's health endpoint, ``{}`` if none."""
+    url = f"http://localhost:{port}{path}"
+    return (
+        "import json, urllib.request\n"
+        "try:\n"
+        f"    d = json.load(urllib.request.urlopen('{url}', timeout=10))\n"
+        "    c = d.get('checks') if isinstance(d, dict) else None\n"
+        "    out = {k: [str((v or {}).get('status', '')), str((v or {}).get('message') or '')[:200]]"
+        " for k, v in (c or {}).items() if isinstance(v, dict)}\n"
+        "except Exception:\n"
+        "    out = {}\n"
+        "print(json.dumps(out))\n"
+    )
+
+
+async def instance_health(
+    compose: Path, project_slug: str, deploy_host: Optional[str] = None
+) -> Optional[dict[str, tuple[str, str]]]:
+    """DEV-67: ``{check: (status, message)}`` the installation's backend reports on its health endpoint right now,
+    or ``None`` when it cannot be read (no backend, not running, no such endpoint). Never raises."""
+    try:
+        services = (yaml.safe_load(compose.read_text(encoding="utf-8")) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    be_role = uat_provisioner.identify_service_roles(services).get("backend")
+    if be_role is None:
+        return None
+    port = uat_provisioner.detect_internal_port(services[be_role], 8000)
+    path = uat_provisioner.resolve_be_health_path(services[be_role], claude_agent.PROJECTS_ROOT / project_slug)
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose),
+        "exec",
+        "-T",
+        be_role,
+        "python",
+        "-c",
+        _health_probe_src(port, path),
+    ]
+    rc, out = await _compose_smoke_step(cmd, 30, env=_verify_env_for_target(deploy_host))
+    if rc != 0:
+        return None
+    try:
+        data = json.loads((out or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    if not isinstance(data, dict) or not data:
+        return None
+    return {str(k): (str(v[0]), str(v[1])) for k, v in data.items() if isinstance(v, list) and len(v) == 2}
+
+
+def _health_worse(before: dict[str, tuple[str, str]], after: dict[str, tuple[str, str]]) -> list[str]:
+    return [
+        f"{name} — {after[name][1] or after[name][0]} (pred nasadením {before[name][0]}, teraz {after[name][0]})"
+        for name in sorted(before)
+        if before[name][0] == "ok" and name in after and after[name][0] in HEALTH_BAD
+    ]
+
+
+async def health_regressions(
+    compose: Path,
+    project_slug: str,
+    before: Optional[dict[str, tuple[str, str]]],
+    deploy_host: Optional[str] = None,
+) -> list[str]:
+    """DEV-67: the checks that were ``ok`` before the deploy and are not working after it — each as a sentence part.
+
+    A check bad right after the start may only be waiting for its first probe, so it is asked again
+    (:data:`HEALTH_SETTLE_ATTEMPTS` × :data:`HEALTH_SETTLE_INTERVAL` s) before it is called a regression. Nothing to
+    compare with (``before`` unknown, health unreadable) is no claim at all."""
+    if not before:
+        return []
+    worse: list[str] = []
+    for attempt in range(HEALTH_SETTLE_ATTEMPTS):
+        after = await instance_health(compose, project_slug, deploy_host)
+        worse = _health_worse(before, after) if after else []
+        if not worse:
+            return []
+        if attempt < HEALTH_SETTLE_ATTEMPTS - 1:
+            await asyncio.sleep(HEALTH_SETTLE_INTERVAL)
+    return worse
+
+
 async def _verify_uat_serves(
     project_slug: str,
     uat_slug: str,

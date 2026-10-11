@@ -56,6 +56,14 @@ services:
 """
 
 
+#: The same installation as it runs since NEX Inbox 1.7.0 (measured on this UAT 11.10.2026): the Genesis share's
+#: PARENT folder is mounted and the project's ``SMB_MOUNT_DIR`` lies under it. Deploying the current project onto
+#: ZIVY above stops on the missing storage (DEV-67) before reaching what a test about something else measures.
+ZIVY_1_7 = ZIVY.replace(
+    "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out", "/mnt/mager-uat-genesis:/var/lib/inbox/genesis:rslave"
+)
+
+
 def _instalacia(tmp_path: Path) -> Path:
     d = tmp_path / "mager" / "nex-inbox"
     d.mkdir(parents=True)
@@ -239,7 +247,7 @@ def test_the_carry_over_actually_reaches_the_written_file(tmp_path):
     d.mkdir(parents=True)
     # Prevzata instalacia hlavicku UZ nesie — prevzatie ju tam zapise. Bez nej by zasiahla straz na
     # rucne pisane nasadenia a skuska by merala ju, nie to, co ma merat.
-    (d / "docker-compose.yml").write_text(f"# {P.GENERATED_BY_MARKER}\n{ZIVY}", encoding="utf-8")
+    (d / "docker-compose.yml").write_text(f"# {P.GENERATED_BY_MARKER}\n{ZIVY_1_7}", encoding="utf-8")
     (d / ".env").write_text("POSTGRES_DB=x\nPOSTGRES_PASSWORD=y\nPROJECT_VERSION=1.4.0\n", encoding="utf-8")
 
     P.provision_uat(
@@ -271,7 +279,7 @@ def test_a_refused_deploy_leaves_the_instance_exactly_as_it_was(tmp_path, monkey
     d.mkdir(parents=True)
     # Sluzba, ktorej znacku nasadenie PREPISE (obraz je nas), ale zdroj ju uz nestavia — teda
     # ``build:`` nedostane a povysena znacka nikde nie je. Presne tvar chyby z 15.09.2026.
-    zivy = f"# {P.GENERATED_BY_MARKER}\n" + ZIVY + "  worker:\n    image: nex-inbox-worker:v1.4.0\n"
+    zivy = f"# {P.GENERATED_BY_MARKER}\n" + ZIVY_1_7 + "  worker:\n    image: nex-inbox-worker:v1.4.0\n"
     (d / "docker-compose.yml").write_text(zivy, encoding="utf-8")
     (d / ".env").write_text("POSTGRES_DB=x\nPOSTGRES_PASSWORD=y\nPROJECT_VERSION=1.4.0\n", encoding="utf-8")
     pred_compose = (d / "docker-compose.yml").read_text(encoding="utf-8")

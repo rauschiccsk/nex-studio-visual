@@ -17,6 +17,7 @@ prevádzky. Keby ho prevzala aj testovacia, prvá skúška zákazníka by mu zas
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +48,7 @@ def _bez_zapisu(monkeypatch) -> None:
     class _Vysledok:
         fe_service = "frontend"
         warnings: list[str] = []
+        compose_path = Path("/nonexistent/docker-compose.yml")
 
     monkeypatch.setattr(instance_adoption.uat_provisioner, "provision_uat", lambda *a, **k: _Vysledok())
     monkeypatch.setattr(deploy_service.uat_provisioner, "provision_uat", lambda *a, **k: _Vysledok())

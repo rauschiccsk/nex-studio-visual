@@ -254,6 +254,7 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
     class _Result:
         warnings: list[str] = []
         fe_service = "frontend"
+        compose_path = Path("/nonexistent/docker-compose.yml")
 
     def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["provision"] = {"project_slug": project_slug, "uat_slug": uat_slug, **kw}
@@ -300,6 +301,7 @@ def test_default_deploy_runner_uat_passes_no_prod_kwargs(monkeypatch):
     class _Result:
         warnings: list[str] = []
         fe_service = "frontend"
+        compose_path = Path("/nonexistent/docker-compose.yml")
 
     def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["uat_slug"] = uat_slug

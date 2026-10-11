@@ -21,6 +21,7 @@ Two layers, deliberately different in kind:
 from __future__ import annotations
 
 import uuid as _uuid
+from pathlib import Path
 
 import pytest
 import yaml
@@ -462,6 +463,7 @@ class TestWarningsChannel:
         class _Result:
             warnings = ["chýba spárovaný NEX Manager"]
             fe_service = "frontend"
+            compose_path = Path("/nonexistent/docker-compose.yml")
 
         async def _fake_up(*a, **k):
             return True, "OK"
