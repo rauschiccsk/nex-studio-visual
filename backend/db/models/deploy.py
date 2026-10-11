@@ -45,8 +45,14 @@ ENVIRONMENT_VALUES: tuple[str, ...] = ("uat", "prod")
 #   * ``accept`` — the Manažér accepted a customer's UAT (opens PROD; §3.5).
 EVENT_TYPE_VALUES: tuple[str, ...] = ("deploy", "accept")
 
-# Per-deploy outcome (an ``accept`` event is always ``ok``).
-STATUS_VALUES: tuple[str, ...] = ("ok", "failed")
+# Per-deploy outcome (an ``accept`` event is always ``ok``). DEV-68: ``unverified`` = the new version was started on
+# the installation (containers replaced, a migration may have run) but a check after it failed — it is what runs.
+DEPLOY_STATUS_OK = "ok"
+DEPLOY_STATUS_FAILED = "failed"
+DEPLOY_STATUS_UNVERIFIED = "unverified"
+STATUS_VALUES: tuple[str, ...] = (DEPLOY_STATUS_OK, DEPLOY_STATUS_FAILED, DEPLOY_STATUS_UNVERIFIED)
+#: Outcomes after which the deployed version is the one the installation runs.
+RUNNING_STATUSES: tuple[str, ...] = (DEPLOY_STATUS_OK, DEPLOY_STATUS_UNVERIFIED)
 
 
 def _ck_in(column: str, values: tuple[str, ...]) -> str:

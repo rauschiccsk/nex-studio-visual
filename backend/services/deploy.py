@@ -66,7 +66,13 @@ from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.db.models.customers import Customer
-from backend.db.models.deploy import DeployEvent
+from backend.db.models.deploy import (
+    DEPLOY_STATUS_FAILED,
+    DEPLOY_STATUS_OK,
+    DEPLOY_STATUS_UNVERIFIED,
+    RUNNING_STATUSES,
+    DeployEvent,
+)
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
@@ -132,10 +138,21 @@ class _WarningTuple(tuple):
 
 
 class RunnerResult(_WarningTuple):
-    """What :func:`_default_deploy_runner` returns: ``(ok, detail, url)`` + the provisioner's ``warnings``."""
+    """What :func:`_default_deploy_runner` returns: ``(ok, detail, url)`` + the provisioner's ``warnings`` + whether
+    the new version was started on the installation (DEV-68; a failed deploy may still have replaced it)."""
 
-    def __new__(cls, ok: bool, detail: str, url: Optional[str], warnings: Optional[list[str]] = None):
-        return super().__new__(cls, (ok, detail, url), warnings)
+    def __new__(
+        cls,
+        ok: bool,
+        detail: str,
+        url: Optional[str],
+        warnings: Optional[list[str]] = None,
+        *,
+        new_version_started: bool = False,
+    ):
+        result = super().__new__(cls, (ok, detail, url), warnings)
+        result.new_version_started = new_version_started
+        return result
 
 
 class DeployOutcome(_WarningTuple):
@@ -221,10 +238,12 @@ def list_project_events(db: Session, project_id: UUID) -> list[DeployEvent]:
 
 
 def current_version(db: Session, customer_id: UUID, environment: str) -> Optional[str]:
-    """The version a customer currently runs in ``environment`` — the latest OK ``deploy`` event.
+    """The version a customer currently runs in ``environment`` — the latest ``deploy`` event that started it.
 
     Returns ``None`` when the customer has never had a successful deploy to that
-    environment. Drives the version × customer matrix cell (§3.3).
+    environment. Drives the version × customer matrix cell (§3.3). DEV-68: a deploy whose check failed after the
+    new version had started (``unverified``) is the version that runs — showing the previous one would be the
+    same lie the files on MAGER told on 11.10.2026.
     """
     stmt = (
         select(DeployEvent.version_number)
@@ -232,7 +251,7 @@ def current_version(db: Session, customer_id: UUID, environment: str) -> Optiona
             DeployEvent.customer_id == customer_id,
             DeployEvent.environment == environment,
             DeployEvent.event_type == "deploy",
-            DeployEvent.status == "ok",
+            DeployEvent.status.in_(RUNNING_STATUSES),
         )
         .order_by(DeployEvent.seq.desc())
         .limit(1)
@@ -258,7 +277,7 @@ def last_deploy_attempt_failed(db: Session, customer_id: UUID, environment: str)
         .order_by(DeployEvent.seq.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return latest_status == "failed"
+    return latest_status in (DEPLOY_STATUS_FAILED, DEPLOY_STATUS_UNVERIFIED)
 
 
 def last_successful_deploy(db: Session, customer_id: UUID, environment: str) -> Optional[DeployEvent]:
@@ -759,7 +778,16 @@ def build_matrix(
 # ---------------------------------------------------------------------------
 
 
-def _vrat_predpis_po_zlyhani(ok: bool, detail: str, result, deploy_host: Optional[str]) -> str:
+def _started(outcome) -> bool:
+    """Whether the orchestrator's instance deploy started the new version (DEV-68) — ``False`` for a plain pair."""
+    from backend.services import orchestrator
+
+    return isinstance(outcome, orchestrator.InstanceDeployResult) and outcome.new_version_started
+
+
+def _vrat_predpis_po_zlyhani(
+    ok: bool, detail: str, result, deploy_host: Optional[str], *, new_version_started: bool = False
+) -> str:
     """Po NEÚSPEŠNOM nasadení vráť na cieľ predpis, ktorý tam bol predtým (ICCINT-151).
 
     **Prečo.** 25.09.2026 na ostrom NEX Inboxe MÁGERSTAVU: nasadenie prekročilo časový limit, ale
@@ -772,9 +800,20 @@ def _vrat_predpis_po_zlyhani(ok: bool, detail: str, result, deploy_host: Optiona
 
     ⚠️ Zlyhanie vrátenia sa PRIPÍŠE do hlásenia, nie zamlčí: vtedy na cieli zostal predpis, ktorý tam
     nepatrí, a to sa musí dozvedieť človek — je to horší stav než samotné zlyhané nasadenie.
+
+    ⚠️ DEV-68: only while the new version was NOT started. 11.10.2026 on NEX Inbox of MAGERSTAV the new containers
+    ran and the database was migrated when the last check failed; putting the old compose back left containers
+    1.7.1 under files 1.5.6 — the next start from the files would have brought back the old code over the new schema.
+    Once the new version runs, the files stay the new ones and the sentence says why.
     """
     if ok or not (deploy_host or "").strip():
         return detail
+    if new_version_started:
+        return (
+            f"{detail} Nová verzia na cieli už beží, preto predpis ostal na nej — návrat na predchádzajúci by "
+            "inštaláciu rozladil (kontajnery novej verzie, predpis starej). Skontroluj aplikáciu skôr, než "
+            "nasadíš znovu."
+        )
     predchadzajuce = getattr(result, "previous_remote_files", None)
     if not predchadzajuce:
         return detail
@@ -856,17 +895,18 @@ async def _default_deploy_runner(
         result.compose_path, project_slug, deploy_host if is_prod else None
     )
     if is_prod:
-        ok, detail = await orchestrator._run_prod_deploy(
+        outcome = await orchestrator._run_prod_deploy(
             project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
         )
-        detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
+        ok, detail = outcome
+        detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host, new_version_started=_started(outcome))
         url = _prod_url(customer_slug, app, private=private_network) if result.fe_service else None
     else:
         # ⚠️ Testovacia inštalácia beží VŽDY na stroji kokpitu — ``deploy_host`` sa sem zámerne
         # neposiela. Údaj pri zákazníkovi sa volá ``prod_host`` a týka sa ostrej prevádzky; keby ho
         # prevzala aj testovacia, prvá skúška zákazníka by mu zasiahla do jeho vlastného servera
         # (ICCINT-151).
-        ok, detail = await orchestrator._run_uat_deploy(
+        outcome = await orchestrator._run_uat_deploy(
             project_slug,
             uat_slug,
             environment="uat",
@@ -875,6 +915,7 @@ async def _default_deploy_runner(
             full_project_slug=project_slug,
             version_number=version_number,
         )
+        ok, detail = outcome
         url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
     # Surface any provision warnings in the recorded (non-secret) detail — AND return them typed, so the
     # deploy screen can show them on a SUCCESSFUL deploy (``detail`` is only rendered on a failure, which is
@@ -898,7 +939,7 @@ async def _default_deploy_runner(
             )
     if warnings:
         detail = f"{detail} | warnings: {'; '.join(warnings)}"
-    return RunnerResult(ok, detail, url, warnings)
+    return RunnerResult(ok, detail, url, warnings, new_version_started=_started(outcome))
 
 
 # ---------------------------------------------------------------------------
@@ -1161,6 +1202,9 @@ async def deploy(
     # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
     # so the seam stays the 3-tuple every existing fake already returns.
     warnings: list[str] = list(getattr(outcome, "warnings", None) or [])
+    # DEV-68: the same seam carries whether the new version was started — a failed deploy that started it is
+    # recorded as UNVERIFIED, so the matrix shows the version that runs, next to the failure.
+    started = bool(getattr(outcome, "new_version_started", False))
     if ci_warning:
         warnings.append(ci_warning)
 
@@ -1209,7 +1253,7 @@ async def deploy(
         version_number=deployed_version,
         environment=environment,
         event_type="deploy",
-        status="ok" if ok else "failed",
+        status=DEPLOY_STATUS_OK if ok else (DEPLOY_STATUS_UNVERIFIED if started else DEPLOY_STATUS_FAILED),
         actor_id=actor_id,
         detail=detail,
     )

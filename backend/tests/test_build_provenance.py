@@ -237,7 +237,7 @@ async def test_the_deploy_builds_with_the_commit_next_to_the_version(monkeypatch
     ok, _detail = await orchestrator._run_uat_deploy("app", "app", version_number="v1.2.3")
 
     assert ok is False  # zastavené zámerne pri spustení
-    assert "--build" in seen["cmd"]
+    assert seen["cmd"][-1] == "build"  # DEV-68: the deploy builds first, in a step of its own
     assert seen["env"][APP_COMMIT_ENV] == _git(repo, "rev-parse", "HEAD")
     assert seen["env"]["APP_VERSION"] == "1.2.3"
 
@@ -267,8 +267,9 @@ def test_the_new_project_smoke_builds_starts_and_stops_with_the_commit(monkeypat
 # ── Stráž ako pravidlo ───────────────────────────────────────────────────────────────────────────────────
 
 #: Čo v kóde znamená „tu sa stavia obraz": ``up … --build`` alebo ``compose build`` — v ktorejkoľvek podobe,
-#: akou kokpit volá docker (zoznam argumentov, alebo pomocník ``docker_compose(["build"], …)``).
-_BUILDS_AN_IMAGE = re.compile(r"""["']--build["']|["']compose["']\s*,\s*["']build["']|\(\s*\[\s*["']build["']""")
+#: akou kokpit volá docker (zoznam argumentov, pomocník ``docker_compose(["build"], …)``, or a step appended to
+#: a shared prefix, ``base + ["build"]`` — the deploy's own build since DEV-68).
+_BUILDS_AN_IMAGE = re.compile(r"""["']--build["']|["']compose["']\s*,\s*["']build["']|[(+]\s*\[\s*["']build["']""")
 
 
 def _build_sites() -> dict[Path, list[int]]:

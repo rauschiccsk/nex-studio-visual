@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # :mod:`backend.db.models.deploy`.
 Environment = Literal["uat", "prod"]
 EventType = Literal["deploy", "accept"]
-DeployStatus = Literal["ok", "failed"]
+DeployStatus = Literal["ok", "failed", "unverified"]  # unverified: started, its check failed (DEV-68)
 
 
 class DeployRequest(BaseModel):

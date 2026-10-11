@@ -493,6 +493,61 @@ async def test_failed_prod_deploy_does_not_graduate(db_session):
     assert bumped2 == "v1.0.0"
 
 
+class _StartedButUnverified(_FakeRunner):
+    """DEV-68: the new version was started on the installation, a check after it failed."""
+
+    async def __call__(self, **kwargs):
+        await super().__call__(**kwargs)
+        return deploy_service.RunnerResult(False, "smerovanie zlyhalo", None, new_version_started=True)
+
+
+@pytest.mark.asyncio
+async def test_a_started_version_whose_check_failed_is_the_version_that_runs(db_session):
+    """11.10.2026, NEX Inbox 1.7.1 on the customer's PROD: the new version ran, the last check failed, and the matrix
+    kept showing 1.5.6 — the version that no longer ran. Recorded as ``unverified``, the matrix shows the running
+    version AND the failure; what was never verified cannot be accepted."""
+    user = _make_user(db_session)
+    project = _make_project(db_session, user=user)
+    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "v0.2.0")
+    customer = _make_customer(db_session, project)
+    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+
+    event, url, _bumped = await _deploy(
+        db_session, customer, version_number="v0.2.0", environment="uat", actor=user, runner=_StartedButUnverified()
+    )
+
+    assert (event.status, url) == ("unverified", None)
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.2.0"
+    assert deploy_service.last_deploy_attempt_failed(db_session, customer.id, "uat") is True
+    assert deploy_service.last_successful_deploy(db_session, customer.id, "uat").version_number == "v0.1.0"
+    with pytest.raises(ValueError, match="has not been successfully deployed"):
+        deploy_service.accept(db_session, customer.id, "v0.2.0", user.id)
+
+
+@pytest.mark.asyncio
+async def test_a_version_that_never_started_leaves_the_previous_one_running(db_session):
+    user = _make_user(db_session)
+    project = _make_project(db_session, user=user)
+    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "v0.2.0")
+    customer = _make_customer(db_session, project)
+    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+
+    event, _url, _bumped = await _deploy(
+        db_session,
+        customer,
+        version_number="v0.2.0",
+        environment="uat",
+        actor=user,
+        runner=_FakeRunner(ok=False, detail="exit 1: build error"),
+    )
+
+    assert event.status == "failed"
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.1.0"
+    assert deploy_service.last_deploy_attempt_failed(db_session, customer.id, "uat") is True
+
+
 # ---------------------------------------------------------------------------
 # INVARIANT 4 / §4: secrets are never echoed; deploy is manual (no autonomy hook)
 # ---------------------------------------------------------------------------

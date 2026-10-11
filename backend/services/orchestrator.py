@@ -71,6 +71,7 @@ from backend.services import (
     failure_framing,
     fast_fix,
     preview_switch,
+    public_route,
     release_note_writer,
     smoke_scratch,
     source_language,
@@ -5929,6 +5930,42 @@ async def _uprac_na_cieli(
     return detail
 
 
+class InstanceDeployResult(tuple):
+    """``(ok, detail)`` of an instance deploy + whether the NEW version was started on the machine (DEV-68).
+
+    11.10.2026, NEX Inbox 1.7.1 on the customer's PROD (MAGER): the new containers ran and the database was migrated
+    when the last check failed — and the deploy put the previous compose back on the machine: containers 1.7.1, files
+    1.5.6. Whether the files may go back depends on whether the new version was started, so the deploy says it.
+    It unpacks exactly like the plain pair it replaces (``ok, detail = …``)."""
+
+    new_version_started: bool
+
+    def __new__(cls, ok: bool, detail: str, *, new_version_started: bool = False) -> "InstanceDeployResult":
+        result = super().__new__(cls, (ok, detail))
+        result.new_version_started = new_version_started
+        return result
+
+
+async def _deploy_compose_step(cmd: list[str], env: dict[str, str], deadline: float, limit: int) -> tuple[bool, str]:
+    """One ``docker compose`` step of a deploy within the deploy's whole time budget → ``(done, why not)``."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
+        )
+    except OSError as exc:
+        return False, f"deploy sa nepodarilo spustiť: {exc}"
+    try:
+        remaining = max(1.0, deadline - asyncio.get_running_loop().time())
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=remaining)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, f"deploy prekročil časový limit ({limit}s)"
+    if proc.returncode != 0:
+        tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
+        return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
+    return True, ""
+
+
 async def _run_uat_deploy(
     project_slug: str,
     uat_slug: str,
@@ -5970,16 +6007,14 @@ async def _run_uat_deploy(
         rc_r, out_r = await _compose_smoke_step(_remote_compose_cmd(compose.parent), 60, env=env_ciela)
         chyba, text_ciela = _remote_compose_text(rc_r, out_r)
         if chyba:
-            return False, chyba
+            return InstanceDeployResult(False, chyba)
         try:
             rozdiel = _compose_drift(compose.read_text(encoding="utf-8"), text_ciela)
         except OSError as exc:
-            return False, f"predpis kokpitu sa nedá prečítať: {exc}"
+            return InstanceDeployResult(False, f"predpis kokpitu sa nedá prečítať: {exc}")
         if rozdiel:
-            return False, rozdiel
+            return InstanceDeployResult(False, rozdiel)
 
-    deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
-    cmd = ["docker", "compose", "-f", str(compose), "up", "-d", "--build", "--force-recreate"]
     # A GENERATED app shows its OWN semantic version (each change = a new version), NOT a build counter (Director
     # 2026-07-11: NEX Studio itself is regularly patched → a counter; the apps we build get their real version).
     # Stamp the DEPLOYED version_number (bare, no leading 'v' — matches the deploy-matrix display) into BOTH the
@@ -5997,21 +6032,22 @@ async def _run_uat_deploy(
     env = _docker_env_for_target(
         agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
     )
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
-        )
-    except OSError as exc:
-        return False, f"deploy sa nepodarilo spustiť: {exc}"
-    try:
-        limit = REMOTE_DEPLOY_TIMEOUT if (deploy_host or "").strip() else UAT_DEPLOY_TIMEOUT
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=limit)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return False, f"deploy prekročil časový limit ({limit}s)"
-    if proc.returncode != 0:
-        tail = (stdout or b"").decode("utf-8", "replace").strip()[-300:]
-        return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
+    limit = REMOTE_DEPLOY_TIMEOUT if (deploy_host or "").strip() else UAT_DEPLOY_TIMEOUT
+    deadline = asyncio.get_running_loop().time() + limit
+    base = ["docker", "compose", "-f", str(compose)]
+    # DEV-68 — the images are built FIRST, while the running version keeps serving; only then are its containers
+    # replaced. ``up --build`` did both in one step, so whoever had to stop the running app before the new one
+    # (a migration the old code must not watch, SERVER-105) stopped it before a build of 16 minutes on the
+    # customer's machine — NEX Inbox of MAGERSTAV was away for 20 minutes on 11.10.2026.
+    built, failure = await _deploy_compose_step(base + ["build"], env, deadline, limit)
+    if not built:
+        return InstanceDeployResult(False, failure)
+    deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
+    # From here the new version is on the machine: whatever fails later, the containers it replaced are gone and a
+    # migration may have run — the compose on the target must stay the new one (DEV-68).
+    started, failure = await _deploy_compose_step(base + ["up", "-d", "--force-recreate"], env, deadline, limit)
+    if not started:
+        return InstanceDeployResult(False, failure, new_version_started=True)
     # v4.0.21: migrate the DB before serve-verify — an alembic app with no migrate service of its
     # own boots against an un-migrated schema otherwise (crash-test 2026-07-21). No-op for apps that
     # already migrate on ``up``; a migration failure is a hard deploy failure (broken schema).
@@ -6022,9 +6058,10 @@ async def _run_uat_deploy(
         customer_slug=customer_slug,
         app=app,
         full_project_slug=full_project_slug,
+        deploy_host=deploy_host,
     )
     if not mig_ok:
-        return False, mig_detail
+        return InstanceDeployResult(False, mig_detail, new_version_started=True)
     deploy_progress.krok(compose.parent, deploy_progress.KROK_OVERENIE)
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
@@ -6049,7 +6086,9 @@ async def _run_uat_deploy(
 
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
         (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
-    return ok, await _uprac_na_cieli(ok, detail, deploy_host, compose.parent)
+    return InstanceDeployResult(
+        ok, await _uprac_na_cieli(ok, detail, deploy_host, compose.parent), new_version_started=True
+    )
 
 
 async def _run_prod_deploy(
@@ -6097,6 +6136,7 @@ async def _run_post_up_migration(
     customer_slug: Optional[str] = None,
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
+    deploy_host: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Run ``alembic upgrade head`` in the backend container after ``up`` (v4.0.21).
 
@@ -6132,11 +6172,13 @@ async def _run_post_up_migration(
         return True, "OK"
 
     cmd = ["docker", "compose", "-f", str(compose), "exec", "-T", be_role, "alembic", "upgrade", "head"]
+    # DEV-68: on the machine the installation runs on — without it the migration was asked of THIS machine's Docker.
+    env = _verify_env_for_target(deploy_host)
     detail = ""
     for attempt in range(MIGRATE_ATTEMPTS):
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=MIGRATE_TIMEOUT)
         except OSError as exc:
@@ -6321,8 +6363,12 @@ async def _verify_uat_serves(
         # for the real domain → 404 at the public URL, while the cockpit reported "✓ Nasadené". Probe the route
         # the internet actually uses — from the app's own container (on nex-proxy-net), hit Traefik with the
         # public Host header — so a broken public route is a real deploy FAILURE, not a false success.
-        public_host = f"{name_base}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
-        route_state, route_last = await _verify_public_route(base, be_role, public_host)
+        if (deploy_host or "").strip():
+            # DEV-68: an installation on another machine is asked at its own addresses, the way its users open them.
+            public_host, route_state, route_last = await _verify_remote_public_route(uat_compose)
+        else:
+            public_host = f"{name_base}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
+            route_state, route_last = await _verify_public_route(base, be_role, public_host)
         if route_state == "down":
             return False, (
                 f"appka beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
@@ -6940,6 +6986,30 @@ def _traefik_public_route_probe_src(public_host: str) -> str:
         "except Exception as e:\n"
         "    print('err', e); sys.exit(2)\n"
     )
+
+
+async def _verify_remote_public_route(instance_compose: Path) -> tuple[str, str, str]:
+    """``(addresses, state, last)`` for an installation on ANOTHER machine (DEV-68): its own routers' addresses
+    (:func:`public_route.route_urls`) asked from the cockpit over the network, retried over the readiness budget like
+    the in-network probe — Traefik needs a moment to pick up freshly started containers."""
+    try:
+        data = yaml.safe_load(instance_compose.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        return "—", public_route.STATE_SKIP, f"predpis inštalácie sa nedá prečítať: {exc}"
+    urls = public_route.route_urls(data)
+    cap = public_route.ROUTE_PROBE_TIMEOUT_SECONDS * max(1, len(urls)) + 10
+    attempts = max(1, ACCEPTANCE_SMOKE_READY_TIMEOUT // ACCEPTANCE_SMOKE_READY_INTERVAL)
+    state, last = public_route.STATE_SKIP, "no response"
+    for i in range(attempts):
+        try:
+            state, last = await run_blocking(public_route.check, urls, cap=cap)
+        except BlockingWorkTimedOut as exc:
+            state, last = public_route.STATE_SKIP, str(exc)
+        if state == public_route.STATE_OK:
+            break
+        if i < attempts - 1:
+            await asyncio.sleep(ACCEPTANCE_SMOKE_READY_INTERVAL)
+    return ", ".join(urls) or "—", state, last
 
 
 async def _verify_public_route(base: list[str], exec_service: str, public_host: str) -> tuple[str, str]:

@@ -15,12 +15,12 @@ import { popisPriebehu } from "@/components/deploy/popisPriebehu";
 
 describe("Popis priebehu na tlačidle (ICCINT-153)", () => {
   it("⚠️ ukáže KROK, nie len že sa niečo deje", () => {
-    const text = popisPriebehu({ bezi: true, krok: "stavím obrazy", trva_sekund: 12, krok_trva_sekund: 12 });
-    expect(text).toContain("stavím obrazy");
+    const text = popisPriebehu({ bezi: true, krok: "staviam obrazy", trva_sekund: 12, krok_trva_sekund: 12 });
+    expect(text).toContain("staviam obrazy");
   });
 
   it("⚠️ a ukáže, ako dlho to už beží — to je odpoveď na „zamrzlo to?“", () => {
-    const text = popisPriebehu({ bezi: true, krok: "stavím obrazy", trva_sekund: 300, krok_trva_sekund: 60 });
+    const text = popisPriebehu({ bezi: true, krok: "staviam obrazy", trva_sekund: 300, krok_trva_sekund: 60 });
     expect(text).toContain("5 min");
   });
 

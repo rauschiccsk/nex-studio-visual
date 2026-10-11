@@ -298,14 +298,13 @@ class _FakeProc:
 
 
 async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatch):
-    # Plain redeploy of the EXISTING compose (NOT uat-deploy.py) — exactly
-    # `docker compose -f /opt/uat/<slug>/docker-compose.yml up -d --build --force-recreate`, with the FE
+    # Plain redeploy of the EXISTING compose (NOT uat-deploy.py): `docker compose -f /opt/uat/<slug>/docker-compose.yml
+    # build`, then `… up -d --force-recreate` (DEV-68: the build runs while the installation is untouched), with the FE
     # build-arg stamped via VITE_APP_VERSION. Exit 0 + serve-verify pass → (True, "OK").
-    captured = {}
+    calls = []
 
     async def _fake_exec(*cmd, stdout=None, stderr=None, env=None):
-        captured["cmd"] = cmd
-        captured["env"] = env
+        calls.append((list(cmd), env))
         return _FakeProc(0, b"deploy log tail")
 
     async def _serves_ok(project_slug, uat_slug):
@@ -316,18 +315,10 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="v0.1.42")
 
     assert ok is True and detail == "OK"
-    assert list(captured["cmd"]) == [
-        "docker",
-        "compose",
-        "-f",
-        "/opt/uat/ledger/docker-compose.yml",
-        "up",
-        "-d",
-        "--build",
-        "--force-recreate",
-    ]
-    assert captured["env"]["VITE_APP_VERSION"] == "0.1.42"  # FE build-arg stamped
-    assert "uat-deploy.py" not in " ".join(captured["cmd"])  # no provisioner invocation
+    base = ["docker", "compose", "-f", "/opt/uat/ledger/docker-compose.yml"]
+    assert [cmd for cmd, _env in calls] == [base + ["build"], base + ["up", "-d", "--force-recreate"]]
+    assert [env["VITE_APP_VERSION"] for _cmd, env in calls] == ["0.1.42", "0.1.42"]  # FE build-arg stamped
+    assert all("uat-deploy.py" not in " ".join(cmd) for cmd, _env in calls)  # no provisioner invocation
 
 
 async def test_run_uat_deploy_nonzero_exit_returns_failure(monkeypatch):

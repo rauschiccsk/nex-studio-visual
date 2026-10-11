@@ -22,7 +22,7 @@ const { getAdoptionPreviewMock, adoptInstanceMock } = vi.hoisted(() => ({
 // ICCINT-153 — dialóg sa počas prevzatia pýta, v ktorom kroku to je. Napodobenina to musí vedieť
 // odpovedať, inak padne na tvare volania namiesto na správaní.
 const getDeployProgressMock = vi.fn(() =>
-  Promise.resolve({ bezi: true, krok: "stavím obrazy", trva_sekund: 5, krok_trva_sekund: 5 }),
+  Promise.resolve({ bezi: true, krok: "staviam obrazy", trva_sekund: 5, krok_trva_sekund: 5 }),
 );
 
 vi.mock("@/services/api/deploy", () => ({

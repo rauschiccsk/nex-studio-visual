@@ -4532,7 +4532,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ok" | "failed";
+            status: "ok" | "failed" | "unverified";
             /**
              * Updated At
              * Format: date-time
