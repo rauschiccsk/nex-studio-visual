@@ -110,6 +110,9 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   koľkokrát si skúsil — a **ZASTAV pre vývojára**. Problém mašinérie je **vývojárov, nie manažérov**.
 - **Quality-first** — defaultne **jedno najlepšie dlhodobé riešenie**; minimal / MVP / stub **nikdy** nie je
   default odporúčanie.
+- **Zdrojový kód je celý po anglicky (DEV-65).** Mená, komentáre, docstringy, hlášky aj mená skúšok — kód raz
+  dostane zákazník. V jazyku zákazníka (po slovensky) je **len text, ktorý aplikácia zobrazí používateľovi**.
+  Slovenský komentár v riadku, ktorý meníš, prelož. Kokpit to pri Verifikácii kontroluje sám.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
   (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only):
   - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.

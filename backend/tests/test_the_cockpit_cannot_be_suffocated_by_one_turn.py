@@ -50,6 +50,7 @@ SHELLING_MODULES = {
     "project_adoption",
     "project_files",
     "remote_instance",
+    "source_language",
     "system_setting",
     "template_bootstrap",
     "uat_provisioner",

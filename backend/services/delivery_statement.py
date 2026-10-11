@@ -95,8 +95,8 @@ def _git(repo: Path, *args: str) -> Optional[str]:
     return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
 
 
-def delivered_commit(db: Session, version: Version, repo: Path) -> tuple[Optional[str], Optional[str]]:
-    """``(sha, source)`` of what the version delivered — the sign-off, else the PASS commit, else the version tag."""
+def _recorded_delivery(db: Session, version: Version) -> tuple[Optional[str], Optional[str]]:
+    """``(sha, source)`` the database knows the version delivered — the sign-off, else the PASS commit; no git."""
     from backend.services.orchestrator import _manazer_signoff
 
     signoff = _manazer_signoff(db, version.id) or {}
@@ -116,14 +116,32 @@ def delivered_commit(db: Session, version: Version, repo: Path) -> tuple[Optiona
     sha = (verdict or {}).get("verified_sha")
     if sha and sha != "legacy":
         return str(sha), SOURCE_VERIFIED
-    tagged = _git(repo, "rev-parse", "--verify", "--quiet", f"refs/tags/v{version.version_number}^{{commit}}")
-    if tagged:
-        return tagged, SOURCE_TAG
     return None, None
 
 
-def base_commit(db: Session, version: Version, repo: Path, delivered: str) -> Optional[str]:
-    """The delivered state of the previous finished version; for the first one, the project when its build began."""
+def _tagged(repo: Path, version_number: str) -> Optional[str]:
+    return _git(repo, "rev-parse", "--verify", "--quiet", f"refs/tags/v{version_number}^{{commit}}")
+
+
+def delivered_commit(db: Session, version: Version, repo: Path) -> tuple[Optional[str], Optional[str]]:
+    """``(sha, source)`` of what the version delivered — the sign-off, else the PASS commit, else the version tag."""
+    sha, source = _recorded_delivery(db, version)
+    if sha:
+        return sha, source
+    tagged = _tagged(repo, version.version_number)
+    return (tagged, SOURCE_TAG) if tagged else (None, None)
+
+
+#: One step of finding where a version began: ``("sha", commit)`` known from the database, ``("tag", version
+#: number)`` to look up in git, ``("before", ISO time)`` — the project's state when the version's build began.
+BaseStep = tuple[str, str]
+
+
+def base_plan(db: Session, version: Version) -> list[BaseStep]:
+    """The database half of :func:`base_commit` — what to try, in order, without touching git.
+
+    DEV-65: Verifikácia reads the version's range from an ``async`` round; the plan is read there and resolved by
+    :func:`resolve_base` off the main loop, so no git command waits on it (ICCINT-74)."""
     from backend.services.deploy import _semver_sort_key
 
     mine = _semver_sort_key(version.version_number)
@@ -136,19 +154,36 @@ def base_commit(db: Session, version: Version, repo: Path, delivered: str) -> Op
         key=lambda v: _semver_sort_key(v.version_number),
         reverse=True,
     )
+    steps: list[BaseStep] = []
     for previous in earlier:
-        sha, _source = delivered_commit(db, previous, repo)
-        if sha:
-            return sha
+        sha, _source = _recorded_delivery(db, previous)
+        steps.append(("sha", sha) if sha else ("tag", previous.version_number))
     started = db.execute(
         select(PipelineMessage.created_at)
         .where(PipelineMessage.version_id == version.id)
         .order_by(PipelineMessage.seq.asc())
         .limit(1)
     ).scalar()
-    if started is None:
-        return None
-    return _git(repo, "rev-list", "-1", f"--before={started.isoformat()}", delivered)
+    if started is not None:
+        steps.append(("before", started.isoformat()))
+    return steps
+
+
+def resolve_base(repo: Path, steps: list[BaseStep], delivered: str) -> Optional[str]:
+    """The git half of :func:`base_commit`: the first step that names a commit."""
+    for kind, value in steps:
+        if kind == "sha":
+            return value
+        if kind == "tag" and (tagged := _tagged(repo, value)):
+            return tagged
+        if kind == "before":
+            return _git(repo, "rev-list", "-1", f"--before={value}", delivered)
+    return None
+
+
+def base_commit(db: Session, version: Version, repo: Path, delivered: str) -> Optional[str]:
+    """The delivered state of the previous finished version; for the first one, the project when its build began."""
+    return resolve_base(repo, base_plan(db, version), delivered)
 
 
 def _rates(db: Session) -> tuple[Decimal, Decimal]:

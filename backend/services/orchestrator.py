@@ -66,12 +66,14 @@ from backend.services import (
     database_schema,
     dedo_escalation,
     dedo_message,
+    delivery_statement,
     deploy_progress,
     failure_framing,
     fast_fix,
     preview_switch,
     release_note_writer,
     smoke_scratch,
+    source_language,
     uat_provisioner,
 )
 from backend.services import epic as epic_service
@@ -1790,6 +1792,8 @@ def _vizual_directive(
             "dátové modely — to je Programovanie. Ak je požiadavka naozaj nejednoznačná, `kind=question`, "
             "opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI `kind=done`.\n"
             + _vizual_checklist_rule(first_draft=False, mockup=True)
+            + SOURCE_IN_ENGLISH_RULE
+            + "\n"
             + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         )
     # ICCINT-27: the FIRST turn of the stage has no Manažér request to apply — it draws the app's first screens
@@ -1820,6 +1824,8 @@ def _vizual_directive(
         "nejednoznačná, nastav `kind=question`, opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI "
         "`kind=done`.\n"
         + _vizual_checklist_rule(first_draft=manager_request is None, mockup=False)
+        + SOURCE_IN_ENGLISH_RULE
+        + "\n"
         + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
 
@@ -6904,6 +6910,55 @@ class _SmokeStack:
 #: Strop na zistenie čísla zmeny (niekoľko volaní gitu, každé so stropom 15 s).
 BUILD_PROVENANCE_CAP = 60
 
+#: DEV-65: how long the source-language check of a version may take (git diff + reading the changed files).
+SOURCE_LANGUAGE_CAP = 120
+#: How many places the source-language finding names — the fixer finds the rest by the same rule.
+SOURCE_LANGUAGE_LISTED = 40
+
+
+def _scan_version_source(repo: Path, plan: list[delivery_statement.BaseStep], version_label: str) -> Optional[list]:
+    """Off the main loop (ICCINT-74): HEAD, the version's base and the scan — git only, no database session."""
+    head = _repo_head(repo)
+    base = delivery_statement.resolve_base(repo, plan, head) if head else None
+    if not head or not base:
+        logger.warning("source language check skipped (%s) — no range for %s", repo.name, version_label)
+        return None
+    return source_language.scan(repo, base, head, version_label)
+
+
+async def _source_language_finding(
+    db: Session, version_id: uuid.UUID, slug: str, version_label: str
+) -> Optional[dict[str, Any]]:
+    """DEV-65: the blocking finding for Slovak text in the code this version added, or ``None``.
+
+    The range is the delivery statement's (:func:`delivery_statement.base_plan` .. HEAD) — what the customer gets
+    from this version. The plan is read from the database here; git runs in a thread. ``None`` also when the range
+    cannot be read: a release is never stopped on a guess; the Auditor's charter covers the code then."""
+    version = db.get(Version, version_id)
+    if version is None:
+        return None
+    plan = delivery_statement.base_plan(db, version)
+    repo = claude_agent.PROJECTS_ROOT / slug
+    try:
+        found = await run_blocking(_scan_version_source, repo, plan, version_label, cap=SOURCE_LANGUAGE_CAP)
+    except (source_language.GitUnreadable, BlockingWorkTimedOut) as exc:
+        logger.warning("source language check skipped (slug=%s): %s", slug, exc)
+        return None
+    if not found:
+        return None
+    listed = ", ".join(f.location() for f in found[:SOURCE_LANGUAGE_LISTED])
+    more = len(found) - SOURCE_LANGUAGE_LISTED
+    places = "1 mieste" if len(found) == 1 else f"{len(found)} miestach"
+    return {
+        "text": (
+            f"Kód, ktorý dostane zákazník, má slovenský text na {places} (komentáre, docstringy, hlášky alebo mená "
+            "skúšok) — prelož ho do angličtiny; text, ktorý aplikácia zobrazí používateľovi, nemeň: "
+            f"{listed}{f' a ďalších {more}' if more > 0 else ''}."
+        ),
+        "blocking": True,
+        "escapes_tests": False,
+    }
+
 
 async def _build_provenance_env(compose: Path) -> dict[str, str]:
     """:func:`build_provenance.build_env` mimo hlavnej slučky — pýta sa gitu (ICCINT-74, ICCINT-166).
@@ -10763,7 +10818,9 @@ async def _run_verifikacia_round(
     # CR-V2-050: the computed runtime floor OVERRIDES the Auditor LLM string — a red smoke/acceptance is a
     # deterministic FAIL the LLM cannot upgrade to PASS.
     llm_pass = review.kind == "verdict" and bool(review.verdict)
-    is_pass = llm_pass and not runtime_floor_red
+    # DEV-65: Slovak text in the code a customer receives floors a PASS too — measured by the cockpit, not judged.
+    language_finding = await _source_language_finding(db, version_id, slug, version_label)
+    is_pass = llm_pass and not runtime_floor_red and language_finding is None
     verdict_str = "PASS" if is_pass else "FAIL"
     # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
     # against the live HEAD (a moved HEAD auto-un-verifies — kills the frozen-PASS bug). slug + version_label
@@ -10784,10 +10841,16 @@ async def _run_verifikacia_round(
         # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
         # sedenie s databázou do cudzieho vlákna nedostane.
         await run_blocking(_push_release_artifacts, claude_agent.PROJECTS_ROOT / slug, version_label, cap=GIT_PUSH_CAP)
+    language_only = llm_pass and not runtime_floor_red and language_finding is not None
     verdict_msg = _verdict_message(
         db,
         version_id=version_id,
-        content=review.summary or f"Verifikácia {verdict_str}.",
+        content=(
+            "Verzia funguje, ale kód, ktorý dostane zákazník, má slovenský text — treba ho preložiť do angličtiny. "
+            if language_only
+            else ""
+        )
+        + (review.summary or f"Verifikácia {verdict_str}."),
         payload={
             "verdict": verdict_str,
             "findings": (
@@ -10803,13 +10866,15 @@ async def _run_verifikacia_round(
                 ]
                 if (llm_pass and runtime_floor_red)
                 else review.findings_as_data()
-            ),
+            )
+            + ([language_finding] if language_finding is not None else []),
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
             # v4.0.11: the Auditor's technical dump rides here → the ConversationThread shows ``content``
             # (the PLAIN summary) with this behind a collapsible "Technický detail" (no jargon wall).
             **({"technical_detail": review.technical_detail} if review.technical_detail else {}),
             **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
+            **({"engine_override": "source_language"} if language_only else {}),
             **({"verified_sha": verified_sha} if verified_sha else {}),
         },
     )
@@ -10822,7 +10887,8 @@ async def _run_verifikacia_round(
     # a ``runtime_floor_red`` FAIL (the mechanical floor IS the truth — no proposed_fix to vet, D4) and the
     # ``fast_fix`` lane (its focused auto loop is unchanged, §6 D3). Fail-open inside → no record → the card
     # demotes accept_fix (§2). The critic writes an append-only fix_critique note the settle then reads.
-    if verdict_str == "FAIL" and not runtime_floor_red and state.flow_type != "fast_fix":
+    # A FAIL only the cockpit's own measurement made (DEV-65) has no Auditor fix scope to vet — like the runtime floor.
+    if verdict_str == "FAIL" and not runtime_floor_red and not language_only and state.flow_type != "fast_fix":
         await _run_fix_critique(db, state, verdict_msg=verdict_msg, on_event=on_event, on_message=on_message)
 
     settled = await _settle_verifikacia_verdict(
@@ -11879,6 +11945,17 @@ def _task_full_number(db: Session, task: Task) -> str:
 #: Skúška Tibor/Nazar: keby rýchlu opravu spúšťal niekto z nich, tieto vety nenapíše — nevie, že má.
 #: Kvalita by potom závisela od toho, KTO stlačil tlačidlo. Manažér má povedať ČO sa má opraviť;
 #: AKO sa pri tom pracuje je vec priebehu a musí platiť rovnako, nech text napísal ktokoľvek.
+#: DEV-65 — the source code a customer receives is all English; only what the application SHOWS is in the customer's
+#: language. One sentence, read by every coding brief (Programovanie in both lanes, the fix after Verifikácia, Vizuál)
+#: and checked mechanically at Verifikácia (:mod:`backend.services.source_language`). Director 11.10.2026: „keď
+#: zákazníkovi odovzdávame zdrojové kódy, tam má byť všetko po anglicky.“
+SOURCE_IN_ENGLISH_RULE = (
+    "ZDROJOVÝ KÓD JE CELÝ PO ANGLICKY — mená, komentáre, docstringy, hlášky aj mená skúšok; kód raz dostane "
+    "zákazník. Po slovensky (v jazyku zákazníka) je LEN text, ktorý aplikácia zobrazí používateľovi. Slovenský "
+    "komentár v riadku, ktorý meníš, prelož. Kokpit to pri Verifikácii kontroluje sám a slovenský text v kóde "
+    "vráti na opravu."
+)
+
 QUALITY_RULES = (
     "AKO SA U NÁS PRACUJE (platí vždy, aj keď to v zadaní nie je napísané):\n"
     "1. SKÚŠKY SA PREPISUJÚ, NEPRISPÔSOBUJÚ. Keď existujúca skúška vynucuje staré správanie, ktoré "
@@ -11889,7 +11966,8 @@ QUALITY_RULES = (
     "sčervenať, je horšia než žiadna: tvrdí, že poistka drží.\n"
     "3. DOKUMENTÁCIA, KTORÁ PO OPRAVE PRESTANE PLATIŤ, SA OPRAVÍ V TEJ ISTEJ ZMENE. Veta v Návrhu, "
     "v Špecifikácii alebo v hlavičke súboru, ktorá tvrdí opak toho, čo kód odteraz robí, nie je "
-    "drobnosť — je to návod, podľa ktorého niekto opravu časom vráti späť."
+    "drobnosť — je to návod, podľa ktorého niekto opravu časom vráti späť.\n"
+    "4. " + SOURCE_IN_ENGLISH_RULE
 )
 
 

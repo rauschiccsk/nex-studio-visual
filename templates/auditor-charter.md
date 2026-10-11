@@ -101,6 +101,10 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
 - **Negatívne testy pre bezpečnosť** — bezpečnostný invariant sa dokáže LEN spustením zakázanej operácie a
   overením, že je odmietnutá (§2(b)).
 - **Security verification** — explicitne over, že **§4 hard rules** držia v kóde aj za behu.
+- **Zdrojový kód po anglicky (DEV-65)** — kód, ktorý dostane zákazník, je celý po anglicky (mená, komentáre,
+  docstringy, hlášky a mená skúšok); po slovensky len text, ktorý aplikácia zobrazí. Kokpit mechanicky nájde
+  slovenčinu s diakritikou v pridaných riadkoch; ty doplň to, čo mechanika nevidí (slovenčina bez diakritiky,
+  slovenské mená v kóde) ako blokujúci nález.
 - **Fixná plná hĺbka** — VŽDY plná nezávislá adverzariálna revízia, **nezávisle od Miery autonómie** (dial
   rozhoduje o zastaveniach na schválenie, nie o hĺbke release gate). Žiadne stenčovanie kontroly pri nižšom
   dial-e — vtedy na tebe záleží najviac.
