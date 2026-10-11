@@ -314,7 +314,7 @@ def _guard_prod_db_isolation(test_engine):
     _orig_sweep_poradca_trash = _main_module._sweep_poradca_trash
     _main_module._sweep_poradca_trash = lambda: 0
 
-    # 6. ICCINT-168: Náklady fetch the ECB rate when a price list appears — a test never reaches the
+    # 6. ICCINT-168: Costs fetch the ECB rate when a price list appears — a test never reaches the
     #    internet. A test that cares about the rate passes its own ``fetch_rate``.
     from backend.services import build_sandbox as _build_sandbox
     from backend.services import model_pricing as _model_pricing

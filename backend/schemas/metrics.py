@@ -56,7 +56,7 @@ class CostRowRead(BaseModel):
     the way to the screen — a renderer must never present them as the same class of number."""
 
     key: str  # phase key, or "externe", or "poradca", or "system"
-    #: ``poradca`` (ICCINT-167): spotreba Poradcu — nameraná, ale mimo fáz stavby a bez ľudského ekvivalentu.
+    #: ``poradca`` (ICCINT-167): Poradca spend — measured, but outside the build phases and without a human equivalent.
     kind: Literal["phase", "external", "poradca", "system"]
     turns: int  # metered messages (UsageTotals.messages) — NOT parse_attempts
     input_tokens: int

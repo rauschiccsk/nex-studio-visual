@@ -1,7 +1,7 @@
-"""Nástroje Poradcu nad skutočnými dátami (ICCINT-167): stavba, plán úloh, git, kroky agenta, zber tajomstiev.
+"""Poradca tools over real data (ICCINT-167): build, Plán úloh, git, agent steps, secrets collection.
 
-Databáza je izolovaná skúšobná; git je skutočný repozitár v dočasnom priečinku; docker sa nevolá.
-Hodnoty tajomstiev sú umelé.
+The database is an isolated test one; git is a real repository in a temporary directory; docker is not called.
+Secret values are artificial.
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ def test_known_secret_values_come_from_env_uat_and_the_vault(world, tmp_path, mo
 
     for name in ("a.env", "b.json"):
         db.add(Credential(title=name, file_path=str(vault / name)))
-    db.add(Credential(title="chýba", file_path=str(vault / "zmazany.env")))  # nečitateľný záznam sa preskočí
+    db.add(Credential(title="chýba", file_path=str(vault / "zmazany.env")))  # an unreadable record is skipped
     db.flush()
     values = set(context.known_secret_values(db, project))
     for fake in (
@@ -205,7 +205,7 @@ def test_known_secret_values_come_from_env_uat_and_the_vault(world, tmp_path, mo
         "fake-vault-json-0005",
     ):
         assert fake in values, fake
-    # Nie-tajné hodnoty sa neskrývajú — inak by odpoveď prestala dávať zmysel.
+    # Non-secret values are not hidden — otherwise the answer would stop making sense.
     for plain in ("demo-aplikacia", "server.example", "jano"):
         assert plain not in values, plain
 

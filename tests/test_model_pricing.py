@@ -1,7 +1,7 @@
-"""Cenník modelov vyčítaný z ťahov, ktoré zaplatil Claude Code (ICCINT-168, :mod:`model_pricing`).
+"""Model price list read off the turns that Claude Code paid for (ICCINT-168, :mod:`model_pricing`).
 
-Ceny v pozorovaniach sú skutočné cenníky zmerané 06.10.2026 riešením rovníc proti ``costUSD`` Claude Code:
-Opus 5.5 4 / 20 / 0,20 / 8 (čítanie pamäte = 5 % vstupu!), Opus 5 5 / 25 / 0,50 / 10, Haiku 4.5 1 / 5 / 0,10 / 2.
+Observed prices are real price lists measured on 06.10.2026 by solving equations against Claude Code ``costUSD``:
+Opus 5.5 4 / 20 / 0.20 / 8 (cache read = 5 % of input!), Opus 5 5 / 25 / 0.50 / 10, Haiku 4.5 1 / 5 / 0.10 / 2.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ OPUS_55 = Prices(4.0, 20.0, 0.2, 8.0)
 OPUS_5 = Prices(5.0, 25.0, 0.5, 10.0)
 T0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
-#: Tvar ťahov zo stavby: vstupu mimo pamäte len jednotky (preto z rovníc vyjde nepresne), výstup stovky až
-#: tisíce, čítanie pamäte desaťtisíce až státisíce, zápis tisíce.
+#: Shape of the turns from a build: only units of non-cache input (hence the equations come out imprecise), output
+#: hundreds to thousands, cache reads tens to hundreds of thousands, writes thousands.
 SHAPES = [
     (2, 149, 21464, 0),
     (2, 3400, 12073, 9410),
@@ -44,14 +44,14 @@ def _obs(prices: Prices, shapes=SHAPES, start=T0) -> list[Observation]:
 
 
 def test_the_price_list_comes_out_exactly_as_anthropic_lists_it():
-    """Vstup mimo pamäte je v ťahu len pár tokenov, takže z rovníc vyjde nepresne (Dedo Home: 4,9938); po
-    zaokrúhlení na najhrubší krok, ktorý ceny Claude Code stále zopakuje, je to cenník presne."""
+    """Non-cache input is only a few tokens in a turn, so the equations come out imprecise (Dedo Home: 4.9938); after
+    rounding to the coarsest step that Claude Code prices still reproduce, it is exactly the price list."""
     assert model_pricing.fit_prices(_obs(OPUS_55)) == OPUS_55
     assert model_pricing.fit_prices(_obs(OPUS_5)) == OPUS_5
 
 
 def test_no_fixed_ratio_is_assumed_between_cache_and_input():
-    """Opus 5.5 číta pamäť za 5 % vstupu, Haiku za 10 % — pomer vychádza z čísel, nie z predpokladu."""
+    """Opus 5.5 reads the cache at 5 % of input, Haiku at 10 % — the ratio comes from the numbers, not an assumption."""
     haiku = Prices(1.0, 5.0, 0.1, 2.0)
     fitted = model_pricing.fit_prices(_obs(haiku))
     assert fitted == haiku
@@ -59,16 +59,16 @@ def test_no_fixed_ratio_is_assumed_between_cache_and_input():
 
 
 def test_too_few_or_dependent_turns_give_no_price_list():
-    """Štyri ceny potrebujú aspoň štyri nezávislé ťahy — inak by cenník bol vymyslený."""
+    """Four prices need at least four independent turns — otherwise the price list would be made up."""
     assert model_pricing.fit_prices(_obs(OPUS_55)[:3]) is None
     same_shape = [Observation(T0 + timedelta(minutes=i), (2, 100, 1000, 10), 0.1) for i in range(6)]
     assert model_pricing.fit_prices(same_shape) is None
     no_cache_writes = [(2, 100 + i, 1000 * i, 0) for i in range(1, 7)]
-    assert model_pricing.fit_prices(_obs(OPUS_55, no_cache_writes)) is None  # zápis sa nedá zistiť
+    assert model_pricing.fit_prices(_obs(OPUS_55, no_cache_writes)) is None  # the write cannot be determined
 
 
 def test_turns_two_price_lists_cannot_explain_together_give_none():
-    """Zmes dvoch cenníkov jeden cenník nezopakuje — radšej žiadny než nesprávny."""
+    """A mix of two price lists is not reproduced by a single price list — better none than a wrong one."""
     mixed = _obs(OPUS_55, SHAPES[:4]) + _obs(OPUS_5, SHAPES[4:], start=T0 + timedelta(days=1))
     assert model_pricing.fit_prices(mixed) is None
 
@@ -119,7 +119,7 @@ def test_an_unreachable_ecb_gives_no_rate_instead_of_breaking(monkeypatch):
     assert model_pricing._fetch_ecb_rate() is None
 
 
-# ── cenníky v databáze ─────────────────────────────────────────────────────────
+# ── price lists in the database ────────────────────────────────────────────────
 
 
 @pytest.fixture()
@@ -185,7 +185,7 @@ def test_a_model_gets_its_list_and_rate_once_it_has_enough_paid_turns(db_session
         return RATE
 
     _turns(db_session, version, _obs(OPUS_55)[:3])
-    assert model_pricing.refresh(db_session, fetch_rate=_rate) == []  # tri ťahy nestačia
+    assert model_pricing.refresh(db_session, fetch_rate=_rate) == []  # three turns are not enough
     assert _lists(db_session) == [] and calls == []
 
     _turns(db_session, version, _obs(OPUS_55)[3:])
@@ -193,8 +193,8 @@ def test_a_model_gets_its_list_and_rate_once_it_has_enough_paid_turns(db_session
     [row] = _lists(db_session)
     assert (row.input_usd, row.output_usd, row.cache_read_usd, row.cache_write_usd) == OPUS_55.as_tuple()
     assert (row.eur_usd, row.rate_date, row.observations) == (1.1204, date(2026, 10, 5), len(SHAPES))
-    assert row.valid_from == T0  # platí od prvého ťahu, ktorý pokrýva
-    assert calls == [1]  # kurz sa stiahol raz, keď cenník vznikol — nie pri každom zobrazení
+    assert row.valid_from == T0  # valid from the first turn that covers it
+    assert calls == [1]  # the rate was fetched once, when the price list appeared — not on every display
 
     model_pricing.refresh(db_session, fetch_rate=_rate)
     assert calls == [1]
@@ -211,13 +211,13 @@ def test_new_turns_that_fit_only_extend_the_list(db_session, version):
 
 
 def test_a_price_change_starts_a_new_list_and_keeps_the_old_one(db_session, version):
-    """Anthropic zmenil cenu: novšie ťahy starý cenník nezopakuje. Dva také nový cenník ešte neurčia; keď ho
-    ťahy od toho okamihu určia, vznikne platný od prvého z nich — a starý ostáva, ním sa počítali staršie ťahy."""
+    """Anthropic changed a price: newer turns do not reproduce the old list. Two such turns do not yet determine a new
+    one; once the turns from then on do, a list valid from their first appears — the old stays, it priced older ones."""
     _turns(db_session, version, _obs(OPUS_5))
     model_pricing.refresh(db_session, fetch_rate=lambda: RATE)
     change = T0 + timedelta(days=3)
     _turns(db_session, version, _obs(OPUS_55, SHAPES[:2], start=change))
-    assert model_pricing.refresh(db_session, fetch_rate=lambda: RATE) == []  # dva ťahy cenník neurčia
+    assert model_pricing.refresh(db_session, fetch_rate=lambda: RATE) == []  # two turns do not determine a price list
     _turns(db_session, version, _obs(OPUS_55, SHAPES[2:], start=change + timedelta(hours=1)))
     assert model_pricing.refresh(db_session, fetch_rate=lambda: RATE) == ["claude-opus-5-5"]
     old, new = _lists(db_session)
@@ -227,20 +227,20 @@ def test_a_price_change_starts_a_new_list_and_keeps_the_old_one(db_session, vers
     rows = model_pricing.price_rows(db_session)
     assert model_pricing.row_for(rows, "claude-opus-5-5", change - timedelta(minutes=1)) is old
     assert model_pricing.row_for(rows, "claude-opus-5-5", change + timedelta(days=1)) is new
-    assert model_pricing.row_for(rows, "claude-opus-5-5", T0 - timedelta(days=30)) is old  # staršie než prvý ťah
+    assert model_pricing.row_for(rows, "claude-opus-5-5", T0 - timedelta(days=30)) is old  # older than the first turn
 
 
 def test_a_list_without_a_rate_retries_the_rate(db_session, version):
     _turns(db_session, version, _obs(OPUS_55))
     model_pricing.refresh(db_session, fetch_rate=lambda: None)
     [row] = _lists(db_session)
-    assert row.eur_usd is None  # ECB nedostupná — cenník je, eurá sa zatiaľ nevyčíslia
+    assert row.eur_usd is None  # ECB unavailable — the price list exists, the euros are not computed yet
     model_pricing.refresh(db_session, fetch_rate=lambda: RATE)
     assert _lists(db_session)[0].eur_usd == 1.1204
 
 
 def test_unpaid_parts_never_teach_the_list(db_session, version):
-    """Prerušený ťah (bez ceny Claude Code) cenník neučí — oceňuje sa ním."""
+    """An interrupted turn (without a Claude Code price) does not teach the price list — it is priced by it."""
     _turns(db_session, version, [Observation(o.at, o.tokens, None) for o in _obs(OPUS_55)])  # type: ignore[arg-type]
     model_pricing.refresh(db_session, fetch_rate=lambda: RATE)
     assert _lists(db_session) == []
@@ -268,22 +268,22 @@ def test_a_hand_entered_cost_naming_a_family_uses_its_newest_list(db_session):
 
 
 def test_one_bad_record_among_good_turns_never_makes_a_new_list(db_session, version):
-    """Jeden zlý zápis (cena nesedí) medzi správnymi ťahmi nový cenník neurčí — ťahy od neho zmes nevysvetlí jeden
-    cenník — a správne ťahy pred ním sa stále rátajú ako overené."""
+    """One bad record (the price does not fit) among correct turns does not determine a new list — the turns after it
+    are not explained by a single price list — and the correct turns before it are still counted as verified."""
     _turns(db_session, version, _obs(OPUS_55))
     model_pricing.refresh(db_session, fetch_rate=lambda: RATE)
     later = T0 + timedelta(days=2)
-    bad = Observation(later, SHAPES[3], 0.9)  # 0,9 $ za ťah, ktorý stojí ~0,05 $
+    bad = Observation(later, SHAPES[3], 0.9)  # $0.9 for a turn that costs ~$0.05
     _turns(db_session, version, [*_obs(OPUS_55, SHAPES[:2], start=later - timedelta(hours=1)), bad])
     _turns(db_session, version, _obs(OPUS_55, SHAPES[4:], start=later + timedelta(hours=1)))
     assert model_pricing.refresh(db_session, fetch_rate=lambda: RATE) == []
     [row] = _lists(db_session)
-    assert row.observations == len(SHAPES) + 2  # dva správne pred zlým zápisom sú overené
+    assert row.observations == len(SHAPES) + 2  # the two correct ones before the bad record are verified
 
 
 def test_a_web_search_turn_does_not_bend_the_token_prices_and_teaches_the_search_price(db_session, version):
-    """Claude Code účtuje vyhľadávanie na webe zvlášť (0,01 $) a má ho v cene ťahu. Keby sa ťah s ním učil ako
-    tokeny, vstup by cenu pohltil (zmerané: Haiku 1,55 $ namiesto 1 $) — preto sa z neho učí len cena vyhľadávania."""
+    """Claude Code bills web search separately ($0.01) and includes it in the turn price. A turn with it learned as
+    tokens would let input swallow the price (measured: Haiku $1.55 not $1) — so only the search price is learned."""
     haiku = Prices(1.0, 5.0, 0.1, 2.0)
     clean = _obs(haiku)
     tokens = (30_000, 900, 40_000, 2_000)
@@ -312,7 +312,7 @@ def test_a_web_search_turn_does_not_bend_the_token_prices_and_teaches_the_search
 
 
 def test_after_an_ecb_failure_the_rate_is_not_retried_on_every_page_view(monkeypatch):
-    """Nedostupná ECB nesmie brzdiť každé otvorenie Nákladov 15-sekundovým čakaním."""
+    """An unavailable ECB must not slow down every opening of Náklady with a 15-second wait."""
     calls = []
 
     def _down(timeout):
@@ -323,7 +323,7 @@ def test_after_an_ecb_failure_the_rate_is_not_retried_on_every_page_view(monkeyp
     monkeypatch.setattr(model_pricing, "_ecb_failed_at", None)
     assert model_pricing._throttled_ecb_rate(1) is None
     assert model_pricing._throttled_ecb_rate(1) is None
-    assert calls == [1]  # druhý pokus sa odložil
+    assert calls == [1]  # the second attempt was deferred
     monkeypatch.setattr(model_pricing, "_ecb_failed_at", model_pricing.time.monotonic() - 601)
     monkeypatch.setattr(model_pricing, "_fetch_ecb_rate", lambda timeout: RATE)
     assert model_pricing._throttled_ecb_rate(1) == RATE  # po odklade znova

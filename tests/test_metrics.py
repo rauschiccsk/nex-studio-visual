@@ -1169,8 +1169,8 @@ def test_migration_086_up_down_up_leaves_no_orphan_rows(monkeypatch):
 
 
 def test_a_turn_that_ran_without_any_recorded_spend_makes_the_total_incomplete(db_session):
-    """Ťah bežal (má trvanie), ale jeho spotreba sa nezaznamenala vôbec (zlyhal pred v4.43.0, alebo sa záznam sedenia
-    nedal prečítať) — jeho cena nie je nula, je neznáma; súčet nesmie vyzerať úplný (nález kontroly ICCINT-168)."""
+    """A turn ran (it has a duration), but its usage was not recorded at all (it failed before v4.43.0, or the session
+    record could not be read) — its cost is unknown, not zero; the total must not look complete (ICCINT-168 review)."""
     _price_list(db_session)
     user = _make_user(db_session)
     project = _make_project(db_session, user)
@@ -1190,8 +1190,8 @@ def test_a_turn_that_ran_without_any_recorded_spend_makes_the_total_incomplete(d
 
 
 def test_the_project_never_shows_less_than_its_versions(db_session):
-    """Každá verzia zaokrúhľuje nahor sama: 10,5 € → 11 v oboch. Projekt preto ukáže 22, nie ⌈21⌉ = 21 —
-    a Poradca o celom projekte (žiadna verzia) pribudne k tomu zvlášť, tiež nahor."""
+    """Each version rounds up on its own: 10.5 € → 11 in both. The project therefore shows 22, not ⌈21⌉ = 21 —
+    and Poradca over the whole project (no version) is added to it separately, also rounded up."""
     from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 
     _price_list(db_session)
@@ -1228,13 +1228,13 @@ def test_the_project_never_shows_less_than_its_versions(db_session):
     m = metrics_service.compute_project_metrics(db_session, project)
     assert [v.totals.agent_cost_total for v in m.by_version] == [11, 11]
     assert _rows(m)["programovanie"].agent_cost == 22
-    assert _rows(m)["poradca"].agent_cost == 1  # (100×3000 + 10×15000)/1e6 = 0,45 € → 1, len na úrovni projektu
+    assert _rows(m)["poradca"].agent_cost == 1  # (100×3000 + 10×15000)/1e6 = 0.45 € → 1, only at the project level
     assert m.totals.agent_cost_total == 23
 
 
 def test_web_searches_are_priced_by_the_list_or_named(db_session):
-    """Vyhľadávanie na webe Claude Code účtuje zvlášť od tokenov — cenník ho má ako vlastnú cenu; kým ju nepozná,
-    vyhľadávania sú pomenované a tokeny ostávajú ocenené."""
+    """Claude Code bills web search separately from tokens — the price list has it as its own price; until it knows it,
+    searches are named and tokens stay priced."""
     row = _price_list(db_session)
     user = _make_user(db_session)
     project = _make_project(db_session, user)

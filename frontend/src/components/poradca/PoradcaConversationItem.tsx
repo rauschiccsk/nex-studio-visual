@@ -1,9 +1,9 @@
-// Jeden rozhovor v zozname Poradcu: otvoriť, premenovať, vymazať (ICCINT-167, v4.42.0).
+// A single conversation in the Poradca list: open, rename, delete (ICCINT-167, v4.42.0).
 //
 // Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie rozhovoru."
-// Premenovanie priamo v zozname — Enter uloží, Esc zruší, odchod z poľa uloží. Vymazanie sa potvrdí priamo
-// v riadku; text je potom preč natrvalo, cena ostáva v Nákladoch. Kým Poradca odpovedá, kôš je zašednutý
-// s dôvodom (backend by vrátil 409) — akciu, ktorá teraz neprejde, neponúkame ako živú.
+// Renaming directly in the list — Enter saves, Esc cancels, leaving the field saves. Deletion is confirmed right
+// in the row; the text is then gone for good, the cost stays in Náklady. While Poradca answers, the trash is greyed
+// out with a reason (the backend would return 409) — an action that would not go through now is not offered as live.
 
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Loader2, Pencil, Trash2 } from "lucide-react";
@@ -17,12 +17,12 @@ const DELETE_BUSY_REASON = "Kým Poradca odpovedá, rozhovor sa nedá vymazať �
 interface Props {
   conversation: PoradcaConversation;
   active: boolean;
-  /** Odpoveď práve beží (zo zoznamu, pri otvorenom rozhovore z jeho živého stavu). */
+  /** An answer is running right now (from the list; for an open conversation from its live state). */
   busy: boolean;
-  /** Meno autora, keď rozhovor nie je môj (admin vidí všetky). */
+  /** Author's name when the conversation is not mine (admin sees all). */
   authorName: string | null;
   onSelect: () => void;
-  /** `true` = uložené; pri chybe ostane pole otvorené s rozpísaným názvom. */
+  /** `true` = saved; on error the field stays open with the typed title. */
   onRename: (title: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
 }
@@ -45,8 +45,8 @@ export default function PoradcaConversationItem({
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState(c.title);
   const [working, setWorking] = useState(false);
-  // Enter aj odchod z poľa vedú k uloženiu (pole počas ukladania zašedne a prehliadač z neho odíde) — uloží
-  // sa raz.
+  // Enter and leaving the field both lead to saving (the field greys out while saving, the browser leaves it) — saves
+  // only once.
   const settled = useRef(false);
 
   function startEdit() {

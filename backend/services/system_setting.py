@@ -58,8 +58,8 @@ class _Default:
 #: helpers further down.
 DEFAULT_SETTINGS: dict[str, _Default] = {
     # ── Poradca (ICCINT-167) ────────────────────────────────────────
-    # Koľko otázok Poradcu smie bežať naraz v celom kokpite. Všetky čerpajú z jedného predplatného
-    # Claude s týždenným limitom — rovnakého ako stavby; ďalšia otázka počká a človek vidí prečo.
+    # How many Poradca questions may run at once in the whole cockpit. They all draw on one Claude subscription
+    # with a weekly limit — the same one as the builds; the next question waits and the person sees why.
     "poradca_max_concurrent": _Default(
         value="3",
         value_type="int",

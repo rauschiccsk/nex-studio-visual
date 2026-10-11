@@ -244,8 +244,8 @@ export default function Sidebar() {
         badge={hasProject && !pipelineAccessDenied && cockpitAwaiting}
         badgeLabel="čaká na Manažéra"
       />
-      {/* ICCINT-167: Poradca — rozhovor s agentom, ktorý len číta a radí; beží vedľa stavby. Projektová položka:
-          bez pripnutého projektu alebo bez prístupu zašednutá s dôvodom, rovnako ako Riadiace centrum. */}
+      {/* ICCINT-167: Poradca — talk with an agent that only reads and advises; runs beside the build. Project item:
+          greyed out with a reason without a pinned project or without access, same as the Control Centre. */}
       <NavItem
         icon={<IconPoradca />}
         label="Poradca"

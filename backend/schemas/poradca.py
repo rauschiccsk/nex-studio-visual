@@ -1,4 +1,4 @@
-"""Schémy Poradcu (ICCINT-167)."""
+"""Poradca schemas (ICCINT-167)."""
 
 from __future__ import annotations
 
@@ -8,21 +8,21 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-#: Najdlhšia otázka — dlhší text je skôr vložený log; ten si Poradca prečíta sám nástrojom.
+#: Longest question — longer text is more likely a pasted log; Poradca reads that itself with a tool.
 MAX_QUESTION_CHARS = 20_000
-#: Najdlhší názov rozhovoru — šírka stĺpca ``poradca_conversations.title``.
+#: Longest conversation title — width of the ``poradca_conversations.title`` column.
 TITLE_MAX_CHARS = 200
 
 
 def _refuse_nul(value: str) -> str:
-    """Znak NUL databáza do textu neuloží (pád 500) — odmietne sa vetou, nie chybou servera."""
+    """A NUL character is not stored by the database in text (500 crash) — rejected with a sentence, not an error."""
     if "\x00" in value:
         raise ValueError("Text nesmie obsahovať znak NUL.")
     return value
 
 
 class PoradcaStep(BaseModel):
-    """Čo Poradca urobil — nástroj a cieľ, nikdy obsah."""
+    """What Poradca did — tool and target, never content."""
 
     tool: str
     target: str = ""
@@ -55,17 +55,17 @@ class PoradcaMessageRead(BaseModel):
     #: DEV-52 — snímky, ktoré Manažér priložil k otázke.
     attachments: list[PoradcaAttachmentRead] = Field(default_factory=list)
     status: Literal["running", "done", "failed", "stopped"]
-    #: Úplné meno modelu tak, ako ho hlási Claude Code; ``None`` pri otázke a pri nedokončenej odpovedi.
+    #: Full model name as reported by Claude Code; ``None`` for a question and for an unfinished answer.
     model: Optional[str] = None
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
-    #: Cena odpovede v EUR tou istou cestou ako stavba; ``None``, keď model nemá nastavenú cenu.
+    #: Cost of the answer in EUR by the same path as the build; ``None`` when the model has no price set.
     cost: Optional[float] = None
     duration_seconds: Optional[float] = None
     error: Optional[str] = None
     created_at: datetime
     finished_at: Optional[datetime] = None
-    #: Odpoveď nesie pokyn pre agenta bežiacej stavby (blok ``<pokyn-pre-agenta>``) — text na vloženie.
+    #: The answer carries an instruction for the agent of a running build (``<pokyn-pre-agenta>`` block) — to insert.
     instruction: Optional[str] = None
     #: Odpoveď nesie požiadavku do Zásobníka (blok ``<poziadavka-do-zasobnika>``, staršie odpovede
     #: ``<poziadavka-na-novu-verziu>``) — DEV-29.
@@ -86,13 +86,13 @@ class PoradcaBacklogSaved(BaseModel):
 class PoradcaConversationRead(BaseModel):
     id: UUID
     project_id: UUID
-    #: O čom sa rozprávame — ``None`` = celý projekt.
+    #: What we are talking about — ``None`` = the whole project.
     version_id: Optional[UUID] = None
     version_number: Optional[str] = None
     author_id: UUID
     author_name: str
     title: str
-    #: Odpoveď práve beží.
+    #: The answer is running now.
     running: bool = False
     created_at: datetime
     updated_at: datetime
@@ -126,14 +126,14 @@ class PoradcaAsk(BaseModel):
 
 
 class PoradcaScopeUpdate(BaseModel):
-    """Zmena „o čom sa rozprávame". ``version_id = None`` = celý projekt (pole je povinné, aby
-    vynechanie neznamenalo nechcenú zmenu)."""
+    """Change of „what we are talking about". ``version_id = None`` = the whole project (the field is required so that
+    omission would not mean an unwanted change)."""
 
     version_id: Optional[UUID]
 
 
 class PoradcaRename(BaseModel):
-    """Nový názov rozhovoru — jeden riadok; medzery a zalomenia sa zlejú do jednej medzery."""
+    """New conversation name — one line; spaces and line breaks merge into a single space."""
 
     title: str = Field(..., min_length=1, max_length=TITLE_MAX_CHARS)
 
@@ -149,15 +149,15 @@ class PoradcaRename(BaseModel):
 
 
 class PoradcaVersionInfo(BaseModel):
-    """Verzia projektu pre voľbu „o čom sa rozprávame" — s fázou a stavom stavby."""
+    """Project version for the „what we are talking about" choice — with the phase and build state."""
 
     id: UUID
     version_number: str
     stage: Optional[str] = None
     status: Optional[str] = None
-    #: Dá sa teraz pokyn od Poradcu vložiť do poľa Riadiaceho centra tejto verzie?
+    #: Can an instruction from Poradca be inserted into the Control Centre field of this version now?
     instruction_open: bool = False
-    #: Prečo nie — veta pre tlačidlo zašednuté s dôvodom.
+    #: Why not — a sentence for a button greyed out with a reason.
     instruction_closed_reason: Optional[str] = None
 
 
@@ -169,7 +169,7 @@ class PoradcaProjectContext(BaseModel):
 
 
 class PoradcaStatus(BaseModel):
-    """Či Poradca vie bežať — pre obrazovku (zašednutie s dôvodom) aj ``/health``."""
+    """Whether Poradca can run — for the screen (greyed out with a reason) and for ``/health``."""
 
     ready: bool
     problems: list[str] = Field(default_factory=list)

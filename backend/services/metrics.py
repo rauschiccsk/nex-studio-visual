@@ -71,7 +71,7 @@ COMPARISON_PHASES: tuple[str, ...] = tuple(s for s in STAGE_VALUES if s != TERMI
 #: wage key and never carries human figures.
 EXTERNAL_ROW_KEY = "externe"
 SYSTEM_ROW_KEY = "system"
-#: ICCINT-167: spotreba Poradcu — riadok zvlášť od fáz stavby, len strana agenta (ako ``system``).
+#: ICCINT-167: Poradca spend — a row separate from the build phases, agent side only (like ``system``).
 PORADCA_ROW_KEY = "poradca"
 
 #: The single human-work coefficient (minutes of human work per 1M tokens) — one key for every phase
@@ -212,8 +212,8 @@ def _price_list(pricing: _Pricing) -> list[PriceListRead]:
 
 
 def usage_cost(db: Session, usage: object, at: Optional[datetime]) -> Optional[float]:
-    """Cena jednej odpovede Poradcu v eurách — tým istým cenníkom ako Náklady (ICCINT-168), zaokrúhlená hore
-    na celé centy. ``None``, keď sa celá oceniť nedá (stará odpoveď bez záznamu, model bez cenníka, bez kurzu)."""
+    """Price of one Poradca answer in euros — by the same price list as Náklady (ICCINT-168), rounded up
+    to whole cents. ``None`` when not fully priceable (old answer without log, model without a price list, no rate)."""
     parts = parts_from_usage_payload(usage)
     if not parts:
         return None
@@ -516,14 +516,14 @@ def _poradca_rows(
     project_id: uuid.UUID,
     version_id: Optional[uuid.UUID],
 ) -> list[CostRowRead]:
-    """Riadok ``kind="poradca"`` (0 alebo 1) — odpovede Poradcu k projektu (ICCINT-167).
+    """The ``kind="poradca"`` row (0 or 1) — Poradca's answers about the project (ICCINT-167).
 
-    Nameraná spotreba, ale mimo fáz stavby a bez ľudského ekvivalentu: Poradca nerobí prácu, ktorú by
-    inak robil programátor, odpovedá na otázky. Rozsah: ``version_id`` → odpovede na otázky k tej verzii
-    (verzia v čase otázky, nie súčasná voľba rozhovoru); ``None`` → všetky odpovede projektu.
+    Measured spend, but outside the build phases and without a human equivalent: Poradca does not do work a programmer
+    would otherwise do, it answers questions. Scope: ``version_id`` → answers about that version (the version at
+    the time of the question, not the current choice of the conversation); ``None`` → all answers of the project.
 
-    Vymazané rozhovory sa rátajú ZÁMERNE: vymazanie zahodí text, nie peniaze, ktoré odpovede stáli
-    (``runner.delete_conversation`` spotrebu ponechá práve kvôli tomuto súčtu)."""
+    Deleted conversations are counted ON PURPOSE: deleting discards the text, not the money the answers cost
+    (``runner.delete_conversation`` keeps the spend precisely for the sake of this sum)."""
     stmt = (
         select(PoradcaMessage)
         .join(PoradcaConversation, PoradcaConversation.id == PoradcaMessage.conversation_id)

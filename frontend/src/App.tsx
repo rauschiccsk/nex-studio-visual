@@ -89,7 +89,7 @@ function App() {
                 which redirect onward to /riadiace-centrum). Špecifikácia is the read-only spec
                 shell (real .md wired in a later step). */}
             <Route path="riadiace-centrum" element={<RiadiaceCentrumPage />} />
-            {/* ICCINT-167: Poradca — rozhovory s agentom, ktorý len číta; vedľa stavby, nad pripnutým projektom. */}
+            {/* ICCINT-167: Poradca — chats with a read-only agent; beside the build, above the pinned project */}
             <Route path="poradca" element={<PoradcaPage />} />
             {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) shown during the
                 vizual phase while the AI edits it. Thin wrapper pattern (UatPage / ProdPage); project- +

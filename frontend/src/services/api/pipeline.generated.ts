@@ -1404,9 +1404,9 @@ export interface paths {
         post?: never;
         /**
          * Delete Conversation
-         * @description Vymazať rozhovor: otázky, odpovede, kroky aj záznam na disku sú preč natrvalo; cena ostáva v Nákladoch.
+         * @description Delete a conversation: questions, answers, steps and the log on disk are gone for good; the cost stays in Costs.
          *
-         *     Kým Poradca odpovedá, 409 — najprv treba odpoveď zastaviť.
+         *     While Poradca is answering, 409 — the answer must be stopped first.
          */
         delete: operations["delete_conversation_api_v1_poradca_conversations__conversation_id__delete"];
         options?: never;
@@ -1465,7 +1465,7 @@ export interface paths {
         get?: never;
         /**
          * Rename Conversation
-         * @description Premenovať rozhovor. Poradie v zozname sa nemení — určuje ho posledná otázka.
+         * @description Rename a conversation. The order in the list does not change — it is determined by the last question.
          */
         put: operations["rename_conversation_api_v1_poradca_conversations__conversation_id__title_put"];
         post?: never;
@@ -1521,7 +1521,7 @@ export interface paths {
         };
         /**
          * Project Context
-         * @description Projekt a jeho verzie s fázou a stavom stavby — pre voľbu „o čom sa rozprávame".
+         * @description A project and its versions with the phase and build state — for the „what are we talking about" choice.
          */
         get: operations["project_context_api_v1_poradca_projects__slug__context_get"];
         put?: never;
@@ -1541,7 +1541,7 @@ export interface paths {
         };
         /**
          * List Conversations
-         * @description Moje rozhovory k projektu, najnovší prvý. Admin vidí rozhovory všetkých.
+         * @description My conversations of a project, newest first. Admin sees everyone's conversations.
          */
         get: operations["list_conversations_api_v1_poradca_projects__slug__conversations_get"];
         put?: never;
@@ -5828,7 +5828,7 @@ export interface components {
         };
         /**
          * PoradcaRename
-         * @description Nový názov rozhovoru — jeden riadok; medzery a zalomenia sa zlejú do jednej medzery.
+         * @description New conversation name — one line; spaces and line breaks merge into a single space.
          */
         PoradcaRename: {
             /** Title */
@@ -5836,8 +5836,8 @@ export interface components {
         };
         /**
          * PoradcaScopeUpdate
-         * @description Zmena „o čom sa rozprávame". ``version_id = None`` = celý projekt (pole je povinné, aby
-         *     vynechanie neznamenalo nechcenú zmenu).
+         * @description Change of „what we are talking about". ``version_id = None`` = the whole project (the field is required so that
+         *     omission would not mean an unwanted change).
          */
         PoradcaScopeUpdate: {
             /** Version Id */
@@ -5845,7 +5845,7 @@ export interface components {
         };
         /**
          * PoradcaStatus
-         * @description Či Poradca vie bežať — pre obrazovku (zašednutie s dôvodom) aj ``/health``.
+         * @description Whether Poradca can run — for the screen (greyed out with a reason) and for ``/health``.
          */
         PoradcaStatus: {
             /**
@@ -5876,7 +5876,7 @@ export interface components {
         };
         /**
          * PoradcaStep
-         * @description Čo Poradca urobil — nástroj a cieľ, nikdy obsah.
+         * @description What Poradca did — tool and target, never content.
          */
         PoradcaStep: {
             /**
@@ -5889,7 +5889,7 @@ export interface components {
         };
         /**
          * PoradcaVersionInfo
-         * @description Verzia projektu pre voľbu „o čom sa rozprávame" — s fázou a stavom stavby.
+         * @description Project version for the „what we are talking about" choice — with the phase and build state.
          */
         PoradcaVersionInfo: {
             /**

@@ -25,7 +25,7 @@ type View = "version" | "cumulative";
 // The external + system rows are NOT build phases — their labels live here, not in PHASE_LABELS.
 const EXTERNAL_ROW_LABEL = "Externé (ručne zadané)";
 const SYSTEM_ROW_LABEL = "Systém (neporovnané)";
-// ICCINT-167: odpovede Poradcu — namerané, mimo fáz stavby, bez ľudského porovnania.
+// ICCINT-167: Poradca answers — measured, outside the build phases, without a human comparison.
 const PORADCA_ROW_LABEL = "Poradca";
 
 // The model options are the families the cockpit's agents run on (ICCINT-167), read from the backend —

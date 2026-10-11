@@ -5,7 +5,7 @@ import type { components } from "@/services/api/pipeline.generated";
 
 // The PIPELINE agent role (NOT the user's ri/ha/shu access role). v2 (CR-V2-001/007): the 5-role waterfall
 // collapsed to the two v2 agents — the AI Agent (doer) + the independent Auditor. DB values (underscore).
-// ICCINT-167: + Poradca — nie je rola stavby, ale model a úsilie si nastavuje rovnako.
+// ICCINT-167: + Poradca — not a build role, but its model and effort are set the same way.
 export type PipelineAgentRole = "ai_agent" | "auditor" | "poradca";
 
 // Aliasované z GENEROVANÉHO kontraktu, nie prepísané ručne: backend deklaruje zoznam ako `Literal`,

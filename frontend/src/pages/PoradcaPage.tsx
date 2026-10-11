@@ -1,12 +1,12 @@
-// Poradca (ICCINT-167, docs/specs/poradca.md) — rozhovory s agentom, ktorý len číta a radí.
+// Poradca (ICCINT-167, docs/specs/poradca.md) — conversations with an agent that only reads and advises.
 //
-// Vľavo moje rozhovory k pripnutému projektu (admin vidí všetky), vpravo rozhovor: o čom sa rozprávame
-// (verzia s fázou a stavom stavby, alebo celý projekt), otázky a odpovede s priebehom, pole na otázku.
-// Beží vedľa stavby — nič tu nemení jej stav. Tri stavy ako každá projektová obrazovka: bez projektu výzva
-// s tlačidlom na Projekty, bez prístupu veta prečo, inak Poradca.
+// On the left my conversations for the pinned project (admin sees all), on the right a conversation: what we talk
+// about (version with phase and build status, or whole project), questions and answers with progress, question field.
+// It runs alongside the build — nothing here changes its state. Three states like every project screen: no project —
+// a prompt with a button to Projekty, no access — a sentence saying why, otherwise Poradca.
 //
-// Adresa nesie vybraný rozhovor (`?c=`) a predvolenú verziu nového rozhovoru (`?verzia=`) — tlačidlo
-// „Opýtaj sa Poradcu" pri hotovej verzii sem vedie s ňou.
+// The address carries the selected conversation (`?c=`) and the default version of a new one (`?verzia=`) — the
+// „Opýtaj sa Poradcu" button on a finished version leads here with it.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -114,7 +114,7 @@ export default function PoradcaPage() {
       .catch(() => setStatus(null));
   }, [slug, refreshList]);
 
-  // Keď odpoveď dobehne, zoznam si obnoví „beží" a poradie.
+  // When the answer finishes, the list refreshes its "running" flag and the order.
   const running = !!detail?.messages?.some((m) => m.status === "running");
   // DEV-25: what grows while Poradca writes — a new message, a new step of the last one, its answer (the text
   // arrives with the status change, not piece by piece).
@@ -129,9 +129,9 @@ export default function PoradcaPage() {
     wasRunning.current = running;
   }, [running, refreshList]);
 
-  // Otvorený rozhovor pozná svoj stav presnejšie než zoznam: odpoveď mohla dobehnúť, kým bol človek
-  // v inom rozhovore (zoznam by ho držal ako bežiaci a kôš zašednutý bez dôvodu), alebo práve začala.
-  // Zoznam je potom jediný zdroj „beží" pre bodku aj kôš.
+  // An open conversation knows its state better than the list: the answer may have finished while the person was
+  // in another conversation (the list would hold it as running and the bin greyed out for no reason), or just started.
+  // The list is then the single source of "running" for both the dot and the bin.
   useEffect(() => {
     if (!detail) return;
     setConversations((list) =>
@@ -159,7 +159,7 @@ export default function PoradcaPage() {
     }
   }, [slug, conversationId, asksForNew, listedSlug, conversations, params, setParams]);
 
-  // Predvolená verzia nového rozhovoru: z adresy, inak pripnutá verzia, inak celý projekt.
+  // Default version of a new conversation: from the address, otherwise the pinned version, otherwise the whole project.
   const defaultScope = useMemo(() => {
     const wanted = params.get("verzia") ?? selectedVersion?.versionId ?? null;
     return context?.versions?.some((v) => v.id === wanted) ? (wanted as string) : WHOLE_PROJECT;
@@ -252,7 +252,7 @@ export default function PoradcaPage() {
 
   return (
     <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] bg-[var(--color-canvas)]">
-      {/* Vľavo — rozhovory */}
+      {/* Left — conversations */}
       <aside className="flex min-h-0 flex-col border-r border-[var(--color-border-default)]">
         <div className="flex items-center justify-between px-3 py-3">
           <h1 className="text-sm font-bold text-[var(--color-text-primary)]">Poradca</h1>

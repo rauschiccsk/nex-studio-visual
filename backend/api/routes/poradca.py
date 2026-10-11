@@ -1,19 +1,19 @@
-"""Poradca — rozhovory s agentom, ktorý len číta a radí (ICCINT-167, ``docs/specs/poradca.md``).
+"""Poradca — conversations with an agent that only reads and advises (ICCINT-167, ``docs/specs/poradca.md``).
 
-* ``GET   /status``                                   → či Poradca vie bežať (a prečo nie)
-* ``GET   /projects/{slug}/conversations``            → rozhovory k projektu (moje; admin všetky)
-* ``POST  /projects/{slug}/conversations``            → nový rozhovor s prvou otázkou
-* ``GET   /conversations/{id}``                       → rozhovor so správami
-* ``PATCH /conversations/{id}``                       → o čom sa rozprávame (verzia / celý projekt)
-* ``PUT   /conversations/{id}/title``                 → premenovať
-* ``DELETE /conversations/{id}``                      → vymazať (text preč, cena ostáva v Nákladoch)
-* ``POST  /conversations/{id}/messages``              → ďalšia otázka
-* ``POST  /messages/{id}/stop``                        → zastaviť odpoveď
-* ``WS    /conversations/{id}/ws?token``               → živý priebeh (kroky, stav)
+* ``GET   /status``                                   → whether Poradca can run (and why not)
+* ``GET   /projects/{slug}/conversations``            → conversations of a project (mine; admin all)
+* ``POST  /projects/{slug}/conversations``            → new conversation with a first question
+* ``GET   /conversations/{id}``                       → conversation with messages
+* ``PATCH /conversations/{id}``                       → what we are talking about (version / whole project)
+* ``PUT   /conversations/{id}/title``                 → rename
+* ``DELETE /conversations/{id}``                      → delete (text gone, cost stays in Costs)
+* ``POST  /conversations/{id}/messages``              → next question
+* ``POST  /messages/{id}/stop``                        → stop the answer
+* ``WS    /conversations/{id}/ws?token``               → live progress (steps, state)
 
-Prístup: k projektu jeho vlastník alebo účet admin (ako všade v kokpite); k rozhovoru jeho autor alebo
-admin. Iný človek dostane 404 — o cudzom rozhovore sa nemá dozvedieť ani to, že existuje. Vymazaný
-rozhovor je 404 pre každého; jeho riadok ostal len kvôli Nákladom.
+Access: to a project its owner or an admin account (as everywhere in the cockpit); to a conversation its author or
+admin. Anyone else gets 404 — a stranger's conversation must not even reveal that it exists. A deleted
+conversation is 404 for everyone; its row stayed only because of Costs.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _captured_backlog_number(db: Session, msg: PoradcaMessage) -> Optional[int]:
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     usage = msg.usage or {}
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
-    # ICCINT-168: tým istým cenníkom ako Náklady (tokeny všetkých druhov × cenník z Claude Code × kurz ECB).
+    # ICCINT-168: by the same price list as Costs (tokens of all kinds × Claude Code price list × ECB rate).
     cost = metrics.usage_cost(db, usage, msg.created_at) if msg.author == AUTHOR_PORADCA and usage else None
     return PoradcaMessageRead(
         id=msg.id,
@@ -202,7 +202,7 @@ def poradca_status(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 def _instruction_target(state: Optional[PipelineState]) -> tuple[bool, Optional[str]]:
-    """Či pole Riadiaceho centra tejto verzie prijme pokyn — tie isté pravidlá, aké platia pre pole samo."""
+    """Whether the Control Centre field of this version accepts an instruction — same rules as for the field itself."""
     if state is None:
         return False, "Stavba tejto verzie ešte nezačala — pokyn nemá komu ísť. Začni stavbu v Riadiacom centre."
     if state.current_stage == "done":
@@ -216,7 +216,7 @@ def _instruction_target(state: Optional[PipelineState]) -> tuple[bool, Optional[
 def project_context(
     slug: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ) -> PoradcaProjectContext:
-    """Projekt a jeho verzie s fázou a stavom stavby — pre voľbu „o čom sa rozprávame"."""
+    """A project and its versions with the phase and build state — for the „what are we talking about" choice."""
     project = authz.assert_project_slug_access(db, current_user, slug)
     rows = db.execute(
         select(Version, PipelineState)
@@ -246,7 +246,7 @@ def project_context(
 def list_conversations(
     slug: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ) -> list[PoradcaConversationRead]:
-    """Moje rozhovory k projektu, najnovší prvý. Admin vidí rozhovory všetkých."""
+    """My conversations of a project, newest first. Admin sees everyone's conversations."""
     project = authz.assert_project_slug_access(db, current_user, slug)
     query = select(PoradcaConversation).where(
         PoradcaConversation.project_id == project.id, PoradcaConversation.deleted_at.is_(None)
@@ -305,7 +305,7 @@ def rename_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PoradcaConversationRead:
-    """Premenovať rozhovor. Poradie v zozname sa nemení — určuje ho posledná otázka."""
+    """Rename a conversation. The order in the list does not change — it is determined by the last question."""
     conversation, _project = _conversation_for(db, current_user, conversation_id)
     _edit(db, conversation, title=payload.title)
     return _conversation_read(db, conversation)
@@ -315,9 +315,9 @@ def rename_conversation(
 async def delete_conversation(
     conversation_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ) -> Response:
-    """Vymazať rozhovor: otázky, odpovede, kroky aj záznam na disku sú preč natrvalo; cena ostáva v Nákladoch.
+    """Delete a conversation: questions, answers, steps and the log on disk are gone for good; the cost stays in Costs.
 
-    Kým Poradca odpovedá, 409 — najprv treba odpoveď zastaviť.
+    While Poradca is answering, 409 — the answer must be stopped first.
     """
     conversation, _project = _conversation_for(db, current_user, conversation_id)
     try:
@@ -405,9 +405,9 @@ def save_request_to_backlog(
 
 @router.websocket("/conversations/{conversation_id}/ws")
 async def conversation_ws(websocket: WebSocket, conversation_id: uuid.UUID, token: str = Query(...)) -> None:
-    """Živý priebeh rozhovoru: ``step`` (nástroj a cieľ), ``queued``, ``finished``. Obsah nikdy.
+    """Live progress of a conversation: ``step`` (tool and target), ``queued``, ``finished``. Never the content.
 
-    Odmietnutie ako pri stavbe: zlý token pred ``accept()``, cudzí rozhovor po ňom s kódom 4003/4004.
+    Rejection as in the build: bad token before ``accept()``, a stranger's conversation after it with code 4003/4004.
     """
     db = SessionLocal()
     try:

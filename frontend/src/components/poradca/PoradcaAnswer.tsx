@@ -1,7 +1,7 @@
-// Jedna odpoveď Poradcu (ICCINT-167): priebeh, text, trvanie a cena, a dve tlačidlá, keď treba zmenu.
+// One Poradca answer (ICCINT-167): progress, text, duration and cost, and two buttons when a change is needed.
 //
-// Tlačidlá sa ukážu len vtedy, keď odpoveď nesie príslušný blok (charta Poradcu, časť 4) — a „Vložiť do
-// Riadiaceho centra" je zašednuté s dôvodom, keď pole stavby pokyn neprijme. Nič sa neodošle samo:
+// The buttons appear only when the answer carries the relevant block (Poradca charter, part 4) — and „Vložiť do
+// Riadiaceho centra" is grey with a reason when the build field rejects an instruction. Nothing is sent by itself:
 // pokyn odošle človek v Riadiacom centre; požiadavka ide len do Zásobníka — verzia z nej nevzniká, o verziách
 // rozhoduje Director (DEV-29).
 
@@ -21,7 +21,7 @@ import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
 interface Props {
   message: PoradcaMessage;
-  /** Verzia, o ktorej sa rozhovor práve rozpráva — `null` = celý projekt. */
+  /** The version the conversation is currently about — `null` = the whole project. */
   scopeVersion: PoradcaVersionInfo | null;
 }
 

@@ -1,17 +1,17 @@
-"""Beh jednej otázky Poradcu (ICCINT-167, návrh §3 a §4.1).
+"""Run of a single Poradca question (ICCINT-167, design §3 and §4.1).
 
-Otázka sa uloží hneď; odpoveď vzniká ako ``running`` a dopĺňa sa na pozadí:
+The question is saved immediately; the answer is created as ``running`` and filled in in the background:
 
-  1. čaká na voľné miesto — naraz beží najviac ``poradca_max_concurrent`` otázok v celom kokpite (všetky
-     čerpajú z jedného predplatného s limitom ako stavby); kým čaká, človek vidí prečo;
-  2. pripraví priečinky, prekrytia tajomstiev a server nástrojov na sockete tejto otázky;
-  3. spustí kontajner (:mod:`.sandbox`) na vlastnej oplotenej sieti a číta priebeh ``stream-json``;
-     z neho do databázy a prehliadača ide len KROK (nástroj a cieľ), nikdy obsah;
-  4. odpoveď prejde filtrom tajomstiev a uloží sa so spotrebou a trvaním.
+  1. waits for a free slot — at most ``poradca_max_concurrent`` questions run at once in the whole cockpit (all
+     draw on one subscription with a limit, like builds); while it waits, the person sees why;
+  2. prepares the directories, the secret overlays and the tools server on this question's socket;
+  3. starts the container (:mod:`.sandbox`) on its own fenced network and reads the ``stream-json`` progress;
+     from it only the STEP (tool and target) goes to the database and the browser, never the content;
+  4. the answer passes the secrets filter and is saved with its usage and duration.
 
-Zastavenie zabije klienta ``docker run`` aj kontajner. Strop jednej otázky je
-``settings.poradca_question_timeout``. Zlyhanie sa vždy zapíše vetou pre človeka — otázka nikdy neostane
-visieť v ``running``: pri štarte backendu :func:`fail_orphans` uzavrie tie, ktoré prerušil reštart.
+Stopping kills the ``docker run`` client and the container. The limit for a single question is
+``settings.poradca_question_timeout``. A failure is always recorded as a sentence for the human — a question never
+stays hanging in ``running``: at backend start :func:`fail_orphans` closes those interrupted by a restart.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ from backend.services.poradca.secrets_filter import SecretFilter
 
 logger = logging.getLogger(__name__)
 
-#: Rola v ``user_agent_settings`` — model a úsilie Poradcu si nastaví každý sám (Nastavenia → Agenti).
+#: Role in ``user_agent_settings`` — everyone sets Poradca's model and effort for themselves (Nastavenia → Agenti).
 PORADCA_ROLE = "poradca"
 DEFAULT_MODEL = "opus"
 DEFAULT_EFFORT = "high"
-#: Kľúč v ``system_settings``: koľko otázok smie bežať naraz v celom kokpite.
+#: Key in ``system_settings``: how many questions may run at once in the whole cockpit.
 MAX_CONCURRENT_KEY = "poradca_max_concurrent"
 
 _CHARTER = Path(__file__).resolve().parents[3] / "templates" / "poradca-charter.md"
@@ -72,22 +72,22 @@ _STREAM_LINE_LIMIT = 16 * 1024 * 1024
 
 
 class PoradcaBusy(Exception):
-    """V rozhovore už jedna otázka beží — ďalšia počká, kým dobehne alebo ju človek zastaví."""
+    """A question is already running in this conversation — the next one waits until it finishes or is stopped."""
 
 
 class ConversationGone(LookupError):
-    """Rozhovor bol medzitým vymazaný — otázka doň už nepatrí."""
+    """The conversation was deleted in the meantime — the question no longer belongs in it."""
 
 
-#: Názov vymazaného rozhovoru. Pôvodný názov je prvá otázka, takže ide preč s textom.
+#: Title of a deleted conversation. The original title is the first question, so it goes away with the text.
 DELETED_TITLE = "Vymazaný rozhovor"
 
 
-# ── priebeh pre prehliadač ────────────────────────────────────────────────────
+# ── progress for the browser ──────────────────────────────────────────────────
 
 
 class _Hub:
-    """Odberatelia priebehu po rozhovoroch. Udalosť je malý slovník; obsah nástrojov v nej nikdy nie je."""
+    """Subscribers to the progress, per conversation. An event is a small dict; tool content is never in it."""
 
     def __init__(self) -> None:
         self._queues: dict[UUID, set[asyncio.Queue]] = defaultdict(set)
@@ -107,17 +107,17 @@ class _Hub:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                pass  # pomalý odberateľ nesmie zdržať otázku; po obnovení si stav prečíta z API
+                pass  # a slow subscriber must not delay the question; after a refresh it reads the state from the API
 
 
 hub = _Hub()
 
 
-# ── strop súbežnosti ──────────────────────────────────────────────────────────
+# ── concurrency limit ─────────────────────────────────────────────────────────
 
 
 class _Slots:
-    """Počítadlo bežiacich otázok so stropom čítaným pri každom vstupe (zmena v Nastaveniach platí hneď)."""
+    """Counter of running questions with a limit read on every entry (a change in Nastavenia applies immediately)."""
 
     def __init__(self) -> None:
         self._active = 0
@@ -156,12 +156,12 @@ class _Running:
     stop_requested: bool = False
     task: Optional[asyncio.Task] = None
     steps: list[dict] = field(default_factory=list)
-    #: Filter tajomstiev tejto otázky — každý krok aj log prejde ním (nález previerky 05.10.2026: kroky
-    #: vstavaných nástrojov a chybový výstup Claude išli predtým nefiltrované).
+    #: Secrets filter of this question — every step and log passes through it (finding of the 05.10.2026 review: steps
+    #: of built-in tools and Claude's error output previously went out unfiltered).
     secret_filter: SecretFilter = field(default_factory=SecretFilter)
 
 
-#: Bežiace odpovede podľa id správy — pre zastavenie.
+#: Running answers by message id — for stopping.
 _running: dict[UUID, _Running] = {}
 
 
@@ -169,7 +169,7 @@ def max_concurrent(db: Session) -> int:
     return system_setting.get_int(db, MAX_CONCURRENT_KEY)
 
 
-# ── verejné vstupy ────────────────────────────────────────────────────────────
+# ── public entry points ───────────────────────────────────────────────────────
 
 
 def ask(
@@ -179,14 +179,14 @@ def ask(
     user: User,
     images: Sequence[attachments.Incoming] = (),
 ) -> tuple[PoradcaMessage, PoradcaMessage]:
-    """Uloží otázku a začne odpoveď na pozadí. Volajúci už overil prístup k rozhovoru.
+    """Saves the question and starts the answer in the background. The caller has verified access to the conversation.
 
     DEV-52: ``images`` sú snímky, ktoré Manažér priložil (už prijaté :func:`attachments.accept`). Uložia sa k
     rozhovoru pred zápisom otázky; keď sa otázka nezapíše, zmažú sa — nikdy neostane snímka bez otázky.
 
     Raises:
-        PoradcaBusy: v tomto rozhovore už odpoveď beží.
-        ConversationGone: rozhovor medzitým niekto vymazal.
+        PoradcaBusy: an answer is already running in this conversation.
+        ConversationGone: someone deleted the conversation in the meantime.
     """
     _lock_live(db, conversation.id)
     running = db.execute(
@@ -235,19 +235,19 @@ def ask(
 
 
 async def stop(message_id: UUID) -> bool:
-    """Zastaví bežiacu odpoveď. ``False``, keď už nebeží (dobehla, alebo ju prerušil reštart)."""
+    """Stops a running answer. ``False`` when it is no longer running (it finished, or a restart interrupted it)."""
     entry = _running.get(message_id)
     if entry is None:
         return False
     entry.stop_requested = True
     await _kill(entry)
     if entry.task is not None and entry.container is None:
-        entry.task.cancel()  # ešte čaká v rade — kontajner neexistuje
+        entry.task.cancel()  # still waiting in the queue — the container does not exist
     return True
 
 
 def fail_orphans(db: Session) -> int:
-    """Pri štarte backendu: odpovede ``running`` z minulého behu už nikto nedokončí — uzavrú sa s dôvodom."""
+    """At backend start: nobody will finish ``running`` answers from the last run — they are closed with a reason."""
     result = db.execute(
         update(PoradcaMessage)
         .where(PoradcaMessage.status == RUNNING)
@@ -298,7 +298,7 @@ def _model_and_effort(db: Session, user_id: UUID) -> tuple[str, str]:
 
 
 def scope_line(db: Session, project: Project, version_id: Optional[UUID]) -> str:
-    """O čom sa rozprávame — riadok kontextu, ktorý dostane Poradca pri každej otázke."""
+    """What we are talking about — the context line Poradca receives with every question."""
     if version_id is None:
         return f"Projekt {project.name} ({project.slug}) — otázka sa týka celého projektu."
     version = db.get(Version, version_id)
@@ -389,8 +389,8 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
 
         token = build_sandbox.turn_token()
         _sessions, run_path = await asyncio.to_thread(sandbox.prepare, conversation_id, token)
-        # ICCINT-168: čo odpoveď stála, sa číta zo záznamu sedenia — súčet pred odpoveďou a po nej (aj keď ju
-        # niekto zastaví alebo vyprší čas). Výsledok behu nesie súčet za celý rozhovor, nie za odpoveď.
+        # ICCINT-168: what an answer cost is read from the session record — the sum before the answer and after it (also
+        # someone stops it or it times out). The run result carries the sum for the whole conversation, not the answer.
         transcript = usage_ledger.build_transcript(sandbox.session_dir(conversation_id), session_id)
         before = await asyncio.to_thread(usage_ledger.last_cost_state, transcript)
         launched_at = datetime.now(timezone.utc)
@@ -444,7 +444,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
         status, error = FAILED, f"Poradcu sa nepodarilo spustiť: {exc}"
     except _QuestionFailed as exc:
         status, error = (STOPPED, None) if entry.stop_requested else (FAILED, str(exc))
-    except Exception:  # noqa: BLE001 — otázka nesmie ostať visieť
+    except Exception:  # noqa: BLE001 — the question must not stay hanging
         logger.exception("poradca: question %s failed", message_id)
         status, error = FAILED, "Poradca zlyhal na strane kokpitu. Podrobnosti sú v logu backendu."
     finally:
@@ -483,7 +483,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
         _running.pop(message_id, None)
         hub.publish(conversation_id, {"type": "finished", "message_id": str(message_id), "status": status})
         if usage and usage.get("parts"):
-            # ICCINT-168: odpoveď mohla byť posledná, ktorá modelu chýbala do cenníka — nech ho má hneď.
+            # ICCINT-168: the answer may have been the last one missing from the model's price list — add it right away.
             await asyncio.to_thread(_refresh_prices)
 
 
@@ -493,12 +493,12 @@ def _refresh_prices() -> None:
     try:
         with SessionLocal() as db:
             model_pricing.refresh(db)
-    except Exception:  # noqa: BLE001 — cenník sa doplní pri ďalšej príležitosti, odpoveď je zapísaná
+    except Exception:  # noqa: BLE001 — the price list is completed next time, the answer is already written
         logger.warning("poradca: cenník sa po odpovedi nepodarilo obnoviť", exc_info=True)
 
 
 def _usage_payload(meta: UsageMetadata) -> dict:
-    """Spotreba odpovede v tvare, aký nesie aj ťah stavby — Náklady ju ocenia tou istou cestou."""
+    """Usage of an answer in the shape a build turn carries too — Náklady price it by the same path."""
     payload: dict = {"input_tokens": meta.input_tokens, "output_tokens": meta.output_tokens, "model": meta.model}
     if meta.parts:
         payload["parts"] = [p.to_payload() for p in meta.parts]
@@ -506,11 +506,11 @@ def _usage_payload(meta: UsageMetadata) -> dict:
 
 
 class _QuestionFailed(Exception):
-    """Claude Code skončil bez odpovede — veta pre človeka."""
+    """Claude Code finished without an answer — a sentence for the human."""
 
 
 async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_dir: str) -> tuple[str, Optional[dict]]:
-    """Spustí kontajner a číta ``stream-json``. Vráti ``(text odpovede, spotreba)``."""
+    """Starts the container and reads ``stream-json``. Returns ``(answer text, usage)``."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -543,7 +543,7 @@ async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_di
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     name = str(block.get("name") or "")
                     if name.startswith("mcp__"):
-                        continue  # krok nástroja Poradcu hlási server nástrojov (z toho, čo naozaj vykonal)
+                        continue  # a Poradca tool step is reported by the tools server (from what it actually executed)
                     target = _builtin_target(name, block.get("input") or {}, project_dir)
                     await _record_step(entry, message_id, name, target)
         elif evt.get("type") == "result":
@@ -585,15 +585,15 @@ def new_conversation(
 
 
 def edit_conversation(db: Session, conversation: PoradcaConversation, **values: Any) -> None:
-    """Zmení názov alebo „o čom sa rozprávame" — rozhovor sa pritom v zozname nepohne.
+    """Changes the title or „o čom sa rozprávame" — the conversation does not move in the list meanwhile.
 
-    Poradie rozhovorov určuje posledná otázka (``updated_at`` nastaví :func:`ask`), nie úprava. Preto
-    ``updated_at`` ostáva výslovne taký, aký bol — inak by ho ``onupdate`` posunul na teraz.
+    The order of conversations is set by the last question (``updated_at`` is set by :func:`ask`), not by an edit. So
+    ``updated_at`` explicitly stays as it was — otherwise ``onupdate`` would move it to now.
 
     Raises:
-        ConversationGone: rozhovor medzitým niekto vymazal. Podmienka ``deleted_at IS NULL`` je v samotnom
-            zápise: úprava, ktorá čakala na zámok vymazania, sa po ňom znova vyhodnotí a nič nezapíše —
-            nový názov by inak vrátil text do vymazaného rozhovoru (nález previerky 05.10.2026).
+        ConversationGone: the conversation was deleted in the meantime. The ``deleted_at IS NULL`` condition is in the
+            write itself: an edit that waited for the deletion lock is re-evaluated after it and writes nothing —
+            the new title would otherwise put text back into a deleted conversation (finding of the 05.10.2026 review).
     """
     result = db.execute(
         update(PoradcaConversation)
@@ -608,20 +608,20 @@ def edit_conversation(db: Session, conversation: PoradcaConversation, **values: 
 
 
 async def delete_conversation(db: Session, conversation: PoradcaConversation) -> None:
-    """Vymaže, čo sa v rozhovore povedalo; spotrebu nechá Nákladom.
+    """Deletes what was said in the conversation; leaves the usage to Náklady.
 
-    Zahodí otázky, odpovede, kroky, chyby, názov aj celý záznam sedenia Claude Code na disku — ten nesie
-    aj to, čo nástroje Poradcovi vrátili. Zo správ ostane len spotreba a čas: Náklady projektu ich sčítajú
-    (``metrics._poradca_rows``) a bez nich by ukázali menej, než sa naozaj minulo. Rozhovor dostane
-    ``deleted_at`` a rozhranie ho odvtedy nevidí.
+    Discards the questions, answers, steps, errors, the title and the whole Claude Code session record on disk — it also
+    carries what the tools returned to Poradca. Of the messages only usage and time remain: the project's Náklady sum
+    (``metrics._poradca_rows``) and without them they would show less than was actually spent. The conversation gets
+    ``deleted_at`` and the interface no longer sees it from then on.
 
-    Poradie: pod zámkom sa záznam presunie do koša (jeden nedeliteľný krok) a zmení sa databáza; zlyhá
-    databáza → záznam sa vráti. Súbory z koša sa mažú až potom, mimo zámku a mimo slučky udalostí.
+    Order: under the lock the record is moved to the trash (one indivisible step) and the database is changed; if the
+    database fails → the record is returned. Trash files are deleted only afterwards, outside the lock and event loop.
 
     Raises:
-        PoradcaBusy: odpoveď ešte beží — kontajner by písal do záznamu, ktorý mažeme; najprv ju zastaviť.
-        ConversationGone: už je vymazaný.
-        OSError: záznam na disku sa nedal presunúť — databáza aj záznam ostali, ako boli.
+        PoradcaBusy: an answer is still running — the container would write into a record being deleted; stop it first.
+        ConversationGone: already deleted.
+        OSError: the record on disk could not be moved — the database and the record stayed as they were.
     """
     trashed = _wipe(db, conversation)
     hub.publish(conversation.id, {"type": "deleted"})
@@ -673,10 +673,10 @@ def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
 
 
 def _lock_live(db: Session, conversation_id: UUID) -> None:
-    """Zamkne riadok rozhovoru do konca transakcie; vymazaný alebo neexistujúci → :class:`ConversationGone`.
+    """Locks the conversation row until the end of the transaction; deleted or non-existent → :class:`ConversationGone`.
 
-    Otázka aj vymazanie idú cez tento zámok, takže sa neprekrížia: otázka do práve vymazaného rozhovoru
-    neprejde a vymazanie nezačne, kým sa otázka ukladá (potom ju už vidí ako bežiacu).
+    Both asking and deleting go through this lock, so they do not cross: a question into a conversation being deleted
+    does not get through and the deletion does not start while a question is being saved (it then sees it as running).
     """
     row = db.execute(
         select(PoradcaConversation.deleted_at).where(PoradcaConversation.id == conversation_id).with_for_update()

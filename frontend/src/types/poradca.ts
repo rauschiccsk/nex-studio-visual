@@ -1,5 +1,5 @@
-// Poradca (ICCINT-167) — typy aliasované z GENEROVANÉHO kontraktu, nie prepísané ručne: zmena na backende
-// sa sem dostane cez `npm run codegen` a type-check ju chytí.
+// Poradca (ICCINT-167) — conversations with a read-and-advise-only agent. Backend: `backend/api/routes/poradca.py`.
+// gets here via `npm run codegen` and the type-check catches it.
 
 import type { components } from "@/services/api/pipeline.generated";
 
@@ -14,7 +14,7 @@ export type PoradcaProjectContext = S["PoradcaProjectContext"];
 export type PoradcaVersionInfo = S["PoradcaVersionInfo"];
 export type PoradcaBacklogSaved = S["PoradcaBacklogSaved"];
 
-/** Udalosť živého priebehu — nástroj a cieľ, nikdy obsah. */
+/** Live progress event — tool and target, never content. */
 export type PoradcaEvent =
   | { type: "step"; message_id: string; tool: string; target: string }
   | { type: "queued"; message_id: string; limit: number }

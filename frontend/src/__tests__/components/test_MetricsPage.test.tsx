@@ -320,7 +320,7 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     expect(labels[6]).toBe("Systém (neporovnané)");
   });
 
-  // ── ICCINT-167: Poradca má vlastný riadok, medzi ručne zadaným a systémom ─────────────────────────────
+  // ── ICCINT-167: Poradca has its own row, between the manually entered one and the system ──────────────
 
   it("names the Poradca row and keeps it agent-only", async () => {
     const withPoradca = project(
@@ -382,7 +382,7 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
     expect(screen.getAllByText(/claude-opus-5-5 · overené na 191 ťahoch/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/1 € = 1,1204 \$/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/5\. 10\. 2026 · Európska centrálna banka/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("17,8508 €").length).toBeGreaterThan(0); // výstup v eurách — presne, nezaokrúhlený
+    expect(screen.getAllByText("17,8508 €").length).toBeGreaterThan(0); // output in euros — exact, not rounded
     expect(screen.getAllByText(/vyhľadávanie na webe: 0,01 \$ \/ 0,0089 € za jedno/).length).toBeGreaterThan(0);
   });
 

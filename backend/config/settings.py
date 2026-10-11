@@ -66,11 +66,11 @@ class Settings(BaseSettings):
     # something else. The on/off switch is the ``BUILD_SANDBOX`` env (default on), read at turn time.
     build_sandbox_image: str = ""
 
-    # Poradca (ICCINT-167, docs/specs/poradca.md §4.1): priečinok so záznamami rozhovorov, socketmi otázok
-    # a prázdnym súborom na prekrytie tajomstiev. Backend ho musí mať pripojený na TEJ ISTEJ ceste ako
-    # hostiteľ — zdroj ``--mount`` kontajnera otázky rozlúšti docker na hostiteľovi.
+    # Poradca (ICCINT-167, docs/specs/poradca.md §4.1): the folder with conversation logs, question sockets
+    # and an empty file for overlaying secrets. The backend must have it mounted at THE SAME path as the
+    # host — the ``--mount`` source of the question container is resolved by docker on the host.
     poradca_data_dir: str = "/opt/data/nex-studio-visual/poradca"
-    # Strop jednej otázky Poradcu v sekundách (návrh §3: 15 minút).
+    # Cap of a single Poradca question in seconds (design §3: 15 minutes).
     poradca_question_timeout: int = 900
     # DEV-58 — the project's release check (release_smoke_test.sh) in Verifikácia: its temporary files go into a
     # folder the Docker daemon sees at the SAME path (a script mounts them into containers) — mounted into the

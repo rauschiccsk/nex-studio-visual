@@ -1,5 +1,5 @@
 /**
- * Poradca (ICCINT-167): obrazovka rozhovorov. Rozhranie je atrapa; WebSocket je nahradený tichým stubom.
+ * Poradca (ICCINT-167): conversations screen. The API is a mock; WebSocket is replaced by a silent stub.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -200,7 +200,7 @@ describe("PoradcaPage", () => {
     expect(screen.getByPlaceholderText(/Opýtaj sa Poradcu/)).toBeDisabled();
   });
 
-  // Premenovanie a vymazanie (Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie rozhovoru").
+  // Rename and delete (Director 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie rozhovoru").
 
   it("renames in place: Enter saves one clean line and the list shows it", async () => {
     api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", []));
@@ -212,7 +212,7 @@ describe("PoradcaPage", () => {
     expect(input.value).toBe("Prečo agent stojí?");
     fireEvent.change(input, { target: { value: "  Nový \n  názov " } });
     fireEvent.submit(input.closest("form") as HTMLFormElement);
-    // Kým sa ukladá, pole zašedne a prehliadač z neho odíde — to je druhá cesta k uloženiu; uloží sa raz.
+    // While saving, the field is greyed out and the browser leaves it — that is a second path to saving; it saves once.
     fireEvent.blur(input);
     finish({ ...conversation("v13", []), title: "Nový názov" });
     expect(await screen.findByText("Nový názov")).toBeInTheDocument();
@@ -244,7 +244,7 @@ describe("PoradcaPage", () => {
     await waitFor(() => expect(api.renamePoradcaConversationApi).toHaveBeenCalledWith("c1", "Rozpísaný názov"));
     expect(await screen.findByText(/Premenovanie zlyhalo/)).toBeInTheDocument();
     expect((screen.getByLabelText("Názov rozhovoru") as HTMLInputElement).value).toBe("Rozpísaný názov");
-    // Druhý pokus prejde.
+    // The second attempt succeeds.
     api.renamePoradcaConversationApi.mockResolvedValue({ ...conversation("v13", []), title: "Rozpísaný názov" });
     fireEvent.submit(screen.getByLabelText("Názov rozhovoru").closest("form") as HTMLFormElement);
     await waitFor(() => expect(screen.queryByLabelText("Názov rozhovoru")).not.toBeInTheDocument());
@@ -262,7 +262,7 @@ describe("PoradcaPage", () => {
     api.listPoradcaConversationsApi.mockResolvedValue([]);
     fireEvent.click(screen.getByRole("button", { name: "Vymazať" }));
     await waitFor(() => expect(api.deletePoradcaConversationApi).toHaveBeenCalledWith("c1"));
-    // Bol otvorený → stránka sa vráti na nový rozhovor; v zozname už nie je.
+    // It was open → the page returns to a new conversation; it is no longer in the list.
     expect(await screen.findByText(/Opýtaj sa na čokoľvek k projektu/)).toBeInTheDocument();
     expect(screen.queryByText("Prečo agent stojí?")).not.toBeInTheDocument();
   });
@@ -285,12 +285,12 @@ describe("PoradcaPage", () => {
       "title",
       "Kým Poradca odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.",
     );
-    // Premenovať sa dá aj počas odpovede.
+    // Renaming works also during an answer.
     expect(screen.getByRole("button", { name: "Premenovať rozhovor" })).toBeEnabled();
   });
 
   it("an answer that finished while I was elsewhere frees the bin when I open the conversation", async () => {
-    // Zoznam ešte hovorí „beží" (odpoveď dobehla, kým som bol v inom rozhovore); otvorený rozhovor vie lepšie.
+    // The list still says „beží" (the answer finished while I was in another conversation); the open one knows better.
     api.listPoradcaConversationsApi.mockResolvedValue([{ ...conversation("v13", []), running: true }]);
     api.getPoradcaConversationApi.mockResolvedValue(conversation("v13", [ANSWER_WITH_INSTRUCTION]));
     renderPage();
@@ -322,8 +322,8 @@ describe("PoradcaPage", () => {
     );
     renderPage();
     await screen.findByText("Rozoberám kroky agenta stavby — posledných 80 krokov");
-    // Kôš zašedne až po zosúladení zoznamu s otvoreným rozhovorom (efekt po vykreslení) — bez čakania
-    // skúška padala v polovici behov (CI 05.10.2026).
+    // The trash greys out only after the list is reconciled with the open conversation (effect after render) — without
+    // waiting the test failed in half of the runs (CI 05.10.2026).
     await waitFor(() => expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled());
   });
 

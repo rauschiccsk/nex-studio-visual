@@ -1,31 +1,31 @@
-"""Kontajner jednej otázky Poradcu — zoznam pripojení JE záruka (``docs/specs/poradca.md`` §4.1).
+"""One-question Poradca container — the list of mounts IS the guarantee (``docs/specs/poradca.md`` §4.1).
 
-Vzor je izolovaná stavba (:mod:`backend.services.build_sandbox`), nie Konzultácia: dočasný domov,
-neprivilegovaný používateľ bez schopností, oplotená sieť, prihlásenie len premennou prostredia. Navyše oproti
-stavbe, lebo Poradca len číta:
+The model is the isolated build (:mod:`backend.services.build_sandbox`), not the Konzultácia: a temporary home,
+an unprivileged user without capabilities, a fenced network, login only via an environment variable. In addition to
+the build, because Poradca only reads:
 
-  * **Claude Code v obmedzenom režime** (``--restricted --tools Read,Grep,Glob``): nástroje, ktoré spúšťajú
-    príkazy alebo kód, ``WebFetch`` aj ``WebSearch`` nie sú k dispozícii; nastavenia používateľa a projektu
-    sa nenačítajú; súborové nástroje nesiahnu mimo pracovného priečinka — ani cez symbolický odkaz.
-    Zmerané 05.10.2026 s CLI 2.1.289: v zozname nástrojov boli len ``Glob``, ``Grep``, ``Read`` a nástroje
-    Poradcu; čítanie ``/etc/hostname`` priamo aj cez odkaz v projekte odmietlo;
-  * **projekt len na čítanie** — zápis odmietne jadro systému, nie sľub v pokyne;
-  * **súbory s tajomstvami prekryté prázdnym súborom** (``.env*``, kľúče, certifikáty, …) a rovnako každý
-    súbor s viacerými pevnými odkazmi — pevný odkaz je druhé meno súboru, ktorý môže ležať kdekoľvek na tom
-    istom disku, a obmedzený režim ho od obyčajného súboru nerozozná;
-  * ``.git`` prekrytý prázdnym ``tmpfs`` — históriu podáva nástroj ``git_historia`` z backendu;
-  * **žiadna Znalostná báza** — tú podáva nástroj s právami človeka, ktorý sa pýta; pripojený priečinok
-    by ich obišiel;
-  * **záznam rozhovoru** v priečinku TOHTO rozhovoru, pripojený tam, kam ho Claude Code ukladá podľa
+  * **Claude Code in restricted mode** (``--restricted --tools Read,Grep,Glob``): tools that run
+    commands or code, ``WebFetch`` and ``WebSearch`` are not available; user and project settings
+    are not loaded; file tools do not reach outside the working directory — not even via a symbolic link.
+    Measured on 05.10.2026 with CLI 2.1.289: the tool list held only ``Glob``, ``Grep``, ``Read`` and Poradca's tools;
+    reading ``/etc/hostname`` was refused both directly and via a link in the project;
+  * **project read-only** — writes are refused by the kernel, not by a promise in the prompt;
+  * **secret files overlaid with an empty file** (``.env*``, keys, certificates, …) and likewise every
+    file with multiple hard links — a hard link is a second name for a file that may lie anywhere on the same
+    disk, and restricted mode cannot tell it from a regular file;
+  * ``.git`` overlaid with an empty ``tmpfs`` — history is served by the ``git_historia`` tool from the backend;
+  * **no Knowledge Base** — it is served by a tool with the rights of the person asking; a mounted directory
+    would bypass them;
+  * **conversation transcript** in the directory of THIS conversation, mounted where Claude Code stores it according to
     pracovného priečinka — záznamy agenta stavby sa nepripájajú vôbec (nález B3);
   * **snímky obrazovky, ktoré Manažér priložil k otázkam TOHTO rozhovoru** (DEV-52) — len na čítanie, mimo
     projektu, a obmedzenému režimu povolené prepínačom ``--add-dir`` (bez neho Read mimo projektu odmietne;
     zmerané 10.10.2026 s CLI 2.1.294 oboma smermi). Iný rozhovor ani projekt sa k nim nedostane.
 
-Nástroje „zozadu" podáva backend cez unixový socket platný pre jednu otázku (:mod:`.mcp_server`);
-v kontajneri ich sprostredkuje :mod:`.shim`. Sieť ostáva oplotená ako pri stavbe.
+Tools "from behind" are served by the backend through a Unix socket valid for a single question (:mod:`.mcp_server`);
+in the container they are relayed by :mod:`.shim`. The network stays fenced, as with the build.
 
-Keď sa kontajner nedá spustiť, otázka skončí chybou s dôvodom — **nikdy** neustúpi na beh mimo kontajnera.
+If the container cannot start, the question fails with a reason — **never** falls back to running outside it.
 """
 
 from __future__ import annotations
@@ -49,17 +49,17 @@ logger = logging.getLogger(__name__)
 
 _LABEL = "poradca sandbox"
 
-#: Vstavané nástroje Poradcu — len čítanie. Všetko ostatné z neho robí obmedzený režim nedostupným.
+#: Poradca's built-in tools — read only. Anything else makes restricted mode unavailable for it.
 BUILTIN_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob")
-#: Meno servera MCP; nástroje sa v Claude Code volajú ``mcp__poradca__<nástroj>``.
+#: MCP server name; tools are called in Claude Code as ``mcp__poradca__<tool>``.
 MCP_SERVER_NAME = "poradca"
 
-#: Kde kontajner vidí priečinok so socketom tejto otázky.
+#: Where the container sees the directory with the socket of this question.
 CONTAINER_RUN_DIR = "/run/poradca"
 SOCKET_NAME = "mcp.sock"
 #: DEV-52 — kde kontajner vidí priložené snímky svojho rozhovoru (len na čítanie, mimo projektu).
 CONTAINER_ATTACHMENTS_DIR = "/run/poradca-prilohy"
-#: Prostredník stdio ↔ socket, v obraze backendu (iba štandardná knižnica Pythonu).
+#: stdio ↔ socket intermediary, in the backend image (Python standard library only).
 SHIM_PATH = "/app/backend/services/poradca/shim.py"
 
 _HOME = "/home/andros"
@@ -67,43 +67,43 @@ _CLAUDE_DIR = f"{_HOME}/.claude"
 _CLAUDE_BIN_DIR = "/home/andros/.local"
 _USER = "1000:1000"
 
-#: Premenné prostredia podané MENOM (hodnota nejde do argv, teda ani do ``ps``). Žiadny token GitHubu,
-#: žiadna databáza — Poradca nič nezapisuje a „zozadu" mu podáva backend.
+#: Environment variables passed by NAME (the value does not go into argv, hence not into ``ps``). No GitHub token,
+#: no database — Poradca writes nothing and the backend serves it "from behind".
 _PASSTHROUGH_ENV: tuple[str, ...] = ("CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER", "LANG")
 
-#: Mená súborov, ktoré nesú tajomstvá. Prekryjú sa prázdnym súborom, nech ležia v projekte kdekoľvek.
+#: Names of files that carry secrets. They are overlaid with an empty file wherever in the project they lie.
 _SECRET_FILE_RE = re.compile(
     r"^(?:\.env(?:\..+)?"
     r"|.+\.(?:pem|key|p12|pfx|jks|keystore|kdbx)"
     r"|id_(?:rsa|dsa|ecdsa|ed25519)(?:[^.]*|.*(?<!\.pub))"
     r"|\.netrc|\.pgpass|\.git-credentials|credentials\.json)$",
-    # ``.`` aj cez nový riadok: súbor ``.env.<nový riadok>…`` nesmie uniknúť prekrytiu len pre svoje meno.
+    # ``.`` also across a newline: a file ``.env.<newline>…`` must not escape the overlay just because of its name.
     re.S,
 )
 
-#: Znaky, ktoré v zápise ``--mount`` dockera začínajú nové pole alebo záznam (čiarka, úvodzovky) — a riadiace
-#: znaky. Súbor s takým menom by do pripojenia prekrytia vpašoval vlastný ``source=`` a docker by pod
-#: priečinok projektu pripojil ľubovoľnú cestu hostiteľa (nález nezávislej previerky 05.10.2026). Takú cestu
-#: preto Poradca nikdy neskladá — otázka zlyhá s menom súboru.
+#: Characters that start a new field or record in a docker ``--mount`` spec (comma, quotes) — and control
+#: characters. A file with such a name would smuggle its own ``source=`` into the overlay mount and docker would mount
+#: an arbitrary host path under the project directory (finding of the independent review, 05.10.2026). Poradca
+#: therefore never builds such a path — the question fails with the file name.
 _MOUNT_UNSAFE = re.compile(r'[,"\x00-\x1f\x7f]')
 
-#: Najdlhšia cesta unixového socketu, ktorú jadro Linuxu prijme (``sun_path`` má 108 bajtov vrátane nuly).
+#: The longest Unix socket path the Linux kernel accepts (``sun_path`` has 108 bytes including the null).
 MAX_SOCKET_PATH = 107
 
-#: Viac prekrytí než toto je nález, nie bežný projekt — otázka radšej zlyhá s dôvodom.
+#: More overlays than this is a finding, not an ordinary project — the question rather fails with a reason.
 MAX_OVERLAYS = 2000
 
-#: Strop pamäte a procesov kontajnera — otázka, ktorá len číta, nepotrebuje viac.
+#: Memory and process cap of the container — a question that only reads does not need more.
 _MEMORY = "2g"
 _PIDS = "512"
 
 
 class PoradcaUnavailable(RuntimeError):
-    """Kontajner Poradcu sa nedá spustiť — otázka zlyhá s dôvodom, nikdy sa nespustí bez neho."""
+    """The Poradca container cannot be started — the question fails with a reason, it never runs without it."""
 
 
 def data_dir() -> Path:
-    """Priečinok Poradcu na hostiteľovi — backend ho má pripojený na tej istej ceste (identita)."""
+    """Poradca directory on the host — the backend has it mounted at the same path (identity)."""
     return Path(settings.poradca_data_dir)
 
 
@@ -139,7 +139,7 @@ def move_to_trash(conversation_id: UUID) -> Optional[Path]:
     ``os.rename`` v rámci jedného disku (kôš leží vedľa ``sessions/`` a ``attachments/``) je nedeliteľný: každá
     časť je buď celá preč, alebo celá na mieste — a keď druhá časť nejde, prvá sa vráti, takže rozhovor nikdy
     neostane napoly. Vymazanie to robí pred zmenou databázy a pri jej zlyhaní všetko vráti
-    (:func:`restore_from_trash`); samotné mazanie súborov (:func:`discard`) príde až po nej, mimo zámku.
+    (:func:`restore_from_trash`); deleting the files themselves (:func:`discard`) comes only after, outside the lock.
     """
     present = [(name, where(conversation_id)) for name, where in _TRASHED if where(conversation_id).exists()]
     if not present:
@@ -168,15 +168,15 @@ def restore_from_trash(trashed: Path, conversation_id: UUID) -> None:
 
 
 def discard(trashed: Path) -> None:
-    """Zmaže záznam z koša. Čo nejde (napr. kontajner, ktorý prežil reštart, doň ešte píše), dozmaže
-    :func:`sweep_trash` pri ďalšom štarte — rozhovor je vymazaný tak či tak."""
+    """Deletes a record from the trash. What cannot be done (e.g. a container that survived a restart and still writes
+    to it) is finished by :func:`sweep_trash` at the next start — the conversation is deleted either way."""
     shutil.rmtree(trashed, ignore_errors=True)
     if trashed.exists():
         logger.warning("%s: %s sa nepodarilo celý zmazať — dozmaže ho štart backendu", _LABEL, trashed)
 
 
 def sweep_trash() -> int:
-    """Pri štarte backendu: dozmaže, čo v koši ostalo. Vráti, koľko záznamov zmizlo. Nikdy nevyhodí."""
+    """At backend start: removes what remained in the trash; returns how many records vanished. Never raises."""
     base = trash_dir()
     if not base.is_dir():
         return 0
@@ -196,7 +196,7 @@ def network_name(project_slug: str, token: str) -> str:
 
 
 def project_dirs(project_slug: str) -> tuple[str, str]:
-    """``(cesta v kontajneri, cesta na hostiteľovi)`` — slug overený, cesta neunikne z ``/opt/projects``."""
+    """``(path in the container, path on the host)`` — slug verified, the path cannot escape ``/opt/projects``."""
     try:
         sandbox_paths.validate_project_slug(project_slug, sandbox=_LABEL)
         from backend.services.claude_agent import PROJECTS_ROOT
@@ -211,16 +211,16 @@ def project_dirs(project_slug: str) -> tuple[str, str]:
 
 
 def overlay_paths(project_dir: str) -> list[str]:
-    """Cesty v projekte (relatívne), ktoré sa prekryjú prázdnym súborom.
+    """Paths in the project (relative) that are overlaid with an empty file.
 
     Súbor s menom tajomstva, každý obyčajný súbor s viac než jedným pevným odkazom a každý súbor v ``private/``
     (DEV-44 — čo Manažér priložil agentovi). Symbolické odkazy sa
-    neprekrývajú: obmedzený režim ich sám rozlúšti a čítanie mimo projektu odmietne (zmerané), kým prekrytie
-    odkazu by docker rozlúštil vnútri kontajnera a mohol by ho namieriť mimo projektu. ``.git`` sa
-    neprechádza — celý sa prekrýva prázdnym ``tmpfs``.
+    are not overlaid: restricted mode resolves them itself and refuses reading outside the project (measured), whereas
+    overlaying a link would be resolved by docker in the container and could point it outside. ``.git`` is
+    not traversed — it is overlaid entirely with an empty ``tmpfs``.
 
     Raises:
-        PoradcaUnavailable: viac prekrytí než :data:`MAX_OVERLAYS`.
+        PoradcaUnavailable: more overlays than :data:`MAX_OVERLAYS`.
     """
     found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_dir, followlinks=False):
@@ -254,13 +254,13 @@ def overlay_paths(project_dir: str) -> list[str]:
 
 
 def prepare(conversation_id: UUID, token: str) -> tuple[Path, Path]:
-    """Vytvorí priečinok záznamu rozhovoru a priečinok socketu otázky; vráti ich cesty.
+    """Creates the conversation transcript directory and the socket directory of the question; returns their paths.
 
-    Vlastníkom je používateľ kontajnera (1000), lebo Claude Code v ňom zapisuje záznam. Prázdny súbor na
-    prekrytia sa vytvorí raz, len na čítanie.
+    The owner is the container user (1000), because Claude Code writes the transcript in it. The empty file for
+    overlays is created once, read-only.
 
     Raises:
-        PoradcaUnavailable: priečinok Poradcu chýba alebo sa doň nedá zapisovať.
+        PoradcaUnavailable: the Poradca directory is missing or cannot be written to.
     """
     base = data_dir()
     socket_path = run_dir(token) / SOCKET_NAME
@@ -294,11 +294,11 @@ def prepare(conversation_id: UUID, token: str) -> tuple[Path, Path]:
 
 @dataclass(frozen=True)
 class ClaudeCall:
-    """Čo sa pýta a s akým modelom — všetko, čím sa líšia dve otázky."""
+    """What is asked and with which model — everything in which two questions differ."""
 
     prompt: str
     claude_session_id: UUID
-    #: Prvá otázka rozhovoru nesie chartu a zakladá sedenie; ďalšie ho obnovia (``--resume``).
+    #: A conversation's first question carries the charter and starts the session; later ones resume (``--resume``).
     charter_text: Optional[str]
     model: Optional[str]
     effort: Optional[str]
@@ -307,7 +307,7 @@ class ClaudeCall:
 
 
 def claude_argv(call: ClaudeCall) -> list[str]:
-    """Prepínače ``claude`` (bez mena programu — ten dodá ``--entrypoint``)."""
+    """``claude`` flags (without the program name — that is supplied by ``--entrypoint``)."""
     mcp = {
         "mcpServers": {
             MCP_SERVER_NAME: {
@@ -348,7 +348,7 @@ def claude_argv(call: ClaudeCall) -> list[str]:
 
 
 def _assert_mount_safe(*parts: str) -> None:
-    """Druhá poistka: nič, čo sa skladá do ``--mount``, nesmie niesť znak, ktorý v ňom začína nové pole."""
+    """Second safeguard: nothing that goes into ``--mount`` may carry a character that starts a new field in it."""
     for part in parts:
         if _MOUNT_UNSAFE.search(part):
             raise PoradcaUnavailable(f"{_LABEL}: cesta {part!r} sa nedá bezpečne pripojiť (čiarka/úvodzovky)")
@@ -363,13 +363,13 @@ def run_argv(
     call: ClaudeCall,
     overlays: list[str],
 ) -> list[str]:
-    """Celý ``docker run`` jednej otázky. Čo tu nie je, Poradca nevidí.
+    """The whole ``docker run`` of one question. What is not here, Poradca does not see.
 
-    PRÍTOMNÉ: dočasný domov, záznam TOHTO rozhovoru, projekt len na čítanie s prekrytiami, ``.git`` ako
+    PRESENT: temporary home, the transcript of THIS conversation, project read-only with overlays, ``.git`` as
     prázdny ``tmpfs``, binárka ``claude`` len na čítanie, priečinok socketu tejto otázky len na čítanie a — keď
     rozhovor nejaké má — priložené snímky TOHTO rozhovoru len na čítanie (DEV-52).
-    NEPRÍTOMNÉ (stráži skúška): ``docker.sock``, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``,
-    Znalostná báza, trezor prístupov, zdieľaný ``~/.claude``, záznamy agenta stavby.
+    ABSENT (guarded by a test): ``docker.sock``, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``,
+    Knowledge Base, access vault, shared ``~/.claude``, build agent transcripts.
     """
     container_dir, host_dir = project_dirs(project_slug)
     _assert_mount_safe(
@@ -383,8 +383,8 @@ def run_argv(
         "--rm",
         "--name",
         container_name(project_slug, token),
-        # Značka stavby: kontajner, ktorý prežije reštart backendu (otázka beží ďalej, nikto ju nečíta, píše
-        # do záznamu rozhovoru), pri štarte odprace ``build_db.reap_orphans`` — rovnako ako jeho sieť.
+        # Build marker: a container surviving a backend restart (the question keeps running, nobody reads it, it writes
+        # to the conversation transcript) is cleaned up at start by ``build_db.reap_orphans`` — like its network.
         "--label",
         f"{build_db.OWNER_LABEL}=poradca",
         "--user",

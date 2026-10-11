@@ -1,11 +1,11 @@
-"""Prostredník MCP v kontajneri Poradcu: stdio Claude Code ↔ unixový socket backendu (ICCINT-167).
+"""MCP shim in the Poradca container: Claude Code stdio ↔ the backend's unix socket (ICCINT-167).
 
-Claude Code vie servery MCP spúšťať len cez stdio, SSE alebo HTTP; sieť kontajnera je oplotená a backend
-nemá byť z nej dosiahnuteľný. Preto backend počúva na unixovom sockete platnom pre jednu otázku a tento
-skript len prenáša bajty oboma smermi — nerozumie im, nič nerozhoduje a nič nepridáva. Všetka logika
-(aké nástroje, čo smú, filter tajomstiev) je v backende, kde sa nedá zmeniť z kontajnera.
+Claude Code can launch MCP servers only via stdio, SSE or HTTP; the container network is fenced off and the backend
+must not be reachable from it. So the backend listens on a unix socket valid for one question and this
+script only carries bytes in both directions — it understands nothing, decides nothing and adds nothing. All the logic
+(which tools, what they may do, the secrets filter) is in the backend, where it cannot be changed from the container.
 
-Iba štandardná knižnica: beží v obraze backendu ako používateľ 1000, bez virtuálneho prostredia.
+Standard library only: it runs in the backend image as user 1000, without a virtual environment.
 """
 
 from __future__ import annotations

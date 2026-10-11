@@ -1,10 +1,10 @@
-"""Čo Poradca o projekte smie vedieť a čo musí skryť (ICCINT-167, návrh §4.2 a §4.4).
+"""What Poradca may know about a project and what it must hide (ICCINT-167, design §4.2 and §4.4).
 
-* :func:`uat_installations` — inštalácie UAT projektu cez tabuľku zákazníkov (nález B9: väzba UAT ↔
-  zákazník ↔ projekt sa číta z kokpitu, nie z mena priečinka). PROD sa tu nevracia nikdy — Poradca ostrú
-  prevádzku zákazníkov nevidí.
-* :func:`known_secret_values` — hodnoty, ktoré filter tajomstiev nahradí presnou zhodou (vrstva 2).
-  Hodnoty idú len do pamäte filtra; nikde sa nezapisujú ani nevypisujú.
+* :func:`uat_installations` — UAT installations of a project via the customers table (finding B9: the UAT ↔
+  customer ↔ project link is read from the cockpit, not from the folder name). PROD is never returned here — Poradca
+  does not see the customers' live operation.
+* :func:`known_secret_values` — values that the secrets filter replaces by exact match (layer 2).
+  The values go only into the filter's memory; they are never written or printed anywhere.
 """
 
 from __future__ import annotations
@@ -26,18 +26,18 @@ from backend.services import uat_provisioner
 
 logger = logging.getLogger(__name__)
 
-#: Premenné prostredia backendu, ktorých hodnoty sú tajomstvá.
+#: Backend environment variables whose values are secrets.
 _ENV_SECRETS = ("CLAUDE_CODE_OAUTH_TOKEN", "SECRET_KEY", "GITHUB_TOKEN", "GH_TOKEN", "DEDO_API_TOKEN")
-#: Premenné s adresou databázy — tajomstvom je heslo v nej.
+#: Variables with a database address — the secret is the password in it.
 _ENV_URLS = ("DATABASE_URL", "TEST_DATABASE_URL")
 
-#: Kľúč, ktorého hodnota je tajomstvo (``DB_PASSWORD``, ``JWT_SECRET``, ``API_KEY``, ``ACCESS_TOKEN``…).
+#: A key whose value is a secret (``DB_PASSWORD``, ``JWT_SECRET``, ``API_KEY``, ``ACCESS_TOKEN``…).
 _SECRET_KEY_RE = re.compile(r"(?i)(pass(word|wd)?|pwd|secret|token|api[_-]?key|private[_-]?key|credential|dsn)")
 
 
 @dataclass(frozen=True)
 class UatInstallation:
-    """Jedna inštalácia UAT projektu u jedného zákazníka."""
+    """One UAT installation of a project at one customer."""
 
     customer_slug: str
     customer_name: str
@@ -45,7 +45,7 @@ class UatInstallation:
 
 
 def uat_installations(db: Session, project: Project) -> list[UatInstallation]:
-    """Inštalácie UAT projektu, ktoré na disku naozaj sú — po zákazníkoch projektu."""
+    """UAT installations of a project that really exist on disk — per customer of the project."""
     from backend.services.deploy import _customer_dir_slug
 
     out: list[UatInstallation] = []
@@ -114,11 +114,11 @@ def _values_from_text(text: str) -> list[str]:
 
 
 def known_secret_values(db: Session, project: Project) -> list[str]:
-    """Hodnoty pre presnú zhodu filtra: prostredie kokpitu, nastavenia inštalácií UAT projektu, trezor.
+    """Values for exact matching: cockpit environment, settings of the project's UAT installations, the vault.
 
-    Trezor prístupov sa prechádza celý — viac skrytého je bezpečnejšie než menej — a číta sa cez službu
-    trezoru (:mod:`backend.services.credentials`, tie isté stráže cesty ako API), nie priamo zo súborov.
-    Záznam, ktorý sa nedá prečítať, sa preskočí (filter tvarov ostáva); nič z toho nesmie zastaviť otázku.
+    The access vault is traversed entirely — hiding more is safer than less — and is read through the vault
+    service (:mod:`backend.services.credentials`, the same path guards as the API), not directly from files.
+    A record that cannot be read is skipped (the shape filter remains); none of this may stop the question.
     """
     values: list[str] = []
     for name in _ENV_SECRETS:
@@ -134,6 +134,6 @@ def known_secret_values(db: Session, project: Project) -> list[str]:
             values += _values_from_text(credentials_service.read_content(db, credential.id).content)
         except (OSError, ValueError, LookupError):
             continue
-        except Exception:  # noqa: BLE001 — trezor nesmie zastaviť otázku; filter tvarov ostáva
+        except Exception:  # noqa: BLE001 — the vault must not stop the question; the shape filter remains
             logger.warning("poradca: credential %s could not be read for redaction", credential.id)
     return [v for v in values if v]

@@ -1,6 +1,6 @@
-"""Z odpovede Poradcu k činu — dve tlačidlá pod odpoveďou (ICCINT-167, návrh §3 „Keď treba niečo zmeniť").
+"""From a Poradca answer to action — two buttons under the answer (ICCINT-167, design §3 „Keď treba niečo zmeniť").
 
-Poradca nič nemení; keď treba zmenu, vloží do odpovede jeden z dvoch blokov (charta, časť 4):
+Poradca changes nothing; when a change is needed, it puts one of two blocks into the answer (charter, part 4):
 
   * ``<pokyn-pre-agenta>…</pokyn-pre-agenta>`` → „Vložiť do Riadiaceho centra": text sa vloží do poľa, ktoré
     v Riadiacom centre práve prijíma text, a odošle ho človek sám (rieši frontend — nič sa tu neposiela);
@@ -11,7 +11,7 @@ DEV-29, Director 08.10.2026: „O verziách rozhodujem ja. Treba, aby zapísal l
 Tlačidlo predtým založilo aj ďalšiu verziu so zadaním z požiadavky; do ktorej verzie požiadavka pôjde,
 rozhoduje Director. Odpovede spred tejto zmeny nesú blok ``<poziadavka-na-novu-verziu>`` — číta sa rovnako.
 
-Text požiadavky sa berie z ULOŽENEJ odpovede (prešla filtrom tajomstiev), nikdy z prehliadača. Druhé
+The request text is taken from the STORED answer (it passed the secret filter), never from the browser. The second
 kliknutie vráti už uloženú požiadavku — nezaloží druhú.
 """
 
@@ -53,7 +53,7 @@ class SavedRequest:
 
 
 def extract_block(text: str, name: str) -> Optional[str]:
-    """Obsah prvého bloku ``<name>…</name>`` bez okrajových medzier; ``None``, keď blok nie je alebo je prázdny."""
+    """Content of the first ``<name>…</name>`` block without edge whitespace; ``None`` if absent or empty."""
     match = re.search(rf"<{name}>\s*(.*?)\s*</{name}>", text or "", re.S)
     if not match:
         return None
@@ -75,7 +75,7 @@ def backlog_item_from_message(db: Session, message: PoradcaMessage) -> SavedRequ
     """Uloží požiadavku z odpovede Poradcu do Zásobníka projektu (alebo vráti už uloženú). Verziu nezakladá.
 
     Raises:
-        HandoffRefused: správa nie je hotová odpoveď Poradcu alebo nemá blok požiadavky.
+        HandoffRefused: the message is not a finished Poradca answer or has no request block.
     """
     if message.author != AUTHOR_PORADCA or message.status != DONE:
         raise HandoffRefused("Požiadavku sa dá uložiť len z hotovej odpovede Poradcu.")

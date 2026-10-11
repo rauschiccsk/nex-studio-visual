@@ -1,4 +1,4 @@
-"""Náklady: Poradca má vlastný riadok, zvlášť od fáz stavby (ICCINT-167, návrh §3 „Náklady a limit")."""
+"""Náklady: Poradca has its own row, separate from the build phases (ICCINT-167, design §3 „Náklady a limit")."""
 
 from __future__ import annotations
 
@@ -50,9 +50,9 @@ def _setup(db):
             )
         )
 
-    answer(v1, 100, 10)  # otázka padla, kým rozhovor bol pri 1.0.0
+    answer(v1, 100, 10)  # the question fell while the conversation was at 1.0.0
     answer(v2, 200, 20)
-    answer(None, 400, 40)  # celý projekt
+    answer(None, 400, 40)  # the whole project
     db.add(PoradcaMessage(conversation_id=conv.id, author="human", content="q", status="done"))
     db.flush()
     return project, v1, v2
@@ -68,13 +68,13 @@ def test_poradca_row_per_scope_and_never_a_human_figure(db_session):
     assert row.key == "poradca" and row.turns == 3
     assert (row.input_tokens, row.output_tokens) == (700, 70)
     assert row.human_minutes is None and row.human_cost is None
-    # Do nameraného súčtu patrí; ručne zadané nie je.
+    # Belongs in the measured total; a manually entered one does not.
     assert result.totals.input_tokens_measured == 700 and result.totals.input_tokens_external == 0
 
     by_version = {v.version_number: v for v in result.by_version}
     v1_rows = [r for r in by_version["1.0.0"].rows if r.kind == "poradca"]
     v2_rows = [r for r in by_version["1.1.0"].rows if r.kind == "poradca"]
-    # Verzia sčíta len otázky, ktoré na ňu naozaj padli — nie podľa súčasnej voľby rozhovoru.
+    # A version sums only the questions that really fell on it — not according to the conversation's current choice.
     assert v1_rows[0].input_tokens == 100
     assert v2_rows[0].input_tokens == 200
 

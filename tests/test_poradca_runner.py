@@ -1,8 +1,8 @@
-"""Beh otázky Poradcu od uloženia po odpoveď (ICCINT-167, návrh §4.1).
+"""Run of a Poradca question from saving to the answer (ICCINT-167, design §4.1).
 
-Namiesto ``docker run … claude`` beží náhradný skript, ktorý sa správa ako Claude Code: zavolá nástroj
-Poradcu cez socket (ako prostredník v kontajneri), vypíše priebeh ``stream-json`` a na konci výsledok so
-spotrebou. Všetko ostatné — uloženie, priebeh, filter, súbežnosť, zastavenie — je skutočné.
+Instead of ``docker run … claude`` a substitute script runs that behaves like Claude Code: it calls a Poradca tool
+through the socket (like the intermediary in the container), prints the ``stream-json`` progress and finally a result
+with usage. Everything else — saving, progress, filter, concurrency, stopping — is real.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ FAKE_CLAUDE = textwrap.dedent(
 
 
 class _Ctx:
-    """``SessionLocal()`` pre skúšku: vráti tú istú izolovanú reláciu a nezatvorí ju."""
+    """``SessionLocal()`` for the test: returns the same isolated session and does not close it."""
 
     def __init__(self, session):
         self._s = session
@@ -168,12 +168,12 @@ async def test_question_runs_to_a_filtered_answer_with_steps_and_usage(world):
     db.expire_all()
     stored = db.get(PoradcaMessage, answer.id)
     assert stored.status == "done", stored.error
-    # Výstup nástroja aj odpoveď prešli filtrom: známe tajomstvo sa nikde neuloží.
+    # Both the tool output and the answer passed through the filter: a known secret is stored nowhere.
     assert FAKE_SECRET not in stored.content and "‹skryté›" in stored.content
     assert "Agent stojí na teste" in stored.content
-    # Kroky: vstavaný nástroj z priebehu, nástroj Poradcu zo servera (raz, nie dvakrát), bez obsahu.
+    # Steps: a built-in tool from the progress, a Poradca tool from the server (once, not twice), without content.
     assert stored.steps == [{"tool": "stavba", "target": "verzia 1.0.0"}, {"tool": "Read", "target": "app.py"}]
-    # ICCINT-168: spotreba zo záznamu sedenia — rozdiel súčtov, aj s vyrovnávacou pamäťou a cenou Claude Code.
+    # ICCINT-168: usage from the session transcript — difference of totals, incl. cache and the Claude Code price.
     assert stored.usage == {
         "input_tokens": 120,
         "output_tokens": 30,
@@ -221,8 +221,8 @@ async def test_stop_kills_the_run_and_records_stopped(world):
     db.expire_all()
     stopped = db.get(PoradcaMessage, answer.id)
     assert stopped.status == "stopped"
-    # ICCINT-168: zastavená odpoveď nie je zadarmo — jej dokončené správy zo záznamu sedenia, bez ceny Claude Code
-    # (ten ju do súčtu nezapíše); ocení ju cenník.
+    # ICCINT-168: a stopped answer is not free — its finished messages from the session transcript, no Claude Code price
+    # (it does not add it to the total); the price list prices it.
     assert stopped.usage["parts"] == [
         {
             "model": "claude-opus-test",
@@ -238,8 +238,8 @@ async def test_stop_kills_the_run_and_records_stopped(world):
 
 
 async def test_a_second_answer_costs_only_itself_not_the_whole_conversation(world):
-    """ICCINT-168: Claude Code hlási pri pokračovaní sedenia súčet ZA CELÝ ROZHOVOR. Druhá odpoveď nesmie
-    zaplatiť aj prvú — jej spotreba je rozdiel súčtov pred ňou a po nej."""
+    """ICCINT-168: on session resume Claude Code reports the sum FOR THE WHOLE CONVERSATION. The second answer must not
+    pay for the first one too — its usage is the difference of totals before and after it."""
     db = world["db"]
     for question in ("Prvá", "Druhá"):
         _human, answer = runner.ask(db, world["conversation"], question, world["user"])
@@ -278,7 +278,7 @@ async def test_unavailable_sandbox_fails_loudly_and_never_runs_without_it(world,
 async def test_concurrency_cap_queues_and_says_why(world, monkeypatch):
     db = world["db"]
     monkeypatch.setattr(runner, "max_concurrent", lambda db: 1)
-    await runner._slots.acquire(1)  # niekto iný práve beží
+    await runner._slots.acquire(1)  # somebody else is running right now
     try:
         _human, answer = runner.ask(db, world["conversation"], "Čakám?", world["user"])
         for _ in range(100):
@@ -305,8 +305,8 @@ def test_fail_orphans_closes_answers_a_restart_interrupted(world):
 
 
 async def test_every_step_passes_the_secret_filter_before_db_and_websocket(world):
-    """Nález previerky 05.10.2026: kroky vstavaných nástrojov (Grep vzor, Read cesta) išli do databázy
-    a prehliadača nefiltrované. Teraz filtruje ``_record_step`` pre všetky kroky na jednom mieste."""
+    """Finding of the 05.10.2026 review: the steps of built-in tools (Grep pattern, Read path) went to the database
+    and the browser unfiltered. Now ``_record_step`` filters all steps in one place."""
     from backend.services.poradca.secrets_filter import SecretFilter
 
     db = world["db"]
@@ -323,7 +323,7 @@ async def test_every_step_passes_the_secret_filter_before_db_and_websocket(world
 
 
 async def test_a_question_into_a_deleted_conversation_never_starts(world):
-    # Otázka aj vymazanie idú cez zámok riadku rozhovoru: do vymazaného sa nič neuloží ani nespustí.
+    # Question and deletion both go through the conversation's row lock: nothing is saved or started in a deleted one.
     db = world["db"]
     await runner.delete_conversation(db, world["conversation"])
     with pytest.raises(runner.ConversationGone):
@@ -351,7 +351,7 @@ async def test_delete_refuses_while_the_real_run_is_going_then_succeeds(world):
 
 
 def test_rename_after_a_delete_writes_nothing_back(world):
-    # Úprava, ktorá prešla kontrolou prístupu pred vymazaním a zápis robí až po ňom (čakala na zámok).
+    # An edit that passed the access check before the deletion and writes only after it (it was waiting for the lock).
     db = world["db"]
     conversation = world["conversation"]
     asyncio.run(runner.delete_conversation(db, conversation))
@@ -362,8 +362,8 @@ def test_rename_after_a_delete_writes_nothing_back(world):
 
 
 async def test_ask_and_delete_take_the_row_lock(world):
-    """Zámok riadku je to, čo otázku a vymazanie radí za seba; v jednej relácii skúšky ho nevidno inak než
-    v poslanom príkaze."""
+    """The row lock is what orders the question and the deletion; in a single test session it is visible only
+    in the sent command."""
     db = world["db"]
     statements: list[str] = []
 
@@ -395,7 +395,7 @@ async def test_a_failed_database_write_puts_the_transcript_back(world, monkeypat
     def _boom():
         raise RuntimeError("databáza spadla")
 
-    with monkeypatch.context() as m:  # nie ``undo()`` — ten by vrátil aj presmerovanie z prípravku ``world``
+    with monkeypatch.context() as m:  # not ``undo()`` — it would also revert the redirect from the ``world`` fixture
         m.setattr(db, "commit", _boom)
         with pytest.raises(RuntimeError):
             await runner.delete_conversation(db, conversation)

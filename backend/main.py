@@ -90,10 +90,10 @@ async def _reap_build_orphans() -> None:
 
 
 def _sweep_poradca_trash() -> int:
-    """Dozmaže záznamy vymazaných rozhovorov Poradcu, ktoré ostali v koši (ICCINT-167).
+    """Finishes deleting records of deleted Poradca conversations that remained in the trash (ICCINT-167).
 
-    Háčik na úrovni modulu (ako :func:`_reap_build_orphans`), aby ho skúšobňa mohla vypnúť: proces skúšok
-    by inak siahol na kôš živého kokpitu na tom istom stroji.
+    A module-level hook (like :func:`_reap_build_orphans`) so the test suite can switch it off: the test process
+    would otherwise touch the trash of the live cockpit on the same machine.
     """
     return poradca_sandbox.sweep_trash()
 
@@ -242,13 +242,13 @@ async def lifespan(app: FastAPI):
         recovered_builds = orchestrator_service.recover_orphaned_builds_on_startup(db)
         if recovered_builds:
             logger.info("Recovered %d orphaned build pipeline(s) after restart", recovered_builds)
-        # ICCINT-167: odpoveď Poradcu, ktorú prerušil reštart, už nikto nedokončí — uzavrie sa s dôvodom,
-        # aby rozhovor nevisel v „Poradca odpovedá…" navždy.
+        # ICCINT-167: a Poradca answer interrupted by a restart will never be finished — it is closed with a reason,
+        # so that the conversation does not hang in „Poradca odpovedá…" forever.
         failed_poradca = poradca_runner.fail_orphans(db)
         if failed_poradca:
             logger.info("Poradca: closed %d answer(s) interrupted by the restart", failed_poradca)
-        # …a dozmaže záznamy vymazaných rozhovorov, ktoré sa pri vymazaní nedali zmazať celé (kontajner
-        # z minulého behu do nich ešte písal; ten už odpratal ``_reap_build_orphans`` vyššie).
+        # …and finishes deleting records of deleted conversations that could not be fully deleted (a container
+        # from the previous run was still writing to them; ``_reap_build_orphans`` above already cleaned that one up).
         swept_poradca = _sweep_poradca_trash()
         if swept_poradca:
             logger.info("Poradca: removed %d transcript(s) of deleted conversations left in the trash", swept_poradca)

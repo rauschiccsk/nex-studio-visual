@@ -1,11 +1,11 @@
-"""Nástroje Poradcu na pohľad „zozadu" (ICCINT-167, návrh §4.2).
+"""Poradca tools for a view "from behind" (ICCINT-167, design §4.2).
 
-Všetko podáva BACKEND: meno kontajnera, priečinok ani databázu neurčuje agent, ale kokpit z projektu
-rozhovoru. Agent smie vybrať len z toho, čo mu kokpit sám ponúkne (napr. meno kontajnera zo zoznamu
-``kontajnery``); čokoľvek iné nástroj odmietne vetou. Výstup každého nástroja prejde filtrom tajomstiev
-a stropom dĺžky v :mod:`.mcp_server` — tu sa len zbiera.
+Everything is served by the BACKEND: the container name, directory or database is not chosen by the agent but by the
+cockpit from the conversation's project. The agent may pick only from what the cockpit itself offers (e.g. a container
+name from the ``kontajnery`` list); the tool rejects anything else with a sentence. The output of each tool passes the
+secrets filter and the length cap in :mod:`.mcp_server` — here it is only collected.
 
-PROD sa nevracia nikdy: Poradca ostrú prevádzku zákazníkov nevidí (rozhodnutie Directora 05.10.2026).
+PROD is never returned: Poradca does not see customers' live operation (Director's decision of 05.10.2026).
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ from backend.db.session import SessionLocal
 from backend.services.poradca.context import UatInstallation, uat_installations
 from backend.services.poradca.mcp_server import Tool, ToolError
 
-#: Mená tlačidiel Riadiaceho centra podľa akcie, ktorú kokpit ponúka (``available_actions``). Poradca
-#: radí tlačidlom, ktoré človek na obrazovke vidí — nie menom v kóde. Stráži ich skúška: akcia, ktorú
-#: frontend pozná a ktorá tu chýba, zčervená.
+#: Names of the Riadiace centrum buttons by the action the cockpit offers (``available_actions``). Poradca
+#: advises with the button the human sees on screen — not with a name in code. A test guards them: an action that the
+#: frontend knows and that is missing here turns red.
 ACTION_LABELS: dict[str, str] = {
     "start": "Spustiť tvorbu špecifikácie",
     "approve_spec": "Schváliť špecifikáciu",
@@ -95,7 +95,7 @@ def _schema(properties: Optional[dict] = None, required: Optional[list[str]] = N
 
 
 async def _run(argv: list[str], *, cwd: Optional[str] = None, timeout: int = _CMD_TIMEOUT_S) -> tuple[int, str]:
-    """Spustí príkaz BEZ shellu (pole argumentov) a vráti ``(kód, stdout+stderr)``."""
+    """Runs a command WITHOUT a shell (argument list) and returns ``(code, stdout+stderr)``."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -231,14 +231,14 @@ def _requirements(n: int) -> str:
 
 
 class PoradcaTools:
-    """Nástroje jednej otázky — viazané na projekt, verziu rozhovoru a človeka, ktorý sa pýta."""
+    """Tools of one question — bound to the project, the conversation's version and the person asking."""
 
     def __init__(self, *, project_id: UUID, version_id: Optional[UUID], user_id: UUID) -> None:
         self.project_id = project_id
         self.version_id = version_id
         self.user_id = user_id
 
-    # ── pomocné ────────────────────────────────────────────────────────────────
+    # ── helpers ────────────────────────────────────────────────────────────────
 
     def _project(self, db: Session) -> Project:
         project = db.get(Project, self.project_id)
@@ -502,7 +502,7 @@ class PoradcaTools:
             )
         return "\n".join(lines)
 
-    # ── Znalostná báza ──────────────────────────────────────────────────────────
+    # ── Knowledge base ──────────────────────────────────────────────────────────
 
     async def znalostna_baza(self, args: dict) -> str:
         from backend.rag import reader
@@ -546,7 +546,7 @@ class PoradcaTools:
             text = text[:_KB_DOC_CHARS] + "\n… (skrátené)"
         return text
 
-    # ── databáza UAT ─────────────────────────────────────────────────────────────
+    # ── UAT database ─────────────────────────────────────────────────────────────
 
     async def databaza_uat(self, args: dict) -> str:
         from backend.services.poradca import uat_db
@@ -574,7 +574,7 @@ class PoradcaTools:
 
 
 def _agent_steps(transcripts: Path, count: int, project_dir: str) -> str:
-    """Posledné kroky agenta stavby zo záznamov Claude Code — nástroj, cieľ a chyba; obsah súborov nie."""
+    """Latest steps of the build agent from Claude Code records — tool, target and error; not file content."""
     if not transcripts.is_dir():
         return "Agent stavby v tomto projekte ešte nepracoval (záznam neexistuje)."
     files = sorted(transcripts.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
@@ -629,7 +629,7 @@ def _step_target(args: dict, project_dir: str) -> str:
 
 
 def _project_containers(docker_ps_json: str, slug: str, installations: list[UatInstallation]) -> list[dict]:
-    """Kontajnery projektu z ``docker ps --format {{json .}}``: náhľad Vizuálu, stavba, inštalácie UAT."""
+    """Project containers from ``docker ps --format {{json .}}``: Vizuál preview, build, UAT installations."""
     by_dir = {str(i.directory): i for i in installations}
     out: list[dict] = []
     for line in docker_ps_json.splitlines():
@@ -666,7 +666,7 @@ def _project_containers(docker_ps_json: str, slug: str, installations: list[UatI
 
 
 def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) -> list[Tool]:
-    """Nástroje jednej otázky. Popisy čítá agent — hovoria, čo nástroj vráti a čo nie."""
+    """Tools of one question. The agent reads the descriptions — they say what the tool returns and what it does not."""
     t = PoradcaTools(project_id=project_id, version_id=version_id, user_id=user_id)
     verzia = {"verzia": {"type": "string", "description": "Číslo verzie, napr. 1.2.0; bez neho verzia rozhovoru."}}
     return [

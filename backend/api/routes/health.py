@@ -43,8 +43,8 @@ def health_check() -> dict:
         "db": "connected" if db_ok else "disconnected",
         "claude_cli_available": _check_claude_cli_available(),
         "claude_config_mounted": _check_claude_config_mounted(),
-        # ICCINT-167: Poradca nemá cestu mimo kontajnera — nesplnená podmienka má byť vidno tu, nie až pri
-        # prvej otázke.
+        # ICCINT-167: Poradca has no route out of the container — an unmet condition should show up here, not at the
+        # first question.
         "poradca": {"ready": not (problems := poradca_readiness.problems()), "problems": problems},
         # Empty ``app_public_url`` strips the cockpit deep link out of every Telegram nudge, so an away
         # Manažér gets a ping with no way back in. Report the absence rather than letting it stay invisible.

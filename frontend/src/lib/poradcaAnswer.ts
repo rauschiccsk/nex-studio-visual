@@ -1,8 +1,8 @@
-// Ako sa odpoveď Poradcu ukáže človeku (ICCINT-167). Čisté funkcie — skúšky v `test_poradcaAnswer`.
+// How a Poradca answer is shown to a person (ICCINT-167). Pure functions — tests in `test_poradcaAnswer`.
 
 import type { PoradcaVersionInfo } from "@/types/poradca";
 
-/** Bloky z charty Poradcu (časť 4) a nadpis, pod ktorým ich človek uvidí. Kokpit z nich robí tlačidlá. */
+/** Blocks from the Poradca charter (part 4) and the heading under which a person sees them. Cockpit makes buttons. */
 const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "pokyn-pre-agenta", heading: "Pokyn pre agenta stavby" },
   { tag: "poziadavka-do-zasobnika", heading: "Požiadavka do Zásobníka" },
@@ -11,8 +11,8 @@ const BLOCKS: { tag: string; heading: string }[] = [
 ];
 
 /**
- * Text odpovede na zobrazenie: bloky so značkami sa zmenia na citát s nadpisom. Bez toho by ich vykresľovač
- * Markdownu (HTML neprepúšťa) zahodil spolu s obsahom a človek by nevidel, čo tlačidlo vloží.
+ * Answer text to display: blocks with tags turn into a quote with a heading. Without that the Markdown renderer
+ * (it does not let HTML through) would discard them with the content and a person would not see what a button inserts.
  */
 export function answerForDisplay(content: string): string {
   let out = content;
@@ -30,7 +30,7 @@ export function answerForDisplay(content: string): string {
   return out.trim();
 }
 
-/** Čo Poradca práve robí — sloveso k nástroju. Neznámy nástroj ostane menom (radšej surové než vymyslené). */
+/** What Poradca is doing right now — a verb for the tool. An unknown tool stays a name (better raw than invented). */
 const STEP_VERBS: Record<string, string> = {
   Read: "Čítam",
   Grep: "Hľadám",
@@ -63,14 +63,14 @@ export function formatDuration(seconds: number | null | undefined): string {
   return rest ? `${m} min ${rest} s` : `${m} min`;
 }
 
-/** Cena odpovede tým istým cenníkom ako Náklady (ICCINT-168). Bez nej cenník modelu alebo kurz ešte nie je
- *  zistený, alebo ide o starú odpoveď bez záznamu sedenia — nikdy nie „nezadaná cena". */
+/** Cost of the answer by the same price list as Costs (ICCINT-168). Without it the model price list or the rate is not
+ *  yet known, or it is an old answer without a session log — never „nezadaná cena". */
 export function formatCost(eur: number | null | undefined): string {
   if (eur == null) return "cena sa zatiaľ nedá vyčísliť";
   return `${eur.toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
-// Voľba „o čom sa rozprávame" — verzia s fázou a stavom stavby.
+// The „what we are talking about" choice — a version with the phase and build state.
 const STAGE_LABELS: Record<string, string> = {
   priprava: "príprava",
   navrh: "návrh",

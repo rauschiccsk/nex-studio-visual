@@ -1,13 +1,13 @@
-"""Zmazanie používateľa už nezoberie jeho rozhovory s Poradcom ani ich cenu (ICCINT-169, v4.43.2).
+"""Deleting a user no longer takes their Poradca conversations or their cost with it (ICCINT-169, v4.43.2).
 
-**Čo sa dialo.** Cudzí kľúč ``poradca_conversations.author_id`` mal ON DELETE CASCADE: zmazanie používateľa
-(kôš pri používateľovi v kokpite) zmazalo jeho rozhovory aj s odpoveďami — a cenu tých odpovedí z Nákladov
-projektu, hoci sa naozaj minula. Projekty a chyby už zmazanie používateľa blokujú (RESTRICT); rozhovory chýbali.
+**What happened.** The foreign key ``poradca_conversations.author_id`` had ON DELETE CASCADE: deleting a user
+(user trash in the cockpit) deleted their conversations with answers — and the cost of those answers from the Costs of
+the project, though really spent. Projects and bugs already block user deletion (RESTRICT); conversations did not.
 
-**Čo mení.** Kľúč na ON DELETE RESTRICT; kokpit pred zmazaním povie, prečo nejde, a ponúkne deaktiváciu
+**What it changes.** Key to ON DELETE RESTRICT; before deleting, the cockpit says why it cannot and offers deactivation
 (``user_service._has_restrict_dependencies``).
 
-**Späť** sa kľúč vráti na CASCADE.
+**Downgrade** returns the key to CASCADE.
 
 Revision ID: 105
 Revises: 104

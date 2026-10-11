@@ -64,8 +64,8 @@ describe("ConversationComposer — framework_issue lock (Director obs #6)", () =
   });
 });
 
-// ICCINT-167: pokyn vložený z Poradcu — pole musí povedať, odkiaľ sa text vzal; nesmie sa tváriť ako jeho
-// vlastný starší koncept, a keď ho človek upraví, je jeho.
+// ICCINT-167: an instruction inserted from Poradca — the field must say where the text came from; it must not pose as
+// its own older draft, and once the person edits it, it is theirs.
 describe("ConversationComposer — pokyn od Poradcu (ICCINT-167)", () => {
   it("labels an inserted instruction as Poradca's and drops the label once he edits it", async () => {
     // DEV-22: the instruction is handed off as pending; a live conversation box takes it when it mounts.

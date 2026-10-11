@@ -1,8 +1,8 @@
-"""Rozhranie Poradcu — prístup a tvar odpovedí (ICCINT-167).
+"""Poradca API — access and shape of the responses (ICCINT-167).
 
-Prístup ako všade v kokpite: k projektu vlastník alebo účet admin; k rozhovoru jeho autor alebo admin.
-Cudzí rozhovor je 404 — o jeho existencii sa iný človek nedozvie. Beh otázky tu nahrádza atrapa;
-skutočný beh skúša ``test_poradca_runner``.
+Access as everywhere in the cockpit: a project — its owner or an admin account; a conversation — its author or an admin.
+Somebody else's conversation is 404 — another person does not learn it exists. The question run is replaced by a dummy;
+the real run is tested by ``test_poradca_runner``.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def _client(db: Any, user: User) -> TestClient:
 
 @pytest.fixture(autouse=True)
 def _fake_run(monkeypatch):
-    """Otázka sa uloží ako pri skutočnom behu, ale odpoveď hneď skončí — bez kontajnera."""
+    """The question is saved as in a real run, but the answer finishes immediately — without a container."""
     calls: list[str] = []
 
     def _ask(db, conversation, question, user, images=()):
@@ -363,7 +363,7 @@ def test_context_lists_versions_with_build_state_and_where_an_instruction_can_go
     )
 
 
-# ── premenovanie a vymazanie (Director 05.10.2026: „chýba mi premenovanie a vymazanie rozhovoru") ──
+# ── rename and delete (Director 05.10.2026: „chýba mi premenovanie a vymazanie rozhovoru") ──
 
 _LONG_AGO = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -375,8 +375,8 @@ def _start(c: TestClient, project: Project, question: str = "Prečo agent stojí
 
 
 def _age(db: Any, cid: str) -> None:
-    """Posledná otázka „dávno" — v jednej transakcii skúšky dá ``now()`` stále ten istý čas, takže bez toho
-    by posun ``updated_at`` úpravou nebolo vidieť."""
+    """The last question "long ago" — within one test transaction ``now()`` always gives the same time, so without it
+    the shift of ``updated_at`` by an edit would not be visible."""
     db.query(PoradcaConversation).filter(PoradcaConversation.id == uuid.UUID(cid)).update({"updated_at": _LONG_AGO})
     db.commit()
 
@@ -396,7 +396,7 @@ def test_rename_changes_the_title_and_the_conversation_keeps_its_place(db_sessio
     r = c.put(f"/api/v1/poradca/conversations/{older}/title", json={"title": "  Prečo   padá\n zostavenie  "})
     assert r.status_code == 200, r.text
     assert r.json()["title"] == "Prečo padá zostavenie"
-    # Poradie určuje posledná otázka, nie úprava názvu.
+    # The order is determined by the last question, not by renaming the title.
     assert _updated_at(db_session, older) == _LONG_AGO
     listed = c.get(f"/api/v1/poradca/projects/{project.slug}/conversations").json()
     assert [x["id"] for x in listed] == [newer, older]
@@ -464,7 +464,7 @@ def test_delete_wipes_what_was_said_and_its_disk_record_but_keeps_the_cost(db_se
     assert c.patch(f"/api/v1/poradca/conversations/{cid}", json={"version_id": None}).status_code == 404
     assert c.delete(f"/api/v1/poradca/conversations/{cid}").status_code == 404
     assert c.post(f"/api/v1/poradca/messages/{answer.id}/backlog").status_code == 404
-    # Text, kroky, chyba, názov aj záznam na disku sú preč (aj z koša)…
+    # Text, steps, error, title and the record on disk are gone (also from the trash)…
     assert not record.exists()
     assert not any(sandbox.trash_dir().iterdir())
     db_session.expire_all()
@@ -473,7 +473,7 @@ def test_delete_wipes_what_was_said_and_its_disk_record_but_keeps_the_cost(db_se
     messages = db_session.query(PoradcaMessage).filter(PoradcaMessage.conversation_id == uuid.UUID(cid)).all()
     assert len(messages) == 2
     assert all(m.content == "" and m.steps == [] and m.error is None for m in messages)
-    # …cena ostala: Náklady projektu ukazujú to isté ako pred vymazaním.
+    # …the cost stayed: the project's Náklady show the same as before the deletion.
     after = metrics.compute_project_metrics(db_session, project)
     row = lambda result: next(r for r in result.rows if r.kind == "poradca")  # noqa: E731
     assert (row(after).input_tokens, row(after).output_tokens, row(after).turns) == (

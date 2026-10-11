@@ -1,7 +1,7 @@
-"""Server MCP Poradcu a prostredník (ICCINT-167, návrh §4.2).
+"""Poradca MCP server and the intermediary (ICCINT-167, design §4.2).
 
-Skúša skutočnú cestu: prostredník :mod:`shim` ako samostatný proces (tak, ako ho spustí Claude Code
-v kontajneri) ↔ unixový socket ↔ :class:`McpServer`. Hodnoty tajomstiev sú umelé.
+Tests the real path: the intermediary :mod:`shim` as a separate process (as Claude Code starts it
+in the container) ↔ unix socket ↔ :class:`McpServer`. Secret values are artificial.
 """
 
 from __future__ import annotations
@@ -92,15 +92,15 @@ async def test_handshake_list_and_call_through_the_shim(tmp_path):
         ],
     )
     init, listed, called = replies
-    # Verziu protokolu vráti tú, ktorú poslal klient.
+    # It returns the protocol version the client sent.
     assert init["result"]["protocolVersion"] == "2099-01-01"
     assert [t["name"] for t in listed["result"]["tools"]] == ["stavba", "zly", "pad"]
     text = called["result"]["content"][0]["text"]
     assert "stavba beží" in text and "1.2.0" in text
-    # Výstup prešiel filtrom — známa hodnota aj tvar.
+    # The output passed the filter — the known value and the shape.
     assert FAKE not in text and "fakepw123" not in text and REDACTED in text
     assert "isError" not in called["result"]
-    # Krok nesie nástroj a cieľ, nie obsah.
+    # A step carries the tool and the target, not the content.
     assert steps == [("stavba", "verzia 1.2.0")]
 
 
@@ -118,7 +118,7 @@ async def test_tool_error_and_crash_come_back_as_results_not_as_a_dead_connectio
     err, crash, missing, ping = replies
     assert err["result"]["isError"] is True
     assert "neexistuje" in err["result"]["content"][0]["text"]
-    # Vnútorný detail pádu sa agentovi neukáže.
+    # The internal detail of the crash is not shown to the agent.
     assert crash["result"]["isError"] is True
     assert "/opt/customers" not in crash["result"]["content"][0]["text"]
     assert missing["result"]["isError"] is True

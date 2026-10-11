@@ -1,8 +1,8 @@
-"""Či Poradca vie bežať — a ak nie, presne prečo (ICCINT-167).
+"""Whether Poradca can run — and if not, exactly why (ICCINT-167).
 
-Ten istý vzor ako pripravenosť izolovanej stavby (:func:`build_sandbox.preflight`): podmienka, ktorá sa
-nedá splniť, má byť vidno skôr, než na ňu narazí prvá otázka. Obrazovka podľa toho pole na otázku
-zašedí s dôvodom; ``/health`` ju ukáže prevádzke.
+The same pattern as the readiness of the isolated build (:func:`build_sandbox.preflight`): a condition that cannot
+be met should be visible before the first question runs into it. The screen uses it to grey out the question field
+with a reason; ``/health`` shows it to operations.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ _cache: Optional[tuple[float, list[str]]] = None
 
 
 def problems() -> list[str]:
-    """Nesplnené podmienky behu — vety pre človeka. Prázdny zoznam = Poradca vie bežať."""
+    """Unmet run conditions — sentences for the human. An empty list = Poradca can run."""
     global _cache
     now = time.time()
     if _cache is not None and now - _cache[0] < _CACHE_SECONDS:
         return list(_cache[1])
     found: list[str] = []
-    # Poradca nemá cestu mimo kontajnera, takže vypínač izolácie stavby (BUILD_SANDBOX) ho nevypína —
-    # podmienky kontajnera sa overujú tu, každá zvlášť.
+    # Poradca has no path outside the container, so the build isolation switch (BUILD_SANDBOX) does not turn it off —
+    # the container conditions are checked here, each separately.
     image = build_sandbox.sandbox_image()
     if shutil.which("docker") is None:
         found.append("program docker nie je v kokpite k dispozícii — kontajner Poradcu sa nedá spustiť")

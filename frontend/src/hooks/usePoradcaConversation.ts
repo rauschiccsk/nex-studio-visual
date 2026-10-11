@@ -1,7 +1,7 @@
-// Jeden rozhovor s Poradcom: načítanie + živý priebeh cez WebSocket (ICCINT-167).
+// One conversation with Poradca: loading + live progress over WebSocket (ICCINT-167).
 //
-// Priebeh nesie len KROKY (nástroj a cieľ) a koniec odpovede — obsah nikdy. Po skončení sa rozhovor načíta
-// znova z API, takže odpoveď, cena aj chyba prídu z uloženého stavu, nie z udalosti.
+// The progress carries only STEPS (tool and target) and the end of the answer — never content. When it ends, the
+// conversation is loaded again from the API, so the answer, cost and error come from stored state, not from an event.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -39,7 +39,7 @@ export function usePoradcaConversation(conversationId: string | null): UsePoradc
       }
     } catch (e: unknown) {
       if (current.current !== conversationId) return;
-      // Vymazaný alebo cudzí rozhovor: starý text na obrazovke nenechávame.
+      // Deleted or foreign conversation: we do not leave the old text on screen.
       if (e instanceof ApiError && e.status === 404) setDetail(null);
       setError(humanizeApiError(e, "Rozhovor sa nepodarilo načítať").message);
     }
@@ -80,13 +80,13 @@ export function usePoradcaConversation(conversationId: string | null): UsePoradc
               : d,
           );
         } else if (evt.type === "finished" || evt.type === "deleted") {
-          // Vymazaný (napr. v inej karte): načítanie vráti „Rozhovor sa nenašiel." namiesto starého textu.
+          // Deleted (e.g. in another tab): loading returns „Rozhovor sa nenašiel." instead of the old text.
           void reload();
         }
       };
       socket.onclose = (ev) => {
         if (!alive || ev.code === CLOSE_FORBIDDEN || ev.code === CLOSE_GONE) return;
-        // Spadnuté spojenie: po obnovení načítaj stav znova — kroky, ktoré medzitým prišli, sú v databáze.
+        // Dropped connection: after reconnecting, load the state again — steps that arrived meanwhile are in the DB.
         timer = setTimeout(() => {
           void reload();
           connect();

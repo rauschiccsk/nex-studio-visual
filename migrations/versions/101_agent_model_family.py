@@ -1,20 +1,20 @@
-"""Model agenta sa ukladá ako rodina, nie verzia (ICCINT-167).
+"""Agent model is stored as a family, not a version (ICCINT-167).
 
-**Čo sa dialo.** Nastavenia ponúkali zoznam štyroch verzií zapísaný v kóde a predvolený model bol natvrdo
-Opus 5. Keď vyšiel Opus 5.5, kokpit o ňom nevedel — bez zásahu do aplikácie sa nedal zvoliť a všetky
-stavby ďalej bežali na Opuse 5. Director 05.10.2026: *„aby som nemusel opravovať aplikáciu, ak sa zmení
+**What happened.** Settings offered a list of four versions written in code and the default model was hard-coded
+Opus 5. When Opus 5.5 came out, the cockpit did not know it — it could not be chosen without changing the app and all
+builds kept running on Opus 5. Director 2026-10-05: *„aby som nemusel opravovať aplikáciu, ak sa zmení
 verzia modelu."*
 
-**Prečo rodina.** ``claude --model opus`` spustí najnovší Opus a Claude Code sa na stroji aktualizuje sám.
-Kokpit preto ukladá len rodinu (``opus``, ``sonnet``, ``haiku``); ktorá verzia naozaj bežala, ukazuje
-záznam behov.
+**Why a family.** ``claude --model opus`` launches the latest Opus and Claude Code updates itself on the machine.
+The cockpit therefore stores only the family (``opus``, ``sonnet``, ``haiku``); which version actually ran is shown by
+the run log.
 
-**Čo migrácia robí.** Uložené úplné mená prevedie na rodinu podľa slova v mene; meno bez známej rodiny
-vymaže (= predvolený model), lebo nové obmedzenie v API by ho už neprečítalo. Na ostrom kokpite v deň
-zmeny nebol v tabuľke ani jeden riadok — migrácia chráni ostatné databázy.
+**What the migration does.** Converts stored names to the family by the word in the name; a name with no known family
+it clears (= default model), because the new API constraint would no longer accept it. On the live cockpit on the day
+of the change there was not a single row in the table — the migration protects other databases.
 
-**Späť** sa rodina vymaže na predvolené: konkrétnu verziu, z ktorej vznikla, si nikto nepamätá
-a vymyslená by bola horšia než predvolená.
+**Downgrade** clears the family to the default: nobody remembers the specific version it came from
+and an invented one would be worse than the default.
 
 Revision ID: 101
 Revises: 100

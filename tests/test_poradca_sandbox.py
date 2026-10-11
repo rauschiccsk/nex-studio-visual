@@ -1,7 +1,7 @@
-"""Kontajner Poradcu — zoznam pripojení JE záruka (ICCINT-167, návrh §4.1).
+"""Poradca container — the list of mounts IS the guarantee (ICCINT-167, design §4.1).
 
-Skúšky čítajú hotový ``docker run`` a pýtajú sa, čo v ňom JE a čo v ňom NIE JE. Pridanie pripojenia,
-ktoré by Poradcovi otvorilo cudzí priečinok, ich zčervená.
+The tests read the finished ``docker run`` and ask what IS in it and what is NOT in it. Adding a mount
+that would open a foreign directory to Poradca turns them red.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def test_project_is_mounted_read_only_and_nothing_else_is_reachable(project):
         "source=/home/andros/.claude,",
     ):
         assert forbidden not in joined, forbidden
-    # Záznam rozhovoru, nie priečinok agenta stavby.
+    # The conversation log, not the build agent's directory.
     session = [m for m in mounts if "/.claude/projects/" in m]
     assert len(session) == 1 and "/poradca/sessions/" in session[0]
 
@@ -153,8 +153,8 @@ def test_overlay_finds_secret_files_and_hard_links_everywhere_but_git(tmp_path):
         path.write_text("x")
     outside = tmp_path / "outside-secret.txt"
     outside.write_text("fake")
-    os.link(outside, proj / "innocent.txt")  # pevný odkaz na súbor mimo projektu
-    os.symlink("/etc/hostname", proj / "odkaz.txt")  # symbolický odkaz rieši obmedzený režim (zmerané)
+    os.link(outside, proj / "innocent.txt")  # hard link to a file outside the project
+    os.symlink("/etc/hostname", proj / "odkaz.txt")  # a symbolic link is handled by the restricted mode (measured)
 
     found = set(sandbox.overlay_paths(str(proj)))
     assert {
@@ -189,12 +189,12 @@ def test_prepare_refuses_without_the_data_dir(tmp_path, monkeypatch):
 
 
 def test_shim_path_is_where_the_image_has_the_backend():
-    # Obraz kopíruje backend do /app/backend (koreňový Dockerfile) — prostredník musí byť tam.
+    # The image copies the backend to /app/backend (root Dockerfile) — the shim must be there.
     rel = Path(sandbox.SHIM_PATH).relative_to("/app")
     assert (Path(__file__).resolve().parents[1] / rel).is_file()
 
 
-# ── nález nezávislej previerky 05.10.2026: meno súboru nesmie vpašovať voľby do --mount ─────────────
+# ── finding of the independent review 2026-10-05: a file name must not smuggle options into --mount ─────────────
 
 
 @pytest.mark.parametrize(
@@ -229,7 +229,7 @@ def test_run_argv_itself_refuses_an_unsafe_overlay(project):
 
 
 def test_a_container_that_outlives_the_backend_is_swept_at_startup(project):
-    # ``build_db.reap_orphans`` hľadá ``label=<OWNER_LABEL>`` — kontajner Poradcu musí niesť presne ten kľúč.
+    # ``build_db.reap_orphans`` looks for ``label=<OWNER_LABEL>`` — the Poradca container must carry exactly that key.
     from backend.services import build_db
 
     argv = _argv()
@@ -239,7 +239,7 @@ def test_a_container_that_outlives_the_backend_is_swept_at_startup(project):
 
 def test_trash_moves_the_whole_record_in_one_step_and_can_put_it_back(project):
     cid = uuid4()
-    assert sandbox.move_to_trash(cid) is None  # rozhovor bez záznamu
+    assert sandbox.move_to_trash(cid) is None  # a conversation without a log
     record = sandbox.session_dir(cid)
     (record / "sub").mkdir(parents=True)
     (record / "sub" / "a.jsonl").write_text("x")
@@ -254,13 +254,13 @@ def test_what_discard_cannot_remove_the_startup_sweep_does(project, monkeypatch)
     cid = uuid4()
     sandbox.session_dir(cid).mkdir(parents=True)
     trashed = sandbox.move_to_trash(cid)
-    # Len vlastná náhrada v ``context()`` — ``monkeypatch.undo()`` by vrátil aj presmerovanie dátového
-    # priečinka z prípravku a ``sweep_trash`` by siahol na kôš živého kokpitu.
+    # Only our own replacement in ``context()`` — ``monkeypatch.undo()`` would also revert the redirection of the data
+    # directory from the fixture and ``sweep_trash`` would touch the live cockpit's trash.
     with monkeypatch.context() as m:
-        m.setattr(sandbox.shutil, "rmtree", lambda *a, **k: None)  # napr. kontajner ešte píše
+        m.setattr(sandbox.shutil, "rmtree", lambda *a, **k: None)  # e.g. a container still writing
         sandbox.discard(trashed)
     assert trashed.exists()
-    assert sandbox.trash_dir() == trashed.parent  # stále dočasný priečinok, nie živý
+    assert sandbox.trash_dir() == trashed.parent  # still a temporary directory, not the live one
     assert sandbox.sweep_trash() == 1
     assert not trashed.exists()
 

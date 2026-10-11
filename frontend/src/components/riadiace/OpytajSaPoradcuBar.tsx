@@ -1,8 +1,8 @@
-// Hotová verzia v Riadiacom centre (ICCINT-167): namiesto poľa na správu tlačidlo „Opýtaj sa Poradcu".
+// A finished version in the Riadiace centrum (ICCINT-167): instead of the message field, an „Opýtaj sa Poradcu" button.
 //
-// Na hotovej verzii agent stavby nepracuje — správa by ostala bez odpovede (backend ju odmietne). Otázky
-// k projektu patria Poradcovi, ktorý beží vedľa stavby a len číta; zmenu z jeho odpovede založí ako novú
-// verziu. Tlačidlo otvorí Poradcu s touto verziou predvolenou.
+// The build agent does not work on a finished version — the message would stay unanswered (the backend rejects it).
+// Questions about the project belong to Poradca, who runs alongside the build and only reads; a change from its answer
+// is filed as a new version. The button opens Poradca with this version preselected.
 
 import { useNavigate } from "react-router-dom";
 import { MessageSquare } from "lucide-react";

@@ -1,4 +1,4 @@
-/** Hotová verzia v Riadiacom centre: namiesto poľa na správu „Opýtaj sa Poradcu" (ICCINT-167). */
+/** A finished version in the Riadiace centrum: instead of the message field, „Opýtaj sa Poradcu" (ICCINT-167). */
 
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";

@@ -1,12 +1,12 @@
-"""Doplní spotrebu starších ťahov zo záznamov sedení (ICCINT-168) — :mod:`backend.services.usage_backfill`.
+"""Backfills usage of older turns from session logs (ICCINT-168) — :mod:`backend.services.usage_backfill`.
 
-Bez ``--apply`` len vypíše výkaz po verziách a nič nezapíše. Spúšťa sa v kontajneri backendu kokpitu, ktorý vidí
-záznamy sedení agentov aj Poradcu na tých istých cestách ako hostiteľ::
+Without ``--apply`` only prints the per-version report, writes nothing. Runs in the cockpit backend container that sees
+session logs of agents and of Poradca at the same paths as the host::
 
     docker exec nex-studio-visual-prod-backend-1 python -m backend.scripts.backfill_usage
     docker exec nex-studio-visual-prod-backend-1 python -m backend.scripts.backfill_usage --apply
 
-Po zápise sa hneď doplnia cenníky — ťahy uzavreté Claude Code nesú jeho cenu a z nich sa cenník vyčíta.
+Right after the write the price lists are backfilled — turns closed by Claude Code carry its cost; it is read off them.
 """
 
 from __future__ import annotations

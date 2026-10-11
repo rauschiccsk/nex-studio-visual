@@ -1,4 +1,4 @@
-// Poradca (ICCINT-167) — rozhovory s agentom, ktorý len číta a radí. Backend: `backend/api/routes/poradca.py`.
+// Poradca (ICCINT-167) — conversations with a read-and-advise-only agent. Backend: `backend/api/routes/poradca.py`.
 
 import api, { fetchBlob } from "../api";
 import type {
@@ -52,17 +52,17 @@ export function askPoradcaApi(
   return api.post<PoradcaConversationDetail>(`/poradca/conversations/${id}/messages`, { question, attachments });
 }
 
-/** O čom sa rozprávame — `null` = celý projekt. */
+/** What we are talking about — `null` = the whole project. */
 export function setPoradcaScopeApi(id: string, versionId: string | null): Promise<PoradcaConversation> {
   return api.patch<PoradcaConversation>(`/poradca/conversations/${id}`, { version_id: versionId });
 }
 
-/** Premenovať rozhovor — poradie v zozname sa nemení. */
+/** Rename a conversation — the order in the list does not change. */
 export function renamePoradcaConversationApi(id: string, title: string): Promise<PoradcaConversation> {
   return api.put<PoradcaConversation>(`/poradca/conversations/${id}/title`, { title });
 }
 
-/** Vymazať rozhovor natrvalo — text je preč, cena ostáva v Nákladoch. Kým Poradca odpovedá, 409. */
+/** Delete a conversation permanently — the text is gone, the cost stays in Náklady. While Poradca is answering, 409. */
 export function deletePoradcaConversationApi(id: string): Promise<void> {
   return api.delete<void>(`/poradca/conversations/${id}`);
 }

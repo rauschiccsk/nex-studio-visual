@@ -1,14 +1,14 @@
-"""Server MCP Poradcu na unixovom sockete jednej otázky (ICCINT-167, návrh §4.2).
+"""MCP server of Poradca on the unix socket of a single question (ICCINT-167, design §4.2).
 
-Hovorí podmnožinou protokolu MCP, ktorú Claude Code pri nástrojoch používa — ``initialize``,
-``notifications/initialized``, ``ping``, ``tools/list``, ``tools/call`` — správami JSON-RPC oddelenými
-novým riadkom (prenos stdio; prostredník :mod:`.shim` ich len prenáša). Verziu protokolu vracia tú, ktorú
-poslal klient: táto podmnožina sa medzi verziami nemení a vlastná pevná verzia by sa raz rozišla s Claude
-Code bez toho, aby to niekto zmenil.
+It speaks the subset of the MCP protocol that Claude Code uses for tools — ``initialize``,
+``notifications/initialized``, ``ping``, ``tools/list``, ``tools/call`` — with JSON-RPC messages separated by a
+newline (stdio transport; the intermediary :mod:`.shim` only relays them). It returns the protocol version the
+client sent: this subset does not change between versions, and its own fixed version would one day diverge from Claude
+Code without anyone changing it.
 
-Každý výstup nástroja prejde filtrom tajomstiev a stropom dĺžky skôr, než opustí backend; chyba nástroja
-sa vráti ako ``isError`` s vetou pre agenta, nie ako pád spojenia. O každom volaní sa ohlási KROK
-(nástroj a cieľ) — nikdy obsah.
+Every tool output passes the secret filter and the length cap before it leaves the backend; a tool error
+is returned as ``isError`` with a sentence for the agent, not as a connection crash. Every call reports a STEP
+(tool and target) — never the content.
 """
 
 from __future__ import annotations
@@ -24,25 +24,25 @@ from backend.services.poradca.secrets_filter import SecretFilter
 
 logger = logging.getLogger(__name__)
 
-#: Najdlhší výstup jedného nástroja, ktorý dostane agent — dlhší sa skráti s poznámkou.
+#: The longest output of a single tool that the agent receives — a longer one is truncated with a note.
 MAX_OUTPUT_CHARS = 60_000
 
 _LINE_LIMIT = 4 * 1024 * 1024
 
 
 class ToolError(Exception):
-    """Chyba, ktorú agent dostane ako výsledok nástroja (``isError``) — veta, nie výpis zásobníka."""
+    """An error the agent receives as a tool result (``isError``) — a sentence, not a stack trace dump."""
 
 
 @dataclass(frozen=True)
 class Tool:
-    """Jeden nástroj Poradcu."""
+    """A single Poradca tool."""
 
     name: str
     description: str
     input_schema: dict
     handler: Callable[[dict], Awaitable[str]]
-    #: Cieľ pre priebeh („backend/x.py", „uat · backend") — z argumentov, nikdy z výsledku.
+    #: Target for progress ("backend/x.py", "uat · backend") — from the arguments, never from the result.
     target: Callable[[dict], str]
 
 
@@ -50,7 +50,7 @@ StepCallback = Callable[[str, str], Awaitable[None]]
 
 
 class McpServer:
-    """Server jednej otázky. ``start`` začne počúvať, ``close`` zruší socket aj otvorené spojenia."""
+    """A single-question server. ``start`` begins listening, ``close`` removes the socket and open connections."""
 
     def __init__(
         self,
@@ -69,7 +69,7 @@ class McpServer:
         if os.path.exists(self._socket_path):
             os.unlink(self._socket_path)
         self._server = await asyncio.start_unix_server(self._handle, path=self._socket_path, limit=_LINE_LIMIT)
-        # Kontajner beží ako 1000 a socket vytvoril backend (root); priečinok socketu vidí len táto otázka.
+        # The container runs as 1000 and the backend (root) made the socket; only this question sees its directory.
         os.chmod(self._socket_path, 0o666)
 
     async def close(self) -> None:
@@ -113,14 +113,14 @@ class McpServer:
         await writer.drain()
 
     async def dispatch(self, message: Any) -> Optional[dict]:
-        """Odpoveď na jednu správu JSON-RPC; ``None`` pre oznámenie (bez ``id``)."""
+        """Reply to a single JSON-RPC message; ``None`` for a notification (no ``id``)."""
         if not isinstance(message, dict):
             return _error(None, -32600, "invalid request")
         method = message.get("method")
         msg_id = message.get("id")
         params = message.get("params") or {}
         if msg_id is None:
-            return None  # oznámenie (napr. notifications/initialized) — bez odpovede
+            return None  # notification (e.g. notifications/initialized) — no reply
         if method == "initialize":
             return _result(
                 msg_id,
@@ -155,7 +155,7 @@ class McpServer:
         if self._on_step is not None:
             try:
                 target = tool.target(arguments)
-            except Exception:  # noqa: BLE001 — priebeh nesmie zhodiť nástroj
+            except Exception:  # noqa: BLE001 — progress reporting must not bring the tool down
                 target = ""
             try:
                 await self._on_step(tool.name, self._filter(target)[:200])
@@ -166,7 +166,7 @@ class McpServer:
             is_error = False
         except ToolError as exc:
             output, is_error = str(exc), True
-        except Exception:  # noqa: BLE001 — chyba nástroja je výsledok pre agenta, nie pád otázky
+        except Exception:  # noqa: BLE001 — a tool error is a result for the agent, not a crash of the question
             logger.exception("poradca: tool %s failed", tool.name)
             output, is_error = f"Nástroj {tool.name} zlyhal na strane kokpitu.", True
         output = self._filter(output or "")

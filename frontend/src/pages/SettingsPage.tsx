@@ -66,7 +66,7 @@ import type {
 const AGENT_ROLES: { id: PipelineAgentRole; label: string }[] = [
   { id: "ai_agent", label: ROLE_LABELS.ai_agent },
   { id: "auditor", label: ROLE_LABELS.auditor },
-  // ICCINT-167: Poradca — rozhovory k projektu; predvolene Opus, úsilie high.
+  // ICCINT-167: Poradca — conversations about a project; default Opus, effort high.
   { id: "poradca", label: "Poradca" },
 ];
 

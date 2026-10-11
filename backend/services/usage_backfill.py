@@ -1,23 +1,23 @@
-"""Doplnenie spotreby starších ťahov zo záznamov sedení (ICCINT-168).
+"""Backfilling usage of older turns from session logs (ICCINT-168).
 
-**Prečo.** Ťahy zapísané pred v4.43.0 nesú len vstupné a výstupné tokeny z výsledku behu — vyrovnávaciu pamäť
-kokpit vtedy nevidel (pri Dedo Home 2,27 miliardy prečítaných tokenov), a preto sa oceniť nedajú. Záznamy sedení,
-ktoré si vedie Claude Code, však na disku zväčša ostali. Director 06.10.2026 schválil: „Staršie verzie doplním
-zo záznamov sedení"; kde záznam chýba alebo je neúplný, Náklady napíšu „nevyčíslené".
+**Why.** Turns written before v4.43.0 carry only input and output tokens from the run result — the cockpit did not see
+then (2.27 billion read tokens on Dedo Home), so they cannot be priced. The session logs that
+Claude Code keeps, however, mostly stayed on disk. Director approved on 2026-10-06: „Staršie verzie doplním
+zo záznamov sedení"; where a log is missing or incomplete, Costs say „nevyčíslené".
 
-**Ako.** Záznam sedenia sa rozdelí na behy — každý ``claude -p`` začína zadaním (riadok ``user`` s textom). Beh,
-ktorý Claude Code uzavrel, končí riadkom ``cost-state``; jeho spotreba je rozdiel súčtov aj s cenou (presne ako
-pri novom ťahu, :mod:`usage_ledger`). Prerušený beh súčet nemá; jeho spotreba sú dokončené správy, aj pomocníkov.
+**How.** The session log splits into runs — each ``claude -p`` starts with a prompt (a ``user`` line with text). A run
+that Claude Code closed ends with a ``cost-state`` line; its usage is the difference of totals with the cost (exactly as
+for a new turn, :mod:`usage_ledger`). An interrupted run has no total; its usage is completed messages, helpers' too.
 
-Behy sa priradia k ťahom kokpitu podľa času. **Čas zápisu ťahu je jeho ZAČIATOK**, nie koniec: databáza dáva
-správe čas začiatku transakcie (``now()``), a tá sa otvorila ešte pred spustením agenta (zmerané 06.10.2026: ťah
-zapísaný 13:49:59 s trvaním 73 s, jeho beh skončil 13:51:11). Beh preto patrí ťahu, ktorý začal posledný pred ním,
-ak do jeho trvania padne. Na Dedo Home takto sedí 178 zo 190 ťahov presne na zapísaný výstup (0,98–1,02). Ťah sa
-doplní, len keď priradené behy pokryjú jeho zapísaný výstup — inak ostane nevyčíslený (radšej „nevyčíslené" než
-cudzí ťah).
+Runs are assigned to cockpit turns by time. **The write time of a turn is its START**, not its end: the database gives
+a message the transaction start time (``now()``), and that opened before the agent was launched (measured 2026-10-06:
+a turn written at 13:49:59 with duration 73 s, its run ended at 13:51:11). A run thus belongs to the turn that started
+last before it, if within its duration. On Dedo Home 178 of 190 turns match the written output (0.98–1.02). A turn is
+backfilled only when assigned runs cover its written output — otherwise it stays unquantified (better „nevyčíslené" than
+someone else's turn).
 
-Nič sa nemaže ani neprepisuje: k spotrebe ťahu pribudnú ``parts`` a značka ``backfill``; vstup a výstup, z ktorých
-sa ráta ľudský čas, ostávajú.
+Nothing is deleted or overwritten: ``parts`` and a ``backfill`` marker are added to the turn's usage; input and output
+from which human time is computed, stay.
 """
 
 from __future__ import annotations
@@ -47,30 +47,30 @@ from backend.services.usage_ledger import (
     parts_from_usage_payload,
 )
 
-#: Značka doplnenej spotreby — aby sa dala odlíšiť (a keby treba, odstrániť) bez dotyku zvyšku záznamu.
+#: Marker of backfilled usage — so it can be told apart (and, if needed, removed) without touching the rest of it.
 BACKFILL_MARK = "transcript-2026-10"
 
-#: Beh môže začať toľko pred časom zápisu ťahu (keby sa transakcia otvorila až počas behu); 5–30 s dáva na Dedo Home,
-#: NEX Inboxe aj NEX Manageri rovnaké a najlepšie priradenie, 60 s a viac už berie behy susedných ťahov.
+#: A run may start this long before the turn's write time (if the transaction opened only during the run); 5–30 s gives
+#: the same, best assignment on Dedo Home, NEX Inbox and NEX Manager; 60 s and more already takes neighbours' runs.
 _START_SLACK = timedelta(seconds=15)
-#: Beh musí skončiť najneskôr toľko po trvaní ťahu (príprava pred behom a zápis po ňom sa do trvania nerátajú).
+#: A run must end at most this long after the turn's duration (preparation before it and the write after don't count).
 _END_SLACK = timedelta(seconds=600)
-#: Pomocník patrí prerušenému behu, ak jeho správa vznikla do tejto chvíle po poslednom zápise behu.
+#: A helper belongs to an interrupted run if its message arose by this moment after the run's last write.
 _HELPER_SLACK = timedelta(seconds=15)
-#: Priradené behy musia pokryť zapísaný výstup ťahu aspoň takto (výsledok behu niekedy nerátal pomocníkov,
-#: preto horná hranica nie je 1, ale :data:`_MAX_COVERAGE`).
+#: Assigned runs must cover the turn's written output at least this much (the run result sometimes omitted helpers,
+#: so the upper bound is not 1 but :data:`_MAX_COVERAGE`).
 _MIN_COVERAGE = 0.98
 _MAX_COVERAGE = 4.0
 
 
 @dataclass
 class Invocation:
-    """Jeden beh ``claude -p`` zo záznamu sedenia."""
+    """One ``claude -p`` run from a session log."""
 
     start: datetime
     end: datetime
     parts: list[UsagePart]
-    closed: bool  # Claude Code ho uzavrel — časti nesú jeho cenu
+    closed: bool  # Claude Code closed it — the parts carry its cost
     taken: bool = False
 
     @property
@@ -79,8 +79,8 @@ class Invocation:
 
 
 def _is_prompt(entry: dict) -> bool:
-    """Zadanie behu: správa človeka s textom (nie výsledok nástroja, nie meta, nie pomocník, nie zhrnutie, ktoré
-    Claude Code vloží pri zhustení dlhého rozhovoru — to je pokračovanie toho istého behu)."""
+    """Run prompt: a human message with text (not a tool result, not meta, not a helper, not the summary that
+    Claude Code inserts when compacting a long conversation — that is a continuation of the same run)."""
     if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isSidechain") or entry.get("isCompactSummary"):
         return False
     content = (entry.get("message") or {}).get("content")
@@ -135,7 +135,7 @@ def _entries(path: Path) -> Iterable[dict]:
 
 
 def read_invocations(transcript: Path) -> list[Invocation]:
-    """Behy jedného záznamu sedenia, v poradí, ako bežali."""
+    """Runs of one session log, in the order they ran."""
     out: list[Invocation] = []
     state: CostState = EMPTY_STATE
     start: Optional[datetime] = None
@@ -169,14 +169,14 @@ def read_invocations(transcript: Path) -> list[Invocation]:
         row = _message_row(entry)
         if row is not None and start is not None:
             key, stamp, model, tokens = row
-            messages[key] = (stamp, model, tokens)  # posledný zápis správy je konečný
+            messages[key] = (stamp, model, tokens)  # the last write of a message is final
     close(None)
     _attach_helpers(transcript, out)
     return out
 
 
 def _attach_helpers(transcript: Path, invocations: list[Invocation]) -> None:
-    """Pomocníci prerušeného behu — ich správy patria behu, počas ktorého vznikli. Uzavretý beh ich už má v súčte."""
+    """Helpers of an interrupted run — their messages belong to the run in which they arose; a closed run has them."""
     helpers = transcript.with_suffix("") / "subagents"
     open_runs = [i for i in invocations if not i.closed]
     if not helpers.is_dir() or not open_runs:
@@ -207,22 +207,22 @@ def _merge(a: list[UsagePart], b: list[UsagePart]) -> list[UsagePart]:
     return [UsagePart(m or None, t[0], t[1], t[2], t[3], None, t[4]) for m, t in totals.items()]
 
 
-# ── ťahy, ktoré treba doplniť ─────────────────────────────────────────────────
+# ── turns that need backfilling ───────────────────────────────────────────────
 
 
-#: Druhy ťahov pri priraďovaní behov. Do priradenia idú VŠETKY ťahy, ktoré bežali — aj tie, čo spotrebu už majú
-#: (nový zápis alebo skoršie doplnenie): ich behy si tak vezmú ony a nepripadnú susednému ťahu. Zapisuje sa len
-#: do ``legacy`` (vstup a výstup bez častí) a ``failed`` (zlyhal bez akejkoľvek spotreby).
+#: Kinds of turns when assigning runs. ALL turns that ran go into assignment — even those that already have usage
+#: (new write or earlier backfill): they take their runs, so the runs do not fall to a neighbouring turn. Written only
+#: into ``legacy`` (input and output without parts) and ``failed`` (failed with no usage at all).
 LEGACY, FAILED, METERED = "legacy", "failed", "metered"
 
 
 @dataclass
 class Turn:
-    """Ťah kokpitu s oknom, v ktorom bežal."""
+    """A cockpit turn with the window in which it ran."""
 
     record: object  # PipelineMessage | PoradcaMessage
-    label: str  # "projekt verzia" pre výkaz
-    started_at: datetime  # čas zápisu ťahu = začiatok jeho transakcie, teda pred behom
+    label: str  # "project version" for the report
+    started_at: datetime  # turn write time = the start of its transaction, hence before the run
     duration: timedelta
     recorded_output: int
     kind: str = LEGACY
@@ -236,14 +236,14 @@ class Turn:
     @property
     def accepted(self) -> bool:
         if self.kind == FAILED:
-            return bool(self.matched)  # zapísaný výstup nemá — nie je s čím porovnať, beh v jeho okne je jeho
+            return bool(self.matched)  # it has no written output — nothing to compare with, a run in its window is its
         if self.kind == LEGACY:
             return bool(self.matched) and _MIN_COVERAGE <= self.coverage <= _MAX_COVERAGE
         return False
 
 
 def _kind(payload_usage: object, timing: object) -> Optional[str]:
-    """Druh ťahu podľa toho, čo o spotrebe zapísal; ``None`` = nebežal (správa bez spotreby aj trvania)."""
+    """Kind of turn by what it wrote about usage; ``None`` = did not run (message with neither usage nor duration)."""
     if isinstance(payload_usage, dict):
         if parts_from_usage_payload(payload_usage) is not None:
             return METERED
@@ -255,9 +255,9 @@ def _kind(payload_usage: object, timing: object) -> Optional[str]:
 
 
 def _match(turns: list[Turn], invocations: list[Invocation]) -> None:
-    """Každý beh ťahu, ktorý začal posledný pred ním — ak beh skončil v trvaní toho ťahu. Ťah, ktorý začal až po
-    štarte behu (v tolerancii), dostane beh len vtedy, keď pred ním nezačal žiadny — inak by krátky beh vzal ďalší
-    ťah, ktorý sa začal tesne po ňom."""
+    """Every run of a turn that started last before it, if the run ended within the turn's duration. A turn that started
+    only after the run start (within tolerance) gets a run only if none started before it — else a short run takes the
+    turn, which started just after it."""
     ordered = sorted(turns, key=lambda t: t.started_at)
     for run in invocations:
         before = [t for t in ordered if t.started_at <= run.start]
@@ -271,12 +271,12 @@ def _match(turns: list[Turn], invocations: list[Invocation]) -> None:
 @dataclass
 class Plan:
     turns: list[Turn]
-    #: projekt → počet behov v záznamoch, ktoré nepatria žiadnemu doplňovanému ťahu (informatívne)
+    #: project → number of runs in the logs that belong to no turn being backfilled (informative)
     unmatched_runs: dict[str, int]
 
 
 def plan(db: Session, *, claude_home: Path, poradca_sessions: Path) -> Plan:
-    """Čo by sa doplnilo — nič nezapisuje."""
+    """What would be backfilled — writes nothing."""
     turns: list[Turn] = []
     unmatched: dict[str, int] = {}
 
@@ -333,7 +333,7 @@ def plan(db: Session, *, claude_home: Path, poradca_sessions: Path) -> Plan:
     for conversation, conversation_turns in by_conversation.values():
         if not any(t.kind != METERED for t in conversation_turns):
             continue
-        # Všetky odpovede rozhovoru naraz — beh tesne pred ďalšou otázkou patrí predchádzajúcej odpovedi.
+        # All answers of the conversation at once — a run right before the next question belongs to the previous answer.
         transcript = poradca_sessions / str(conversation.id) / f"{conversation.claude_session_id}.jsonl"
         if transcript.exists():
             _match(conversation_turns, read_invocations(transcript))
@@ -342,7 +342,7 @@ def plan(db: Session, *, claude_home: Path, poradca_sessions: Path) -> Plan:
 
 
 def apply(db: Session, the_plan: Plan) -> int:
-    """Zapíše časti doplnených ťahov; vráti ich počet. Vstup a výstup ťahu sa nemenia."""
+    """Writes the parts of backfilled turns; returns their count. A turn's input and output do not change."""
     written = 0
     for turn in the_plan.turns:
         if not turn.accepted:
@@ -350,7 +350,7 @@ def apply(db: Session, the_plan: Plan) -> int:
         parts = [p.to_payload() for run in turn.matched for p in run.parts]
         record = turn.record
         current = (record.payload or {}).get("usage") if isinstance(record, PipelineMessage) else record.usage
-        # Ťah, ktorý zlyhal, dostane spotrebu len do ceny — vstup a výstup ostanú nulové, ľudský čas sa nemení.
+        # A turn that failed gets usage only up to the cost — input and output stay zero, human time does not change.
         usage = {**(current or {"input_tokens": 0, "output_tokens": 0, "model": None})}
         usage.update(parts=parts, backfill=BACKFILL_MARK)
         if isinstance(record, PipelineMessage):
@@ -363,7 +363,7 @@ def apply(db: Session, the_plan: Plan) -> int:
 
 
 def report(the_plan: Plan) -> list[str]:
-    """Výkaz po verziách: koľko ťahov sa doplní, koľko nie a prečo."""
+    """Report per version: how many turns get backfilled, how many do not and why."""
     by_label: dict[str, list[Turn]] = {}
     for turn in the_plan.turns:
         by_label.setdefault(turn.label, []).append(turn)

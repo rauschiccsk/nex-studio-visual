@@ -111,8 +111,8 @@ class TestRiCannotDeleteSelf:
 
 
 class TestDeleteKeepsWhatTheUserPaidFor:
-    """ICCINT-169: zmazanie používateľa nesmie zobrať jeho rozhovory s Poradcom — s nimi by z Nákladov projektu zmizla
-    cena odpovedí, hoci sa naozaj minula. Kokpit zmazanie odmietne a panel ponúkne deaktiváciu."""
+    """ICCINT-169: deleting a user must not take their Poradca conversations — the cost of answers would vanish from
+    the project's Costs though it was really spent. The cockpit refuses deletion and the panel offers deactivation."""
 
     def _ri(self, client, db_session, name):
         seed_user(db_session, username=name, password="Nex12345", role="ri")
@@ -154,10 +154,10 @@ class TestDeleteKeepsWhatTheUserPaidFor:
         assert resp.status_code == 422
         assert resp.json()["detail"] == "používateľ má rozhovory s Poradcom a ich cena je v Nákladoch projektov"
         db_session.expire_all()
-        assert db_session.get(PoradcaMessage, answer.id) is not None  # odpoveď aj jej cena ostali
+        assert db_session.get(PoradcaMessage, answer.id) is not None  # the answer and its cost stayed
 
     def test_the_database_itself_refuses_to_cascade_the_conversations(self, db_session):
-        """Aj mimo kokpitu (priame zmazanie riadku) databáza rozhovor nezoberie — kľúč je RESTRICT, nie CASCADE."""
+        """Even outside the cockpit (direct row deletion) the database keeps the conversation: RESTRICT, not CASCADE."""
         import pytest
         from sqlalchemy import text
         from sqlalchemy.exc import DBAPIError

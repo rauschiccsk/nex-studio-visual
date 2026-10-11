@@ -1,16 +1,16 @@
-"""Databáza UAT pre Poradcu — len na čítanie, stráži to DATABÁZA (ICCINT-167, návrh §4.3, nálezy B4, B5).
+"""UAT database for Poradca — read-only, guarded by the DATABASE (ICCINT-167, design §4.3, findings B4, B5).
 
-V databáze inštalácie UAT je účet :data:`ROLE` bez práv správcu, s ``default_transaction_read_only = on``
-a ``statement_timeout = 10s``, a s právom SELECT **len na stĺpce bez tajných mien** v obyčajných tabuľkách
-schémy ``public``. Stĺpec s heslom tak nevydá ani ``row_to_json``, alias, ``substr`` či pohľad — odmietne
-ho databáza, nie filter. Tvarový filter výstupu (:mod:`.secrets_filter`) ostáva ako druhá vrstva.
+In the database of a UAT installation there is an account :data:`ROLE` without admin rights, with
+``default_transaction_read_only = on``, ``statement_timeout = 10s`` and SELECT **only on columns without secret names**
+in ordinary tables of the ``public`` schema. A password column is thus not yielded by ``row_to_json``, alias, ``substr``
+or a view — the database refuses it, not a filter. The output shape filter (:mod:`.secrets_filter`) is a second layer.
 
-Účet zakladá :func:`ensure_role` — krok po spustení UAT pri každom nasadení (zachytí aj zmeny schémy:
-práva sa najprv odoberú a potom znova udelia podľa aktuálnych stĺpcov). Do ručne písaného predpisu
-inštalácie sa nesiaha; databáza s rozšírením ``dblink`` alebo ``postgres_fdw`` účet nedostane vôbec.
+The account is created by :func:`ensure_role` — a step after UAT starts on every deployment (catches schema changes too:
+rights are first revoked and then granted again according to the current columns). A hand-written installation
+descriptor is not touched; a database with the ``dblink`` or ``postgres_fdw`` extension gets no account at all.
 
-Dotaz beží cez ``docker exec -u postgres <db> psql -U poradca_ro`` ako POLE argumentov (žiadny shell);
-dotaz so spätnou lomkou sa odmietne (príkazy ``psql`` ako ``\\!``), a viac príkazov v jednom tiež.
+The query runs via ``docker exec -u postgres <db> psql -U poradca_ro`` as an ARRAY of arguments (no shell);
+a query with a backslash is rejected (``psql`` commands such as ``\\!``), and so is more than one statement in one.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ logger = logging.getLogger(__name__)
 
 ROLE = "poradca_ro"
 
-#: Meno roly v PostgreSQL, ktoré smie ísť do ``psql -U`` (z ``POSTGRES_USER`` kontajnera).
+#: PostgreSQL role name that may go into ``psql -U`` (from the container's ``POSTGRES_USER``).
 _PG_ROLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
-#: Stĺpec s takýmto menom Poradca nedostane. Široko — radšej nevidieť stĺpec navyše než heslo. ``cipher`` /
-#: ``nonce``: zašifrované tajomstvo (NEX Inbox ``email_credentials.ciphertext``) je tiež materiál k prístupom.
+#: Poradca does not get a column with such a name. Broad — better to miss an extra column than a password. ``cipher`` /
+#: ``nonce``: an encrypted secret (NEX Inbox ``email_credentials.ciphertext``) is also material for access.
 SECRET_COLUMN_PATTERN = (
     r"(pass|pwd|secret|token|hash|salt|key|session|otp|credential|private|cookie|signature|cipher|nonce)"
 )
-#: Tabuľku s takýmto menom Poradca nedostane vôbec — ani jej „nevinné" stĺpce (zmerané 05.10.2026 v živom
-#: UAT NEX Inboxu: ``email_credentials`` mala skrytý len ``key``, šifrovaný text bol čitateľný).
+#: Poradca gets no table with such a name at all — not even its "innocent" columns (measured 05.10.2026 in the live
+#: UAT of NEX Inbox: ``email_credentials`` had only ``key`` hidden, the encrypted text was readable).
 SECRET_TABLE_PATTERN = r"(credential|secret|password|token|session)"
 
 _FORBIDDEN_EXTENSIONS = ("dblink", "postgres_fdw")
@@ -54,7 +54,7 @@ def _strip_comments(query: str) -> str:
 
 
 def query_problem(query: str) -> Optional[str]:
-    """Veta pre agenta, prečo dotaz nepustíme; ``None``, keď je v poriadku. Skutočnú stráž drží databáza."""
+    """Sentence for the agent on why the query is refused; ``None`` when fine. The real guard is the database."""
     if not query.strip():
         return "Dotaz je prázdny."
     if "\\" in query:
@@ -68,7 +68,7 @@ def query_problem(query: str) -> Optional[str]:
 
 
 def _wrapped(query: str, limit: int) -> str:
-    """SELECT/WITH sa obalí stropom riadkov; EXPLAIN sa pustí, ako je."""
+    """SELECT/WITH is wrapped in a row cap; EXPLAIN is run as is."""
     body = _strip_comments(query).strip().rstrip(";").strip()
     if re.match(r"^\s*explain\b", body, re.IGNORECASE):
         return body
@@ -104,7 +104,7 @@ def _db_service(installation: UatInstallation) -> Optional[str]:
 
 
 async def _db_container(installation: UatInstallation) -> tuple[str, str]:
-    """``(kontajner databázy, meno databázy)`` inštalácie — z jej predpisu a štítkov kontajnera."""
+    """``(database container, database name)`` of the installation — from its descriptor and the container labels."""
     service = _db_service(installation)
     if not service:
         raise ToolError(f"Inštalácia UAT {installation.customer_slug} nemá databázu, ktorú by kokpit rozpoznal.")
@@ -162,13 +162,13 @@ async def run_query(installation: UatInstallation, query: str, *, rows: int, tim
             )
         return f"Databáza dotaz odmietla:\n{out.strip()[:2000]}"
     lines = out.rstrip("\n").splitlines()
-    if len(lines) > rows + 1:  # hlavička + riadky
+    if len(lines) > rows + 1:  # header + rows
         lines = lines[: rows + 1] + [f"… (zobrazených prvých {rows} riadkov)"]
     return f"Dotaz:\n{sql}\n\nVýsledok (UAT {installation.customer_slug}):\n" + "\n".join(lines)
 
 
 def role_setup_sql(db_name: str) -> str:
-    """Skript, ktorý účet Poradcu založí alebo zosúladí so súčasnou schémou. Opakovateľný."""
+    """Script that creates the Poradca account or reconciles it with the current schema. Repeatable."""
     return f"""
 DO $$
 BEGIN
@@ -208,13 +208,13 @@ END $$;
 
 
 async def ensure_role(installation_dir: Path, customer_slug: str) -> tuple[bool, str]:
-    """Založí alebo zosúladí účet Poradcu v databáze inštalácie UAT. Nikdy nevyhodí výnimku.
+    """Creates or reconciles the Poradca account in the database of a UAT installation. Never raises an exception.
 
-    Vráti ``(ok, veta)`` — nasadenie UAT kvôli Poradcovi nezlyhá; veta ide do jeho záznamu.
+    Returns ``(ok, sentence)`` — UAT deployment does not fail because of Poradca; the sentence goes to its record.
     """
     try:
         return await _ensure_role(UatInstallation(customer_slug, customer_slug, installation_dir))
-    except Exception:  # noqa: BLE001 — nasadenie UAT kvôli Poradcovi nikdy nezlyhá
+    except Exception:  # noqa: BLE001 — a UAT deployment never fails because of Poradca
         logger.exception("poradca: role setup crashed in %s", installation_dir)
         return False, f"Účet Poradcu v databáze UAT {customer_slug} sa nepodarilo pripraviť."
 
@@ -225,8 +225,8 @@ async def _ensure_role(installation: UatInstallation) -> tuple[bool, str]:
         container, db_name = await _db_container(installation)
     except ToolError as exc:
         return False, str(exc)
-    # Správca databázy je ten z nastavenia inštalácie (nexmanager, nexweb, …) — rola ``postgres`` v živých
-    # UAT neexistuje (zmerané 05.10.2026 pred prvým zápisom). Miestny socket ho pustí bez hesla.
+    # The DB admin is the one from the installation settings (nexmanager, nexweb, …) — the ``postgres`` role does not
+    # exist in the live UAT (measured 05.10.2026 before the first write). The local socket admits it without a password.
     code, superuser = await _docker("exec", container, "printenv", "POSTGRES_USER")
     superuser = (superuser.strip() if code == 0 else "") or "postgres"
     if not _PG_ROLE_RE.match(superuser):

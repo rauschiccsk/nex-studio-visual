@@ -65,7 +65,7 @@ describe("Nastavenia → Agenti — model by family (ICCINT-167)", () => {
     );
     expect(screen.getAllByRole("option", { name: "Sonnet — vždy najnovší" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("option", { name: "Haiku — vždy najnovší (naposledy bežal Haiku 4.5)" }).length).toBeGreaterThan(0);
-    // ICCINT-167: Poradca si model a úsilie nastavuje ako ostatní agenti.
+    // ICCINT-167: Poradca sets its model and effort like the other agents.
     expect(screen.getByText("Poradca")).toBeInTheDocument();
     // No option value is a version — only families reach the backend.
     const values = screen.getAllByRole("option").map((o) => (o as HTMLOptionElement).value);

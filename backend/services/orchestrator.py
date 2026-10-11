@@ -153,10 +153,10 @@ FRAMEWORK_RESUME_DIRECTIVE = (
     "Pokračuj v práci tam, kde si prestal."
 )
 
-#: Odpoveď na správu do Riadiaceho centra HOTOVEJ verzie (ICCINT-167). Konzultácia, ktorá na ňu kedysi
-#: odpovedala, je preč — otázky k projektu patria Poradcovi (beží vedľa stavby, len číta) a zmena patrí
-#: do novej verzie. Odmietnuť je poctivejšie než správu uložiť: agent stavby na hotovej verzii nepracuje
-#: a správa by ostala bez odpovede (presne chyba, ktorú Konzultácia kedysi opravovala).
+#: Reply to a message to the Riadiace centrum of a FINISHED version (ICCINT-167). The Konzultácia that once answered it
+#: is gone — questions about the project belong to Poradca (runs alongside the build, read-only) and a change belongs
+#: in a new version. Refusing is more honest than saving the message: the build agent does not work on a finished one
+#: and the message would stay unanswered (exactly the bug that Konzultácia once fixed).
 DONE_RELAY_REFUSAL = (
     "Verzia je hotová — agent stavby na nej už nepracuje. Otázku k nej polož Poradcovi, zmenu založ ako novú verziu."
 )
@@ -6037,8 +6037,8 @@ async def _run_uat_deploy(
     else:
         ok, detail = await _verify_uat_serves(project_slug, uat_slug)
     if ok and environment == "uat" and not deploy_host:
-        # ICCINT-167: účet Poradcu len na čítanie v databáze UAT — po každom nasadení, aby práva sledovali
-        # schému (nový stĺpec s heslom nesmie zostať čitateľný). Nasadenie kvôli nemu nikdy nezlyhá.
+        # ICCINT-167: read-only Poradca account in the UAT database — after each deployment, so the rights follow
+        # the schema (a new column with a password must not stay readable). A deployment never fails because of it.
         from backend.services.poradca import uat_db
 
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)

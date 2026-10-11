@@ -1,4 +1,4 @@
-"""Filter tajomstiev Poradcu (ICCINT-167, návrh §4.4). Všetky hodnoty sú UMELÉ — nikdy nie skutočné."""
+"""Poradca secrets filter (ICCINT-167, design §4.4). All values are ARTIFICIAL — never real."""
 
 from __future__ import annotations
 

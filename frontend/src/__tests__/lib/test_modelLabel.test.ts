@@ -1,6 +1,6 @@
 /**
- * Mená modelov (ICCINT-167): z úplného mena, ktoré hlási Claude Code, sa skladá meno pre človeka bez
- * zoznamu známych verzií — aj verzia, ktorá ešte nevyšla, sa musí ukázať správne.
+ * Model names (ICCINT-167): a human-readable name is composed from the full name reported by Claude Code, without
+ * a list of known versions — even a version that has not been released yet must be shown correctly.
  */
 
 import { describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ describe("modelDisplayName", () => {
     ["claude-opus-5", "Opus 5"],
     ["claude-sonnet-5-5", "Sonnet 5.5"],
     ["claude-haiku-4-5-20251001", "Haiku 4.5"],
-    // Verzia, ktorú kokpit nikdy nevidel — žiadny zoznam ju nesmie potrebovať.
+    // A version the cockpit has never seen — no list may need it.
     ["claude-opus-7-2", "Opus 7.2"],
     ["opus", "Opus"],
   ])("%s → %s", (id, expected) => {

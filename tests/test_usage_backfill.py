@@ -1,7 +1,7 @@
-"""Doplnenie spotreby starších ťahov zo záznamov sedení (ICCINT-168, :mod:`usage_backfill`).
+"""Backfilling the spend of older turns from session logs (ICCINT-168, :mod:`usage_backfill`).
 
-Záznamy majú tvar, aký Claude Code naozaj píše: beh začína zadaním (``user`` s textom), uzavretý beh končí
-súčtom sedenia ``cost-state``, prerušený nemá nič; pomocníci v ``<sedenie>/subagents``.
+The logs have the shape Claude Code really writes: a run starts with the prompt (``user`` with text), a closed run ends
+with the session total ``cost-state``, an interrupted one has nothing; helpers are in ``<session>/subagents``.
 """
 
 from __future__ import annotations
@@ -64,18 +64,18 @@ def _write(path: Path, rows: list[dict]) -> None:
 
 
 def _three_runs(path: Path) -> None:
-    """Uzavretý beh → prerušený beh → uzavretý beh (súčet po treťom nezahŕňa prerušený — tak to Claude Code robí)."""
+    """Closed run → interrupted run → closed run (the third total excludes the interrupted run, as in Claude Code)."""
     _write(
         path,
         [
             _prompt(T0),
             _msg("a1", T0 + timedelta(seconds=5), 100),
-            _tool_result(T0 + timedelta(seconds=6)),  # výsledok nástroja nie je nové zadanie
+            _tool_result(T0 + timedelta(seconds=6)),  # a tool result is not a new prompt
             _msg("a2", T0 + timedelta(seconds=9), 200),
             _state(out=300, cost=0.10, read=3000),
             _prompt(T0 + timedelta(minutes=5)),
             _msg("b1", T0 + timedelta(minutes=5, seconds=3), 40),
-            _msg("b1", T0 + timedelta(minutes=5, seconds=8), 400),  # posledný zápis správy je konečný
+            _msg("b1", T0 + timedelta(minutes=5, seconds=8), 400),  # the last write of a message is final
             _prompt(T0 + timedelta(minutes=10)),
             _msg("c1", T0 + timedelta(minutes=10, seconds=4), 50),
             _state(out=350, cost=0.12, read=4000),
@@ -90,7 +90,7 @@ def test_a_session_record_splits_into_runs_closed_with_a_price_or_cut_off_withou
     assert first.closed and first.parts == [UsagePart(OPUS, 3, 300, 3000, 30, 0.10)]
     assert first.end == T0 + timedelta(seconds=9)
     assert not cut.closed and cut.parts == [UsagePart(OPUS, 1, 400, 1000, 10, None)]
-    # súčet po treťom behu sa odčíta od súčtu po PRVOM — prerušený beh medzi nimi súčet nemá
+    # the total after the third run is subtracted from the one after the FIRST — the interrupted run between has none
     assert last.closed and last.parts == [UsagePart(OPUS, 0, 50, 1000, 0, pytest.approx(0.02))]
 
 
@@ -123,8 +123,8 @@ def world(db_session, tmp_path):
 
 
 def _turn(db, version, *, at: datetime, out: int, duration: float = 15.0) -> PipelineMessage:
-    """Ťah, ako ho kokpit zapísal. ``at`` je čas ZÁPISU = začiatok transakcie, teda PRED behom ťahu (zmerané:
-    ťah zapísaný 13:49:59 s trvaním 73 s, jeho beh skončil 13:51:11)."""
+    """A turn as the cockpit wrote it. ``at`` is the WRITE time = transaction start, i.e. BEFORE the turn ran (measured:
+    a turn written 13:49:59 with a duration of 73 s, its run ended 13:51:11)."""
     msg = PipelineMessage(
         version_id=version.id,
         stage="programovanie",
@@ -143,7 +143,7 @@ def _turn(db, version, *, at: datetime, out: int, duration: float = 15.0) -> Pip
     return msg
 
 
-#: Začiatky ťahov troch behov z :func:`_three_runs` (behy začínajú T0, T0+5 min, T0+10 min).
+#: Starts of the turns of the three runs from :func:`_three_runs` (runs start at T0, T0+5 min, T0+10 min).
 STARTS = (T0 - timedelta(seconds=1), T0 + timedelta(minutes=4, seconds=59), T0 + timedelta(minutes=9, seconds=59))
 
 
@@ -152,11 +152,11 @@ def _three_turns(db, version, outs=(300, 400, 50)) -> list[PipelineMessage]:
 
 
 def test_old_turns_get_their_runs_and_keep_what_they_recorded(world):
-    """Každý beh patrí ťahu, ktorý začal posledný pred ním; ťah dostane časti a značku, jeho vstup a výstup
-    (z ktorých sa ráta ľudský čas) ostanú. Ťah, ktorému žiadny beh nepatrí, ostane nedoplnený."""
+    """Each run belongs to the last turn that started before it; the turn gets parts and a mark, its input and output
+    (from which human time is computed) stay. A turn to which no run belongs stays unfilled."""
     db, version = world["db"], world["version"]
     first, cut, _third = _three_turns(db, version)
-    nothing = _turn(db, version, at=T0 + timedelta(hours=3), out=999)  # žiadny beh — záznam sa nezachoval
+    nothing = _turn(db, version, at=T0 + timedelta(hours=3), out=999)  # no run — the log was not preserved
 
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
     assert usage_backfill.apply(db, the_plan) == 3
@@ -164,14 +164,14 @@ def test_old_turns_get_their_runs_and_keep_what_they_recorded(world):
     assert db.get(PipelineMessage, first.id).payload["usage"]["parts"][0]["cost_usd"] == 0.10
     stored = db.get(PipelineMessage, cut.id).payload["usage"]
     assert stored["parts"][0]["cost_usd"] is None and stored["backfill"] == usage_backfill.BACKFILL_MARK
-    assert (stored["input_tokens"], stored["output_tokens"]) == (3, 400)  # nezmenené
+    assert (stored["input_tokens"], stored["output_tokens"]) == (3, 400)  # unchanged
     assert "parts" not in db.get(PipelineMessage, nothing.id).payload["usage"]
     assert the_plan.unmatched_runs[world["project"].slug] == 0
     assert any("1.5.0: ťahov 4, doplní sa 3" in line for line in usage_backfill.report(the_plan))
 
 
 def test_a_run_long_after_the_last_turn_belongs_to_no_turn(world):
-    """Beh, ktorý skončil dávno po trvaní ťahu, čo začal pred ním, mu nepatrí — jeho vlastný ťah sa nezachoval."""
+    """A run ending long after the duration of the turn that started before it is not its — its own turn was lost."""
     db, version = world["db"], world["version"]
     early = _turn(db, version, at=T0 - timedelta(hours=1), out=300)
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
@@ -182,8 +182,8 @@ def test_a_run_long_after_the_last_turn_belongs_to_no_turn(world):
 
 
 def test_a_run_that_does_not_cover_the_turn_is_not_forced_onto_it(world):
-    """Ťah zapísal 5 000 výstupných tokenov, beh v jeho čase má 300 — to nie je jeho beh (alebo záznam je neúplný):
-    radšej „nevyčíslené" než cudzia spotreba."""
+    """The turn wrote 5 000 output tokens, the run at its time has 300 — that is not its run (or the log is incomplete):
+    better „nevyčíslené" than someone else's spend."""
     db, version = world["db"], world["version"]
     first, *_rest = _three_turns(db, version, outs=(5_000, 400, 50))
     the_plan = usage_backfill.plan(db, claude_home=world["home"], poradca_sessions=world["tmp"] / "none")
@@ -202,9 +202,9 @@ def test_a_turn_already_recorded_with_parts_is_left_alone(world):
 
 
 def test_a_compaction_summary_does_not_split_a_run(tmp_path):
-    """Pri zhustení dlhého rozhovoru vloží Claude Code zhrnutie ako správu ``user`` s textom — nie je to nové zadanie.
-    Keby bolo, prvá polovica behu by sa zarátala zo správ a druhá zo súčtu, ktorý ju už obsahuje (nález kontroly:
-    Dedo Home +169-tisíc výstupných tokenov navyše)."""
+    """On compacting a long conversation Claude Code inserts the summary as a ``user`` message with text — not a prompt.
+    If it were, the first half of the run would count from messages and the second from a total that contains it (review
+    finding: Dedo Home +169 thousand extra output tokens)."""
     path = tmp_path / "s.jsonl"
     summary = {"type": "user", "isCompactSummary": True, "timestamp": _iso(T0 + timedelta(seconds=4))}
     summary["message"] = {"role": "user", "content": "Zhrnutie doterajšieho rozhovoru…"}
@@ -223,8 +223,8 @@ def test_a_compaction_summary_does_not_split_a_run(tmp_path):
 
 
 def test_running_the_backfill_twice_counts_nothing_twice(world):
-    """Druhé spustenie: beh, ktorý už patrí doplnenému ťahu, si ten ťah nechá — nepripadne inému nedoplnenému
-    ťahu, ktorý začal skôr a jeho vlastný beh v zázname chýba (presne by mu „sedel")."""
+    """Second run: a run that already belongs to a filled-in turn stays with it — it does not fall to another unfilled
+    turn that started earlier and whose own run is missing from the log (it would fit it exactly)."""
     db, version = world["db"], world["version"]
     earlier = _turn(db, version, at=T0 - timedelta(minutes=2), out=300, duration=200.0)
     first, *_rest = _three_turns(db, version)
@@ -237,8 +237,8 @@ def test_running_the_backfill_twice_counts_nothing_twice(world):
 
 
 def test_a_failed_turns_runs_are_costed_but_not_turned_into_human_work(world):
-    """Ťah, ktorý zlyhal pred v4.43.0, nemá zapísanú spotrebu vôbec — jeho beh je v zázname. Doplní sa do ceny;
-    vstup a výstup (z nich sa ráta ľudský čas) ostanú nulové — zlyhaný pokus nie je práca, ktorú by robil človek."""
+    """A turn that failed before v4.43.0 has no spend recorded — its run is in the log. It is filled into the price;
+    input and output (from which human time is computed) stay zero — a failed attempt is not work a human would do."""
     db, version = world["db"], world["version"]
     _first, failed, _third = _three_turns(db, version)
     failed.payload = {**failed.payload, "usage": None}
@@ -252,8 +252,8 @@ def test_a_failed_turns_runs_are_costed_but_not_turned_into_human_work(world):
 
 
 def test_a_short_run_stays_with_its_answer_even_when_the_next_question_follows_at_once(world):
-    """Odpovede jedného rozhovoru sa priraďujú spolu. Krátky beh patrí odpovedi, ktorá začala PRED ním — nie ďalšej
-    otázke, položenej pár sekúnd po jeho štarte."""
+    """Answers of one conversation are assigned together. A short run belongs to the answer that started BEFORE it — not
+    to the next question asked a few seconds after its start."""
     db = world["db"]
     conversation = PoradcaConversation(
         project_id=world["project"].id, author_id=world["user"].id, title="t", claude_session_id=uuid.uuid4()
@@ -275,7 +275,7 @@ def test_a_short_run_stays_with_its_answer_even_when_the_next_question_follows_a
         return answer
 
     first = _answer(T0 - timedelta(seconds=2), T0 + timedelta(seconds=10), 300)
-    second = _answer(T0 + timedelta(seconds=12), T0 + timedelta(minutes=5, seconds=9), 400)  # 12 s po štarte behu
+    second = _answer(T0 + timedelta(seconds=12), T0 + timedelta(minutes=5, seconds=9), 400)  # 12 s after the run start
     _answer(T0 + timedelta(minutes=9, seconds=58), T0 + timedelta(minutes=10, seconds=5), 50)
     sessions = world["tmp"] / "poradca"
     _three_runs(sessions / str(conversation.id) / f"{conversation.claude_session_id}.jsonl")
@@ -287,7 +287,7 @@ def test_a_short_run_stays_with_its_answer_even_when_the_next_question_follows_a
 
 
 def test_an_old_poradca_answer_is_filled_from_its_conversation_record(world):
-    """Stará odpoveď Poradcu sa doplní zo záznamu sedenia SVOJHO rozhovoru — aj s cenou, ktorú Claude Code zaplatil."""
+    """An old Poradca answer is filled in from the session log of ITS conversation — with the price Claude Code paid."""
     db = world["db"]
     conversation = PoradcaConversation(
         project_id=world["project"].id, author_id=world["user"].id, title="t", claude_session_id=uuid.uuid4()

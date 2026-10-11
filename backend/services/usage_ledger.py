@@ -1,23 +1,23 @@
-"""Spotreba jedného behu Claude Code — zo záznamu sedenia, ktorý si Claude Code vedie sám (ICCINT-168).
+"""Usage of a single Claude Code run — from the session log that Claude Code keeps itself (ICCINT-168).
 
-**Prečo nie z výsledku behu.** Výsledok (``result``) nesie ``total_cost_usd`` a ``modelUsage`` — ale pri
-pokračovaní sedenia (``--resume``) sú to SÚČTY ZA CELÉ SEDENIE, nie za beh (zmerané 06.10.2026, Claude Code
-2.1.290: druhý beh v sedení hlásil 0,0141886 $ = prvý 0,0113585 $ + druhý sám 0,0028301 $). Kokpit pokračuje
-v tom istom sedení pri každom ťahu stavby; sčítanie týchto čísel by Náklady mnohonásobne nafúklo.
+**Why not from the run result.** The result (``result``) carries ``total_cost_usd`` and ``modelUsage`` — but when
+a session is resumed (``--resume``) they are TOTALS FOR THE WHOLE SESSION, not the run (measured 2026-10-06, Claude Code
+2.1.290: 2nd run in a session reported $0.0141886 = 1st $0.0113585 + 2nd alone $0.0028301). The cockpit continues
+in the same session on every build turn; summing these numbers would inflate Costs many times over.
 
-**Odkiaľ teda.** Na konci každého dokončeného behu zapíše Claude Code do záznamu sedenia riadok ``cost-state``
-so súčtom po modeloch (tokeny všetkých druhov aj cenu). Kokpit si posledný súčet prečíta PRED behom a znova
-PO ňom; spotreba behu je ich rozdiel — presne to, čo Claude Code naúčtoval, aj s pomocníkmi (Task) a aj pre
-beh, ktorý síce skončil chybou, ale Claude Code ho stihol uzavrieť.
+**So where from.** At the end of every completed run Claude Code writes a ``cost-state`` line into the session log
+with the per-model total (tokens of all kinds and the cost). The cockpit reads the last total BEFORE the run and again
+AFTER it; the run's usage is their difference — exactly what Claude Code billed, including helpers (Task) and also for a
+run that ended with an error but that Claude Code managed to close.
 
-**Prerušený beh** (vypršal čas, zabitý proces) ``cost-state`` nezapíše a v súčte Claude Code chýba (zmerané:
-zabitý beh medzi dvoma dokončenými sa do súčtu nedostal). Jeho tokeny však v zázname sú — konečné čísla každej
-DOKONČENEJ správy, aj u pomocníkov (``<sedenie>/subagents/*.jsonl``). Správa rozpísaná v okamihu zabitia má
-v zázname nuly a jej doterajší výstup sa zistiť nedá. Ceny takej časti Claude Code nehlási (``cost_usd`` je
-``None``); ocení ju cenník (:mod:`backend.services.model_pricing`).
+**An interrupted run** (timed out, killed) writes no ``cost-state`` and is missing from Claude Code's total (measured:
+a run killed between two completed ones missed the total). Its tokens are in the log though — final numbers of each
+COMPLETED message, helpers' too (``<session>/subagents/*.jsonl``). A message being written at the moment of the kill has
+zeros in the log and its output so far is unknown. Claude Code does not report the cost of such a part (``cost_usd`` is
+``None``); the price list prices it (:mod:`backend.services.model_pricing`).
 
-**Priebežné správy** zo ``stream-json`` sa na spotrebu nepoužívajú: nesú počet výstupných tokenov z okamihu,
-keď správa začala (zmerané: 4 namiesto 2 983).
+**Intermediate messages** from ``stream-json`` are not used for usage: they carry the output-token count from the moment
+the message started (measured: 4 instead of 2,983).
 """
 
 from __future__ import annotations
@@ -32,24 +32,24 @@ from typing import Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Model, ktorým Claude Code označuje vlastné náhradné správy (chyba API, prerušenie) — nič sa za ne neplatí.
+#: The model Claude Code uses to label its own substitute messages (API error, interruption) — nothing is paid for them.
 SYNTHETIC_MODEL = "<synthetic>"
 
-#: Riadky záznamu s časom pred začiatkom behu, o ktoré sa ešte opiera hranica behu (hodiny hostiteľa aj
-#: kontajnera sú tie isté; rezerva kryje len zaokrúhlenie časovej pečiatky).
+#: Log lines timestamped before the run start that the run boundary still relies on (host and
+#: container clocks are the same; the margin only covers timestamp rounding).
 _CLOCK_SLACK = timedelta(seconds=2)
 
-#: Po koľkých bajtoch sa záznam číta odzadu. Záznam stavby má desiatky MB (Dedo Home 71 MB) a beh je na konci.
+#: After how many bytes the log is read from the end. A build log is tens of MB (Dedo Home 71 MB); the run is last.
 _CHUNK = 1 << 20
 
 
 @dataclass(frozen=True)
 class UsagePart:
-    """Spotreba jedného modelu v jednom behu.
+    """Usage of one model in one run.
 
-    ``cost_usd`` je cena, ktorú za presne tieto tokeny vypočítal Claude Code — ``None``, keď ju nenahlásil
-    (prerušený beh, alebo sa záznam sedenia nedal prečítať). Tokeny ``cache_write`` sú zápis do vyrovnávacej
-    pamäte, ``cache_read`` čítanie z nej; ``input`` je vstup mimo nej."""
+    ``cost_usd`` is the cost Claude Code computed for exactly these tokens — ``None`` when it did not report it
+    (interrupted run, or the session log could not be read). ``cache_write`` tokens are writes to the cache,
+    ``cache_read`` reads from it; ``input`` is input outside it."""
 
     model: Optional[str]
     input_tokens: int = 0
@@ -57,7 +57,7 @@ class UsagePart:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     cost_usd: Optional[float] = None
-    #: Vyhľadávania na webe — Claude Code ich účtuje zvlášť (nie sú tokeny), a v ``cost_usd`` sú (ICCINT-168).
+    #: Web searches — Claude Code bills them separately (not tokens) and they are in ``cost_usd`` (ICCINT-168).
     web_search_requests: int = 0
 
     @property
@@ -93,22 +93,22 @@ class UsagePart:
 
 
 def parts_from_usage_payload(usage: object) -> Optional[list[UsagePart]]:
-    """Časti spotreby uložené pri ťahu, alebo ``None`` pri zázname spred ICCINT-168 (len vstup a výstup bez
-    vyrovnávacej pamäte — taký sa oceniť nedá a Náklady to musia povedať, nie ho podceniť)."""
+    """Parts of usage stored at the turn, or ``None`` for a record from before ICCINT-168 (only input and output without
+    the cache — such a record cannot be priced and Costs must say so, not underestimate it)."""
     if not isinstance(usage, dict) or not isinstance(usage.get("parts"), list):
         return None
     return [p for p in (UsagePart.from_payload(d) for d in usage["parts"]) if p is not None]
 
 
-# ── záznam sedenia ─────────────────────────────────────────────────────────────
+# ── session log ────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class CostState:
-    """Súčet sedenia z riadku ``cost-state``: model → (vstup, výstup, čítanie, zápis, vyhľadávania, cena $).
+    """Session total from the ``cost-state`` line: model → (input, output, read, write, searches, cost $).
 
-    ``unknown_cost``: Claude Code cenu niektorého modelu nepozná (``hasUnknownModelCost``) — jeho ``costUSD`` je
-    potom odhad a nesmie sa vydávať za cenu Claude Code (ani učiť cenník)."""
+    ``unknown_cost``: Claude Code does not know the price of some model (``hasUnknownModelCost``) — its ``costUSD`` is
+    then an estimate and must not be passed off as Claude Code's price (nor teach the price list)."""
 
     models: dict[str, tuple[int, int, int, int, int, float]]
     unknown_cost: bool = False
@@ -134,12 +134,12 @@ EMPTY_STATE = CostState({})
 
 
 def build_transcript(session_dir: Path, claude_session_id: object) -> Path:
-    """Súbor záznamu sedenia ``<priečinok sedení projektu>/<id sedenia>.jsonl``."""
+    """Session log file ``<project session directory>/<session id>.jsonl``."""
     return session_dir / f"{claude_session_id}.jsonl"
 
 
 def _lines_backwards(path: Path) -> Iterator[str]:
-    """Riadky súboru od konca — záznam stavby má desiatky MB a to podstatné je na jeho konci."""
+    """Lines of the file from the end — a build log is tens of MB and what matters is at its end."""
     with open(path, "rb") as fh:
         fh.seek(0, os.SEEK_END)
         pos = fh.tell()
@@ -159,8 +159,8 @@ def _lines_backwards(path: Path) -> Iterator[str]:
 
 
 def last_cost_state(transcript: Path) -> Optional[CostState]:
-    """Posledný súčet sedenia; :data:`EMPTY_STATE`, keď sedenie súčet ešte nemá (nové sedenie, žiadny
-    dokončený beh), ``None``, keď sa záznam nedá prečítať."""
+    """The last session total; :data:`EMPTY_STATE` when the session has no total yet (new session, no
+    completed run), ``None`` when the log cannot be read."""
     try:
         if not transcript.exists():
             return EMPTY_STATE
@@ -174,16 +174,16 @@ def last_cost_state(transcript: Path) -> Optional[CostState]:
             if isinstance(entry, dict) and entry.get("type") == "cost-state":
                 return CostState.from_line(entry)
         return EMPTY_STATE
-    except Exception:  # noqa: BLE001 — číta sa aj PRED ťahom; meranie nesmie zhodiť ťah
+    except Exception:  # noqa: BLE001 — also read BEFORE a turn; the measurement must not bring the turn down
         logger.warning("usage: záznam sedenia %s sa nedá prečítať", transcript, exc_info=True)
         return None
 
 
 def _delta(before: CostState, after: CostState) -> Optional[list[UsagePart]]:
-    """Spotreba medzi dvoma súčtami, po modeloch. ``None``, keď súčet klesol — to nie je ten istý rad
-    (sedenie sa založilo nanovo) a rozdiel by klamal."""
+    """Usage between two totals, per model. ``None`` when the total decreased — that is not the same series
+    (the session was created anew) and the difference would lie."""
     if any(model not in after.models for model in before.models):
-        return None  # model zo súčtu zmizol — nový rad, nie pokračovanie
+        return None  # the model vanished from the total — a new series, not a continuation
     parts: list[UsagePart] = []
     for model, now in after.models.items():
         then = before.models.get(model, (0, 0, 0, 0, 0, 0.0))
@@ -207,7 +207,7 @@ def _delta(before: CostState, after: CostState) -> Optional[list[UsagePart]]:
 
 
 def _parse_ts(value: object) -> Optional[datetime]:
-    """Čas zápisu; bez časového pásma ho Claude Code píše v UTC (porovnáva sa so začiatkom behu v UTC)."""
+    """Write time; without a time zone Claude Code writes it in UTC (it is compared with the run start in UTC)."""
     if not isinstance(value, str):
         return None
     try:
@@ -218,7 +218,7 @@ def _parse_ts(value: object) -> Optional[datetime]:
 
 
 def _is_cost_state(line: str) -> bool:
-    """Riadok so súčtom sedenia — podľa typu, nie podľa textu (ten istý text môže byť aj v nástroji agenta)."""
+    """The line with the session total — by type, not by text (the same text may also be in an agent's tool)."""
     if '"cost-state"' not in line:
         return False
     try:
@@ -229,10 +229,10 @@ def _is_cost_state(line: str) -> bool:
 
 
 def _finished_messages(lines: Iterator[str], since: datetime, *, stop_at_cost_state: bool) -> dict[str, tuple]:
-    """Konečná spotreba každej správy modelu od ``since`` — id správy → (model, vstup, výstup, čítanie, zápis).
+    """Final usage of every model message since ``since`` — message id → (model, input, output, read, write).
 
-    Claude Code zapisuje správu po blokoch, každý so spotrebou z toho okamihu; platí POSLEDNÝ zápis správy.
-    Číta sa odzadu, takže prvý videný zápis správy je ten posledný."""
+    Claude Code writes a message in blocks, each with the usage from that moment; the LAST write of a message counts.
+    It is read from the end, so the first write of a message seen is the last one."""
     seen: dict[str, tuple] = {}
     for line in lines:
         if stop_at_cost_state and _is_cost_state(line):
@@ -270,10 +270,10 @@ def _searches(usage: dict) -> int:
 
 
 def unfinished_parts(transcript: Path, started_at: datetime) -> list[UsagePart]:
-    """Spotreba prerušeného behu: dokončené správy hlavného sedenia aj pomocníkov od začiatku behu, po modeloch.
+    """Usage of an interrupted run: completed messages of the main session and helpers since the run start, per model.
 
-    Hlavný záznam sa číta odzadu po posledný ``cost-state`` (koniec posledného DOKONČENÉHO behu; všetko za ním
-    je novšie), pomocníci (``<sedenie>/subagents``) celí, ak sa menili počas behu."""
+    The main log is read from the end up to the last ``cost-state`` (end of the last COMPLETED run; everything after it
+    is newer), helpers (``<session>/subagents``) whole, if they changed during the run."""
     since = started_at - _CLOCK_SLACK
     seen: dict[str, tuple] = {}
     try:
@@ -310,11 +310,11 @@ def unfinished_parts(transcript: Path, started_at: datetime) -> list[UsagePart]:
 
 
 def settle(transcript: Path, before: Optional[CostState], started_at: datetime) -> Optional[list[UsagePart]]:
-    """Spotreba behu, ktorý práve skončil — akokoľvek.
+    """Usage of a run that has just ended — however it ended.
 
-    Pribudol súčet sedenia → beh Claude Code uzavrel a spotreba je rozdiel súčtov (s jeho cenou). Nepribudol →
-    beh bol prerušený a spotreba sú jeho dokončené správy (bez ceny). ``None``, keď sa záznam nedá prečítať
-    alebo súčet nemá zmysel — volajúci potom použije, čo vie z výsledku behu, a nič nevymýšľa."""
+    A session total was added → Claude Code closed the run, usage is the difference of totals (with cost). None added →
+    the run was interrupted and the usage is its completed messages (without cost). ``None`` when the log cannot be read
+    or the total makes no sense — the caller then uses what it knows from the run result and invents nothing."""
     if before is None:
         return None
     try:
@@ -327,6 +327,6 @@ def settle(transcript: Path, before: Optional[CostState], started_at: datetime) 
                 logger.warning("usage: súčet sedenia %s klesol — beh sa nedá odčítať, beriem výsledok behu", transcript)
             return parts
         return unfinished_parts(transcript, started_at)
-    except Exception:  # noqa: BLE001 — meranie nesmie zhodiť ťah, ktorý meria
+    except Exception:  # noqa: BLE001 — the measurement must not bring down the turn it measures
         logger.warning("usage: spotrebu zo záznamu sedenia %s sa nepodarilo zistiť", transcript, exc_info=True)
         return None

@@ -1,17 +1,17 @@
-"""Poradca — rozhovory s agentom, ktorý len číta a radí (ICCINT-167).
+"""Poradca — conversations with an agent that only reads and advises (ICCINT-167).
 
-**Čo sa dialo.** Ľudia, ktorí v kokpite projektujú, nemali kde sa opýtať, čomu nerozumejú, ani koho
-poslať pozrieť veci „zozadu" — logy, kroky agenta stavby, databázu UAT. Konzultácia na hotovej verzii
-bežala cez stav verzie (počas stavby nešla), videla len kód a na ostrom kokpite ju nikto nepoužil.
-Director 05.10.2026 schválil Poradcu: samostatná položka kokpitu, beží vedľa stavby, len číta.
+**What happened.** People who design in the cockpit had nowhere to ask what they did not understand, nor whom to
+send to look at things „from behind" — logs, the build agent's steps, the UAT database. Consulting on a finished version
+ran through the version state (not possible during the build), saw only code and nobody used it on the live cockpit.
+Director approved Poradca on 2026-10-05: a separate cockpit item, runs alongside the build, read-only.
 
-**Čo pridáva.**
-* ``poradca_conversations`` — rozhovor jedného človeka k projektu (o čom: verzia alebo celý projekt);
-* ``poradca_messages`` — otázky a odpovede; z priebehu len kroky (nástroj a cieľ), nikdy obsah;
-* rola ``poradca`` v ``user_agent_settings`` — model a úsilie Poradcu sa nastavujú ako pri ostatných
+**What it adds.**
+* ``poradca_conversations`` — one person's conversation about a project (about: a version or the whole project);
+* ``poradca_messages`` — questions and answers; from the progress only steps (tool and target), never content;
+* the ``poradca`` role in ``user_agent_settings`` — Poradca's model and effort are set as for the other
   agentoch.
 
-**Späť** sa tabuľky zahodia a nastavenia roly ``poradca`` vymažú — obmedzenie by ich inak neprepustilo.
+**Downgrade** drops the tables and deletes the ``poradca`` role settings — the constraint would not let them through.
 
 Revision ID: 102
 Revises: 101

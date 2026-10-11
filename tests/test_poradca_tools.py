@@ -1,4 +1,4 @@
-"""Nástroje Poradcu „zozadu" (ICCINT-167, návrh §4.2 a §4.3). Hodnoty sú umelé."""
+"""Poradca tools "from behind" (ICCINT-167, design §4.2 and §4.3). The values are artificial."""
 
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ from backend.services.poradca.mcp_server import ToolError
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# ── tlačidlá ───────────────────────────────────────────────────────────────────
+# ── buttons ────────────────────────────────────────────────────────────────────
 
 
 def test_every_action_the_frontend_knows_has_a_button_label():
-    """Akcia, ktorú frontend pozná, musí mať meno tlačidla — inak by Poradca radil menom z kódu."""
+    """An action known to the frontend must have a button name — otherwise Poradca would advise by the code name."""
     text = (ROOT / "frontend" / "src" / "services" / "api" / "pipeline.ts").read_text(encoding="utf-8")
     lines = text.splitlines()
     start = next((i for i, line in enumerate(lines) if line.startswith("export type PipelineActionName")), None)
@@ -31,7 +31,7 @@ def test_every_action_the_frontend_knows_has_a_button_label():
         if m:
             actions.add(m.group(1))
             if m.group(2):
-                break  # posledná akcia zoznamu končí bodkočiarkou (komentáre ich majú tiež — preto po riadkoch)
+                break  # the last action of the list ends with a semicolon (comments have them too — hence line by line)
     assert len(actions) >= 15
     assert actions - set(tools.ACTION_LABELS) == set()
 
@@ -56,7 +56,7 @@ def test_containers_are_only_the_projects_own():
                 "Image": "b",
                 "Labels": "a=b,com.docker.compose.project.working_dir=/opt/uat/andros/nex-demo,x=y",
             },
-            # PROD toho istého zákazníka — nesmie sa objaviť
+            # PROD of the same customer — must not appear
             {
                 "Names": "andros-demo-backend",
                 "State": "running",
@@ -64,7 +64,7 @@ def test_containers_are_only_the_projects_own():
                 "Image": "b",
                 "Labels": "com.docker.compose.project.working_dir=/opt/customers/andros/nex-demo",
             },
-            # iný projekt s podobným menom
+            # another project with a similar name
             {"Names": "vizual-nex-demo2", "State": "running", "Status": "Up", "Image": "v", "Labels": ""},
             {"Names": "nex-studio-visual-prod-db-1", "State": "running", "Status": "Up", "Image": "pg", "Labels": ""},
         ),
@@ -150,7 +150,7 @@ def test_int_arguments_are_bounded():
             tools._int_arg({"pocet": bad}, "pocet", 30, 100)
 
 
-# ── databáza UAT ────────────────────────────────────────────────────────────────
+# ── UAT database ────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -195,13 +195,13 @@ def test_role_sql_grants_columns_not_tables_and_refuses_foreign_access_extension
     assert "GRANT SELECT ON" not in sql
     assert "default_transaction_read_only = on" in sql
     assert "statement_timeout = '10s'" in sql
-    assert "BASE TABLE" in sql  # pohľady nie — cez pohľad by sa dalo dostať k stĺpcu hesla
+    assert "BASE TABLE" in sql  # views are not — through a view one could get to the password column
     assert "dblink" in sql and "postgres_fdw" in sql
     for secret in ("password_hash", "api_token", "jwt_secret", "refresh_token", "otp_seed", "private_key"):
         assert re.search(uat_db.SECRET_COLUMN_PATTERN, secret, re.I), secret
     for plain in ("username", "stav", "suma", "created_at"):
         assert not re.search(uat_db.SECRET_COLUMN_PATTERN, plain, re.I), plain
-    # Zašifrované tajomstvo je tiež tajomstvo; tabuľka s prístupmi sa nevydá vôbec.
+    # An encrypted secret is also a secret; the table with access credentials is not served at all.
     for secret in ("ciphertext", "nonce"):
         assert re.search(uat_db.SECRET_COLUMN_PATTERN, secret, re.I), secret
     assert "c.table_name !~*" in sql
@@ -211,13 +211,13 @@ def test_role_sql_grants_columns_not_tables_and_refuses_foreign_access_extension
         assert not re.search(uat_db.SECRET_TABLE_PATTERN, table, re.I), table
 
 
-# ── 05.10.2026, zmerané pred zápisom do živých UAT: správca nie je „postgres" ─────────────────────────
+# ── 05.10.2026, measured before writing to the live UAT: the admin is not „postgres" ─────────────────────────
 
 
 async def test_role_setup_connects_as_the_installations_own_superuser(monkeypatch, tmp_path):
-    """V živých UAT sa správca volá podľa nastavenia inštalácie (nexmanager, nexweb, nex_inbox) a rola
-    ``postgres`` tam neexistuje — ``psql`` bez ``-U`` by sa prihlásil ako ``postgres`` a zlyhal. Prihlásenie
-    musí ísť menom z ``POSTGRES_USER`` kontajnera databázy."""
+    """In the live UAT the admin is named according to the installation settings (nexmanager, nexweb, nex_inbox) and the
+    ``postgres`` role does not exist there — ``psql`` without ``-U`` would log in as ``postgres`` and fail. The login
+    must use the name from the ``POSTGRES_USER`` of the database container."""
     calls: list[tuple[str, ...]] = []
 
     async def fake_docker(*argv, stdin=None, timeout=60):

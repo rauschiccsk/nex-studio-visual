@@ -1,15 +1,15 @@
-"""Vymazaný rozhovor Poradcu — text preč, cena ostáva (ICCINT-167, v4.42.0).
+"""Deleted Poradca conversation — text gone, price stays (ICCINT-167, v4.42.0).
 
-**Čo sa dialo.** Rozhovor Poradcu sa nedal premenovať ani odstrániť; zoznam vľavo len rástol. Director
+**What happened.** A Poradca conversation could be neither renamed nor removed; the list on the left only grew. Director
 05.10.2026: „chýba mi premenovanie rozhovoru a vymazanie rozhovoru."
 
-**Prečo nie zmazanie riadkov.** Náklady projektu sčítajú spotrebu odpovedí Poradcu z ``poradca_messages``
-(``metrics._poradca_rows``). Zmazané riadky by z Nákladov zobrali peniaze, ktoré sa naozaj minuli. Preto
-vymazanie zahodí všetko, čo sa v rozhovore povedalo (otázky, odpovede, kroky, chyby, názov, záznam sedenia
-na disku), ponechá len spotrebu a čas a rozhovor označí ``deleted_at`` — zo zoznamu aj z rozhrania zmizne.
+**Why not delete the rows.** The project's Náklady sum the spend of Poradca answers from ``poradca_messages``
+(``metrics._poradca_rows``). Deleted rows would take away money that was really spent. So
+deletion discards everything said in the conversation (questions, answers, steps, errors, title, session log
+on disk), keeps only the spend and time, and marks the conversation ``deleted_at`` — it vanishes from list and UI.
 
-**Späť** sa stĺpec zahodí; vymazané rozhovory by sa potom v zozname ukázali prázdne s názvom
-„Vymazaný rozhovor" — nič z ich obsahu sa nevráti, lebo nič z neho neostalo.
+**Downgrade** drops the column; deleted conversations would then show in the list empty with the title
+„Vymazaný rozhovor" — nothing of their content returns, because nothing of it was left.
 
 Revision ID: 103
 Revises: 102

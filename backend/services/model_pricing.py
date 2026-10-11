@@ -1,22 +1,22 @@
-"""Cenník modelov Anthropic — vyčítaný z ťahov, ktoré zaplatil Claude Code, nie zadaný ručne (ICCINT-168).
+"""Anthropic model price list — read off the turns paid for by Claude Code, not entered by hand (ICCINT-168).
 
-**Odkiaľ ceny.** Každý ťah, ktorý Claude Code dokončil, nesie po modeloch tokeny štyroch druhov (vstup, výstup,
-čítanie a zápis vyrovnávacej pamäte) a cenu, ktorú za ne Claude Code vypočítal (:mod:`usage_ledger`). Cena je
-lineárna v tokenoch, takže zo štyroch nezávislých ťahov toho istého modelu vyjdú štyri ceny presne; z viacerých
-ich vyrovnáva metóda najmenších štvorcov. Pevný pomer (napr. čítanie = 10 % vstupu) sa NEPREDPOKLADÁ — Opus 5.5
-číta pamäť za 5 % vstupu, Haiku a Sonnet za 10 % (zmerané 06.10.2026).
+**Source of prices.** Every turn that Claude Code finished carries, per model, tokens of four kinds (input, output,
+cache reads and cache writes) and the price Claude Code computed for them (:mod:`usage_ledger`). The price is
+linear in tokens, so four independent turns of the same model yield exactly four prices; with more turns
+they are fitted by least squares. A fixed ratio (e.g. read = 10 % of input) is NOT ASSUMED — Opus 5.5
+reads cache at 5 % of input, Haiku and Sonnet at 10 % (measured 06.10.2026).
 
-**Zaokrúhlenie na cenník.** Vstupných tokenov mimo pamäte býva v ťahu len pár, takže ich cena vyjde z rovníc
-nepresne (Dedo Home: 4,9938 namiesto 5). Každá cena sa preto zaokrúhli na najhrubší krok (1, 0,5, 0,25, 0,1 …),
-pri ktorom cenník stále zopakuje ceny Claude Code v tolerancii — z toho vyjde cenník, ako ho Anthropic uvádza.
+**Rounding to the price list.** A turn has only a few non-cached input tokens, so their price comes out of the
+equations imprecisely (Dedo Home: 4.9938 instead of 5). Each price is therefore rounded to the coarsest step (1, 0.5,
+0.25, 0.1 …) at which the list still reproduces Claude Code prices within tolerance — that is the list Anthropic states.
 
-**Overenie.** Cenník platí, len keď zopakuje súčet cien Claude Code najviac s odchýlkou :data:`TOTAL_TOLERANCE`
-a žiadny ťah sa neodchýli o viac než :data:`TURN_TOLERANCE`. Novšie ťahy sa s ním porovnávajú priebežne; keď ich
-cenník prestane zopakovať (Anthropic zmenil cenu), vznikne nový od prvého takého ťahu a starý ostáva pre staršie.
+**Verification.** The list is valid only if it reproduces the sum of Claude Code prices within :data:`TOTAL_TOLERANCE`
+and no turn deviates by more than :data:`TURN_TOLERANCE`. Newer turns are compared with it continuously; once it stops
+reproducing them (Anthropic changed the price), a new list starts at the first such turn; the old one serves older ones.
 
-**Kurz.** Referenčný kurz Európskej centrálnej banky sa stiahne raz, keď cenník vznikne, a uloží sa k nemu
-s dátumom (Director 06.10.2026: „kurz zistiť z verejne dostupného zdroja len pri zmene ceny Antropic modelov").
-Keď sa nedá stiahnuť, cenník ostane bez kurzu, ceny v eurách sa nevyčíslia a pri ďalšej kontrole sa skúsi znova.
+**Exchange rate.** The European Central Bank reference rate is downloaded once at list creation and stored with it
+with a date (Director 06.10.2026: „kurz zistiť z verejne dostupného zdroja len pri zmene ceny Antropic modelov").
+If it cannot be downloaded, the list stays without a rate, euro prices are not computed and the next check tries again.
 """
 
 from __future__ import annotations
@@ -40,39 +40,39 @@ from backend.services.usage_ledger import UsagePart, parts_from_usage_payload
 
 logger = logging.getLogger(__name__)
 
-#: Súčet cien Claude Code na ťahoch, ktorými sa cenník overuje, musí cenník zopakovať aspoň takto presne.
+#: The sum of Claude Code prices on the turns that verify the price list must be reproduced at least this exactly.
 TOTAL_TOLERANCE = 0.005
-#: … a žiadny jednotlivý ťah sa nesmie odchýliť viac. Drobné ťahy (pod :data:`_TINY_USD`) sa do tejto
-#: kontroly nerátajú — pri nich je relatívna odchýlka zaokrúhlenie, nie iný cenník.
+#: … and no single turn may deviate more. Tiny turns (below :data:`_TINY_USD`) are not counted in this
+#: check — for them the relative deviation is rounding, not a different price list.
 TURN_TOLERANCE = 0.02
 _TINY_USD = 0.001
-#: Kroky zaokrúhlenia cien, od najhrubšieho.
+#: Price rounding steps, from the coarsest.
 _STEPS = (1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005, 0.001, 0.0001)
-#: Cena vyhľadávania sa uzná, keď ju každý ťah s vyhľadávaním zopakuje aspoň takto presne.
+#: The web search price is accepted when every turn with a search reproduces it at least this exactly.
 _SEARCH_TOLERANCE = 0.05
 
 ECB_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 ECB_SOURCE = "Európska centrálna banka — referenčný kurz"
-#: Po neúspešnom stiahnutí kurzu sa ďalší pokus odloží — nedostupná ECB nesmie brzdiť každé otvorenie Nákladov.
+#: After a failed rate download the next try is postponed — an unavailable ECB must not slow each opening of Náklady.
 _ECB_RETRY_SECONDS = 600
 _ecb_failed_at: Optional[float] = None
 
 
 @dataclass(frozen=True)
 class Observation:
-    """Jeden ťah jedného modelu, ktorý zaplatil Claude Code."""
+    """One turn of one model, paid for by Claude Code."""
 
     at: datetime
-    tokens: tuple[int, int, int, int]  # vstup, výstup, čítanie pamäte, zápis do pamäte
+    tokens: tuple[int, int, int, int]  # input, output, cache read, cache write
     cost_usd: float
-    #: Vyhľadávania na webe — v ``cost_usd`` sú, ale nie sú tokeny. Ťah s nimi cenník tokenov neučí (vstup by
-    #: ich cenu pohltil: Haiku vyšiel 1,55 $ namiesto 1 $); z neho sa vyčíta cena jedného vyhľadávania.
+    #: Web searches — in ``cost_usd`` but not tokens. A turn with them does not teach the token price list (input would
+    #: absorb their price: Haiku came out at $1.55 instead of $1); the price of one search is read off such a turn.
     searches: int = 0
 
 
 @dataclass(frozen=True)
 class Prices:
-    """Ceny v dolároch za milión tokenov."""
+    """Prices in dollars per million tokens."""
 
     input_usd: float
     output_usd: float
@@ -97,11 +97,11 @@ def _tokens(part: UsagePart) -> tuple[int, int, int, int]:
     return (part.input_tokens, part.output_tokens, part.cache_read_tokens, part.cache_write_tokens)
 
 
-# ── vyčítanie cien ─────────────────────────────────────────────────────────────
+# ── reading off the prices ─────────────────────────────────────────────────────────────
 
 
 def _solve(matrix: list[list[float]], rhs: list[float]) -> Optional[list[float]]:
-    """Gaussova eliminácia s výberom pivota; ``None`` pri singulárnej sústave (ťahy nie sú nezávislé)."""
+    """Gaussian elimination with pivot selection; ``None`` for a singular system (the turns are not independent)."""
     n = len(rhs)
     a = [row[:] + [rhs[i]] for i, row in enumerate(matrix)]
     for col in range(n):
@@ -118,12 +118,12 @@ def _solve(matrix: list[list[float]], rhs: list[float]) -> Optional[list[float]]
 
 
 def _least_squares(observations: list[Observation]) -> Optional[list[float]]:
-    """Ceny za milión tokenov metódou najmenších štvorcov. Stĺpce sa najprv zmerajú na rovnakú veľkosť —
-    čítaní z pamäte sú milióny, vstupov jednotky, a bez toho by sústava bola numericky slepá."""
+    """Prices per million tokens by least squares. The columns are first scaled to the same magnitude —
+    cache reads are millions, inputs a few units, and without that the system would be numerically blind."""
     rows = [[t / 1_000_000.0 for t in o.tokens] for o in observations]
     scale = [max((abs(r[j]) for r in rows), default=0.0) for j in range(4)]
     if any(s <= 0 for s in scale):
-        return None  # niektorý druh tokenov sa ani raz nevyskytol — jeho cena sa nedá zistiť
+        return None  # some kind of token never occurred — its price cannot be determined
     rows = [[r[j] / scale[j] for j in range(4)] for r in rows]
     ys = [o.cost_usd for o in observations]
     normal = [[sum(r[i] * r[j] for r in rows) for j in range(4)] for i in range(4)]
@@ -135,7 +135,7 @@ def _least_squares(observations: list[Observation]) -> Optional[list[float]]:
 
 
 def deviations(prices: Prices, observations: list[Observation]) -> tuple[float, float]:
-    """``(odchýlka súčtu, najväčšia odchýlka ťahu)`` cenníka od cien Claude Code — relatívne."""
+    """``(sum deviation, largest turn deviation)`` of the price list from the Claude Code prices — relative."""
     total_actual = sum(o.cost_usd for o in observations)
     total_fit = sum(prices.cost_usd(o.tokens) for o in observations)
     total = abs(total_fit - total_actual) / total_actual if total_actual > 0 else 0.0
@@ -152,8 +152,8 @@ def _fits(prices: Prices, observations: list[Observation]) -> bool:
 
 
 def fit_prices(observations: list[Observation]) -> Optional[Prices]:
-    """Cenník, ktorý zopakuje ceny Claude Code na týchto ťahoch — alebo ``None``, keď sa z nich zistiť nedá
-    (menej než štyri nezávislé ťahy, záporná cena, alebo ich jeden cenník nezopakuje)."""
+    """A price list that reproduces the Claude Code prices on these turns — or ``None`` when they do not determine it
+    (fewer than four independent turns, a negative price, or one price list does not reproduce them)."""
     if len(observations) < 4:
         return None
     raw = _least_squares(observations)
@@ -162,7 +162,7 @@ def fit_prices(observations: list[Observation]) -> Optional[Prices]:
     current = [max(p, 0.0) for p in raw]
     if not _fits(Prices(*current), observations):
         return None
-    # Cena s najväčším podielom na súčte sa zaokrúhľuje prvá — tá, čo takmer nič nestojí, potom už nepohne.
+    # The price with the largest share of the sum is rounded first — the almost-free one then no longer moves it.
     weight = [sum(o.tokens[j] for o in observations) * current[j] for j in range(4)]
     for j in sorted(range(4), key=lambda k: -weight[k]):
         for step in _STEPS:
@@ -180,9 +180,9 @@ def fit_prices(observations: list[Observation]) -> Optional[Prices]:
 
 
 def ecb_rate(timeout: float = 15.0) -> Optional[Rate]:
-    """Referenčný kurz eura k doláru z ECB; ``None``, keď sa nedá stiahnuť alebo prečítať — a potom
-    :data:`_ECB_RETRY_SECONDS` ani nepokúša. (Skúšky túto funkciu nahrádzajú, aby nesiahli na internet; samotné
-    čítanie odpovede ECB a odklad po neúspechu skúšajú cez :func:`_throttled_ecb_rate`.)"""
+    """Reference euro-to-dollar rate from the ECB; ``None`` when it cannot be downloaded or read — and then it is not
+    retried for :data:`_ECB_RETRY_SECONDS`. (Tests replace this function to avoid touching the internet; reading the ECB
+    response itself and the postponement after a failure are tested through :func:`_throttled_ecb_rate`.)"""
     return _throttled_ecb_rate(timeout)
 
 
@@ -197,7 +197,7 @@ def _throttled_ecb_rate(timeout: float) -> Optional[Rate]:
 
 def _fetch_ecb_rate(timeout: float = 15.0) -> Optional[Rate]:
     try:
-        with urllib.request.urlopen(ECB_URL, timeout=timeout) as response:  # noqa: S310 — pevná https adresa
+        with urllib.request.urlopen(ECB_URL, timeout=timeout) as response:  # noqa: S310 — fixed https address
             body = response.read().decode("utf-8", errors="replace")
         day = re.search(r"time=['\"](\d{4}-\d{2}-\d{2})['\"]", body)
         usd = re.search(r"currency=['\"]USD['\"]\s+rate=['\"]([0-9.]+)['\"]", body)
@@ -205,16 +205,16 @@ def _fetch_ecb_rate(timeout: float = 15.0) -> Optional[Rate]:
             logger.warning("model_pricing: odpoveď ECB nemá kurz USD")
             return None
         return Rate(eur_usd=float(usd.group(1)), on=date.fromisoformat(day.group(1)), source=ECB_SOURCE)
-    except Exception:  # noqa: BLE001 — bez kurzu sa len nevyčíslia eurá, Náklady nesmú spadnúť
+    except Exception:  # noqa: BLE001 — without a rate only the euros are not computed, Náklady must not crash
         logger.warning("model_pricing: kurz ECB sa nepodarilo stiahnuť", exc_info=True)
         return None
 
 
-# ── údaje ──────────────────────────────────────────────────────────────────────
+# ── data ──────────────────────────────────────────────────────────────────────
 
 
 def _usage_rows(db: Session) -> Iterable[tuple[datetime, object]]:
-    """Všetky uložené spotreby — ťahy stavby aj odpovede Poradcu — s časom zápisu."""
+    """All stored spend — build turns and Poradca answers — with the write time."""
     for at, usage in db.execute(
         select(PipelineMessage.created_at, PipelineMessage.payload["usage"]).where(
             PipelineMessage.payload["usage"]["parts"].is_not(None)
@@ -228,7 +228,7 @@ def _usage_rows(db: Session) -> Iterable[tuple[datetime, object]]:
 
 
 def observations_by_model(db: Session) -> dict[str, list[Observation]]:
-    """Ťahy, ktoré zaplatil Claude Code, po modeloch, od najstaršieho."""
+    """Turns paid for by Claude Code, per model, from the oldest."""
     out: dict[str, list[Observation]] = {}
     for at, usage in _usage_rows(db):
         for part in parts_from_usage_payload(usage) or []:
@@ -241,7 +241,7 @@ def observations_by_model(db: Session) -> dict[str, list[Observation]]:
 
 
 def price_rows(db: Session) -> dict[str, list[ModelPrice]]:
-    """Cenníky po modeloch, od najstaršieho."""
+    """Price lists per model, from the oldest."""
     out: dict[str, list[ModelPrice]] = {}
     for row in db.execute(select(ModelPrice).order_by(ModelPrice.valid_from.asc())).scalars():
         out.setdefault(row.model, []).append(row)
@@ -271,8 +271,8 @@ def _prices_of(row: ModelPrice) -> Prices:
 
 
 def search_price(prices: Prices, observations: list[Observation]) -> Optional[float]:
-    """Cena jedného vyhľadávania na webe: čo z ceny ťahu ostane po tokenoch, delené počtom vyhľadávaní —
-    zaokrúhlené na najhrubší krok, ktorý každý taký ťah zopakuje; ``None``, keď taký ťah nie je alebo nesedí."""
+    """Price of one web search: what is left of the turn price after tokens, divided by the number of searches —
+    rounded to the coarsest step every such turn reproduces; ``None`` when there is no such turn or it does not fit."""
     with_search = [o for o in observations if o.searches > 0]
     if not with_search:
         return None
@@ -289,20 +289,20 @@ def search_price(prices: Prices, observations: list[Observation]) -> Optional[fl
 
 
 def refresh(db: Session, *, fetch_rate: Optional[Callable[[], Optional[Rate]]] = None) -> list[str]:
-    """Doplní a overí cenníky podľa ťahov zaplatených od poslednej kontroly; vráti modely, ktorým pribudol cenník.
+    """Completes and verifies price lists from the turns paid since the last check; returns models that gained one.
 
-    * model bez cenníka → vyčíta sa zo všetkých jeho ťahov (keď sa dá) a stiahne sa kurz;
-    * model s cenníkom → nové ťahy sa s ním porovnajú; keď ich cenník prestane zopakovať a ťahy od toho okamihu
-      určia iný cenník, vznikne nový od prvého z nich (Anthropic zmenil cenu) — starý ostáva pre staršie ťahy;
-    * cenník bez kurzu → kurz sa skúsi stiahnuť znova.
+    * model without a price list → read off all its turns (when possible) and the rate is downloaded;
+    * model with a price list → new turns are compared with it; when it stops reproducing them and turns from then on
+      determine another list, a new one starts from the first (Anthropic changed a price); the old one serves older;
+    * price list without a rate → the rate download is tried again.
 
-    Kurz sa hľadá až pri volaní (``ecb_rate`` z modulu), nie pri definícii — skúšky ho tak vedia nahradiť
-    a nikdy nesiahnu na internet."""
+    The rate is looked up only at call time (``ecb_rate`` from the module), not at definition — so tests can replace it
+    and never reach the internet."""
     fetcher = fetch_rate or ecb_rate
     fetched: list[Optional[Rate]] = []
 
     def rate_once() -> Optional[Rate]:
-        """Kurz najviac raz za kontrolu — rovnaký pre všetky cenníky, ktoré pri nej vzniknú."""
+        """The rate at most once per check — the same for all price lists created during it."""
         if not fetched:
             fetched.append(fetcher())
         return fetched[0]
@@ -331,15 +331,15 @@ def refresh(db: Session, *, fetch_rate: Optional[Callable[[], Optional[Rate]]] =
             continue
         current = _prices_of(latest)
         off = [o for o in fresh if o.cost_usd >= _TINY_USD and not _fits(current, [o])]
-        # Ťahy pred prvým nezopakovaným sú overené.
+        # Turns before the first non-reproduced one are verified.
         confirmed = [o for o in fresh if not off or o.at < off[0].at]
         if confirmed:
             latest.observations += len(confirmed)
             latest.checked_until = confirmed[-1].at
         if not off:
             continue
-        # Od prvého nezopakovaného: je to nový cenník? Nový sa vyčíta, až keď ho ťahy od toho okamihu jednoznačne
-        # určia (aspoň štyri nezávislé a všetky ho zopakujú) — jeden zlý zápis medzi správnymi ho neurčí nikdy.
+        # From the first non-reproduced turn: is it a new list? A new one is read off only when the turns from then
+        # on determine it unambiguously (at least four independent, all reproducing it) — one bad record never does.
         since = [o for o in observations if o.at >= off[0].at]
         prices = fit_prices(since)
         if prices is None or prices == current:
@@ -357,19 +357,19 @@ def refresh(db: Session, *, fetch_rate: Optional[Callable[[], Optional[Rate]]] =
     try:
         db.commit()
     except IntegrityError:
-        # Ten istý cenník práve zapísala súbežná kontrola — jej zápis platí.
+        # The same price list was just written by a concurrent check — its write stands.
         db.rollback()
         return []
     return created
 
 
-# ── oceňovanie ─────────────────────────────────────────────────────────────────
+# ── pricing ─────────────────────────────────────────────────────────────────
 
 
 def row_for(rows: dict[str, list[ModelPrice]], model: Optional[str], at: Optional[datetime]) -> Optional[ModelPrice]:
-    """Cenník, ktorým sa ocení spotreba modelu z daného času: posledný, ktorý v tom čase už platil. Spotreba
-    staršia než prvý cenník modelu sa ocení prvým — model sa za ten čas nezmenil, len ešte nebolo z čoho
-    cenník vyčítať."""
+    """The price list used to price a model's spend from the given time: the latest one already valid then. Spend
+    older than the model's first price list is priced by the first — the model did not change in that time, there was
+    just nothing yet to read a price list from."""
     candidates = rows.get(model or "", [])
     if not candidates:
         return None
@@ -380,8 +380,8 @@ def row_for(rows: dict[str, list[ModelPrice]], model: Optional[str], at: Optiona
 
 
 def family_row(rows: dict[str, list[ModelPrice]], family_or_model: Optional[str]) -> Optional[ModelPrice]:
-    """Cenník pre ručne zadaný náklad, ktorý menuje celý model alebo len rodinu (``opus``): presný model,
-    inak najnovší cenník modelu tej rodiny."""
+    """The price list for a manually entered cost that names a whole model or only a family (``opus``): the exact model,
+    otherwise the newest price list of that family."""
     if not family_or_model:
         return None
     if family_or_model in rows:
@@ -392,12 +392,12 @@ def family_row(rows: dict[str, list[ModelPrice]], family_or_model: Optional[str]
 
 
 def part_cost_usd(row: ModelPrice, part: UsagePart) -> float:
-    """Cena tokenov časti spotreby — vyhľadávania na webe zvlášť (:func:`search_cost_usd`)."""
+    """Token price of a part of the spend — web searches separately (:func:`search_cost_usd`)."""
     return _prices_of(row).cost_usd(_tokens(part))
 
 
 def search_cost_usd(row: ModelPrice, part: UsagePart) -> Optional[float]:
-    """Cena vyhľadávaní na webe v časti spotreby; ``None``, keď ich má, ale cenník ich cenu ešte nepozná."""
+    """Price of web searches in a part of the spend; ``None`` when it has them but the price list lacks their price."""
     if not part.web_search_requests:
         return 0.0
     if row.web_search_usd is None:

@@ -348,8 +348,8 @@ class TestRelayQueue:
         with pytest.raises(orchestrator.OrchestratorError):
             await orchestrator.relay_manazer_message(db_session, version_id=version.id, text="hi")
 
-    # ICCINT-167: Konzultácia na hotovej verzii je preč — správa tam nemá komu ísť. Odmietne sa ešte pred
-    # zápisom, s vetou, ktorá ukáže cestu ďalej (Poradca, nová verzia), namiesto správy bez odpovede.
+    # ICCINT-167: the Konzultácia on a finished version is gone — the message has nobody to go to. It is rejected before
+    # the write, with a sentence that shows the way forward (Poradca, new version), instead of a message with no answer.
     @pytest.mark.asyncio
     async def test_relay_on_a_finished_version_is_refused_and_records_nothing(self, db_session):
         version, _ = _make_version(db_session)
