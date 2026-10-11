@@ -189,6 +189,8 @@ def _door(monkeypatch, tmp_path, *, launch: _Reply, session: _Reply | None = Non
         MANAGER_MODULE_SLUG="demo-app",
         MANAGER_DEPLOY_SLUG="uat-acme",
     )
+    # DEV-69: the probe signs as the paired NEX Manager does — the pair here agrees.
+    _write_env(tmp_path / "acme" / "nex-manager", LAUNCH_SIGNING_KEY=key, DEPLOY_SLUG="uat-acme")
     seen: list[str] = []
 
     class _Client:
@@ -341,7 +343,7 @@ _TOKEN = "razena-vstupenka"
 
 
 def _shape_probe(monkeypatch, client: "_ShapeRecorder") -> None:
-    monkeypatch.setattr(uat_launch, "_mint_launch_token", lambda *a, **k: _TOKEN)
+    monkeypatch.setattr(uat_launch, "_mint_as_paired_manager", lambda *a, **k: _TOKEN)
     monkeypatch.setattr(uat_launch.httpx, "Client", lambda **kw: client)
 
 

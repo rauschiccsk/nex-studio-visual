@@ -31,7 +31,7 @@ from urllib.parse import quote
 import httpx
 from jose import jwt  # python-jose — the backend's declared JWT lib (matches auth.py / core.security)
 
-from backend.services import uat_provisioner
+from backend.services import launch_pairing, uat_provisioner
 
 #: Token lifetime — under the app's hard ``exp - iat <= 60 s`` cap.
 _LAUNCH_TTL_SECONDS = 50
@@ -114,6 +114,35 @@ def _mint_launch_token(customer_slug: str, project_slug: str, *, subject: str) -
     )
 
 
+def _mint_as_paired_manager(customer_slug: str, project_slug: str, *, subject: str) -> Optional[str]:
+    """A ticket exactly as the customer's NEX Manager signs it, or ``None`` when there is no Manager to sign (DEV-69).
+
+    Its key and its ``DEPLOY_SLUG`` from the Manager's own settings, the module's slug as the cockpit registered it
+    there (the project slug) — never the module's settings, which are the very values the module checks a ticket
+    against: a door check minted from them could not fail, and 11.10.2026 it did not, while every real launch did."""
+    manager = uat_provisioner._parse_env_file(
+        uat_provisioner.UAT_ROOT / customer_slug / launch_pairing.MANAGER_PROJECT / ".env"
+    )
+    key = manager.get(launch_pairing.MANAGER_KEY)
+    if not key:
+        return None
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "iss": "nex-manager",
+            "aud": project_slug,
+            "sub": subject,
+            "deploy": manager.get(launch_pairing.MANAGER_DEPLOY) or "",
+            "purpose": "module-launch",
+            "jti": str(uuid.uuid4()),
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(seconds=_LAUNCH_TTL_SECONDS)).timestamp()),
+        },
+        key,
+        algorithm="HS256",
+    )
+
+
 def build_uat_launch_url(customer_slug: str, project_slug: str, uat_url: str, *, subject: str) -> Optional[str]:
     """Return ``<uat_url>/api/v1/launch?lt=<token>`` for a token-launch app's UAT deploy, or ``None`` when
     the deploy has no launch key/slugs wired (not token-launch, or no paired NEX Manager). The signing key
@@ -150,9 +179,10 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
     ``None`` never warns (the rule the CI floor and the identity pre-check follow): not being able to tell is
     not evidence that the door is shut, and an alarm that cries on ignorance is one people learn to ignore.
     """
-    token = _mint_launch_token(customer_slug, project_slug, subject=subject)
+    # DEV-69: the ticket a real launch carries — signed as the paired NEX Manager signs it.
+    token = _mint_as_paired_manager(customer_slug, project_slug, subject=subject)
     if not token:
-        return None, "vstupenka sa nedá vyraziť (appka nemá spárovaný NEX Manager)"
+        return None, "vstupenka sa nedá vyraziť (zákazník nemá NEX Manager s podpisovým kľúčom)"
     launch_endpoint = f"{uat_url.rstrip('/')}/api/v1/launch"
 
     # ICCINT-92: skús NAJPRV ten tvar, ktorý NEX Manager reálne používa — vstupenku v tele požiadavky.

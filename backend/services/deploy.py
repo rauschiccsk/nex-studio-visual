@@ -88,7 +88,14 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_STALE_SIGNOFF,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
-from backend.services import ci_status, dedo_project_proposal, deploy_progress, private_access, uat_provisioner
+from backend.services import (
+    ci_status,
+    dedo_project_proposal,
+    deploy_progress,
+    launch_pairing,
+    private_access,
+    uat_provisioner,
+)
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -625,6 +632,41 @@ def uat_launch_wired(customer: Customer, project: Project) -> bool:
         )
         is not None
     )
+
+
+def _token_modules_of(db: Session, customer_dir: str) -> list[str]:
+    """The projects this customer has that open from its NEX Manager — by the customer's folder name (DEV-69)."""
+    rows = db.execute(
+        select(Project.slug, Customer)
+        .join(Customer, Customer.project_id == Project.id)
+        .where(Project.auth_mode == "token")
+    ).all()
+    return sorted({slug for slug, customer in rows if _customer_dir_slug(customer) == customer_dir})
+
+
+def _launch_pairing_warning(
+    customer_dir: str, environment: str, deploy_host: Optional[str], modules: list[str]
+) -> Optional[str]:
+    """:func:`launch_pairing.customer_warning` for one customer's environment, read where it runs (DEV-69).
+
+    ``None`` when there is nothing to compare — no NEX Manager installed there, or a file that cannot be read: not
+    being able to tell never raises an alarm."""
+    from backend.services import remote_instance
+
+    root = uat_provisioner.PROD_ROOT if environment == "prod" else uat_provisioner.UAT_ROOT
+
+    def _env(app: str) -> Optional[dict[str, str]]:
+        folder = root / customer_dir / app
+        if deploy_host:
+            text, error = remote_instance.read_text(folder, ".env", deploy_host=deploy_host)
+            return None if error or text is None else uat_provisioner._parse_env_text(text)
+        return uat_provisioner._parse_env_file(folder / ".env") if (folder / ".env").is_file() else None
+
+    manager_env = _env(launch_pairing.MANAGER_PROJECT)
+    if not manager_env:
+        return None
+    module_envs = {slug: env for slug in modules if (env := _env(slug))}
+    return launch_pairing.customer_warning(manager_env, module_envs)
 
 
 def _uat_door_warning(db: Session, customer: Customer, project: Project, actor_id: Optional[UUID]) -> Optional[str]:
@@ -1236,6 +1278,24 @@ async def deploy(
             if door_warning and door_warning not in warnings:
                 warnings.append(door_warning)
                 detail = f"{detail} | {door_warning}"
+
+    # DEV-69: a NEX Manager and the modules it opens must agree on the ticket. After a deploy of either, both sides
+    # are compared — never showing a key — and every module the Manager could not open is named. The list of modules
+    # comes from this cockpit's records; the files are read where the installations run, off the main loop.
+    if ok and (project.auth_mode == "token" or project.slug == launch_pairing.MANAGER_PROJECT):
+        modules = (
+            [project.slug] if project.auth_mode == "token" else _token_modules_of(db, _customer_dir_slug(customer))
+        )
+        pairing_warning = await asyncio.to_thread(
+            _launch_pairing_warning,
+            _customer_dir_slug(customer),
+            environment,
+            (customer.prod_host or None) if environment == "prod" else None,
+            modules,
+        )
+        if pairing_warning and pairing_warning not in warnings:
+            warnings.append(pairing_warning)
+            detail = f"{detail} | {pairing_warning}"
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
     # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand
