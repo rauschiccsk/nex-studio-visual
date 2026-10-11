@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUILD_ID } from "./buildId";
+import { SERVER_BACK_EVENT } from "./serverBack";
 import {
   clearGuardState,
   decide,
@@ -25,8 +26,9 @@ export interface VersionWatchOptions {
  * Asks the server whether a newer version exists.
  *
  * - at startup -> when newer, the app reloads itself silently,
- * - on the window returning to the foreground and periodically -> the app is NOT forced,
- *   it offers a bar.
+ * - on the window returning to the foreground, on the person switching to it, on its connection to the server
+ *   coming back (DEV-63: every deploy restarts the server) and periodically -> the app is NOT forced, it offers
+ *   a bar.
  */
 export function useVersionWatch(options?: VersionWatchOptions): {
   updateAvailable: boolean;
@@ -98,12 +100,19 @@ export function useVersionWatch(options?: VersionWatchOptions): {
     const onVisible = () => {
       if (document.visibilityState === "visible") void check("runtime");
     };
+    // DEV-63: a window that stays on screen never becomes "visible" again — switching between two open windows is
+    // a focus change, and a deploy shows itself as the server connection coming back.
+    const onAttention = () => void check("runtime");
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onAttention);
+    window.addEventListener(SERVER_BACK_EVENT, onAttention);
     const timer = setInterval(() => void check("runtime"), intervalMs);
 
     return () => {
       alive.current = false;
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onAttention);
+      window.removeEventListener(SERVER_BACK_EVENT, onAttention);
       clearInterval(timer);
     };
   }, [check, intervalMs]);

@@ -9,6 +9,7 @@ import { scopeActiveContextTo } from "./store/activeContextStore";
 import { useSessionKeepAlive } from "./hooks/useSessionKeepAlive";
 import { UpdateBanner } from "./pwa/UpdateBanner";
 import { useVersionWatch } from "./pwa/useVersionWatch";
+import { SETTINGS } from "./config/settings";
 
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -50,7 +51,8 @@ function App() {
 
   // DEV-21: a window installed as an app stays open for days and the cockpit is deployed often — it must notice
   // a new version itself. The watch and its banner live ABOVE the router so the login screen gets them too.
-  const { updateAvailable, applyUpdate, dismiss } = useVersionWatch();
+  // DEV-63: every minute, not every fifteen — plus on switching to the window and on the server coming back.
+  const { updateAvailable, applyUpdate, dismiss } = useVersionWatch({ intervalMs: SETTINGS.VERSION_CHECK_INTERVAL_MS });
 
   return (
     <ThemeProvider username={username}>

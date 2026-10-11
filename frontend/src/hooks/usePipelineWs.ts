@@ -18,6 +18,7 @@ import {
   type PipelineWsFrame,
 } from "../services/api/pipeline";
 import { humanizeApiError } from "../services/apiError";
+import { announceServerBack } from "../pwa/serverBack";
 
 const _MAX_ACTIVITY = 50;
 
@@ -150,6 +151,8 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
     let cancelled = false;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    // DEV-63: a connection is being re-established — its next open means the server is back (a deploy restarts it).
+    let comingBack = false;
     everConnectedRef.current = false;
     setReconnecting(false);
 
@@ -196,6 +199,10 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
         setConnected(true);
         setReconnecting(false);
         setError(null);
+        if (comingBack) {
+          comingBack = false;
+          announceServerBack(); // the version watch asks at once whether a newer version is out
+        }
         // E6 (CR-NS-038): a fresh connection inherits the current away state. Read the LIVE value
         // (getState) — this effect is keyed on [versionId, token], not isAway, so the closure value
         // could be stale; the separate effect below pushes subsequent toggles.
@@ -261,6 +268,7 @@ export function usePipelineWs(versionId: string | null): UsePipelineWs {
         setConnected(false);
         setError(null); // the amber "reconnecting" banner now owns the connection messaging
         if (everConnectedRef.current) setReconnecting(true);
+        comingBack = true;
         if (retryTimer) return; // a retry is already pending
         const delay = Math.min(1000 * 2 ** attempt, 15000); // 1s,2s,4s,8s,…,15s cap
         attempt += 1;
