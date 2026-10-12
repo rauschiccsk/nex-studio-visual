@@ -54,3 +54,32 @@ done
 for net in "${PRIVATE[@]}"; do ipt -A "$FWD_CHAIN" -d "$net" -j DROP; done
 ipt -A "$FWD_CHAIN" -j RETURN                                      # the internet
 ipt -C DOCKER-USER -s "$SANDBOX_NET" -j "$FWD_CHAIN" 2>/dev/null || ipt -I DOCKER-USER 1 -s "$SANDBOX_NET" -j "$FWD_CHAIN"
+
+# ── the search index and the local model, from outside docker (ICCINT-231) ──────────────────────────────
+# nex-qdrant (9130 REST, 9131 gRPC) and nex-ollama (9132) are published on every interface and have no
+# password. Measured 12.10.2026: Máger Dedo read the whole Knowledge Base index from MAGER over Tailscale,
+# and the tailnet holds 25 devices, MÁGERSTAV's computers among them; the office LAN (eno4) and the Windows VM
+# (virbr0) reach them the same way. Only the cockpit and the build sandboxes need them — through a docker
+# bridge (QDRANT_URL / OLLAMA_URL point at a bridge gateway) — and the host itself through localhost.
+# Binding the ports to 127.0.0.1 would cut the cockpit off, so the ports stay published and only docker's own
+# interfaces may use them:
+#   • IPv4 is address-translated to the container → FORWARD, i.e. DOCKER-USER, matched before translation;
+#   • IPv6 is answered by docker's proxy on the host itself ([::]:9130) → INPUT — and BEFORE Tailscale's own
+#     ts-input chain, which would accept the tailnet first.
+RAG_CHAIN="NEX-RAG-PORTS"
+RAG_PORTS="9130:9132"
+
+ipt -N "$RAG_CHAIN" 2>/dev/null || true
+ipt -F "$RAG_CHAIN"
+ipt -A "$RAG_CHAIN" -i docker0 -j RETURN
+ipt -A "$RAG_CHAIN" -i br-+ -j RETURN
+ipt -A "$RAG_CHAIN" -j DROP
+ipt -C DOCKER-USER -p tcp -m conntrack --ctorigdstport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null \
+    || ipt -I DOCKER-USER 1 -p tcp -m conntrack --ctorigdstport "$RAG_PORTS" -j "$RAG_CHAIN"
+
+ip6tables -N "$RAG_CHAIN" 2>/dev/null || true
+ip6tables -F "$RAG_CHAIN"
+ip6tables -A "$RAG_CHAIN" -i lo -j RETURN
+ip6tables -A "$RAG_CHAIN" -j DROP
+ip6tables -C INPUT -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null \
+    || ip6tables -I INPUT 1 -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN"
