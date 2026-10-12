@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.services import orchestrator, source_language
+from backend.services import orchestrator, source_language, uat_guide
 from tests.test_orchestrator_v2_verifikacia import (
     _ban_deploy_calls,
     _make_version,
@@ -151,6 +151,15 @@ def test_a_quotation_is_one_quotation_whichever_mark_closes_it(line, slovak):
 # --- Verifikácia ---------------------------------------------------------------------------------------------------
 
 
+def _guide(version) -> dict[str, str]:
+    """The UAT test guide the agent writes while it builds (DEV-90) — without it the version does not pass."""
+    return {
+        uat_guide.relative_path(version.version_number): (
+            "## Uloženie faktúry\nObrazovka: Faktúry\n1. Ulož faktúru.\nOčakávané: Faktúra je v zozname.\n"
+        )
+    }
+
+
 def _project_repo(monkeypatch, tmp_path, project, files) -> None:
     root = tmp_path / "projects"
     path = root / project.slug
@@ -165,7 +174,9 @@ def _project_repo(monkeypatch, tmp_path, project, files) -> None:
 async def test_slovak_code_floors_the_auditors_pass_and_reaches_the_fixer(db_session, monkeypatch, tmp_path):
     version, project = _make_version(db_session)
     _seed_verifikacia(db_session, version.id)
-    _project_repo(monkeypatch, tmp_path, project, {"backend/app/money.py": "# zaokrúhli až na konci\nx = 1\n"})
+    _project_repo(
+        monkeypatch, tmp_path, project, {"backend/app/money.py": "# zaokrúhli až na konci\nx = 1\n", **_guide(version)}
+    )
     _stub_auditor(monkeypatch, _verdict_pass())
     _stub_smoke(monkeypatch)
     _ban_deploy_calls(monkeypatch)
@@ -199,7 +210,10 @@ async def test_slovak_screen_text_does_not_stop_a_release(db_session, monkeypatc
     version, project = _make_version(db_session)
     _seed_verifikacia(db_session, version.id)
     _project_repo(
-        monkeypatch, tmp_path, project, {"backend/app/screen.py": 'SAVED = "Faktúra uložená"  # what the screen says\n'}
+        monkeypatch,
+        tmp_path,
+        project,
+        {"backend/app/screen.py": 'SAVED = "Faktúra uložená"  # what the screen says\n', **_guide(version)},
     )
     monkeypatch.setattr(orchestrator, "_commit_release_note", lambda *a, **k: None)
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)

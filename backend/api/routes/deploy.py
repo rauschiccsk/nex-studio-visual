@@ -39,6 +39,7 @@ from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
+from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.deploy import (
     AcceptRequest,
@@ -46,8 +47,20 @@ from backend.schemas.deploy import (
     DeployMatrix,
     DeployRequest,
     DeployResult,
+    UatGuideLoginRead,
+    UatGuideRead,
+    UatGuideSectionRead,
 )
-from backend.services import ci_status, claude_agent, deploy_progress, instance_adoption, uat_provisioner
+from backend.services import (
+    ci_status,
+    claude_agent,
+    delivery_statement,
+    deploy_progress,
+    env_contract,
+    instance_adoption,
+    uat_guide,
+    uat_provisioner,
+)
 from backend.services import deploy as deploy_service
 from backend.services import uat_launch as uat_launch_service
 
@@ -155,6 +168,45 @@ def uat_launch(
             detail="Launch kľúč pre UAT nie je nastavený (chýba spárovaný NEX Manager).",
         )
     return _UatLaunchResponse(launch_url=launch_url)
+
+
+@router.get("/projects/{slug}/uat-guide", response_model=UatGuideRead)
+def get_uat_guide(
+    slug: str,
+    version: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> UatGuideRead:
+    """DEV-90 — what to try in UAT for ``version``: the agent's test guide of the commit that was verified, or the
+    changes of the release note for a version from before the guide; and how each customer's admin signs in."""
+    authz.assert_project_slug_access(db, _current_user, slug)
+    project = _resolve_project(db, slug)
+    row = db.execute(
+        select(Version).where(Version.project_id == project.id, Version.version_number == version)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Verzia {version} v projekte nie je.")
+    repo = claude_agent.PROJECTS_ROOT / project.slug
+    sha, _source = delivery_statement.delivered_commit(db, row, repo)
+    found = uat_guide.for_commit(repo, row.version_number, sha)
+    contract = env_contract.for_project(repo)
+    people = contract.of_kind(env_contract.CUSTOMER)
+    legacy = env_contract.declares_legacy_admin(repo)
+    customers = db.execute(select(Customer).where(Customer.project_id == project.id).order_by(Customer.name)).scalars()
+    return UatGuideRead(
+        version_number=row.version_number,
+        source=found.source,
+        sections=[
+            UatGuideSectionRead(title=s.title, screen=s.screen, data=s.data, steps=s.steps, expected=s.expected)
+            for s in found.guide.sections
+        ],
+        nothing_to_test=found.guide.nothing_to_test,
+        changes=found.changes,
+        logins=[
+            UatGuideLoginRead(customer_id=c.id, login=uat_guide.admin_login(people, c.settings or {}, legacy))
+            for c in customers
+        ],
+    )
 
 
 @router.get("/projects/{slug}/deploy-events", response_model=list[DeployEventRead])

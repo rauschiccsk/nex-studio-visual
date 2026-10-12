@@ -731,6 +731,29 @@ export function registerFixtures(): void {
     legacy_admin: false,
   });
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
+  // DEV-90: what to try in UAT — a guide with two changes, so the UAT tab is measured with it.
+  answer("get", "/api/v1/projects/{slug}/uat-guide", {
+    version_number: "1.7.1",
+    source: "guide",
+    sections: [
+      {
+        title: "Detail faktúry sa otvorí aj v staršom prehliadači na serveri",
+        screen: "Faktúry → detail faktúry",
+        data: "faktúra EMOS SK s.r.o. 9084643319",
+        steps: ["Otvor NEX Inbox z NEX Genesis.", "V zozname faktúr klikni na faktúru EMOS.", "Prejdi na druhú stranu PDF."],
+        expected: ["Detail sa otvorí, PDF je vidno a dá sa listovať."],
+      },
+      {
+        title: "Objednávkový kód z ISDOC",
+        screen: "Faktúry → detail faktúry → Položky",
+        steps: ["Otvor faktúru od RMJ, s.r.o. prijatú ako ISDOC."],
+        expected: ["Pri každej položke je objednávkový kód (napr. S093276315)."],
+      },
+    ],
+    nothing_to_test: null,
+    changes: [],
+    logins: [CUSTOMER.id, NEW_CUSTOMER.id].map((id) => ({ customer_id: id, login: "operator@priklad.sk" })),
+  });
   answerUntyped<AdoptionPreview>("get", "/api/v1/customers/{customer_id}/adoption-preview", {
     instance_dir: "/opt/uat/novak/nex-inbox",
     exists: true,

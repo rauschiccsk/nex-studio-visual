@@ -5,6 +5,7 @@ import type {
   DeployMatrix,
   DeployRequest,
   DeployResult,
+  UatGuide,
 } from "../../types/deploy";
 
 /**
@@ -12,6 +13,7 @@ import type {
  *
  * Maps to `backend.api.routes.deploy`:
  *   - GET  /projects/{slug}/deploy-matrix        → getDeployMatrix
+ *   - GET  /projects/{slug}/uat-guide            → getUatGuide (DEV-90)
  *   - GET  /projects/{slug}/deploy-events        → listProjectDeployEvents
  *   - GET  /customers/{customerId}/deploy-events → listCustomerDeployEvents
  *   - POST /customers/{customerId}/deploy        → deployCustomer (Nasadiť)
@@ -24,6 +26,11 @@ import type {
 /** The version × customer matrix feeding the UAT / PROD tabs (design §3.3). */
 export function getDeployMatrix(slug: string): Promise<DeployMatrix> {
   return api.get<DeployMatrix>(`/projects/${slug}/deploy-matrix`);
+}
+
+/** DEV-90 — what to try in UAT for one version: the agent's test guide, or an older version's release-note changes. */
+export function getUatGuide(slug: string, version: string): Promise<UatGuide> {
+  return api.get<UatGuide>(`/projects/${slug}/uat-guide?version=${encodeURIComponent(version)}`);
 }
 
 /** Mint a short-lived UAT test launch URL for a token-launch app — open it to land LOGGED-IN in the

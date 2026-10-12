@@ -322,3 +322,34 @@ class DeployMatrix(BaseModel):
         ),
     )
     rows: list[DeployMatrixRow] = Field(default_factory=list)
+
+
+class UatGuideSectionRead(BaseModel):
+    """DEV-90 — one change of the UAT test guide: where, with what, the steps and what has to happen."""
+
+    title: str
+    screen: Optional[str] = None
+    data: Optional[str] = None
+    steps: list[str] = Field(default_factory=list)
+    expected: list[str] = Field(default_factory=list)
+
+
+class UatGuideLoginRead(BaseModel):
+    """How a customer's first admin signs in to UAT — a login, never a password."""
+
+    customer_id: UUID
+    login: Optional[str] = None
+
+
+class UatGuideRead(BaseModel):
+    """DEV-90 — what to try in UAT for one version of the project."""
+
+    version_number: str
+    #: ``guide`` the agent's test guide of the verified commit; ``release_notes`` a version from before the guide —
+    #: the changes its release note lists; ``none`` nothing to show (the version is not verified, or has neither).
+    source: Literal["guide", "release_notes", "none"]
+    sections: list[UatGuideSectionRead] = Field(default_factory=list)
+    #: The guide says the version changes nothing a user can try — and why.
+    nothing_to_test: Optional[str] = None
+    changes: list[str] = Field(default_factory=list)
+    logins: list[UatGuideLoginRead] = Field(default_factory=list)

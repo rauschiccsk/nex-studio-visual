@@ -31,6 +31,8 @@ vi.mock("@/services/api/deploy", () => ({
   deployCustomer: vi.fn(),
   acceptCustomerUat: vi.fn(),
   uatLaunch: vi.fn(),
+  // DEV-90: the UAT tab also asks what to try; never answering keeps that panel out of these tests.
+  getUatGuide: vi.fn(() => new Promise(() => {})),
 }));
 
 const contextMock = { selectedProject: { slug: "nex-websites", name: "NEX Websites" } };

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { acceptCustomerUat, deployCustomer, getDeployMatrix, uatLaunch } from "@/services/api/deploy";
+import UatGuidePanel from "@/components/deploy/UatGuidePanel";
 import { ApiError } from "@/services/api";
 import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
 import { humanizeApiError } from "@/services/apiError";
@@ -673,6 +674,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           </table>
         </div>
       )}
+
+      {/* DEV-90: what to try in UAT — the agent's test guide of the version, under the table. */}
+      {environment === "uat" && slug && <UatGuidePanel slug={slug} versions={verified} rows={rows} />}
 
       {/* ICCINT-102: prevzatie ručne písanej inštalácie — samostatné rozhodnutie s náhľadom
           a odpísaným potvrdením. NIE je to prepínač pri „Nasadiť“. */}

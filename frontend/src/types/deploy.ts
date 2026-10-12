@@ -175,3 +175,6 @@ export interface DeployRequest {
 export interface AcceptRequest {
   version_number: string;
 }
+
+/** DEV-90 — what to try in UAT for one version (generated from the backend contract, so it cannot drift). */
+export type UatGuide = components["schemas"]["UatGuideRead"];

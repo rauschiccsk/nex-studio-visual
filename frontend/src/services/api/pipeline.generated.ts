@@ -2391,6 +2391,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/uat-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Uat Guide
+         * @description DEV-90 — what to try in UAT for ``version``: the agent's test guide of the commit that was verified, or the
+         *     changes of the release note for a version from before the guide; and how each customer's admin signs in.
+         */
+        get: operations["get_uat_guide_api_v1_projects__slug__uat_guide_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/rag/categories": {
         parameters: {
             query?: never;
@@ -7184,6 +7205,56 @@ export interface components {
             title?: string | null;
         };
         /**
+         * UatGuideLoginRead
+         * @description How a customer's first admin signs in to UAT — a login, never a password.
+         */
+        UatGuideLoginRead: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Login */
+            login?: string | null;
+        };
+        /**
+         * UatGuideRead
+         * @description DEV-90 — what to try in UAT for one version of the project.
+         */
+        UatGuideRead: {
+            /** Changes */
+            changes?: string[];
+            /** Logins */
+            logins?: components["schemas"]["UatGuideLoginRead"][];
+            /** Nothing To Test */
+            nothing_to_test?: string | null;
+            /** Sections */
+            sections?: components["schemas"]["UatGuideSectionRead"][];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "guide" | "release_notes" | "none";
+            /** Version Number */
+            version_number: string;
+        };
+        /**
+         * UatGuideSectionRead
+         * @description DEV-90 — one change of the UAT test guide: where, with what, the steps and what has to happen.
+         */
+        UatGuideSectionRead: {
+            /** Data */
+            data?: string | null;
+            /** Expected */
+            expected?: string[];
+            /** Screen */
+            screen?: string | null;
+            /** Steps */
+            steps?: string[];
+            /** Title */
+            title: string;
+        };
+        /**
          * UnpricedRead
          * @description Spend a row could NOT price, and why (ICCINT-168) — the screen names it instead of hiding it.
          */
@@ -11965,6 +12036,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectCostsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_uat_guide_api_v1_projects__slug__uat_guide_get: {
+        parameters: {
+            query: {
+                version: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UatGuideRead"];
                 };
             };
             /** @description Validation Error */

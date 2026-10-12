@@ -77,6 +77,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   zmena hesla), alebo z `ADMIN_INITIAL_PASSWORD`. Heslo správcu, ktoré nič z toho neoznačí, by dostalo náhodnú
   hodnotu a **kokpit také nasadenie zastaví**. Neoznačené tajomstvá (podpisové kľúče, šifrovacie kľúče) si kokpit
   vygeneruje sám — tie neoznačuj.
+- **Návod na skúšku v UAT (DEV-90).** Manažér skúša verziu v UAT podľa `docs/specs/versions/v<N>/UAT_SKUSKA.md`.
+  Úloha, ktorá mení to, čo používateľ vidí alebo robí, doň doplní zmenu: nadpis `## …`, `Obrazovka: …`, očíslované
+  kroky (tlačidlá presne ako na obrazovke) a `Očakávané: …`. Presný tvar je v zadaní každej úlohy. Verifikácia bez
+  návodu neprejde; verzia bez viditeľnej zmeny má jediný riadok `Nie je čo skúšať: …`.
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí

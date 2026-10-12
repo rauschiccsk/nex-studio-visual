@@ -76,6 +76,7 @@ from backend.services import (
     release_note_writer,
     smoke_scratch,
     source_language,
+    uat_guide,
     uat_provisioner,
 )
 from backend.services import epic as epic_service
@@ -7165,6 +7166,31 @@ async def _source_language_finding(
     }
 
 
+def _uat_guide_finding(slug: str, version_label: str) -> Optional[dict[str, Any]]:
+    """DEV-90: the blocking finding for a missing or incomplete UAT test guide, or ``None``.
+
+    Read from the working tree the verification stage verifies — a file, no git, nothing that waits on a process. The
+    fix turn gets the same sentence the manager does, with the path and the shape the brief already gave.
+    A project without a checkout cannot be checked, and a release is never stopped on a guess (as DEV-65)."""
+    repo = claude_agent.PROJECTS_ROOT / slug
+    if not (repo / ".git").exists():
+        return None
+    found = uat_guide.problems(uat_guide.read_worktree(repo, version_label))
+    if not found:
+        return None
+    path = uat_guide.relative_path(version_label)
+    return {
+        "text": (
+            f"Návod na skúšku v UAT ({path}) {'chýba' if found == ['chýba'] else 'nie je úplný: ' + '; '.join(found)}"
+            " — doplň ho v tvare zo zadania úloh: pri každej zmene, ktorú používateľ uvidí, nadpis „## …“, "
+            "„Obrazovka: …“, očíslované kroky a „Očakávané: …“; keď verzia nemení nič viditeľné, jediný riadok "
+            "„Nie je čo skúšať: …“."
+        ),
+        "blocking": True,
+        "escapes_tests": False,
+    }
+
+
 async def _build_provenance_env(compose: Path) -> dict[str, str]:
     """:func:`build_provenance.build_env` mimo hlavnej slučky — pýta sa gitu (ICCINT-74, ICCINT-166).
 
@@ -11031,7 +11057,10 @@ async def _run_verifikacia_round(
     llm_pass = review.kind == "verdict" and bool(review.verdict)
     # DEV-65: Slovak text in the code a customer receives floors a PASS too — measured by the cockpit, not judged.
     language_finding = await _source_language_finding(db, version_id, slug, version_label)
-    is_pass = llm_pass and not runtime_floor_red and language_finding is None
+    # DEV-90: so does a missing UAT test guide — the manager tests the version in UAT from it.
+    guide_finding = _uat_guide_finding(slug, version_label)
+    floor_findings = [f for f in (language_finding, guide_finding) if f is not None]
+    is_pass = llm_pass and not runtime_floor_red and not floor_findings
     verdict_str = "PASS" if is_pass else "FAIL"
     # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
     # against the live HEAD (a moved HEAD auto-un-verifies — kills the frozen-PASS bug). slug + version_label
@@ -11052,15 +11081,20 @@ async def _run_verifikacia_round(
         # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
         # sedenie s databázou do cudzieho vlákna nedostane.
         await run_blocking(_push_release_artifacts, claude_agent.PROJECTS_ROOT / slug, version_label, cap=GIT_PUSH_CAP)
-    language_only = llm_pass and not runtime_floor_red and language_finding is not None
+    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90) — the Auditor passed the version.
+    floor_only = llm_pass and not runtime_floor_red and bool(floor_findings)
+    floor_sentences = [
+        sentence
+        for finding, sentence in (
+            (language_finding, "kód, ktorý dostane zákazník, má slovenský text — treba ho preložiť do angličtiny"),
+            (guide_finding, "chýba úplný návod na skúšku v UAT — treba ho doplniť"),
+        )
+        if finding is not None
+    ]
     verdict_msg = _verdict_message(
         db,
         version_id=version_id,
-        content=(
-            "Verzia funguje, ale kód, ktorý dostane zákazník, má slovenský text — treba ho preložiť do angličtiny. "
-            if language_only
-            else ""
-        )
+        content=(f"Verzia funguje, ale {' a '.join(floor_sentences)}. " if floor_only else "")
         + (review.summary or f"Verifikácia {verdict_str}."),
         payload={
             "verdict": verdict_str,
@@ -11078,14 +11112,18 @@ async def _run_verifikacia_round(
                 if (llm_pass and runtime_floor_red)
                 else review.findings_as_data()
             )
-            + ([language_finding] if language_finding is not None else []),
+            + floor_findings,
             "proposed_fix": review.proposed_fix,
             "phase": "verifikacia",
             # v4.0.11: the Auditor's technical dump rides here → the ConversationThread shows ``content``
             # (the PLAIN summary) with this behind a collapsible "Technický detail" (no jargon wall).
             **({"technical_detail": review.technical_detail} if review.technical_detail else {}),
             **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
-            **({"engine_override": "source_language"} if language_only else {}),
+            **(
+                {"engine_override": "source_language" if language_finding is not None else "uat_guide"}
+                if floor_only
+                else {}
+            ),
             **({"verified_sha": verified_sha} if verified_sha else {}),
         },
     )
@@ -11098,8 +11136,9 @@ async def _run_verifikacia_round(
     # a ``runtime_floor_red`` FAIL (the mechanical floor IS the truth — no proposed_fix to vet, D4) and the
     # ``fast_fix`` lane (its focused auto loop is unchanged, §6 D3). Fail-open inside → no record → the card
     # demotes accept_fix (§2). The critic writes an append-only fix_critique note the settle then reads.
-    # A FAIL only the cockpit's own measurement made (DEV-65) has no Auditor fix scope to vet — like the runtime floor.
-    if verdict_str == "FAIL" and not runtime_floor_red and not language_only and state.flow_type != "fast_fix":
+    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90) has no Auditor fix scope to vet — like the
+    # runtime floor.
+    if verdict_str == "FAIL" and not runtime_floor_red and not floor_only and state.flow_type != "fast_fix":
         await _run_fix_critique(db, state, verdict_msg=verdict_msg, on_event=on_event, on_message=on_message)
 
     settled = await _settle_verifikacia_verdict(
@@ -12212,6 +12251,7 @@ def _directive_for_build_task(
     flow_type: str = "new_version",
     task_label: Optional[str] = None,
     schema_rule: Optional[str] = None,
+    version_number: Optional[str] = None,
 ) -> str:
     """Per-task brief for the AI Agent's Programovanie SELF-CHECKING loop (CR-V2-012; design §2.1 / §5.1(1)
     "self-check — continuous self-verification while coding, like Dedo").
@@ -12270,6 +12310,10 @@ def _directive_for_build_task(
     )
     if schema_rule:
         parts.append(schema_rule)
+    # DEV-90: the UAT test guide grows with the tasks that change what a user sees — in every brief of both lanes,
+    # so a build that is already running gets the rule too (a charter is read only at the session's first call).
+    if version_number:
+        parts.append(uat_guide.BRIEF_RULE.format(path=uat_guide.relative_path(version_number)))
     # ICCINT-114: NEPODMIENENE a v oboch dráhach. Prierezové pravidlá vyššie prichádzajú z Návrhu, ktorý
     # rýchla dráha nemá — bez tohto by na nej nebolo žiadne. A pravidlá, ktoré platia len keď si na ne
     # Manažér spomenie, nie sú pravidlá.
@@ -12963,6 +13007,7 @@ async def _run_build_round(
     # into every task brief).
     cross_cutting = _fetch_cross_cutting_rules(db, version_id)
     schema_rule = _build_schema_rule(db, version_id)  # DEV-7
+    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
     # The Manažér's framed return/answer (an ``uprav`` / ``answer`` re-dispatch) seeds attempt 1 of whichever
     # task runs first in THIS dispatch (the resumed task), then is consumed so later turns use generated briefs.
     pending_directive = directive
@@ -13193,6 +13238,7 @@ async def _run_build_round(
                             state.flow_type,
                             task_label=_task_full_number(db, task),
                             schema_rule=schema_rule,
+                            version_number=version_number,
                         )
                     )
                 pending_directive = None  # consume once — later attempts/tasks use generated briefs
@@ -13204,6 +13250,7 @@ async def _run_build_round(
                     state.flow_type,
                     task_label=_task_full_number(db, task),
                     schema_rule=schema_rule,
+                    version_number=version_number,
                 )
             result = await _dispatch_build_turn(
                 db,

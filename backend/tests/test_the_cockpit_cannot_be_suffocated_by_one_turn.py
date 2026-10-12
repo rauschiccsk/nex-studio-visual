@@ -54,6 +54,7 @@ SHELLING_MODULES = {
     "source_language",
     "system_setting",
     "template_bootstrap",
+    "uat_guide",
     "uat_provisioner",
     "vizual_sandbox",
 }
