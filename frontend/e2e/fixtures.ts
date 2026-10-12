@@ -631,6 +631,88 @@ export const LAYOUT = {
   },
 };
 
+/** DEV-84 — the runs GitHub listed for NEX Inbox on 12.10.2026, in the shapes the repository tab draws. */
+export const CI_RUNS: S["CiRunsRead"] = {
+  repo: "rauschiccsk/nex-inbox",
+  actions_url: "https://github.com/rauschiccsk/nex-inbox/actions",
+  total_count: 193,
+  fetched_at: T2,
+  error: null,
+  stale: false,
+  refresh_seconds: 30,
+  runs: [
+    {
+      id: 38305919265,
+      number: 25,
+      attempt: 1,
+      workflow: "Release smoke gate",
+      subject: "proof(red): nginx without the .mjs type (do not merge)",
+      event: "workflow_dispatch",
+      event_label: "spustené ručne",
+      state: "failure",
+      state_label: "Zlyhalo",
+      branch: "ci/v180-disk-blackhole-red-mount-and-a-long-branch-name",
+      sha: "577bd01aa2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
+      actor: "rauschiccsk",
+      created_at: T2,
+      duration_seconds: 716,
+      url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38305919265",
+      failed_step: "smb-blackhole › Skutočné zdieľanie zmĺkne a vráti sa (deploy/ci/smb_blackhole_check.sh)",
+      task: null,
+      deployed: [],
+    },
+    {
+      id: 38305915333,
+      number: 24,
+      attempt: 1,
+      workflow: "CI",
+      subject: "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
+      event: "push",
+      event_label: "odoslanie",
+      state: "success",
+      state_label: "Prešlo",
+      branch: "main",
+      sha: "1771419bb2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
+      actor: "rauschiccsk",
+      created_at: T1,
+      duration_seconds: 784,
+      url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38305915333",
+      failed_step: null,
+      task: {
+        label: "32.2.1",
+        task_id: "33333333-3333-4333-8333-333333333321",
+        title: "Brána vydania — tri funkcie a SP-21…SP-27",
+        version_id: VERSION.id,
+        version_number: VERSION.version_number,
+      },
+      deployed: [
+        { environment: "prod", customer: "MÁGERSTAV spol. s r.o.", version: "1.7.1" },
+        { environment: "uat", customer: "ICC s.r.o.", version: "1.7.1" },
+      ],
+    },
+    {
+      id: 38302046414,
+      number: 168,
+      attempt: 1,
+      workflow: "CI",
+      subject: "feat(1.8.0): disk check of the Genesis share (TASK #33.1.2)",
+      event: "push",
+      event_label: "odoslanie",
+      state: "running",
+      state_label: "Beží",
+      branch: "main",
+      sha: "2fc9065bb2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
+      actor: "rauschiccsk",
+      created_at: T2,
+      duration_seconds: 95,
+      url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38302046414",
+      failed_step: null,
+      task: null,
+      deployed: [],
+    },
+  ],
+};
+
 export function registerFixtures(): void {
   answer("get", "/api/v1/auth/me", USER);
   answer("get", "/api/v1/user-layout", LAYOUT);
@@ -775,6 +857,8 @@ export function registerFixtures(): void {
     legacy_admin: false,
   });
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
+  // DEV-84: the repository tab — a red proof with its failed step, a run with its task and where it runs, one running.
+  answer("get", "/api/v1/projects/{slug}/ci-runs", CI_RUNS);
   // DEV-90: what to try in UAT — a guide with two changes, so the UAT tab is measured with it.
   answer("get", "/api/v1/projects/{slug}/uat-guide", {
     version_number: "1.7.1",

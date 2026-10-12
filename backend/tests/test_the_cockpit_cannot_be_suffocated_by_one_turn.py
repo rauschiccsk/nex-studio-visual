@@ -35,6 +35,7 @@ SHELLING_MODULES = {
     "build_db",
     "build_provenance",
     "build_sandbox",
+    "ci_runs",
     "ci_status",
     "claude_agent",
     "create_project_postscaffold",

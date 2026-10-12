@@ -19,8 +19,8 @@
  * Project- + version-scoped (follows the pin); the transcript + relay are keyed on the selected version.
  */
 
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { FolderOpen, Lock } from "lucide-react";
 import { ResizeHandle, useWideScreen } from "nex-shared";
 
@@ -79,6 +79,12 @@ export default function RiadiaceCentrumPage() {
   const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
   const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
   const planOnPhone = pane === "plan" ? "" : "max-md:hidden";
+  // DEV-84 — a link to one task (`?uloha=20.1.1` from the repository tab) shows the plan, also on a phone.
+  const [searchParams] = useSearchParams();
+  const focusTask = searchParams.get("uloha");
+  useEffect(() => {
+    if (focusTask) setPane("plan");
+  }, [focusTask]);
   // DEV-82: on a computer the task plan is as wide as the person left it (kept on the server); its left edge is the
   // handle. Until the layout arrives — and on a tablet or a phone — the column keeps its default from the classes.
   const wide = useWideScreen();
@@ -395,6 +401,7 @@ export default function RiadiaceCentrumPage() {
           board={board}
           onBoard={setBoard}
           ci={ci}
+          focusTask={focusTask}
         />
       </div>
     </div>

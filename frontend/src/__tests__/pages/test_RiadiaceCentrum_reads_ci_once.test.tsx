@@ -20,7 +20,8 @@ const { seen, red } = vi.hoisted(() => ({
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
-  return { ...actual, useNavigate: () => vi.fn() };
+  // DEV-84: the page reads `?uloha=` — rendered without a router here, so the address is empty.
+  return { ...actual, useNavigate: () => vi.fn(), useSearchParams: () => [new URLSearchParams(), vi.fn()] };
 });
 vi.mock("@/store/authStore", () => ({
   useAuthStore: (selector: (s: unknown) => unknown) => selector({ user: { role: "ha" } }),

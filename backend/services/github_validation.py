@@ -86,7 +86,7 @@ def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:
     a status that could not be read is not the same as "offline", and the caller must not wait on a guess."""
     response = httpx.get(
         f"{GITHUB_API_BASE}/repos/{repo_full}/actions/runners",
-        headers=_github_headers(),
+        headers=github_headers(),
         timeout=timeout,
     )
     if response.status_code != 200:
@@ -100,7 +100,7 @@ def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:
     return None
 
 
-def _github_headers() -> dict[str, str]:
+def github_headers() -> dict[str, str]:
     """Standard GitHub API headers including the bearer token."""
     return {
         "Accept": "application/vnd.github+json",
@@ -129,7 +129,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
         On unexpected GitHub API response codes.
     """
     probe_url = f"{GITHUB_API_BASE}/users/{owner}"
-    probe = httpx.get(probe_url, headers=_github_headers(), timeout=timeout)
+    probe = httpx.get(probe_url, headers=github_headers(), timeout=timeout)
     if probe.status_code == 404:
         raise ValueError(f"GitHub account '{owner}' not found. Check the github_org setting.")
     if probe.status_code != 200:
@@ -147,7 +147,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
         # creating the repo under the wrong account.
         who_resp = httpx.get(
             f"{GITHUB_API_BASE}/user",
-            headers=_github_headers(),
+            headers=github_headers(),
             timeout=timeout,
         )
         if who_resp.status_code != 200:
@@ -240,7 +240,7 @@ def create_github_repo(
         "auto_init": False,
     }
 
-    response = httpx.post(url, headers=_github_headers(), json=body, timeout=timeout)
+    response = httpx.post(url, headers=github_headers(), json=body, timeout=timeout)
 
     if response.status_code == 201:
         logger.info("Created GitHub repository %s", repo)
@@ -310,7 +310,7 @@ def delete_github_repo(repo: str, *, timeout: float = _DEFAULT_GITHUB_API_TIMEOU
         raise RuntimeError("Cannot delete GitHub repository: no github_token configured.")
 
     url = f"{GITHUB_API_BASE}/repos/{owner}/{name}"
-    response = httpx.delete(url, headers=_github_headers(), timeout=timeout)
+    response = httpx.delete(url, headers=github_headers(), timeout=timeout)
 
     if response.status_code == 204:
         logger.info("Deleted GitHub repository %s", repo)

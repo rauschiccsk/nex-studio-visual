@@ -76,6 +76,8 @@ interface Props {
   onBoard: (board: PipelineBoard) => void;
   /** DEV-51: the build's CI — a finished version with red (or running) checks is not ready to deploy. */
   ci?: CiStatus | null;
+  /** DEV-84 — `epic.feat.task` of the task a link points at (the repository tab): opened, scrolled to, outlined. */
+  focusTask?: string | null;
 }
 
 // Level colour-coding (design §4.5, salvaged): EPIC = purple, FEAT = yellow, TASK = blue, on the node TITLE
@@ -248,6 +250,8 @@ function PlanNode(props: {
   /** DEV-75 — what the node's tasks are billed as; shown even when the node is collapsed. */
   billing?: React.ReactNode;
   className?: string;
+  /** DEV-84 — the element's id, so a link can scroll to the node. */
+  domId?: string;
   children?: React.ReactNode;
 }) {
   const {
@@ -268,11 +272,12 @@ function PlanNode(props: {
     spend,
     billing,
     className,
+    domId,
     children,
   } = props;
   const hasTechnical = !!(technical ?? "").trim();
   return (
-    <div className={className}>
+    <div id={domId} className={className}>
       <div className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--color-surface-hover)]">
         <span className={`flex min-w-0 items-center gap-1.5 ${levelColor}`}>
           {hasChildren ? (
@@ -335,7 +340,7 @@ function PlanNode(props: {
   );
 }
 
-export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props) {
+export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Props) {
   const navigate = useNavigate();
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
@@ -618,7 +623,26 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
   }
   // Render-time view of the collapse set: an active-task ancestor is force-EXPANDED so the live task stays visible,
   // WITHOUT mutating the saved `collapsed` (the Manažér's choice is remembered; the override lifts when work moves on).
+  // DEV-84 — the task a link points at: its epic and feat open the same render-time way, the saved set untouched.
+  let focused: { epicId: string; featId: string; taskId: string } | null = null;
+  for (const epic of plan?.plan ?? []) {
+    for (const feat of epic.feats) {
+      for (const task of feat.tasks) {
+        if (focusTask && `${epic.number}.${feat.number}.${task.number}` === focusTask) {
+          focused = { epicId: epic.id, featId: feat.id, taskId: task.id };
+        }
+      }
+    }
+  }
+  if (focused) {
+    activeAncestors.add(focused.epicId);
+    activeAncestors.add(focused.featId);
+  }
   const effectiveCollapsed = new Set([...collapsed].filter((id) => !activeAncestors.has(id)));
+  const focusedTaskId = focused?.taskId ?? null;
+  useEffect(() => {
+    if (focusedTaskId) document.getElementById(`planrail-task-${focusedTaskId}`)?.scrollIntoView?.({ block: "center" });
+  }, [focusedTaskId]);
 
   return (
     <aside
@@ -844,6 +868,11 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
         <ErrorNote error={categoryError} className="mb-1 px-1" />
+        {plan && focusTask && !focused && (
+          <p role="status" className="mb-1 px-1 text-[var(--color-text-muted)]">
+            Úloha {focusTask} v pláne tejto verzie nie je.
+          </p>
+        )}
         {error ? (
           <ErrorNote error={error} className="px-1" />
         ) : !plan ? (
@@ -900,7 +929,10 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
                     <PlanNode
                       key={task.id}
                       nodeId={task.id}
-                      className="ml-4 mt-1"
+                      domId={`planrail-task-${task.id}`}
+                      className={`ml-4 mt-1 ${
+                        task.id === focusedTaskId ? "rounded ring-2 ring-[var(--color-accent-primary)]" : ""
+                      }`}
                       number={task.number}
                       title={task.title}
                       status={task.status}

@@ -2323,6 +2323,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/ci-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ci Runs
+         * @description The project's newest CI runs as GitHub lists them, with the task of each commit and the customers it runs at.
+         *
+         *     GitHub is asked at most once per ``ci_runs_cache_seconds`` per repository for everybody; the token stays on the
+         *     server. Never fails on GitHub: the reason comes in ``error``, the last answer with ``stale``.
+         */
+        get: operations["get_ci_runs_api_v1_projects__slug__ci_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/customer-settings": {
         parameters: {
             query?: never;
@@ -4091,6 +4114,109 @@ export interface components {
              * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
              */
             new_password: string;
+        };
+        /**
+         * CiRunDeployed
+         * @description A customer whose UAT or PROD runs the run's commit.
+         */
+        CiRunDeployed: {
+            /** Customer */
+            customer: string;
+            /** Environment */
+            environment: string;
+            /** Version */
+            version: string;
+        };
+        /** CiRunRead */
+        CiRunRead: {
+            /** Actor */
+            actor: string;
+            /** Attempt */
+            attempt: number;
+            /** Branch */
+            branch: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Deployed
+             * @default []
+             */
+            deployed: components["schemas"]["CiRunDeployed"][];
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Event */
+            event: string;
+            /** Event Label */
+            event_label: string;
+            /** Failed Step */
+            failed_step?: string | null;
+            /** Id */
+            id: number;
+            /** Number */
+            number: number;
+            /** Sha */
+            sha: string;
+            /** State */
+            state: string;
+            /** State Label */
+            state_label: string;
+            /** Subject */
+            subject: string;
+            task?: components["schemas"]["CiRunTask"] | null;
+            /** Url */
+            url: string;
+            /** Workflow */
+            workflow: string;
+        };
+        /**
+         * CiRunTask
+         * @description The task whose commit the run checked — from ``(TASK #20.1.1)`` in the commit's subject.
+         */
+        CiRunTask: {
+            /** Label */
+            label: string;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+        };
+        /** CiRunsRead */
+        CiRunsRead: {
+            /** Actions Url */
+            actions_url?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Refresh Seconds */
+            refresh_seconds: number;
+            /** Repo */
+            repo?: string | null;
+            /**
+             * Runs
+             * @default []
+             */
+            runs: components["schemas"]["CiRunRead"][];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * Total Count
+             * @default 0
+             */
+            total_count: number;
         };
         /**
          * CiStatusRead
@@ -12522,6 +12648,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BillingOverviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ci_runs_api_v1_projects__slug__ci_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiRunsRead"];
                 };
             };
             /** @description Validation Error */

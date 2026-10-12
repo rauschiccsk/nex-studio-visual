@@ -52,6 +52,10 @@ class Settings(BaseSettings):
         default="",
         description="GitHub personal access token for repository validation API calls",
     )
+    # DEV-84: the repository tab — how long GitHub's answer about a repository's CI runs is shared by every window
+    # (one question per repository, not one per person), and how many of the newest runs it lists (GitHub's page cap).
+    ci_runs_cache_seconds: int = 30
+    ci_runs_listed: int = 100
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

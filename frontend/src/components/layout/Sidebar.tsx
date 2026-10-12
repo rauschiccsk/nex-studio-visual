@@ -45,6 +45,8 @@ const IconMetrics = () => <NavIcon glyph="📊" />;
 const IconRiadiace = () => <NavIcon glyph="🎛️" />;
 const IconPoradca = () => <NavIcon glyph="💬" />;
 const IconSpec = () => <NavIcon glyph="📄" />;
+// DEV-84: the CI runs of the selected project's repository.
+const IconRepozitar = () => <NavIcon glyph="🔀" />;
 
 // CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) during the vizual phase.
 const IconVizual = () => <NavIcon glyph="🖥️" />;
@@ -301,6 +303,15 @@ export default function Sidebar() {
         onClick={() => navigate(hasProject ? "/specifikacia" : projectsFallback)}
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k dokumentom"
+      />
+      {/* DEV-84: the CI runs of the selected project's GitHub repository — read-only, project-scoped like the rest. */}
+      <NavItem
+        icon={<IconRepozitar />}
+        label="Repozitár"
+        active={hasProject ? isActive("/repozitar") : false}
+        onClick={() => navigate(hasProject ? "/repozitar" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k repozitáru"
       />
       {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
           their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then

@@ -35,3 +35,12 @@ a GitHub ukazoval niečo iné ako kokpit. Teraz ju kokpit odošle po každej hot
 napíše ti to v rozhovore aj s dôvodom a kód odošle spolu s ďalšou úlohou. Riadok Zostavenie namiesto „zatiaľ nevieme“
 povie, že kód na GitHube ešte nie je a koľko commitov čaká na odoslanie. AI Agent hlavnú vetvu sám neodosiela; na
 GitHub posiela len bočné vetvy, keď potrebuje dokázať, že skúška vie zlyhať.
+
+**Nová záložka Repozitár — behy kontrol projektu bez otvárania GitHubu.** V ľavom paneli pod Dokumentmi je záložka
+Repozitár. Ukáže behy kontrol (CI) vybraného projektu tak ako GitHub: stav slovami (Prešlo, Zlyhalo, Beží, Čaká,
+Zrušené), predmet commitu, číslo behu, vetvu, kto ho spustil, kedy a ako dlho bežal. Pri zlyhanom behu vidíš aj krok,
+ktorý zlyhal. Pri behoch spustených ručne, kde GitHub píše len „CI“, ukáže predmet commitu, ktorý sa kontroloval.
+Číslo úlohy v commite je tlačidlo: otvorí Plán úloh danej verzie, rozbalí úlohu a zvýrazní ju. Commit, ktorý beží
+u zákazníka, má značku „na PROD“ alebo „na UAT“ s menom zákazníka a verziou. Behy filtruješ podľa stavu, vetvy
+a človeka a môžeš v nich hľadať. Záložka sa obnovuje sama každých 30 sekúnd. Kokpit sa GitHubu pýta raz za všetkých,
+nech je otvorených okien koľkokoľvek. Záložka behy len ukazuje, nespúšťa ani nezastavuje ich.
