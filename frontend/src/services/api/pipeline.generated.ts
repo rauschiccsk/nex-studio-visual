@@ -2212,7 +2212,7 @@ export interface paths {
         };
         /**
          * Get Billing
-         * @description DEV-73 — the Fakturácia tab: every version of the project, the newest first, with where it stands for
+         * @description DEV-73 — the billing tab: every version of the project, the newest first, with where it stands for
          *     invoicing (issued, issuable, waiting for the work kind, …) and the totals.
          *
          *     Sync like the rest: counting reads git.
@@ -3558,7 +3558,7 @@ export interface components {
         };
         /**
          * BillingRowRead
-         * @description DEV-73 — one version on the Fakturácia tab.
+         * @description DEV-73 — one version on the billing tab.
          */
         BillingRowRead: {
             /** Base Sha */
