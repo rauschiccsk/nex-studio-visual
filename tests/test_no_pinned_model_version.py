@@ -38,6 +38,8 @@ _SKIP_PREFIXES = (
     "tests/",
     "backend/tests/",
     "frontend/src/__tests__/",
+    # The browser guard's fixtures (DEV-62) replay what the backend reports, e.g. the version that last ran.
+    "frontend/e2e/",
     # Generated locally from the backend (gitignored) — clean whenever the backend is.
     "frontend/openapi.json",
 )
