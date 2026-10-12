@@ -991,7 +991,14 @@ async def _default_deploy_runner(
 # ---------------------------------------------------------------------------
 
 
-def accept(db: Session, customer_id: UUID, version_number: str, actor_id: Optional[UUID]) -> DeployEvent:
+def accept(
+    db: Session,
+    customer_id: UUID,
+    version_number: str,
+    actor_id: Optional[UUID],
+    *,
+    detail: Optional[str] = None,
+) -> DeployEvent:
     """Record a Manažér's UAT acceptance for a (customer, version) pair (§3.5).
 
     Recording an ``accept`` event opens the PROD deploy for that exact pair. The
@@ -1031,7 +1038,8 @@ def accept(db: Session, customer_id: UUID, version_number: str, actor_id: Option
         event_type="accept",
         status="ok",
         actor_id=actor_id,
-        detail="UAT accepted — PROD opened",
+        # DEV-91: what was tested in UAT, when the route knows it.
+        detail=detail or "UAT accepted — PROD opened",
     )
     db.add(event)
     db.flush()

@@ -18,6 +18,7 @@ from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.uat_check import UatCheck
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
 
@@ -42,6 +43,7 @@ __all__ = [
     "PoradcaMessage",
     "Project",
     "ProjectAssignment",
+    "UatCheck",
     "VersionRateChange",
     "Epic",
     "Feat",

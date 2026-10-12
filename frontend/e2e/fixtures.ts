@@ -754,6 +754,24 @@ export function registerFixtures(): void {
     changes: [],
     logins: [CUSTOMER.id, NEW_CUSTOMER.id].map((id) => ({ customer_id: id, login: "operator@priklad.sk" })),
   });
+  // DEV-91: what was tried — one change ticked off, so the guard measures the guide with its controls.
+  answer("get", "/api/v1/customers/{customer_id}/uat-checks", {
+    version_number: "1.7.1",
+    items: ["Detail faktúry sa otvorí aj v staršom prehliadači na serveri", "Objednávkový kód z ISDOC"],
+    checks: [
+      {
+        item: "Detail faktúry sa otvorí aj v staršom prehliadači na serveri",
+        status: "tested",
+        note: null,
+        checked_by: "Mária Manažérová",
+        updated_at: T2,
+      },
+    ],
+    tested: 1,
+    total: 2,
+    untested: ["Objednávkový kód z ISDOC"],
+    broken: [],
+  });
   answerUntyped<AdoptionPreview>("get", "/api/v1/customers/{customer_id}/adoption-preview", {
     instance_dir: "/opt/uat/novak/nex-inbox",
     exists: true,

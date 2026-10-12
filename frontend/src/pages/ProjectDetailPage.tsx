@@ -16,6 +16,7 @@ import {
 import { listUsersApi } from "@/services/api/users";
 import { listVersions } from "@/services/api/versions";
 import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
+import { FROM_UAT_LABEL, fastFixFromUat, forgetFastFixOrigin } from "@/lib/fastFixHandoff";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
@@ -136,6 +137,8 @@ export default function ProjectDetailPage() {
   // DEV-32: a half-written quick-fix instruction survives leaving the screen; it comes back when he opens the
   // dialog again, and is forgotten once the fix has started.
   const fastFixDraft = useDraft(draftKey("rychla-oprava", slug));
+  // DEV-91: the text was prepared from a UAT test that failed — the dialog says so until he edits it.
+  const [fastFixFromTest, setFastFixFromTest] = useState(false);
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
   const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
   // DEV-50: a fast fix says up front whether it fixes our own error (never billed) or changes what was agreed.
@@ -218,6 +221,7 @@ export default function ProjectDetailPage() {
     try {
       const res = await startFastFixApi(project.id, directive, fastFixKind);
       fastFixDraft.clear();
+      forgetFastFixOrigin(slug);
       // ICCINT-62: shared with the Dedo proposal bar, the OTHER entry into this same lane — it omitted this
       // step and the build started with the Manažér left on the previous version. One helper, both entries.
       await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
@@ -277,9 +281,10 @@ export default function ProjectDetailPage() {
   const openFastFix = useCallback(() => {
     setFastFixError(null);
     setFastFixDirective(fastFixDraft.text);
+    setFastFixFromTest(fastFixFromUat(slug));
     setFastFixKind(null);
     setFastFixOpen(true);
-  }, [fastFixDraft.text]);
+  }, [fastFixDraft.text, slug]);
 
   // DEV-57: a screen that sends the manager here to start a fast fix (the deploy stopped by failed checks) lands
   // on the open dialog — once the versions are loaded (a fast fix patches the newest one), and only once: the
@@ -846,6 +851,9 @@ export default function ProjectDetailPage() {
             <label htmlFor="fastfix-directive" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
               Popis opravy
             </label>
+            {fastFixFromTest && (
+              <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_UAT_LABEL}</p>
+            )}
             <textarea
               data-draft="rychla-oprava"
               lang="sk"
@@ -856,6 +864,10 @@ export default function ProjectDetailPage() {
               onChange={(e) => {
                 setFastFixDirective(e.target.value);
                 fastFixDraft.setText(e.target.value);
+                if (fastFixFromTest) {
+                  setFastFixFromTest(false); // he edited it — the text is his now
+                  forgetFastFixOrigin(slug);
+                }
               }}
               rows={5}
               placeholder="Napríklad: V ľavom menu oprav preklep „Nastvenia“ na „Nastavenia“."

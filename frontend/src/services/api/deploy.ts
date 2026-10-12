@@ -5,7 +5,9 @@ import type {
   DeployMatrix,
   DeployRequest,
   DeployResult,
+  UatCheckWrite,
   UatGuide,
+  UatProgress,
 } from "../../types/deploy";
 
 /**
@@ -14,6 +16,7 @@ import type {
  * Maps to `backend.api.routes.deploy`:
  *   - GET  /projects/{slug}/deploy-matrix        → getDeployMatrix
  *   - GET  /projects/{slug}/uat-guide            → getUatGuide (DEV-90)
+ *   - GET/PUT /customers/{customerId}/uat-checks → getUatChecks / setUatCheck (DEV-91)
  *   - GET  /projects/{slug}/deploy-events        → listProjectDeployEvents
  *   - GET  /customers/{customerId}/deploy-events → listCustomerDeployEvents
  *   - POST /customers/{customerId}/deploy        → deployCustomer (Nasadiť)
@@ -31,6 +34,16 @@ export function getDeployMatrix(slug: string): Promise<DeployMatrix> {
 /** DEV-90 — what to try in UAT for one version: the agent's test guide, or an older version's release-note changes. */
 export function getUatGuide(slug: string, version: string): Promise<UatGuide> {
   return api.get<UatGuide>(`/projects/${slug}/uat-guide?version=${encodeURIComponent(version)}`);
+}
+
+/** DEV-91 — the changes to try in a version for one customer and what was recorded for each. */
+export function getUatChecks(customerId: string, version: string): Promise<UatProgress> {
+  return api.get<UatProgress>(`/customers/${customerId}/uat-checks?version=${encodeURIComponent(version)}`);
+}
+
+/** DEV-91 — record that a change was tried or does not work; `status: null` takes the record back. */
+export function setUatCheck(customerId: string, body: UatCheckWrite): Promise<UatProgress> {
+  return api.put<UatProgress>(`/customers/${customerId}/uat-checks`, body);
 }
 
 /** Mint a short-lived UAT test launch URL for a token-launch app — open it to land LOGGED-IN in the

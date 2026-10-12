@@ -47,9 +47,12 @@ from backend.schemas.deploy import (
     DeployMatrix,
     DeployRequest,
     DeployResult,
+    UatCheckRead,
+    UatCheckWrite,
     UatGuideLoginRead,
     UatGuideRead,
     UatGuideSectionRead,
+    UatProgressRead,
 )
 from backend.services import (
     ci_status,
@@ -58,6 +61,7 @@ from backend.services import (
     deploy_progress,
     env_contract,
     instance_adoption,
+    uat_checks,
     uat_guide,
     uat_provisioner,
 )
@@ -515,6 +519,72 @@ async def adopt_instance(
     )
 
 
+def _uat_scope(db: Session, customer_id: UUID, version_number: str, *, required: bool = True):
+    """``(customer, version, changes to try)`` for one customer's project; ``None`` (or 404) when one is missing."""
+    customer = db.get(Customer, customer_id)
+    version = (
+        db.execute(
+            select(Version).where(Version.project_id == customer.project_id, Version.version_number == version_number)
+        ).scalar_one_or_none()
+        if customer is not None
+        else None
+    )
+    if version is None:
+        if required:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Verzia {version_number} sa nenašla.")
+        return None
+    project = db.get(Project, customer.project_id)
+    changes = uat_checks.items_for(db, version, claude_agent.PROJECTS_ROOT / project.slug)
+    return customer, version, changes
+
+
+def _progress_read(version: Version, found: uat_checks.Progress) -> UatProgressRead:
+    return UatProgressRead(
+        version_number=version.version_number,
+        items=found.items,
+        checks=[
+            UatCheckRead(item=c.item, status=c.status, note=c.note, checked_by=c.checked_by, updated_at=c.updated_at)
+            for c in found.checks.values()
+        ],
+        tested=found.tested,
+        total=len(found.items),
+        untested=found.untested,
+        broken=found.broken,
+    )
+
+
+@router.get("/customers/{customer_id}/uat-checks", response_model=UatProgressRead)
+def get_uat_checks(
+    customer_id: UUID,
+    version: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UatProgressRead:
+    """DEV-91 — the changes to try in ``version`` for this customer and what was recorded for each."""
+    authz.assert_customer_access(db, current_user, customer_id)
+    _customer, row, changes = _uat_scope(db, customer_id, version)
+    return _progress_read(row, uat_checks.progress(db, customer_id, row, changes))
+
+
+@router.put("/customers/{customer_id}/uat-checks", response_model=UatProgressRead)
+def put_uat_check(
+    customer_id: UUID,
+    payload: UatCheckWrite,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> UatProgressRead:
+    """DEV-91 — record that a change was tried or does not work (with what happened), or take the record back."""
+    authz.assert_customer_access(db, current_user, customer_id)
+    _customer, row, changes = _uat_scope(db, customer_id, payload.version_number)
+    try:
+        uat_checks.record(db, customer_id, row, changes, payload.item, payload.status, payload.note, current_user.id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    db.commit()
+    return _progress_read(row, uat_checks.progress(db, customer_id, row, changes))
+
+
 @router.post("/customers/{customer_id}/accept", response_model=DeployEventRead)
 def accept_customer_uat(
     customer_id: UUID,
@@ -533,8 +603,15 @@ def accept_customer_uat(
     step that OPENS PROD, so it gets the same explicit check as the deploy above.
     """
     authz.assert_customer_access(db, current_user, customer_id)
+    # DEV-91: the acceptance keeps what was tested — the same count the manager saw before confirming.
+    scope = _uat_scope(db, customer_id, payload.version_number, required=False)
+    detail = (
+        uat_checks.acceptance_detail(uat_checks.progress(db, customer_id, scope[1], scope[2]))
+        if scope is not None
+        else None
+    )
     try:
-        event = deploy_service.accept(db, customer_id, payload.version_number, current_user.id)
+        event = deploy_service.accept(db, customer_id, payload.version_number, current_user.id, detail=detail)
         db.commit()
     except ValueError as exc:
         db.rollback()

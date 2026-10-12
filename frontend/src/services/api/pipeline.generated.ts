@@ -611,6 +611,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}/uat-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Uat Checks
+         * @description DEV-91 — the changes to try in ``version`` for this customer and what was recorded for each.
+         */
+        get: operations["get_uat_checks_api_v1_customers__customer_id__uat_checks_get"];
+        /**
+         * Put Uat Check
+         * @description DEV-91 — record that a change was tried or does not work (with what happened), or take the record back.
+         */
+        put: operations["put_uat_check_api_v1_customers__customer_id__uat_checks_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customer_id}/uat-launch": {
         parameters: {
             query?: never;
@@ -7205,6 +7229,42 @@ export interface components {
             title?: string | null;
         };
         /**
+         * UatCheckRead
+         * @description DEV-91 — what the manager recorded for one change in UAT: tried, or does not work (with what happened).
+         */
+        UatCheckRead: {
+            /** Checked By */
+            checked_by?: string | null;
+            /** Item */
+            item: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "tested" | "broken";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * UatCheckWrite
+         * @description DEV-91 — record what the manager found for one change; ``status`` empty takes the record back.
+         */
+        UatCheckWrite: {
+            /** Item */
+            item: string;
+            /** Note */
+            note?: string | null;
+            /** Status */
+            status?: ("tested" | "broken") | null;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
          * UatGuideLoginRead
          * @description How a customer's first admin signs in to UAT — a login, never a password.
          */
@@ -7253,6 +7313,32 @@ export interface components {
             steps?: string[];
             /** Title */
             title: string;
+        };
+        /**
+         * UatProgressRead
+         * @description DEV-91 — the changes to try in one version for one customer, and how far the testing got.
+         */
+        UatProgressRead: {
+            /** Broken */
+            broken?: string[];
+            /** Checks */
+            checks?: components["schemas"]["UatCheckRead"][];
+            /** Items */
+            items?: string[];
+            /**
+             * Tested
+             * @default 0
+             */
+            tested: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Untested */
+            untested?: string[];
+            /** Version Number */
+            version_number: string;
         };
         /**
          * UnpricedRead
@@ -9194,6 +9280,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_DeployProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_uat_checks_api_v1_customers__customer_id__uat_checks_get: {
+        parameters: {
+            query: {
+                version: string;
+            };
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UatProgressRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_uat_check_api_v1_customers__customer_id__uat_checks_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UatCheckWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UatProgressRead"];
                 };
             };
             /** @description Validation Error */

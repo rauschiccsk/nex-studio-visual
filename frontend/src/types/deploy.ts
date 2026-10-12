@@ -178,3 +178,6 @@ export interface AcceptRequest {
 
 /** DEV-90 — what to try in UAT for one version (generated from the backend contract, so it cannot drift). */
 export type UatGuide = components["schemas"]["UatGuideRead"];
+/** DEV-91 — what was tried in UAT for one customer and version. */
+export type UatProgress = components["schemas"]["UatProgressRead"];
+export type UatCheckWrite = components["schemas"]["UatCheckWrite"];

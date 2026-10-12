@@ -353,3 +353,35 @@ class UatGuideRead(BaseModel):
     nothing_to_test: Optional[str] = None
     changes: list[str] = Field(default_factory=list)
     logins: list[UatGuideLoginRead] = Field(default_factory=list)
+
+
+class UatCheckRead(BaseModel):
+    """DEV-91 — what the manager recorded for one change in UAT: tried, or does not work (with what happened)."""
+
+    item: str
+    status: Literal["tested", "broken"]
+    note: Optional[str] = None
+    checked_by: Optional[str] = None
+    updated_at: datetime
+
+
+class UatProgressRead(BaseModel):
+    """DEV-91 — the changes to try in one version for one customer, and how far the testing got."""
+
+    version_number: str
+    #: The changes in the guide's order — its section titles, or the release note's changes of an older version.
+    items: list[str] = Field(default_factory=list)
+    checks: list[UatCheckRead] = Field(default_factory=list)
+    tested: int = 0
+    total: int = 0
+    untested: list[str] = Field(default_factory=list)
+    broken: list[str] = Field(default_factory=list)
+
+
+class UatCheckWrite(BaseModel):
+    """DEV-91 — record what the manager found for one change; ``status`` empty takes the record back."""
+
+    version_number: str = Field(..., min_length=1, max_length=50)
+    item: str = Field(..., min_length=1, max_length=2000)
+    status: Optional[Literal["tested", "broken"]] = None
+    note: Optional[str] = Field(default=None, max_length=4000)

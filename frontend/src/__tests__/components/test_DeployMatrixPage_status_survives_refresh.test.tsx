@@ -31,6 +31,8 @@ vi.mock("@/services/api/deploy", () => ({
   uatLaunch: vi.fn(),
   // DEV-90: the UAT tab also asks what to try; never answering keeps that panel out of these tests.
   getUatGuide: vi.fn(() => new Promise(() => {})),
+  // DEV-91: the acceptance asks how much was tested; without an answer the question stays as before.
+  getUatChecks: vi.fn(() => Promise.reject(new Error("not in this test"))),
 }));
 
 const contextMock = { selectedProject: { slug: "nex-manager", name: "NEX Manager" } };

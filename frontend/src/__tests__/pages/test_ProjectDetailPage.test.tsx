@@ -8,12 +8,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
+import { FROM_UAT_LABEL } from "@/lib/fastFixHandoff";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
@@ -521,6 +522,26 @@ describe("ProjectDetailPage — príchod zo zastaveného nasadenia (DEV-57)", ()
 
     expect(await screen.findByRole("dialog", { name: "Rýchla oprava" })).toBeInTheDocument();
     expect(navigateMock).toHaveBeenCalledWith({ pathname: "/projects/demo", hash: "" }, { replace: true });
+  });
+
+  it("DEV-91: a brief prepared from a UAT test lands in the dialog saying where it came from, until he edits it", async () => {
+    window.localStorage.setItem("nex.draft.rychla-oprava.demo", "V UAT nefunguje: Detail faktúry.");
+    window.localStorage.setItem("nex.draft.rychla-oprava.demo.origin", "uat");
+    locationMock.search = "?rychla-oprava=1";
+    try {
+      const ProjectDetailPage = await importPage();
+      render(<ProjectDetailPage />);
+
+      const dialog = await screen.findByRole("dialog", { name: "Rýchla oprava" });
+      expect(within(dialog).getByLabelText("Popis opravy")).toHaveValue("V UAT nefunguje: Detail faktúry.");
+      expect(within(dialog).getByText(FROM_UAT_LABEL)).toBeInTheDocument();
+      fireEvent.change(within(dialog).getByLabelText("Popis opravy"), { target: { value: "Vlastný text." } });
+
+      expect(within(dialog).queryByText(FROM_UAT_LABEL)).not.toBeInTheDocument();
+      expect(window.localStorage.getItem("nex.draft.rychla-oprava.demo.origin")).toBeNull();
+    } finally {
+      window.localStorage.clear();
+    }
   });
 
   it("bez odkazu sa dialóg sám neotvorí", async () => {

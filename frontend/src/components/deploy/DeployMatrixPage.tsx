@@ -10,13 +10,14 @@ import {
   UploadCloud,
 } from "lucide-react";
 
-import { acceptCustomerUat, deployCustomer, getDeployMatrix, uatLaunch } from "@/services/api/deploy";
+import { acceptCustomerUat, deployCustomer, getDeployMatrix, getUatChecks, uatLaunch } from "@/services/api/deploy";
 import UatGuidePanel from "@/components/deploy/UatGuidePanel";
 import { ApiError } from "@/services/api";
 import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
+import { acceptanceTesting } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
 import { fmtDeployTime, fmtVer } from "./version";
 
@@ -324,9 +325,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
   async function handleAccept(row: DeployMatrixRow) {
     if (!row.uat_version) return;
+    // DEV-91: the question says how much of the version was tried — the decision stays his.
+    const tested = await getUatChecks(row.customer_id, row.uat_version).then(acceptanceTesting, () => "");
     if (
       !window.confirm(
         `Akceptovať UAT verziu ${fmtVer(row.uat_version)} pre zákazníka ${row.customer_name}? ` +
+          tested +
           "Otvorí sa tým PROD nasadenie pre túto verziu.",
       )
     )
