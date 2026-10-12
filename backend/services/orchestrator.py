@@ -5285,6 +5285,69 @@ def _git_tag_version(project_root: Path, version_number: str, sha: str) -> None:
 _GIT_PUSH_TIMEOUT = 60
 
 
+def _git_publish(project_root: Path, args: list[str]) -> tuple[int, str, str]:
+    """``(returncode, stdout, stderr)`` of one git command in ``project_root`` — both streams, because the branch
+    name comes back on stdout and every failure reason comes back on stderr. Never raises."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(project_root), *args],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_PUSH_TIMEOUT,
+            check=False,
+        )
+        return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, "", str(exc)
+
+
+#: DEV-96 — the brief's rule; the charter says the same for a session that has read it.
+PUSH_RULE = (
+    "Hlavnú vetvu na GitHub odošle kokpit hneď po tejto úlohe — sám ju neodosielaj. Bočnú vetvu pošli na GitHub "
+    "len pre červený dôkaz; jej výsledok nie je výsledok verzie."
+)
+
+#: DEV-96 — why a branch did not reach ``origin``, in the words the manager reads.
+BRANCH_NOT_NAMED = "projekt nie je na pomenovanej vetve"
+
+
+def _push_branch(project_root: Path) -> tuple[bool, Optional[str], Optional[str]]:
+    """Push the checkout's current branch to ``origin`` — ``(pushed, branch, why not)``.
+
+    A checkout without ``.git`` or without ``origin`` has nothing to publish to: ``(False, None, None)`` — not a
+    failure. A detached HEAD or a refused push is: ``(False, branch, reason)``. The branch is READ, never assumed
+    to be ``main`` — pushing to the wrong branch is worse than not pushing."""
+    import subprocess
+
+    if not (project_root / ".git").is_dir():
+        return False, None, None
+    if _git_publish(project_root, ["remote", "get-url", "origin"])[0] != 0:
+        return False, None, None
+
+    # Wire the HTTPS credential helper before pushing, exactly as
+    # :func:`template_bootstrap.push_and_verify` does at project creation. That call writes the helper into
+    # the CONTAINER's global gitconfig, which is lost on every recreate — so without repeating it here a
+    # push would start failing on credentials the first time a container was recreated without a project
+    # being created in it. Idempotent; a non-zero exit is non-fatal (the push below surfaces the real
+    # error, and the container has no ssh binary so HTTPS+gh is the only authenticated path).
+    try:
+        subprocess.run(
+            ["gh", "auth", "setup-git"], capture_output=True, text=True, timeout=_GIT_PUSH_TIMEOUT, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    branch_rc, branch, _ = _git_publish(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch_rc != 0 or not branch or branch == "HEAD":
+        return False, None, BRANCH_NOT_NAMED
+    rc, _, err = _git_publish(project_root, ["push", "origin", f"HEAD:refs/heads/{branch}"])
+    if rc != 0:
+        return False, branch, err or "git push skončil chybou"
+    return True, branch, None
+
+
 def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
     """Publish the completing version's release artifacts — the RELEASE_NOTES commit + the ``v{N}`` tag.
 
@@ -5300,68 +5363,33 @@ def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
     Returns True iff both the branch and the tag reached ``origin``. A project with no ``origin`` (a purely
     local checkout) is not a failure — there is nothing to publish to — and returns False after an INFO.
     """
-    import subprocess
-
-    def _git(args: list[str]) -> tuple[int, str, str]:
-        """``(returncode, stdout, stderr)`` — both streams, because the branch name comes back on stdout
-        and every failure reason comes back on stderr."""
-        try:
-            proc = subprocess.run(
-                ["git", "-C", str(project_root), *args],
-                capture_output=True,
-                text=True,
-                timeout=_GIT_PUSH_TIMEOUT,
-                check=False,
+    pushed, branch, why = _push_branch(project_root)
+    if not pushed:
+        if why is None:
+            logger.info(
+                "release artifacts for v%s stay local — %s has no 'origin' remote", version_number, project_root
             )
-            return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
-        except (OSError, subprocess.SubprocessError) as exc:
-            return 1, "", str(exc)
-
-    if not (project_root / ".git").is_dir():
-        return False  # dry-run / no checkout — nothing to publish
-    if _git(["remote", "get-url", "origin"])[0] != 0:
-        logger.info("release artifacts for v%s stay local — %s has no 'origin' remote", version_number, project_root)
-        return False
-
-    # Wire the HTTPS credential helper before pushing, exactly as
-    # :func:`template_bootstrap.push_and_verify` does at project creation. That call writes the helper into
-    # the CONTAINER's global gitconfig, which is lost on every recreate — so without repeating it here a
-    # release push would start failing on credentials the first time a container was recreated without a
-    # project being created in it. Idempotent; a non-zero exit is non-fatal (the push below surfaces the real
-    # error, and the container has no ssh binary so HTTPS+gh is the only authenticated path).
-    try:
-        subprocess.run(
-            ["gh", "auth", "setup-git"], capture_output=True, text=True, timeout=_GIT_PUSH_TIMEOUT, check=False
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-    # Read the branch rather than assuming "main": pushing to the wrong branch is worse than not pushing.
-    branch_rc, branch, _ = _git(["rev-parse", "--abbrev-ref", "HEAD"])
-    if branch_rc != 0 or not branch or branch == "HEAD":
-        logger.warning(
-            "release artifacts for v%s NOT pushed — %s is not on a named branch (detached HEAD)",
-            version_number,
-            project_root,
-        )
-        return False
-
-    rc, _, err = _git(["push", "origin", f"HEAD:refs/heads/{branch}"])
-    if rc != 0:
-        logger.warning(
-            "release-notes commit for v%s NOT pushed (branch %s): %s — the changelog exists only in this "
-            "checkout; push it by hand or fix the remote credentials",
-            version_number,
-            branch,
-            err,
-        )
+        elif why == BRANCH_NOT_NAMED:
+            logger.warning(
+                "release artifacts for v%s NOT pushed — %s is not on a named branch (detached HEAD)",
+                version_number,
+                project_root,
+            )
+        else:
+            logger.warning(
+                "release-notes commit for v%s NOT pushed (branch %s): %s — the changelog exists only in this "
+                "checkout; push it by hand or fix the remote credentials",
+                version_number,
+                branch,
+                why,
+            )
         return False
 
     tag = f"v{version_number}"
     # ``--force`` on the TAG ref only (never the branch): _git_tag_version re-anchors the tag with ``-f`` on a
     # FAIL→fix→re-PASS, so the remote tag must be allowed to move with it or the two disagree about which
     # commit was verified.
-    rc, _, err = _git(["push", "--force", "origin", f"refs/tags/{tag}"])
+    rc, _, err = _git_publish(project_root, ["push", "--force", "origin", f"refs/tags/{tag}"])
     if rc != 0:
         logger.warning(
             "verified tag %s NOT pushed: %s — the release commit is on the remote but the tag that names it "
@@ -5373,6 +5401,21 @@ def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
 
     logger.info("release artifacts published for %s: branch %s + tag %s pushed to origin", project_root, branch, tag)
     return True
+
+
+async def _push_after_task(project_root: Path) -> Optional[str]:
+    """DEV-96 — after every finished task the project's branch goes to GitHub, so CI runs on the version's real
+    code during the whole build and GitHub shows what the cockpit shows.
+
+    12.10.2026, NEX Inbox 1.8.0: nobody pushed for a week — 31 commits lay only on ANDROS, the agent tested copies
+    on side branches and wrote „všetko prešlo“, and six commits with code never ran the full CI. The first push
+    came only with a passed verification. Returns ``None`` when the branch is on GitHub (or there is no GitHub to
+    push to), else why it is not — for the manager. Never raises: the next task's push carries this one too."""
+    try:
+        pushed, _branch, why = await run_blocking(_push_branch, project_root, cap=GIT_PUSH_CAP)
+    except BlockingWorkTimedOut:
+        return f"odoslanie neskončilo do {GIT_PUSH_CAP} s"
+    return None if pushed or why is None else why
 
 
 def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> None:
@@ -12326,6 +12369,9 @@ def _directive_for_build_task(
         f"Predmet KAŽDÉHO commitu tejto úlohy končí `(TASK #{task_label or task.number})` — podľa neho kokpit "
         "pripíše dodaný kód tejto úlohe na súpise dodávky (kategória a zľava úlohy)."
     )
+    # DEV-96: the cockpit pushes the main branch after every task, so the CI the manager and the Auditor read runs on
+    # the version's real code — an agent's own push to side branches tested copies and reported them as the version.
+    parts.append(PUSH_RULE)
     if schema_rule:
         parts.append(schema_rule)
     # DEV-90: the UAT test guide grows with the tasks that change what a user sees — in every brief of both lanes,
@@ -13382,6 +13428,25 @@ async def _run_build_round(
                         attempt_errors=prior_failures,
                         on_message=on_message,
                     )
+                    # DEV-96: the finished task's code goes to GitHub at once — CI runs on it, never only later.
+                    push_problem = await _push_after_task(claude_agent.PROJECTS_ROOT / slug)
+                    if push_problem:
+                        push_msg = _record_message(
+                            db,
+                            version_id=version_id,
+                            stage="programovanie",
+                            author="system",
+                            recipient="manazer",
+                            kind="notification",
+                            content=(
+                                f"Kód úlohy #{_task_full_number(db, task)} sa nepodarilo odoslať na GitHub "
+                                f"({push_problem}). Kontroly na GitHube preň zatiaľ nebežia; kokpit ho odošle "
+                                "spolu s ďalšou úlohou."
+                            ),
+                            payload={"phase": "programovanie", "push_failed": True, "task_id": str(task.id)},
+                        )
+                        if on_message is not None:
+                            await on_message(push_msg)
                     task_done = True
                     break
                 prior_failures.append(mech)

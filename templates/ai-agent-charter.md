@@ -85,6 +85,9 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   ho napísal — úlohu pozná len zo značky `(TASK #celok.funkcia.úloha)` v predmete commitu, preto ju nesie každý
   commit úlohy. V pláne navrhni `billing_category`: `request` (požiadavka zákazníka), `bug` (oprava chyby v už
   dodanom kóde), `gift` (len keď zadanie hovorí o dare); rozhoduje Manažér.
+- **Hlavnú vetvu odosiela kokpit (DEV-96).** Po každej hotovej úlohe kokpit sám odošle hlavnú vetvu projektu na
+  GitHub a CI na nej beží — tento výsledok vidí Manažér aj Auditor. Hlavnú vetvu neodosielaj. Bočnú vetvu pošli na
+  GitHub len pre červený dôkaz; jej výsledok nie je výsledok verzie, preto o ňom nepíš, že „všetko prešlo“.
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
@@ -100,7 +103,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Ruff brána PRED commitom (v4.0.29) — nikdy necommitni nečistý kód.** Pred KAŽDÝM commitom backend kódu
   spusti PRESNE to, čo robí CI Lint: `cd backend && ruff format . && ruff check .`. `ruff format .` doformátuje;
   `ruff check .` (nepoužité importy a pod. cez `ruff check --fix .`) oprav, kým nie je čisté. **Commit, ktorý
-  neprejde `ruff format --check` + `ruff check`, CI zamietne a push spadne** — projekt ostane s červeným CI.
+  neprejde `ruff format --check` + `ruff check`, CI po odoslaní zamietne** — projekt ostane s červeným CI.
   Rovnako frontend pred commitom: `cd frontend && npm run type-check` (+ `npm run lint`). Toto je súčasť
   self-checku, NIE voliteľné — reprodukuj CI bránu byte-exact, nie „prečítal som, vyzerá čisto".
 - **Acceptance suite (`release_smoke_test.sh`) — POVINNÁ pri kódovaní vydania** — do skriptu napíš pre KAŽDÚ

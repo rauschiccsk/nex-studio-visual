@@ -142,9 +142,14 @@ class TestJednoPravidloDvajaCitatelia:
 
 @pytest.fixture()
 def git_odpoveda(monkeypatch):
-    """Projekt je repozitár s remote na GitHub. Skúšky nižšie sú o CI, nie o gite."""
+    """The project is a repository with a GitHub remote and its code is already there. The tests below are about CI,
+    not git."""
 
     def _git(prikaz, cwd=None):
+        if "--abbrev-ref" in prikaz:
+            return 0, "main\n"
+        if "rev-list" in prikaz:
+            return 0, "0\n"
         if "rev-parse" in prikaz:
             return 0, "abc1234def5678\n"
         if "remote.origin.url" in prikaz:

@@ -28,3 +28,10 @@ vidíš len ty, nikto iný, ani správca, ani agent, ani Poradca. Máš ich na k
 medzitým zmeníš na inom zariadení, kokpit tvoj text potichu neprepíše: ukáže ti oba a vyberieš, ktorý ostane.
 „Vyriešené“ presunie poznámku medzi vyriešené, odkiaľ sa dá vrátiť; natrvalo ju zmažeš len výslovne. „Do Zásobníka“
 z nej spraví požiadavku REQ vo vybranom projekte (prvý riadok je názov, zvyšok popis) a poznámka na ňu odkáže.
+
+**Kód každej hotovej úlohy je hneď na GitHube a kontroly na ňom bežia počas celej stavby.** Doteraz kokpit odoslal
+hlavnú vetvu projektu na GitHub až po úspešnej Verifikácii. Kontroly na GitHube tak dodávaný kód videli až na konci
+a GitHub ukazoval niečo iné ako kokpit. Teraz ju kokpit odošle po každej hotovej úlohe. Keď sa odoslanie nepodarí,
+napíše ti to v rozhovore aj s dôvodom a kód odošle spolu s ďalšou úlohou. Riadok Zostavenie namiesto „zatiaľ nevieme“
+povie, že kód na GitHube ešte nie je a koľko commitov čaká na odoslanie. AI Agent hlavnú vetvu sám neodosiela; na
+GitHub posiela len bočné vetvy, keď potrebuje dokázať, že skúška vie zlyhať.

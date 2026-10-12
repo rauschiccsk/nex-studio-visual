@@ -264,6 +264,42 @@ def _bez_cakania(prikaz: list[str], cwd: Optional[Path] = None) -> tuple[int, st
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+def _commits_waiting(n: int) -> str:
+    """How many commits wait, with the Slovak plural of the noun and of the verb, as the build line shows it."""
+    if n == 1:
+        return "1 commit čaká"
+    return f"{n} commity čakajú" if n < 5 else f"{n} commitov čaká"
+
+
+def unpushed_commits(project_root: Path, sha: str) -> tuple[Optional[str], int]:
+    """DEV-96 — the checkout's branch and how many commits up to ``sha`` are not in it on GitHub yet.
+
+    ``(None, 0)`` when it cannot be told (detached HEAD, git cannot answer). Compared with ``origin/<branch>`` as
+    this checkout knows it — the cockpit pushes the branch itself after every task, which keeps that ref fresh.
+    When the checkout does not know the branch on ``origin`` at all, the commits on no ``origin`` branch are
+    counted. 12.10.2026: NEX Inbox 1.8.0 had 31 commits only on ANDROS and the build line said only that no CI
+    run had appeared for the commit — true, but not why."""
+    rc, branch = _bez_cakania(["git", "-C", str(project_root), "rev-parse", "--abbrev-ref", "HEAD"])
+    branch = branch.strip()
+    if rc != 0 or not branch or branch == "HEAD":
+        return None, 0
+    rc, out = _bez_cakania(
+        ["git", "-C", str(project_root), "rev-list", "--count", f"refs/remotes/origin/{branch}..{sha}"]
+    )
+    if rc != 0:
+        rc, out = _bez_cakania(
+            ["git", "-C", str(project_root), "rev-list", "--count", sha, "--not", "--remotes=origin"]
+        )
+    try:
+        return branch, int(out.strip()) if rc == 0 else 0
+    except ValueError:
+        return branch, 0
+
+
+#: DEV-96 — why CI has no run for the commit, when the code is not on GitHub yet.
+NOT_ON_GITHUB = "kód ešte nie je na GitHube vo vetve {branch} — {waiting} na odoslanie, kontroly preň nebežali"
+
+
 async def _behy_z_githubu(project_root: Path, repo: str, sha: str) -> tuple[Optional[list[dict]], Optional[str]]:
     """Behy pre commit — bez čakania. ``([], None)`` znamená „spýtal som sa, beh ešte nie je"."""
     rc, out = await asyncio.to_thread(_bez_cakania, prikaz_na_behy(repo, sha), project_root)
@@ -304,6 +340,13 @@ async def _zisti(project_root: Path, sha: Optional[str], teraz: float) -> StavZo
     if chyba:
         return StavZostavenia("unknown", chyba, sha, teraz)
     rows = rows or []
+    if not rows:
+        # DEV-96: a run that exists is evidence whichever branch carried the commit to GitHub, so the reason is
+        # asked only when there is none — and a commit that never left this machine cannot have one.
+        branch, waiting = await asyncio.to_thread(unpushed_commits, project_root, sha)
+        if waiting:
+            detail = NOT_ON_GITHUB.format(branch=branch, waiting=_commits_waiting(waiting))
+            return StavZostavenia("unknown", detail, sha, teraz)
 
     stav, detail = verdikt(rows)
     zlyhal = prvy_zlyhany(rows)
