@@ -22,8 +22,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FolderOpen, Lock } from "lucide-react";
+import { ResizeHandle, useWideScreen } from "nex-shared";
 
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import {
   relayPipelineMessageApi,
@@ -77,6 +79,14 @@ export default function RiadiaceCentrumPage() {
   const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
   const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
   const planOnPhone = pane === "plan" ? "" : "max-md:hidden";
+  // DEV-82: on a computer the task plan is as wide as the person left it (kept on the server); its left edge is the
+  // handle. Until the layout arrives — and on a tablet or a phone — the column keeps its default from the classes.
+  const wide = useWideScreen();
+  const layout = useUserLayoutStore((s) => s.layout);
+  const saveLayout = useUserLayoutStore((s) => s.save);
+  const [planDragged, setPlanDragged] = useState<number | null>(null);
+  const planLimit = wide ? layout?.limits.plan_width : undefined;
+  const planWidth = planLimit ? (planDragged ?? layout?.plan_width ?? planLimit.default) : undefined;
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -210,7 +220,10 @@ export default function RiadiaceCentrumPage() {
   const blockRecoveryActive = blockRecoveryOwnsInput(board?.state);
 
   return (
-    <div className="grid h-full grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[auto_minmax(0,1fr)_auto_auto]">
+    <div
+      className="grid h-full grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[auto_minmax(0,1fr)_auto_auto]"
+      style={planWidth ? { gridTemplateColumns: `minmax(0,1fr) ${planWidth}px` } : undefined}
+    >
       {/* DEV-62: on a phone, the switch between the conversation and the task plan. */}
       <div
         role="tablist"
@@ -357,8 +370,25 @@ export default function RiadiaceCentrumPage() {
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live
           board (available_actions gates the "Zostaviť plán" trigger; recent_messages drives tree-freshness). */}
       <div
-        className={`col-start-1 row-start-2 row-span-4 min-h-0 md:col-start-2 md:row-start-1 md:row-span-4 ${planOnPhone}`}
+        className={`relative col-start-1 row-start-2 row-span-4 min-h-0 md:col-start-2 md:row-start-1 md:row-span-4 ${planOnPhone}`}
       >
+        {planLimit && planWidth && (
+          <ResizeHandle
+            value={planWidth}
+            min={planLimit.min}
+            max={planLimit.max}
+            defaultValue={planLimit.default}
+            panel="right"
+            onResize={setPlanDragged}
+            onResizeEnd={(w) => {
+              setPlanDragged(null);
+              if (w !== (layout?.plan_width ?? planLimit.default))
+                void saveLayout({ plan_width: w === planLimit.default ? null : w });
+            }}
+            label="Šírka Plánu úloh"
+            className="absolute inset-y-0 left-0"
+          />
+        )}
         <PlanUlohRail
           versionId={versionId}
           messages={board?.recent_messages ?? []}

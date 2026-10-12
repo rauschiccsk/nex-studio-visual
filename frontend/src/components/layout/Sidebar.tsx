@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Sidebar as ShellSidebar, NavItem, SectionLabel, Brand, UserCard, NavIcon, useShell } from "nex-shared";
+import { Sidebar as ShellSidebar, NavItem, SectionDivider, Brand, UserCard, NavIcon, useShell } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
+import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import { useBackendVersion } from "@/hooks/useBackendVersion";
 import { verziaDoPanela } from "@/lib/verziaDoPanela";
@@ -68,7 +68,12 @@ const IconKey = () => <NavIcon glyph="🔑" />;
 // the user footer. Collapse state is owned here and passed to the shell.
 
 export default function Sidebar() {
-  const [railCollapsed, setCollapsed] = useState(false);
+  // DEV-82: the width and the collapsed state are the person's own, kept on the server (until they arrive, the
+  // sidebar keeps its default width, expanded).
+  const layout = useUserLayoutStore((s) => s.layout);
+  const saveLayout = useUserLayoutStore((s) => s.save);
+  const railCollapsed = layout?.sidebar_collapsed ?? false;
+  const widthLimit = layout?.limits.sidebar_width;
   // DEV-62: on a narrow screen the sidebar is the shell's drawer and is never collapsed to icons.
   const { narrow } = useShell();
   const collapsed = railCollapsed && !narrow;
@@ -123,40 +128,42 @@ export default function Sidebar() {
   );
 
   // ─── Footer slot ─────────────────────────────────────────────────────────
+  // E6 (CR-NS-038; broadened v4.0.48): presence toggle for EVERY operator, not just the admin. "Preč" →
+  // agent-needs-operator events ping Telegram even with the cockpit open. Since the v4.0.35 ownership model a Junior
+  // (shu) OWNS + operates their own projects, so they need the same presence signal — the backend notify is already
+  // per-user. DEV-81: one line with the user card — the state is the icon and its color; the full sentence is in the
+  // tooltip and the accessible name.
+  const presence = user && (
+    <button
+      type="button"
+      onClick={() => setIsAway(!isAway)}
+      aria-pressed={isAway}
+      aria-label={isAway ? "Preč — prepnúť na Pri počítači" : "Pri počítači — prepnúť na Preč"}
+      title={
+        isAway
+          ? "Preč — upozornenia na Telegram zapnuté aj s otvoreným Riadiacim centrom. Klikni pre „Pri počítači“."
+          : "Pri počítači — bez Telegram upozornení (vidíš Riadiace centrum). Klikni pred odchodom od počítača."
+      }
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm leading-none transition-colors ${
+        isAway
+          ? "bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
+          : "hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      {isAway ? "🌙" : "🟢"}
+    </button>
+  );
+  // v4.0.50: "Moje konto" moved OUT of the sidebar INTO Settings (Nastavenia → Moje konto tab, next to the admin
+  // "Používatelia" tab) — account management lives systematically in Settings.
+  const role = user?.role ? ROLE_LABEL[user.role] : "—";
   const footer = (
-    <>
-      {/* E6 (CR-NS-038; broadened v4.0.48): presence toggle for EVERY operator, not just the admin.
-          "Preč" → agent-needs-operator events ping Telegram even with the cockpit open. Since the v4.0.35
-          ownership model a Junior (shu) OWNS + operates their own projects, so they need the same presence
-          signal — the backend notify is already per-user (pings the AWAY user's OWN chat_id, board WS is
-          owner-or-ri). Was gated to role==="ri", a leftover from before ownership. Collapsed → icon only. */}
-      {user && (
-        <button
-          onClick={() => setIsAway(!isAway)}
-          title={
-            isAway
-              ? "Preč — upozornenia na Telegram zapnuté aj s otvoreným Riadiacim centrom. Klikni pre „Pri počítači“."
-              : "Pri počítači — bez Telegram upozornení (vidíš Riadiace centrum). Klikni pred odchodom od počítača."
-          }
-          className={`flex items-center gap-2 w-full rounded-lg px-2 py-1.5 mb-1 text-xs transition-colors ${
-            isAway
-              ? "bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
-              : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-          } ${collapsed ? "justify-center" : ""}`}
-        >
-          <span className="text-sm leading-none">{isAway ? "🌙" : "🟢"}</span>
-          {!collapsed && <span>{isAway ? "Preč" : "Pri počítači"}</span>}
-        </button>
-      )}
-      {/* v4.0.50: "Moje konto" moved OUT of the sidebar INTO Settings (Nastavenia → Moje konto tab, next to
-          the admin "Používatelia" tab) — account management lives systematically in Settings. */}
-      <UserCard
-        initials={initials}
-        name={displayName}
-        subtitle={user?.role ? ROLE_LABEL[user.role] : "—"}
-        onLogout={handleLogout}
-      />
-    </>
+    <UserCard
+      initials={initials}
+      name={displayName}
+      subtitle={role}
+      onLogout={handleLogout}
+      actions={presence}
+    />
   );
 
   return (
@@ -172,9 +179,19 @@ export default function Sidebar() {
     // build board, not as a standalone destination (design §4.1, §2.4).
     <ShellSidebar
       collapsed={railCollapsed}
-      onToggleCollapse={() => setCollapsed((c) => !c)}
+      onToggleCollapse={() => void saveLayout({ sidebar_collapsed: !railCollapsed })}
       logo={logo}
       footer={footer}
+      // DEV-81: 28 px entries, a two-line brand and a one-line footer — room for the tabs still to come.
+      dense
+      width={layout?.sidebar_width ?? undefined}
+      // The default width is kept as „none chosen“ — it then follows the default if that ever changes.
+      onWidthChange={
+        widthLimit ? (w) => void saveLayout({ sidebar_width: w === widthLimit.default ? null : w }) : undefined
+      }
+      minWidth={widthLimit?.min}
+      maxWidth={widthLimit?.max}
+      defaultWidth={widthLimit?.default}
     >
       <NavItem icon={<IconHome />} label="Prehľad" active={isActive("/")} onClick={() => navigate("/")} />
       {/* Getting-started guide for a non-expert operator (handover). Always accessible (not project-scoped). */}
@@ -333,7 +350,8 @@ export default function Sidebar() {
           group directly ABOVE the Settings section header (Director directive). */}
       <NavItem icon={<IconUpdates />} label="Aktualizácie" active={isActive("/updates")} onClick={() => navigate("/updates")} />
 
-      <SectionLabel label="Nastavenia" />
+      {/* DEV-81: a line, not a heading — „Nastavenia“ above „Nastavenia“ said the same thing twice. */}
+      <SectionDivider />
       <NavItem icon={<IconSettings />} label="Nastavenia" active={isActive("/settings")} onClick={() => navigate("/settings")} />
     </ShellSidebar>
   );

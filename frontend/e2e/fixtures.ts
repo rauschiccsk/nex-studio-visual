@@ -620,8 +620,21 @@ const DOCS: KnowledgeDoc[] = [
   },
 ];
 
+/** DEV-82 — the person's layout as the server keeps it: nothing chosen yet, with the bounds of every width. */
+export const LAYOUT = {
+  sidebar_width: null,
+  sidebar_collapsed: false,
+  plan_width: null,
+  limits: {
+    sidebar_width: { min: 180, max: 360, default: 224 },
+    plan_width: { min: 280, max: 640, default: 320 },
+  },
+};
+
 export function registerFixtures(): void {
   answer("get", "/api/v1/auth/me", USER);
+  answer("get", "/api/v1/user-layout", LAYOUT);
+  answer("put", "/api/v1/user-layout", LAYOUT);
   answerUntyped("get", "/api/v1/version", { version: "4.43.26" });
   answer("get", "/api/v1/projects", { items: [PROJECT], total: 1, skip: 0, limit: 50 });
   answer("get", "/api/v1/projects/{project_id}", PROJECT);

@@ -2809,6 +2809,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/user-layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get My Layout */
+        get: operations["get_my_layout_api_v1_user_layout_get"];
+        /** Set My Layout */
+        put: operations["set_my_layout_api_v1_user_layout_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/user-sessions": {
         parameters: {
             query?: never;
@@ -5607,6 +5625,15 @@ export interface components {
             /** Tokens */
             tokens: number;
         };
+        /** LayoutLimitRead */
+        LayoutLimitRead: {
+            /** Default */
+            default: number;
+            /** Max */
+            max: number;
+            /** Min */
+            min: number;
+        };
         /**
          * LoginRequest
          * @description Payload for ``POST /auth/login``.
@@ -7705,6 +7732,37 @@ export interface components {
              * @description Login name, unique across the system.
              */
             username: string;
+        };
+        /** UserLayoutRead */
+        UserLayoutRead: {
+            /**
+             * Limits
+             * @description Per width: its bounds and the default, in px.
+             */
+            limits: {
+                [key: string]: components["schemas"]["LayoutLimitRead"];
+            };
+            /** Plan Width */
+            plan_width?: number | null;
+            /**
+             * Sidebar Collapsed
+             * @default false
+             */
+            sidebar_collapsed: boolean;
+            /** Sidebar Width */
+            sidebar_width?: number | null;
+        };
+        /**
+         * UserLayoutWrite
+         * @description Only the fields sent change; a width of ``null`` returns to the default.
+         */
+        UserLayoutWrite: {
+            /** Plan Width */
+            plan_width?: number | null;
+            /** Sidebar Collapsed */
+            sidebar_collapsed?: boolean | null;
+            /** Sidebar Width */
+            sidebar_width?: number | null;
         };
         /**
          * UserRead
@@ -13026,6 +13084,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserAgentSettingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_layout_api_v1_user_layout_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserLayoutRead"];
+                };
+            };
+        };
+    };
+    set_my_layout_api_v1_user_layout_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserLayoutWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserLayoutRead"];
                 };
             };
             /** @description Validation Error */

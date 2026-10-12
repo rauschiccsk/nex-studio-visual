@@ -25,6 +25,7 @@ import type { AuthUser } from "@/services/api/auth";
 import { loginApi, logoutApi, getMeApi } from "@/services/api/auth";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
+import { useUserLayoutStore } from "@/store/userLayoutStore";
 
 export type { AuthUser };
 
@@ -70,6 +71,8 @@ const authModule = createAuthStore<AuthUser, [string, string]>({
   onLogin: () => {
     usePresenceStore.getState().setIsAway(false);
     useActiveContextStore.getState().setSelectedProject(null);
+    // DEV-82: the previous person's panel widths never show for the next one — the layout is read anew.
+    useUserLayoutStore.getState().reset();
   },
 });
 

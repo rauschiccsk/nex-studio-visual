@@ -35,6 +35,7 @@ from backend.api.routes.system_settings import router as system_settings_router
 from backend.api.routes.tasks import router as tasks_router
 from backend.api.routes.uploads import router as uploads_router
 from backend.api.routes.user_agent_settings import router as user_agent_settings_router
+from backend.api.routes.user_layout import router as user_layout_router
 from backend.api.routes.user_sessions import router as user_sessions_router
 from backend.api.routes.users import router as users_router
 from backend.api.routes.versions import router as versions_router
@@ -351,6 +352,7 @@ app.include_router(uploads_router, prefix="/api/v1")
 app.include_router(release_notes_router, prefix="/api/v1")
 app.include_router(system_settings_router, prefix="/api/v1/system-settings")
 app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settings")
+app.include_router(user_layout_router, prefix="/api/v1/user-layout")
 app.include_router(poradca_router, prefix="/api/v1/poradca")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
 app.include_router(pipeline_router, prefix="/api/v1/pipeline")
