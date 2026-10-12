@@ -19,6 +19,7 @@
  * Project- + version-scoped (follows the pin); the transcript + relay are keyed on the selected version.
  */
 
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FolderOpen, Lock } from "lucide-react";
 
@@ -71,6 +72,11 @@ export default function RiadiaceCentrumPage() {
   } = usePipelineWs(versionId);
   // DEV-51: the build's CI, read ONCE — the phase-bar line, the status strip and the rail all show the same answer.
   const ci = useStavZostavenia(versionId);
+  // DEV-62: a phone has room for one column — the conversation or the Plán úloh, switched by the tabs on top.
+  // From the tablet up both stand side by side and the tabs are not there.
+  const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
+  const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
+  const planOnPhone = pane === "plan" ? "" : "max-md:hidden";
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
@@ -204,9 +210,38 @@ export default function RiadiaceCentrumPage() {
   const blockRecoveryActive = blockRecoveryOwnsInput(board?.state);
 
   return (
-    <div className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)]">
+    <div className="grid h-full grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[auto_minmax(0,1fr)_auto_auto]">
+      {/* DEV-62: on a phone, the switch between the conversation and the Plán úloh. */}
+      <div
+        role="tablist"
+        aria-label="Čo ukázať"
+        className="col-start-1 row-start-1 flex border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+      >
+        {(
+          [
+            ["rozhovor", "Rozhovor"],
+            ["plan", "Plán úloh"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pane === id}
+            onClick={() => setPane(id)}
+            className={`flex-1 py-2 text-xs font-medium ${
+              pane === id
+                ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Top — read-only phase bar (conversation column). */}
-      <div className="col-start-1 row-start-1 min-w-0">
+      <div className={`col-start-1 row-start-2 min-w-0 md:row-start-1 ${conversationOnPhone}`}>
         <PhaseBar board={board ?? null} />
         {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
@@ -214,7 +249,7 @@ export default function RiadiaceCentrumPage() {
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}
-      <div className="col-start-1 row-start-2 flex min-h-0 min-w-0 flex-col">
+      <div className={`col-start-1 row-start-3 flex min-h-0 min-w-0 flex-col md:row-start-2 ${conversationOnPhone}`}>
         <HonestStatusStrip
           state={board?.state ?? null}
           projectName={selectedProject.name}
@@ -238,7 +273,7 @@ export default function RiadiaceCentrumPage() {
           the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
           (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled version whose verified
           green drifted past HEAD (overit_znovu — CR-V2-057). */}
-      <div className="col-start-1 row-start-3 min-w-0">
+      <div className={`col-start-1 row-start-4 min-w-0 md:row-start-3 ${conversationOnPhone}`}>
         <DecisionCardsBar
           board={board}
           versionId={versionId}
@@ -302,7 +337,7 @@ export default function RiadiaceCentrumPage() {
 
       {/* Bottom — the relay send box; on a FINISHED version „Opýtaj sa Poradcu" instead (ICCINT-167): no agent
           works on a done version, so a message there would go unanswered (the engine refuses it). */}
-      <div className="col-start-1 row-start-4 min-w-0">
+      <div className={`col-start-1 row-start-5 min-w-0 md:row-start-4 ${conversationOnPhone}`}>
         {board?.state?.current_stage === "done" ? (
           <OpytajSaPoradcuBar versionId={versionId} />
         ) : (
@@ -321,7 +356,9 @@ export default function RiadiaceCentrumPage() {
 
       {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live
           board (available_actions gates the "Zostaviť plán" trigger; recent_messages drives tree-freshness). */}
-      <div className="col-start-2 row-start-1 row-span-4 min-h-0">
+      <div
+        className={`col-start-1 row-start-2 row-span-4 min-h-0 md:col-start-2 md:row-start-1 md:row-span-4 ${planOnPhone}`}
+      >
         <PlanUlohRail
           versionId={versionId}
           messages={board?.recent_messages ?? []}

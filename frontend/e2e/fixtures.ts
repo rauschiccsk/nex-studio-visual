@@ -646,6 +646,27 @@ export function registerFixtures(): void {
     { id: "haiku", last_run_at: null, last_run_model: null },
   ]);
   answer("get", "/api/v1/users", { items: [USER, COLLEAGUE], total: 2, skip: 0, limit: 50 });
+  answer("get", "/api/v1/user-agent-settings", [
+    { agent_role: "ai_agent", model: "opus", effort: "high", helper_model: "sonnet" },
+    { agent_role: "auditor", model: "opus", effort: "max", helper_model: null },
+    { agent_role: "poradca", model: "sonnet", effort: "medium", helper_model: null },
+  ]);
+  answer("get", "/api/v1/user-sessions", {
+    items: [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        user_id: USER.id,
+        username: USER.username,
+        token_version: 3,
+        created_at: T1,
+        updated_at: T2,
+        last_seen_at: T2,
+      },
+    ],
+    total: 1,
+    skip: 0,
+    limit: 50,
+  });
   answer("get", "/api/v1/projects/{project_id}/zadanie-na-disku", {
     content: "",
     relative_path: "docs/specs/versions/v1.8.0/ZADANIE.md",

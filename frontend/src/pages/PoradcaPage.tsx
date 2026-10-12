@@ -79,6 +79,7 @@ export default function PoradcaPage() {
 
   const [context, setContext] = useState<PoradcaProjectContext | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [pane, setPane] = useState<"rozhovory" | "rozhovor">("rozhovor");
   const [conversations, setConversations] = useState<PoradcaConversation[]>([]);
   const [status, setStatus] = useState<PoradcaStatus | null>(null);
   const [loadError, setLoadError] = useState<HumanError | null>(null);
@@ -250,15 +251,54 @@ export default function PoradcaPage() {
 
   const notReady = status && !status.ready ? (status.problems ?? []).join("; ") : null;
 
+  // DEV-62: a phone has room for one column — the list of conversations or the open one, switched by the tabs on
+  // top; choosing a conversation (or starting a new one) shows it. From the tablet up both stand side by side.
+  const open = (id: string | null) => {
+    select(id);
+    setPane("rozhovor");
+  };
+
   return (
-    <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] bg-[var(--color-canvas)]">
+    <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] bg-[var(--color-canvas)] md:grid-cols-[260px_minmax(0,1fr)] md:grid-rows-1">
+      <div
+        role="tablist"
+        aria-label="Čo ukázať"
+        className="row-start-1 flex border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+      >
+        {(
+          [
+            ["rozhovory", "Rozhovory"],
+            ["rozhovor", "Rozhovor"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pane === id}
+            onClick={() => setPane(id)}
+            className={`flex-1 py-2 text-xs font-medium ${
+              pane === id
+                ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Left — conversations */}
-      <aside className="flex min-h-0 flex-col border-r border-[var(--color-border-default)]">
+      <aside
+        className={`row-start-2 flex min-h-0 flex-col border-r border-[var(--color-border-default)] md:col-start-1 md:row-start-1 ${
+          pane === "rozhovory" ? "" : "max-md:hidden"
+        }`}
+      >
         <div className="flex items-center justify-between px-3 py-3">
           <h1 className="text-sm font-bold text-[var(--color-text-primary)]">Poradca</h1>
           <button
             type="button"
-            onClick={() => select(null)}
+            onClick={() => open(null)}
             className="flex items-center gap-1 rounded-lg bg-primary-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-primary-500"
           >
             <MessageSquarePlus className="h-3.5 w-3.5" /> Nový rozhovor
@@ -277,7 +317,7 @@ export default function PoradcaPage() {
               active={c.id === conversationId}
               busy={c.running}
               authorName={me && c.author_id !== me.id ? c.author_name : null}
-              onSelect={() => select(c.id)}
+              onSelect={() => open(c.id)}
               onRename={(title) => renameConversation(c.id, title)}
               onDelete={() => deleteConversation(c.id)}
             />
@@ -285,8 +325,12 @@ export default function PoradcaPage() {
         </ul>
       </aside>
 
-      {/* Vpravo — rozhovor */}
-      <section className="flex min-h-0 flex-col">
+      {/* Right — the conversation */}
+      <section
+        className={`row-start-2 flex min-h-0 min-w-0 flex-col md:col-start-2 md:row-start-1 ${
+          pane === "rozhovor" ? "" : "max-md:hidden"
+        }`}
+      >
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] px-4 py-2">
           <span className="text-xs text-[var(--color-text-secondary)]">
             {selectedProject.name} — o čom sa rozprávame:
@@ -295,7 +339,7 @@ export default function PoradcaPage() {
             aria-label="O čom sa rozprávame"
             value={scopeId}
             onChange={(e) => void changeScope(e.target.value)}
-            className="rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
+            className="min-w-0 max-w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
           >
             <option value={WHOLE_PROJECT}>Celý projekt</option>
             {(context?.versions ?? []).map((v) => (
@@ -545,7 +589,7 @@ function PoradcaComposer({
               ? "Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok, Ctrl+V vloží snímku obrazovky)"
               : "Opýtaj sa Poradcu… (Enter odošle, Shift+Enter nový riadok)"
           }
-          className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
+          className="min-h-[2.5rem] min-w-0 flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
         <button
           type="submit"

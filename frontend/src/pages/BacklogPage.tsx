@@ -362,10 +362,13 @@ export default function BacklogPage() {
       )}
 
       {/* View tabs */}
-      <div className="flex items-center gap-0 border-b border-[var(--color-border-default)] mb-4">
+      <div role="tablist" aria-label="Požiadavky" className="flex items-center gap-0 border-b border-[var(--color-border-default)] mb-4">
         {(["backlog", "history"] as View[]).map((t) => (
           <button
             key={t}
+            type="button"
+            role="tab"
+            aria-selected={view === t}
             onClick={() => setView(t)}
             className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
               view === t

@@ -17,7 +17,8 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     serviceWorkers: "block",
-    screenshot: "only-on-failure",
+    // E2E_SCREENSHOTS=1 keeps a picture of every page for a look by eye (test-results/), not only of failures.
+    screenshot: process.env.E2E_SCREENSHOTS ? "on" : "only-on-failure",
   },
   projects: [
     {

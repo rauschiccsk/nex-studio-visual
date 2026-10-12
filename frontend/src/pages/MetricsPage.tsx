@@ -625,12 +625,19 @@ export default function MetricsPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Náklady — {projectName}</h1>
-        <div className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]">
+        <div
+          role="tablist"
+          aria-label="Náklady za"
+          className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]"
+        >
           {(["version", "cumulative"] as View[]).map((v) => (
             <button
               key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
               onClick={() => setView(v)}
               className={`px-2.5 py-1 ${
                 view === v

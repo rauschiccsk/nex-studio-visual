@@ -37,7 +37,7 @@ for (const page of pages()) {
     );
 
     const found: Record<string, string[]> = { "": report(await problemsOn(browser, hasTouch)) };
-    const tabs = browser.locator('main [role="tab"]');
+    const tabs = browser.locator('main [role="tab"]:visible');
     for (let i = 0; i < (await tabs.count()); i++) {
       const tab = tabs.nth(i);
       const name = ((await tab.innerText()) || `tab ${i + 1}`).trim();
@@ -46,6 +46,7 @@ for (const page of pages()) {
       found[`tab „${name}“`] = report(await problemsOn(browser, hasTouch));
     }
 
+    test.info().annotations.push({ type: "measured", description: Object.keys(found).map((k) => k || "page").join(", ") });
     expect.soft(unanswered, "API calls without a fixture — the page was measured half empty").toEqual([]);
     expect.soft(errors, "the page threw").toEqual([]);
     for (const [where, problems] of Object.entries(found)) {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Sidebar as ShellSidebar, NavItem, SectionLabel, Brand, UserCard, NavIcon } from "nex-shared";
+import { Sidebar as ShellSidebar, NavItem, SectionLabel, Brand, UserCard, NavIcon, useShell } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { usePresenceStore } from "@/store/usePresenceStore";
@@ -68,7 +68,10 @@ const IconKey = () => <NavIcon glyph="🔑" />;
 // the user footer. Collapse state is owned here and passed to the shell.
 
 export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [railCollapsed, setCollapsed] = useState(false);
+  // DEV-62: on a narrow screen the sidebar is the shell's drawer and is never collapsed to icons.
+  const { narrow } = useShell();
+  const collapsed = railCollapsed && !narrow;
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -168,7 +171,7 @@ export default function Sidebar() {
     // Auditor entry here — the verifier is independent and surfaces inside the
     // build board, not as a standalone destination (design §4.1, §2.4).
     <ShellSidebar
-      collapsed={collapsed}
+      collapsed={railCollapsed}
       onToggleCollapse={() => setCollapsed((c) => !c)}
       logo={logo}
       footer={footer}

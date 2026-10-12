@@ -221,7 +221,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline"
+        className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline pointer-coarse:min-h-11"
       >
         <ExternalLink className="h-3 w-3" /> Otvoriť aplikáciu
       </a>
@@ -427,8 +427,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)]">
-          <table className="w-full text-left text-sm">
-            <thead>
+          {/* DEV-62: on a phone every customer is a card — the columns stack, each under its own label — so the
+              version and the Nasadiť/Akceptovať buttons are reached without sliding the table sideways. */}
+          <table className="w-full text-left text-sm max-md:block">
+            <thead className="max-md:hidden">
               <tr className="border-b border-[var(--color-border-default)] text-xs text-[var(--color-text-muted)]">
                 <th className="px-3 py-2 font-medium">Zákazník</th>
                 <th className="px-3 py-2 font-medium">{labels.column}</th>
@@ -436,7 +438,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 <th className="px-3 py-2 font-medium text-right">Akcie</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--color-border-default)]">
+            <tbody className="divide-y divide-[var(--color-border-default)] max-md:block">
               {rows.map((row) => {
                 const isBusy = busy === row.customer_id;
                 const blocked = deployBlock(row);
@@ -466,15 +468,18 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const accepted =
                   environment === "uat" && !!row.uat_version && row.accepted_versions.includes(row.uat_version);
                 return (
-                  <tr key={row.customer_id} className="align-top">
+                  <tr key={row.customer_id} className="align-top max-md:block max-md:py-2">
                     {/* Customer */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-3 max-md:block max-md:py-1.5">
                       <div className="font-medium text-[var(--color-text-primary)]">{row.customer_name}</div>
                       <div className="font-mono text-[11px] text-[var(--color-text-muted)]">{row.customer_slug}</div>
                     </td>
 
                     {/* Currently deployed version in this environment */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-3 max-md:block max-md:py-1.5">
+                      <div className="mb-1 text-[11px] font-medium text-[var(--color-text-muted)] md:hidden">
+                        {labels.column}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         {current ? (
                           <span className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-primary)]">
@@ -535,7 +540,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                     </td>
 
                     {/* Nasadiť version picker (verified versions only) */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-3 max-md:block max-md:py-1.5">
+                      <div className="mb-1 text-[11px] font-medium text-[var(--color-text-muted)] md:hidden">
+                        Nasadiť verziu
+                      </div>
                       {verified.length === 0 ? (
                         <span className="text-xs text-[var(--color-text-muted)]">
                           nič na nasadenie — dôvod hore
@@ -597,8 +605,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                     </td>
 
                     {/* Actions: Nasadiť (+ Akceptovať on UAT) */}
-                    <td className="px-3 py-3">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="px-3 py-3 max-md:block max-md:py-1.5">
+                      <div className="flex flex-wrap items-center justify-end gap-2 max-md:justify-start">
                         {environment === "uat" && (
                           <button
                             onClick={() => handleAccept(row)}

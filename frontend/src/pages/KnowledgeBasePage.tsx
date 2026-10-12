@@ -122,6 +122,9 @@ export default function KnowledgeBasePage() {
 
   // Mode: 'browse' | 'edit' | 'create'
   const [mode, setMode] = useState<"browse" | "edit" | "create">("browse");
+  // DEV-62: a phone has room for one column — the list or the document, switched by the tabs on top. Opening a
+  // document or starting a new one shows it. From the tablet up both stand side by side.
+  const [pane, setPane] = useState<"zoznam" | "dokument">("zoznam");
 
   // Edit state
   const [editContent, setEditContent] = useState("");
@@ -368,13 +371,48 @@ export default function KnowledgeBasePage() {
     }
   }, [newTitle]);
 
+  useEffect(() => {
+    if (selectedDoc || mode !== "browse") setPane("dokument");
+  }, [selectedDoc, mode]);
+
   // --- Render ---
 
   return (
-    <div className="flex h-[calc(100vh-100px)] bg-[var(--color-canvas)] rounded-xl border border-[var(--color-border-default)] overflow-hidden">
+    <div className="flex h-[calc(100vh-100px)] flex-col bg-[var(--color-canvas)] rounded-xl border border-[var(--color-border-default)] overflow-hidden md:flex-row">
+      <div
+        role="tablist"
+        aria-label="Čo ukázať"
+        className="flex shrink-0 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+      >
+        {(
+          [
+            ["zoznam", "Dokumenty"],
+            ["dokument", "Dokument"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pane === id}
+            onClick={() => setPane(id)}
+            className={`flex-1 py-2 text-xs font-medium ${
+              pane === id
+                ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {/* KB Tree column — unified hierarchical browser (replaces former
           categories sidebar + documents list) */}
-      <div className="w-80 bg-[var(--color-surface)] border-r border-[var(--color-border-default)] flex flex-col min-w-0">
+      <div
+        className={`min-h-0 flex-1 bg-[var(--color-surface)] border-r border-[var(--color-border-default)] flex flex-col min-w-0 md:w-80 md:flex-none ${
+          pane === "zoznam" ? "" : "max-md:hidden"
+        }`}
+      >
         {/* Header */}
         <div className="p-3 border-b border-[var(--color-border-default)]">
           <h2 className="text-base font-semibold flex items-center gap-2 text-[var(--color-text-primary)]">
@@ -564,8 +602,8 @@ export default function KnowledgeBasePage() {
         </div>
       </div>
 
-      {/* Main content area — viewer / editor / creator (unchanged) */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main content area — viewer / editor / creator */}
+      <div className={`min-h-0 flex-1 flex flex-col min-w-0 ${pane === "dokument" ? "" : "max-md:hidden"}`}>
         {/* Viewer / Editor / Creator */}
         <div className="flex-1 flex flex-col overflow-hidden">
             {mode === "create" ? (

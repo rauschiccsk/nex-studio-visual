@@ -58,7 +58,7 @@ describe("Nastavenia → Agenti — model by family (ICCINT-167)", () => {
 
   it("lists the backend's families with the version that last ran, and no version as a value", async () => {
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Agenti" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Agenti" }));
 
     await waitFor(() =>
       expect(screen.getAllByRole("option", { name: "Opus — vždy najnovší (naposledy bežal Opus 5.5)" }).length).toBeGreaterThan(0),

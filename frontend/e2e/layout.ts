@@ -5,8 +5,9 @@
  *
  * 1. The page never scrolls sideways.
  * 2. No element sticks out of the screen or is cut off by a box that hides its overflow. The one exception is a
- *    frame meant to scroll sideways — a table's frame, a code block, or a box marked `data-scroll-x` — whose
- *    content may be wider; the frame itself must fit.
+ *    frame that scrolls sideways on purpose — a table's frame, a code block, or a box marked `data-scroll-x`, with
+ *    `overflow-x: auto` or `scroll` — whose content may be wider; the frame itself must fit. A frame that only
+ *    hides its overflow is no exception: what it hides, a finger cannot reach.
  * 3. Every control (button, link, field, tab) can be reached: scrolled into view, the point in its middle hits the
  *    control itself, not something lying over it. On a touch screen it is at least {@link TOUCH_PX} px in both
  *    directions — except a link inside running text, which is as tall as its line.
@@ -26,6 +27,8 @@ export interface Problem {
 /** Runs inside the page: returns the problems of what is on the screen right now. */
 function measure(touchPx: number): Problem[] {
   const vw = window.innerWidth;
+  /** Sub-pixel rounding of the layout, nothing more: a whole pixel past the edge is already a cut-off letter. */
+  const EDGE = 0.5;
   const problems: Problem[] = [];
   const doc = document.documentElement;
 
@@ -49,53 +52,76 @@ function measure(touchPx: number): Problem[] {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
+  // A frame that hides its overflow cuts its content off; only one that scrolls lets a finger reach it.
+  const scrolls = (el: Element): boolean => ["auto", "scroll"].includes(getComputedStyle(el).overflowX);
   const scrollsSidewaysOnPurpose = (el: Element): boolean =>
-    el.hasAttribute("data-scroll-x") ||
-    ["PRE", "CODE", "TEXTAREA"].includes(el.tagName) ||
-    el.querySelector(":scope > table, :scope > * > table") !== null ||
-    el.classList.contains("xterm-viewport");
+    scrolls(el) &&
+    (el.hasAttribute("data-scroll-x") ||
+      ["PRE", "CODE", "TEXTAREA"].includes(el.tagName) ||
+      el.querySelector(":scope > table, :scope > * > table") !== null ||
+      el.classList.contains("xterm-viewport"));
   const clips = (el: Element): boolean => getComputedStyle(el).overflowX !== "visible";
 
-  if (doc.scrollWidth > vw + 1) {
+  if (doc.scrollWidth > vw) {
     problems.push({ rule: "page-scrolls-sideways", what: "page", detail: `${doc.scrollWidth - vw} px wider than the screen` });
   }
 
   // Rule 2 — outermost offenders only: a child of a reported element is the same problem.
   const offenders = new Set<Element>();
-  for (const el of Array.from(document.body.querySelectorAll("*"))) {
-    if (!shown(el)) continue;
+  /** The horizontal room the box `from` (and its ancestors) leaves for what is inside it; `null` = inside a frame
+   *  that scrolls on purpose, or inside something already reported. */
+  const roomIn = (from: Element | null) => {
     let left = 0;
     let right = vw;
     let clippedBy: Element | null = null;
-    let insideFrame = false;
-    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
-      if (offenders.has(a)) {
-        insideFrame = true; // already reported through its ancestor
-        break;
-      }
-      if (clips(a) && scrollsSidewaysOnPurpose(a)) {
-        insideFrame = true;
-        break;
-      }
-      if (clips(a)) {
-        const r = a.getBoundingClientRect();
-        if (r.left > left) left = r.left;
-        if (r.right < right) {
-          right = r.right;
-          clippedBy = a;
-        }
+    for (let a = from; a && a !== document.body; a = a.parentElement) {
+      if (offenders.has(a)) return null;
+      if (!clips(a)) continue;
+      if (scrollsSidewaysOnPurpose(a)) return null;
+      const r = a.getBoundingClientRect();
+      if (r.left > left) left = r.left;
+      if (r.right < right) {
+        right = r.right;
+        clippedBy = a;
       }
     }
-    if (insideFrame) continue;
+    return { left, right, clippedBy };
+  };
+  const report = (what: string, from: number, to: number, room: { left: number; right: number; clippedBy: Element | null }) => {
+    const where = room.clippedBy ? `cut off by ${describe(room.clippedBy)}` : "outside the screen";
+    problems.push({
+      rule: "sticks-out",
+      what,
+      detail: `${where}: ${Math.round(from)}–${Math.round(to)} px, room ${Math.round(room.left)}–${Math.round(room.right)} px`,
+    });
+  };
+  for (const el of Array.from(document.body.querySelectorAll("*"))) {
+    if (!shown(el)) continue;
+    const room = roomIn(el.parentElement);
+    if (!room) continue;
     const r = el.getBoundingClientRect();
-    if (r.right > right + 1 || r.left < left - 1) {
+    if (r.right > room.right + EDGE || r.left < room.left - EDGE) {
       offenders.add(el);
-      const where = clippedBy ? `cut off by ${describe(clippedBy)}` : "outside the screen";
-      problems.push({
-        rule: "sticks-out",
-        what: describe(el),
-        detail: `${where}: ${Math.round(r.left)}–${Math.round(r.right)} px, room ${Math.round(left)}–${Math.round(right)} px`,
-      });
+      report(describe(el), r.left, r.right, room);
+    }
+  }
+  // Text that runs out of its own box (a word too long for the line) is not a box of its own — measured line by
+  // line. A box that cuts its text off with an ellipsis („…“) does so on purpose.
+  const texts = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = texts.nextNode(); node; node = texts.nextNode()) {
+    const parent = node.parentElement;
+    if (!parent || !node.textContent?.trim() || !shown(parent)) continue;
+    if (Array.from(offenders).some((o) => o.contains(parent))) continue;
+    const room = roomIn(parent);
+    if (!room || (room.clippedBy && getComputedStyle(room.clippedBy).textOverflow === "ellipsis")) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const line of Array.from(range.getClientRects())) {
+      if (line.width > 0 && (line.right > room.right + EDGE || line.left < room.left - EDGE)) {
+        offenders.add(parent);
+        report(`text „${node.textContent.trim().slice(0, 40)}“ in ${describe(parent)}`, line.left, line.right, room);
+        break;
+      }
     }
   }
 

@@ -82,8 +82,8 @@ function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void
       className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] overflow-hidden mb-3 cursor-pointer hover:border-[var(--color-border-default)] transition-colors"
       onClick={onOpen}
     >
-      <div className="px-5 py-3 border-b border-[var(--color-border-default)] flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="px-5 py-3 border-b border-[var(--color-border-default)] flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-mono font-bold text-primary-400 text-sm">{version.version_number}</span>
           {version.name && (
             <span className="text-[var(--color-text-secondary)] text-sm font-medium">{version.name}</span>
@@ -444,7 +444,7 @@ export default function ProjectDetailPage() {
           {project.repo_url && (
             <div>
               <span className="text-[var(--color-text-muted)] text-xs">Úložisko</span>
-              <div className="font-mono text-[var(--color-text-primary)] mt-0.5">{project.repo_url}</div>
+              <div className="font-mono text-[var(--color-text-primary)] mt-0.5 break-all">{project.repo_url}</div>
             </div>
           )}
           {project.description && (
@@ -772,7 +772,7 @@ export default function ProjectDetailPage() {
               {project.repo_url && (
                 <li>
                   {deleteGithub ? "aj jeho GitHub repozitár " : "GitHub repozitár zostane zachovaný: "}
-                  <span className="font-mono">{project.repo_url}</span>
+                  <span className="font-mono break-all">{project.repo_url}</span>
                 </li>
               )}
             </ul>
