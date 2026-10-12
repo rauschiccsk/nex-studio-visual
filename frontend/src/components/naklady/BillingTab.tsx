@@ -97,7 +97,7 @@ export default function BillingTab({ slug }: { slug: string }) {
         <Total
           label="Čaká na určenie druhu práce"
           value={`${billing.needs_kind}`}
-          hint="rýchle opravy — oprava chyby sa neúčtuje, zmena áno"
+          hint="rýchle opravy — oprava chyby je záručná, zmena sa účtuje"
         />
       </div>
 

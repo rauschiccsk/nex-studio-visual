@@ -10,9 +10,12 @@
  *   - ``GET  /delivery-statements/{id}/csv``       → downloadStatementCsv
  *   - ``GET  /projects/{slug}/billing``           → getProjectBilling (DEV-73, every version for invoicing)
  *   - ``PUT  /versions/{id}/billing-rates``       → setBillingRates (DEV-74, the version's own rates)
+ *   - ``PUT  /versions/{id}/billing-discounts``   → setBillingDiscounts (DEV-75, the version's own discounts)
+ *   - ``PUT  /versions/{id}/task-categories``     → setTaskCategories (DEV-75, what tasks are billed as)
  */
 
 import api, { downloadFile } from "../api";
+import type { BillingCategory } from "@/lib/billingCategory";
 import type { WorkKind } from "@/lib/workKind";
 
 export interface DeliveredFile {
@@ -37,6 +40,51 @@ export interface StatementCalibration {
   per_1k_docs: number | null;
   complete: boolean;
 }
+
+/** DEV-75 — a task whose work is on a line of the statement. */
+export interface StatementLineTask {
+  /** epic.feat.task — the number in the plan and in the agent's commits. */
+  label: string;
+  title: string;
+  lines: number;
+  tokens: number;
+}
+
+/** DEV-75 — one line of the statement: a category × kind, its full value, the discount and the amount. */
+export interface StatementLine {
+  category: BillingCategory;
+  kind: "code" | "docs";
+  /** False = work without a task (design documents, the visual phase, fixes after verification). */
+  tasked: boolean;
+  label: string;
+  lines: number;
+  tokens: number;
+  rate: string;
+  full_eur: string;
+  discount_pct: string;
+  /** „záručná oprava“, „pozornosť ICC“, „zľava“ — null without a discount. */
+  discount_label: string | null;
+  discount_eur: string;
+  amount_eur: string;
+  tasks: StatementLineTask[];
+}
+
+/** DEV-75 — a task of the version's plan with its category and what it delivered. */
+export interface StatementTask {
+  id: string;
+  label: string;
+  title: string;
+  /** The epic it is under — a whole epic's tasks are set at once. */
+  epic_title: string;
+  /** Its own category; null = the version's. */
+  own_category: BillingCategory | null;
+  /** As it counts; null while the version's work kind is undecided. */
+  category: BillingCategory | null;
+  lines: number;
+  tokens: number;
+}
+
+export type CategoryValues<T> = Record<BillingCategory, T>;
 
 export interface StatementPreview {
   version_number: string;
@@ -65,6 +113,16 @@ export interface StatementPreview {
   amount_eur: string | null;
   cannot_issue: string[];
   calibration: StatementCalibration | null;
+  /** DEV-75 — the category of a task nobody decided; null while the work kind is undecided. */
+  version_category: BillingCategory | null;
+  /** In %, as the version counts — its own where it has one, else Nastavenia. */
+  discounts: CategoryValues<string>;
+  settings_discounts: CategoryValues<string>;
+  discounts_own: CategoryValues<boolean>;
+  lines: StatementLine[];
+  tasks: StatementTask[];
+  /** What the delivery was worth before the discounts. */
+  full_eur: string | null;
 }
 
 export interface IssuedStatement {
@@ -87,6 +145,8 @@ export interface IssuedStatement {
   /** DEV-54 — the statement this one replaced, and when this one was replaced in turn (null = the valid one). */
   replaces_id: string | null;
   replaced_at: string | null;
+  /** DEV-75 — the lines it was issued with; null on one issued before the categories. */
+  lines: StatementLine[] | null;
 }
 
 export interface DeliveryStatementView {
@@ -94,6 +154,16 @@ export interface DeliveryStatementView {
   issued: IssuedStatement[];
   /** DEV-74 — every change of the version's own rates, the newest first. */
   rate_changes: RateChange[];
+  /** DEV-75 — every change of the version's own discounts, the newest first. */
+  discount_changes: DiscountChange[];
+}
+
+/** DEV-75 — one change of a version's own discounts in %; null = the discount in Nastavenia. */
+export interface DiscountChange {
+  created_at: string;
+  changed_by: string | null;
+  previous: CategoryValues<string | null>;
+  current: CategoryValues<string | null>;
 }
 
 /** DEV-74 — one change of a version's own rates; null = the rate in Nastavenia. */
@@ -152,6 +222,23 @@ export function setBillingRates(
   rates: { rate_code: string | null; rate_docs: string | null },
 ): Promise<RateChange[]> {
   return api.put<RateChange[]>(`/versions/${versionId}/billing-rates`, rates);
+}
+
+/** DEV-75 — the version's own discount per category in %; null = back to Nastavenia. Returns every change. */
+export function setBillingDiscounts(
+  versionId: string,
+  discounts: CategoryValues<string | null>,
+): Promise<DiscountChange[]> {
+  return api.put<DiscountChange[]>(`/versions/${versionId}/billing-discounts`, discounts);
+}
+
+/** DEV-75 — what these tasks are billed as (all of an epic or feat at once); null = the version's category. */
+export function setTaskCategories(
+  versionId: string,
+  taskIds: string[],
+  category: BillingCategory | null,
+): Promise<{ changed: number }> {
+  return api.put<{ changed: number }>(`/versions/${versionId}/task-categories`, { task_ids: taskIds, category });
 }
 
 export function getDeliveryStatement(versionId: string): Promise<DeliveryStatementView> {

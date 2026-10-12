@@ -49,6 +49,10 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # documentation; NULL = the rate in Nastavenia. Every change is kept in ``version_rate_changes``.
     rate_code = Column(Numeric(12, 4), nullable=True)
     rate_docs = Column(Numeric(12, 4), nullable=True)
+    #: DEV-75: the discount of each billing category for this version, in % — empty = the default in Nastavenia.
+    discount_bug = Column(Numeric(5, 2), nullable=True)
+    discount_request = Column(Numeric(5, 2), nullable=True)
+    discount_gift = Column(Numeric(5, 2), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -63,6 +67,11 @@ class Version(Base, UUIDMixin, TimestampMixin):
         CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change')", name="ck_versions_work_kind"),
         # DEV-74: an own rate is a price — empty means Nastavenia, zero is no rate.
         CheckConstraint("rate_code > 0 AND rate_docs > 0", name="ck_versions_rates_positive"),
+        CheckConstraint(
+            "(discount_bug >= 0 AND discount_bug <= 100) AND (discount_request >= 0 AND discount_request <= 100)"
+            " AND (discount_gift >= 0 AND discount_gift <= 100)",
+            name="ck_versions_discounts_range",
+        ),
     )
 
     # Relationship to the owning Project. The inverse side ``Project.versions``

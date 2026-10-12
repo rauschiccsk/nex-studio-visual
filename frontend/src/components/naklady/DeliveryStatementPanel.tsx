@@ -4,17 +4,24 @@
 // total is their sum), and what the agent's work cost per 1 000 delivered tokens — so the rates rest on data.
 // „Vydať súpis“ freezes it; an issued one downloads as CSV. A version has one valid statement (DEV-54): issuing
 // again asks first and replaces it — the old one stays in the list, greyed and marked as replaced.
+// DEV-75: the lines are the billing category of the task that wrote the code × kind, each with full value, discount
+// and amount; the version's discounts and its tasks' categories are confirmed or changed here before issuing.
 
 import { useCallback, useEffect, useState } from "react";
 import { Download, FileText, Loader2 } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
+import StatementLines from "@/components/naklady/StatementLines";
+import StatementTasks from "@/components/naklady/StatementTasks";
+import VersionDiscounts from "@/components/naklady/VersionDiscounts";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import {
   downloadStatementCsv,
   getDeliveryStatement,
   issueDeliveryStatement,
+  setBillingDiscounts,
   setBillingRates,
+  setTaskCategories,
   setWorkKind,
   type DeliveryStatementView,
   type RateChange,
@@ -265,42 +272,46 @@ export default function DeliveryStatementPanel({
             </span>
           </div>
 
-          <table className="mb-2 w-full text-xs">
-            <thead className="text-left text-[var(--color-text-muted)]">
-              <tr>
-                <th className="py-1 font-normal">Druh</th>
-                <th className="py-1 text-right font-normal">Riadkov</th>
-                <th className="py-1 text-right font-normal">Tokenov</th>
-                <th className="py-1 text-right font-normal">Sadzba</th>
-                <th className="py-1 text-right font-normal">Suma</th>
-              </tr>
-            </thead>
-            <tbody className="text-[var(--color-text-primary)]">
-              <tr>
-                <td className="py-1">
-                  Kód a skúšky{" "}
-                  <span className="text-[var(--color-text-muted)]">
-                    (kód {int.format(p.code?.tokens ?? 0)}, skúšky {int.format(p.tests?.tokens ?? 0)})
-                  </span>
-                </td>
-                <td className="py-1 text-right">{int.format((p.code?.lines ?? 0) + (p.tests?.lines ?? 0))}</td>
-                <td className="py-1 text-right">{int.format(codeTokens)}</td>
-                <td className="py-1 text-right">{rate(p.rate_code)}</td>
-                <td className="py-1 text-right" data-testid="statement-amount-code">
-                  {eur(p.amount_code_eur)}
-                </td>
-              </tr>
-              <tr>
-                <td className="py-1">Dokumentácia</td>
-                <td className="py-1 text-right">{int.format(p.docs?.lines ?? 0)}</td>
-                <td className="py-1 text-right">{int.format(p.docs?.tokens ?? 0)}</td>
-                <td className="py-1 text-right">{rate(p.rate_docs)}</td>
-                <td className="py-1 text-right" data-testid="statement-amount-docs">
-                  {eur(p.amount_docs_eur)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {p.lines.length > 0 ? (
+            <StatementLines lines={p.lines} full={p.full_eur} total={p.amount_eur} />
+          ) : (
+            <table className="mb-2 w-full text-xs">
+              <thead className="text-left text-[var(--color-text-muted)]">
+                <tr>
+                  <th className="py-1 font-normal">Druh</th>
+                  <th className="py-1 text-right font-normal">Riadkov</th>
+                  <th className="py-1 text-right font-normal">Tokenov</th>
+                  <th className="py-1 text-right font-normal">Sadzba</th>
+                  <th className="py-1 text-right font-normal">Suma</th>
+                </tr>
+              </thead>
+              <tbody className="text-[var(--color-text-primary)]">
+                <tr>
+                  <td className="py-1">
+                    Kód a skúšky{" "}
+                    <span className="text-[var(--color-text-muted)]">
+                      (kód {int.format(p.code?.tokens ?? 0)}, skúšky {int.format(p.tests?.tokens ?? 0)})
+                    </span>
+                  </td>
+                  <td className="py-1 text-right">{int.format((p.code?.lines ?? 0) + (p.tests?.lines ?? 0))}</td>
+                  <td className="py-1 text-right">{int.format(codeTokens)}</td>
+                  <td className="py-1 text-right">{rate(p.rate_code)}</td>
+                  <td className="py-1 text-right" data-testid="statement-amount-code">
+                    {eur(p.amount_code_eur)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1">Dokumentácia</td>
+                  <td className="py-1 text-right">{int.format(p.docs?.lines ?? 0)}</td>
+                  <td className="py-1 text-right">{int.format(p.docs?.tokens ?? 0)}</td>
+                  <td className="py-1 text-right">{rate(p.rate_docs)}</td>
+                  <td className="py-1 text-right" data-testid="statement-amount-docs">
+                    {eur(p.amount_docs_eur)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
           <VersionRates
             preview={p}
             changes={view?.rate_changes ?? []}
@@ -309,11 +320,25 @@ export default function DeliveryStatementPanel({
               act(() => setBillingRates(versionId, { rate_code: code, rate_docs: docs }), "Sadzby sa nepodarilo uložiť")
             }
           />
+          <VersionDiscounts
+            preview={p}
+            changes={view?.discount_changes ?? []}
+            busy={busy}
+            onSave={(discounts) => act(() => setBillingDiscounts(versionId, discounts), "Zľavy sa nepodarilo uložiť")}
+          />
+          <StatementTasks
+            tasks={p.tasks}
+            fallback={p.version_category}
+            busy={busy}
+            onSet={(taskIds, category) =>
+              act(() => setTaskCategories(versionId, taskIds, category), "Kategóriu úloh sa nepodarilo uložiť")
+            }
+          />
           <p className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]" data-testid="statement-amount">
             Suma: {eur(p.amount_eur)}
-            {p.work_kind === "fix" && (
+            {p.full_eur != null && p.amount_eur != null && Number(p.full_eur) !== Number(p.amount_eur) && (
               <span className="ml-2 text-xs font-normal text-[var(--color-text-muted)]">
-                oprava chyby v dodanom kóde — neúčtuje sa
+                plná hodnota {eur(p.full_eur)}, zľava {eur(Number(p.full_eur) - Number(p.amount_eur))}
               </span>
             )}
           </p>

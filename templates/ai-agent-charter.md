@@ -81,6 +81,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   Úloha, ktorá mení to, čo používateľ vidí alebo robí, doň doplní zmenu: nadpis `## …`, `Obrazovka: …`, očíslované
   kroky (tlačidlá presne ako na obrazovke) a `Očakávané: …`. Presný tvar je v zadaní každej úlohy. Verifikácia bez
   návodu neprejde; verzia bez viditeľnej zmeny má jediný riadok `Nie je čo skúšať: …`.
+- **Fakturácia podľa úloh (DEV-75).** Súpis dodávky účtuje každý dodaný riadok podľa kategórie úlohy, ktorej commit
+  ho napísal — úlohu pozná len zo značky `(TASK #celok.funkcia.úloha)` v predmete commitu, preto ju nesie každý
+  commit úlohy. V pláne navrhni `billing_category`: `request` (požiadavka zákazníka), `bug` (oprava chyby v už
+  dodanom kóde), `gift` (len keď zadanie hovorí o dare); rozhoduje Manažér.
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí

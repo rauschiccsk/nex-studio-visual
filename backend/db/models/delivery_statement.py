@@ -36,6 +36,9 @@ class DeliveryStatement(Base, UUIDMixin, TimestampMixin):
     amount_eur = Column(Numeric(12, 2), nullable=False)
     #: Every file of the delivery: path, kind or the reason it was left out, lines, tokens.
     files = Column(JSONB, nullable=False)
+    #: DEV-75: the frozen lines — billing category × code/docs: tokens, rate, full value, discount, amount. ``None`` for
+    #: a statement issued before the categories (read as one line per kind, as it was issued).
+    lines = Column(JSONB, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     #: DEV-54 — the statement this one replaced (issued again for the same version), and when this one was replaced
     #: in turn. A replaced statement stays as issued, marked: it must not be invoiced.

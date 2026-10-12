@@ -266,6 +266,7 @@ def create(db: Session, data: TaskCreate) -> Task:
         estimated_minutes=data.estimated_minutes,
         actual_minutes=data.actual_minutes,
         checklist_type=data.checklist_type,
+        billing_category=data.billing_category,
     )
     db.add(task)
     db.flush()

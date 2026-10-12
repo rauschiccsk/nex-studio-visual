@@ -33,11 +33,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from backend.schemas.task import TaskPriority, TaskType
+from backend.schemas.task import BillingCategory, TaskPriority, TaskType
 
 _FENCE_RE = re.compile(
     r"<<<PIPELINE_STATUS>>>\s*(.*?)\s*<<<END_PIPELINE_STATUS>>>",
@@ -104,6 +104,18 @@ class TaskPlanTask(BaseModel):
     checklist_type: Optional[str] = Field(default=None, max_length=30)
     priority: TaskPriority = "normal"
     estimated_minutes: Optional[int] = None
+    #: DEV-75: the AI Agent's proposal of what the task is billed as; the manager confirms or changes it in the
+    #: task plan.
+    billing_category: Optional[BillingCategory] = None
+
+    @field_validator("billing_category", mode="before")
+    @classmethod
+    def _unknown_category_is_undecided(cls, value: Any) -> Any:
+        """A proposal the cockpit does not know is no proposal — the version's category applies and the manager
+        decides; it never fails the whole plan."""
+        if isinstance(value, str) and value.strip().lower() in get_args(BillingCategory):
+            return value.strip().lower()
+        return None
 
 
 class TaskPlanFeat(BaseModel):

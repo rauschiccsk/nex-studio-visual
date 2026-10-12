@@ -55,9 +55,18 @@ function view(over: Partial<DeliveryStatementView["preview"]> = {}, issued: Deli
       amount_eur: "228.71",
       cannot_issue: [],
       calibration: { eur_code: 125.62, eur_docs: 63.78, per_1k_code: 2.95, per_1k_docs: 1.64, complete: true },
+      version_category: "request",
+      discounts: { request: "0", bug: "100", gift: "100" },
+      settings_discounts: { request: "0", bug: "100", gift: "100" },
+      discounts_own: { request: false, bug: false, gift: false },
+      lines: [],
+      tasks: [],
+      full_eur: null,
       ...over,
     },
     issued,
+    rate_changes: [],
+    discount_changes: [],
   } as DeliveryStatementView;
 }
 
@@ -113,11 +122,30 @@ describe("Statement of delivered tokens", () => {
     expect(getDeliveryStatement).toHaveBeenCalledTimes(2);
   });
 
-  it("a bug fix in delivered code has an amount of 0 € and says why", async () => {
-    vi.mocked(getDeliveryStatement).mockResolvedValue(view({ work_kind: "fix", amount_code_eur: "0.00", amount_docs_eur: "0.00", amount_eur: "0.00" }));
+  it("a bug fix in delivered code is a warranty fix — 0 € with the full value it had (DEV-75)", async () => {
+    const line = {
+      category: "bug" as const,
+      kind: "code" as const,
+      tasked: true,
+      label: "Oprava chyby — kód a skúšky",
+      lines: 12,
+      tokens: 47_435,
+      rate: "2.0000",
+      full_eur: "94.87",
+      discount_pct: "100.00",
+      discount_label: "záručná oprava",
+      discount_eur: "94.87",
+      amount_eur: "0.00",
+      tasks: [{ label: "21.1.1", title: "Zaokrúhlenie", lines: 12, tokens: 47_435 }],
+    };
+    const fix = { work_kind: "fix" as const, version_category: "bug" as const, full_eur: "94.87", lines: [line] };
+    vi.mocked(getDeliveryStatement).mockResolvedValue(
+      view({ ...fix, amount_code_eur: "0.00", amount_docs_eur: "0.00", amount_eur: "0.00" }),
+    );
     render(<DeliveryStatementPanel versionId="v-151" />);
 
-    expect(await screen.findByTestId("statement-amount")).toHaveTextContent("0,00 €oprava chyby v dodanom kóde — neúčtuje sa");
+    expect(await screen.findByTestId("statement-amount")).toHaveTextContent("Suma: 0,00 €plná hodnota 94,87 €, zľava 94,87 €");
+    expect(screen.getByTestId("statement-line")).toHaveTextContent("−94,87 €100 % · záručná oprava");
   });
 
   it("issues the statement and the issued one can be downloaded", async () => {
@@ -139,6 +167,7 @@ describe("Statement of delivered tokens", () => {
       amount_eur: "228.71",
       replaces_id: null,
       replaced_at: null,
+      lines: null,
     };
     vi.mocked(getDeliveryStatement).mockResolvedValueOnce(view()).mockResolvedValue(view({}, [issued]));
     vi.mocked(issueDeliveryStatement).mockResolvedValue(issued);
@@ -182,6 +211,7 @@ describe("Statement of delivered tokens", () => {
       amount_eur: "249.98",
       replaces_id: "s-1",
       replaced_at: null,
+      lines: null,
     };
     const replaced = {
       ...valid,
@@ -192,6 +222,7 @@ describe("Statement of delivered tokens", () => {
       amount_eur: "423.87",
       replaces_id: null,
       replaced_at: "2026-10-10T13:47:36Z",
+      lines: null,
     };
 
     it("⚠️ a new statement is issued only after confirming it replaces the valid one", async () => {

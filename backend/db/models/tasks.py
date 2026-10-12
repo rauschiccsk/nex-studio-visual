@@ -117,6 +117,9 @@ class Task(Base, UUIDMixin, TimestampMixin):
     # dispatched, so a retry still diffs against the original baseline. Written
     # by the per-task build loop (CR-3); dormant in CR-1.
     baseline_sha = Column(String(40), nullable=True)
+    #: DEV-75: what the delivered work of this task is billed as — ``bug`` (a fix of our error), ``request`` (what the
+    #: customer asked for), ``gift`` (an attention of ICC). Empty = the version's own (a fix of our error → bug).
+    billing_category = Column(String(10), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("feat_id", "number", name="uq_tasks_feat_id_number"),
@@ -132,4 +135,5 @@ class Task(Base, UUIDMixin, TimestampMixin):
             "priority IN ('normal', 'high', 'urgent')",
             name="ck_tasks_priority",
         ),
+        CheckConstraint("billing_category IN ('bug', 'request', 'gift')", name="ck_tasks_billing_category"),
     )

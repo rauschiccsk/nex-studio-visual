@@ -3093,6 +3093,28 @@ export interface paths {
         patch: operations["update_version_api_v1_versions__version_id__patch"];
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/billing-discounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Billing Discounts
+         * @description DEV-75 — the version's own discount per category in % (``null`` = back to Nastavenia). An issued statement
+         *     keeps its discounts; only a new statement that replaces it counts with these. Returns every change, the newest
+         *     first.
+         */
+        put: operations["set_billing_discounts_api_v1_versions__version_id__billing_discounts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}/billing-rates": {
         parameters: {
             query?: never;
@@ -3247,6 +3269,27 @@ export interface paths {
          *     v4.0.35: owner-or-admin — a Junior may reset only their OWN project's version.
          */
         post: operations["reset_tasks_api_v1_versions__version_id__reset_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/versions/{version_id}/task-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Task Categories
+         * @description DEV-75 — what these tasks' delivered work is billed as (``null`` = the version's category); the screen sends
+         *     every task of an epic or feat to set them at once. A task of another version refuses the whole change (422).
+         */
+        put: operations["set_task_categories_api_v1_versions__version_id__task_categories_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4689,6 +4732,11 @@ export interface components {
         };
         /** DeliveryStatementView */
         DeliveryStatementView: {
+            /**
+             * Discount Changes
+             * @description DEV-75, the newest first.
+             */
+            discount_changes?: components["schemas"]["DiscountChangeRead"][];
             /** Issued */
             issued: components["schemas"]["IssuedStatementRead"][];
             preview: components["schemas"]["StatementPreviewRead"];
@@ -4995,6 +5043,42 @@ export interface components {
              * @description Non-fatal, non-secret notes about a deploy that SUCCEEDED — what a manager must know and act on although nothing failed (e.g. no paired NEX Manager, so one-click launch stays off until one is deployed for this customer). A warning NEVER means failure: ``ok`` stays True.
              */
             warnings?: string[];
+        };
+        /**
+         * DiscountChangeRead
+         * @description DEV-75 — one change of a version's own discounts, in %; ``None`` = the discount in Nastavenia.
+         */
+        DiscountChangeRead: {
+            /**
+             * Changed By
+             * @description Who changed them — the person's name.
+             */
+            changed_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current */
+            current: {
+                [key: string]: string | null;
+            };
+            /** Previous */
+            previous: {
+                [key: string]: string | null;
+            };
+        };
+        /**
+         * DiscountsWrite
+         * @description DEV-75 — a version's own discount per category in %; ``null`` = back to the discount in Nastavenia.
+         */
+        DiscountsWrite: {
+            /** Bug */
+            bug?: number | string | null;
+            /** Gift */
+            gift?: number | string | null;
+            /** Request */
+            request?: number | string | null;
         };
         /**
          * EpicCreate
@@ -5442,6 +5526,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Lines */
+            lines?: components["schemas"]["StatementLineRead"][] | null;
             /** Rate Code */
             rate_code: string;
             /** Rate Docs */
@@ -6914,6 +7000,70 @@ export interface components {
              */
             reason: string;
         };
+        /**
+         * StatementLineRead
+         * @description DEV-75 — one line of the statement: a category × kind, its full value, the discount and the amount.
+         */
+        StatementLineRead: {
+            /** Amount Eur */
+            amount_eur: string;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "bug" | "request" | "gift";
+            /** Discount Eur */
+            discount_eur: string;
+            /**
+             * Discount Label
+             * @description „záručná oprava“, „pozornosť ICC“, „zľava“.
+             */
+            discount_label?: string | null;
+            /** Discount Pct */
+            discount_pct: string;
+            /** Full Eur */
+            full_eur: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "code" | "docs";
+            /** Label */
+            label: string;
+            /** Lines */
+            lines: number;
+            /** Rate */
+            rate: string;
+            /**
+             * Tasked
+             * @description False = work without a task (design documents, the visual phase, fixes after verification).
+             */
+            tasked: boolean;
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: components["schemas"]["StatementLineTaskRead"][];
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * StatementLineTaskRead
+         * @description DEV-75 — a task whose work is on a line of the statement.
+         */
+        StatementLineTaskRead: {
+            /**
+             * Label
+             * @description epic.feat.task — the number in the plan and in the agent's commits.
+             */
+            label: string;
+            /** Lines */
+            lines: number;
+            /** Title */
+            title: string;
+            /** Tokens */
+            tokens: number;
+        };
         /** StatementPreviewRead */
         StatementPreviewRead: {
             /** Amount Code Eur */
@@ -6939,12 +7089,33 @@ export interface components {
             delivered_source?: string | null;
             /** Delivered Source Label */
             delivered_source_label?: string | null;
+            /**
+             * Discounts
+             * @description In %, as the version counts.
+             */
+            discounts?: {
+                [key: string]: string;
+            };
+            /** Discounts Own */
+            discounts_own?: {
+                [key: string]: boolean;
+            };
             docs?: components["schemas"]["KindTotalRead"] | null;
             /**
              * Files
              * @default []
              */
             files: components["schemas"]["DeliveredFileRead"][];
+            /**
+             * Full Eur
+             * @description What the delivery was worth before the discounts.
+             */
+            full_eur?: string | null;
+            /**
+             * Lines
+             * @default []
+             */
+            lines: components["schemas"]["StatementLineRead"][];
             /** Rate Code */
             rate_code: string;
             /**
@@ -6959,6 +7130,10 @@ export interface components {
              * @default false
              */
             rate_docs_own: boolean;
+            /** Settings Discounts */
+            settings_discounts?: {
+                [key: string]: string;
+            };
             /**
              * Settings Rate Code
              * @default 0
@@ -6969,13 +7144,57 @@ export interface components {
              * @default 0
              */
             settings_rate_docs: string;
+            /**
+             * Tasks
+             * @default []
+             */
+            tasks: components["schemas"]["StatementTaskRead"][];
             tests?: components["schemas"]["KindTotalRead"] | null;
             /** Tokenizer */
             tokenizer: string;
+            /**
+             * Version Category
+             * @description The category of a task nobody decided; None while the work kind is undecided.
+             */
+            version_category?: ("bug" | "request" | "gift") | null;
             /** Version Number */
             version_number: string;
             /** Work Kind */
             work_kind?: ("fix" | "change") | null;
+        };
+        /**
+         * StatementTaskRead
+         * @description DEV-75 — a task of the version's plan with its category and what it delivered.
+         */
+        StatementTaskRead: {
+            /**
+             * Category
+             * @description As it counts; None while undecided.
+             */
+            category?: ("bug" | "request" | "gift") | null;
+            /**
+             * Epic Title
+             * @default
+             */
+            epic_title: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Lines */
+            lines: number;
+            /**
+             * Own Category
+             * @description None = the version's category.
+             */
+            own_category?: ("bug" | "request" | "gift") | null;
+            /** Title */
+            title: string;
+            /** Tokens */
+            tokens: number;
         };
         /**
          * SystemSettingRead
@@ -7038,6 +7257,21 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** TaskCategoriesRead */
+        TaskCategoriesRead: {
+            /** Changed */
+            changed: number;
+        };
+        /**
+         * TaskCategoriesWrite
+         * @description DEV-75 — the category of these tasks (all of one epic or feat at once); ``null`` = the version's.
+         */
+        TaskCategoriesWrite: {
+            /** Category */
+            category?: ("bug" | "request" | "gift") | null;
+            /** Task Ids */
+            task_ids: string[];
+        };
         /**
          * TaskCreate
          * @description Payload for creating a new task.
@@ -7059,6 +7293,11 @@ export interface components {
              * @description Measured duration in minutes; typically set after completion.
              */
             actual_minutes?: number | null;
+            /**
+             * Billing Category
+             * @description DEV-75: bug | request | gift; None = the version's category.
+             */
+            billing_category?: ("bug" | "request" | "gift") | null;
             /**
              * Checklist Type
              * @description Checklist type injected into the CC delegation context (e.g. 'model', 'schema', 'service', 'router', 'frontend').
@@ -8071,6 +8310,8 @@ export interface components {
          * @description Response for GET /versions/{version_id}/task-plan.
          */
         _TaskPlanResponse: {
+            /** Billing Default */
+            billing_default?: string | null;
             /** Epic Count */
             epic_count: number;
             /** Feat Count */
@@ -13280,6 +13521,41 @@ export interface operations {
             };
         };
     };
+    set_billing_discounts_api_v1_versions__version_id__billing_discounts_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscountsWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountChangeRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_billing_rates_api_v1_versions__version_id__billing_rates_put: {
         parameters: {
             query?: never;
@@ -13496,6 +13772,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_task_categories_api_v1_versions__version_id__task_categories_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCategoriesWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCategoriesRead"];
                 };
             };
             /** @description Validation Error */

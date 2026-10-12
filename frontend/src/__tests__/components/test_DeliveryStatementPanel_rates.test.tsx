@@ -50,9 +50,17 @@ function view(own: boolean, changes: RateChange[] = []): DeliveryStatementView {
       amount_eur: own ? "102.74" : "124.06",
       cannot_issue: [],
       calibration: null,
+      version_category: "request",
+      discounts: { request: "0", bug: "100", gift: "100" },
+      settings_discounts: { request: "0", bug: "100", gift: "100" },
+      discounts_own: { request: false, bug: false, gift: false },
+      lines: [],
+      tasks: [],
+      full_eur: null,
     },
     issued: [],
     rate_changes: changes,
+    discount_changes: [],
   };
 }
 

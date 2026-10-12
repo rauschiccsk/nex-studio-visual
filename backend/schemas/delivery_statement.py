@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.schemas.task import BillingCategory
+
 WorkKind = Literal["fix", "change"]
 
 
@@ -35,6 +37,48 @@ class CalibrationRead(BaseModel):
     per_1k_code: Optional[float] = None
     per_1k_docs: Optional[float] = None
     complete: bool = True
+
+
+class StatementLineTaskRead(BaseModel):
+    """DEV-75 — a task whose work is on a line of the statement."""
+
+    label: str = Field(description="epic.feat.task — the number in the plan and in the agent's commits.")
+    title: str
+    lines: int
+    tokens: int
+
+
+class StatementLineRead(BaseModel):
+    """DEV-75 — one line of the statement: a category × kind, its full value, the discount and the amount."""
+
+    category: BillingCategory
+    kind: Literal["code", "docs"]
+    tasked: bool = Field(
+        description="False = work without a task (design documents, the visual phase, fixes after verification).",
+    )
+    label: str
+    lines: int
+    tokens: int
+    rate: Decimal
+    full_eur: Decimal
+    discount_pct: Decimal
+    discount_label: Optional[str] = Field(default=None, description="„záručná oprava“, „pozornosť ICC“, „zľava“.")
+    discount_eur: Decimal
+    amount_eur: Decimal
+    tasks: list[StatementLineTaskRead] = []
+
+
+class StatementTaskRead(BaseModel):
+    """DEV-75 — a task of the version's plan with its category and what it delivered."""
+
+    id: UUID
+    label: str
+    title: str
+    epic_title: str = ""
+    own_category: Optional[BillingCategory] = Field(default=None, description="None = the version's category.")
+    category: Optional[BillingCategory] = Field(default=None, description="As it counts; None while undecided.")
+    lines: int
+    tokens: int
 
 
 class StatementPreviewRead(BaseModel):
@@ -69,6 +113,16 @@ class StatementPreviewRead(BaseModel):
     #: Why it cannot be issued yet (kind undecided, rates missing) — empty when it can.
     cannot_issue: list[str] = []
     calibration: Optional[CalibrationRead] = None
+    # DEV-75 — categories and discounts.
+    version_category: Optional[BillingCategory] = Field(
+        default=None, description="The category of a task nobody decided; None while the work kind is undecided."
+    )
+    discounts: dict[BillingCategory, Decimal] = Field(default_factory=dict, description="In %, as the version counts.")
+    settings_discounts: dict[BillingCategory, Decimal] = Field(default_factory=dict)
+    discounts_own: dict[BillingCategory, bool] = Field(default_factory=dict)
+    lines: list[StatementLineRead] = []
+    tasks: list[StatementTaskRead] = []
+    full_eur: Optional[Decimal] = Field(default=None, description="What the delivery was worth before the discounts.")
 
 
 class IssuedStatementRead(BaseModel):
@@ -91,6 +145,8 @@ class IssuedStatementRead(BaseModel):
     #: DEV-54 — the statement this one replaced, and when this one was replaced in turn (``None`` = valid).
     replaces_id: Optional[UUID] = None
     replaced_at: Optional[datetime] = None
+    #: DEV-75 — the lines it was issued with; ``None`` on one issued before the categories (two lines by kind).
+    lines: Optional[list[StatementLineRead]] = None
 
     model_config = {"from_attributes": True}
 
@@ -113,10 +169,39 @@ class RatesWrite(BaseModel):
     rate_docs: Optional[Decimal] = None
 
 
+class DiscountChangeRead(BaseModel):
+    """DEV-75 — one change of a version's own discounts, in %; ``None`` = the discount in Nastavenia."""
+
+    created_at: datetime
+    changed_by: Optional[str] = Field(default=None, description="Who changed them — the person's name.")
+    previous: dict[BillingCategory, Optional[Decimal]]
+    current: dict[BillingCategory, Optional[Decimal]]
+
+
+class DiscountsWrite(BaseModel):
+    """DEV-75 — a version's own discount per category in %; ``null`` = back to the discount in Nastavenia."""
+
+    bug: Optional[Decimal] = None
+    request: Optional[Decimal] = None
+    gift: Optional[Decimal] = None
+
+
+class TaskCategoriesWrite(BaseModel):
+    """DEV-75 — the category of these tasks (all of one epic or feat at once); ``null`` = the version's."""
+
+    task_ids: list[UUID] = Field(min_length=1)
+    category: Optional[BillingCategory] = None
+
+
+class TaskCategoriesRead(BaseModel):
+    changed: int
+
+
 class DeliveryStatementView(BaseModel):
     preview: StatementPreviewRead
     issued: list[IssuedStatementRead]
     rate_changes: list[RateChangeRead] = Field(default_factory=list, description="DEV-74, the newest first.")
+    discount_changes: list[DiscountChangeRead] = Field(default_factory=list, description="DEV-75, the newest first.")
 
 
 class IssueStatementWrite(BaseModel):

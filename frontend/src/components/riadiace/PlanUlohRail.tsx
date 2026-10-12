@@ -30,12 +30,18 @@
 // tree: "<done>/<total> úloh hotových" + a slim green bar + "N %", computed live off the SAME fetched plan
 // (the message-growth refetch advances it as tasks finish). Shown only when the plan has tasks. All additive,
 // no new endpoint/WS/backend change.
+//
+// DEV-75: under every task, feat and epic, what its delivered work is billed as (a bug fix, a customer request, a
+// gift) — the AI Agent proposed it in the plan, the manager confirms or changes it per task or for a whole feat or epic.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, ChevronRight, Loader2, Rocket } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Receipt, Rocket } from "lucide-react";
 
 import { getTaskPlan } from "../../services/api/versions";
+import { setTaskCategories } from "../../services/api/deliveryStatements";
+import CategoryPicker from "../naklady/CategoryPicker";
+import { commonCategory, type BillingCategory } from "@/lib/billingCategory";
 import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
 import { postPipelineActionApi } from "../../services/api/pipeline";
 import type { CiStatus, PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
@@ -239,6 +245,8 @@ function PlanNode(props: {
   onToggleTechnical: () => void;
   /** DEV-49 — what the agent spent on this node; shown even when the node is collapsed. */
   spend?: NodeSpend | null;
+  /** DEV-75 — what the node's tasks are billed as; shown even when the node is collapsed. */
+  billing?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
 }) {
@@ -258,6 +266,7 @@ function PlanNode(props: {
     isExpanded,
     onToggleTechnical,
     spend,
+    billing,
     className,
     children,
   } = props;
@@ -312,6 +321,12 @@ function PlanNode(props: {
           {spendLine(spend)}
         </p>
       )}
+      {billing && (
+        <div className="flex min-w-0 items-center gap-1 pl-5 text-[var(--color-text-muted)]" title="Fakturácia">
+          <Receipt className="h-3 w-3 flex-shrink-0" aria-hidden />
+          {billing}
+        </div>
+      )}
       {/* A collapsed node is reduced to its single header line — its own L1/L2 and its whole subtree vanish. */}
       {!isCollapsed && <PlainLine text={plain} />}
       {!isCollapsed && hasTechnical && isExpanded && <TechnicalDetail text={technical ?? ""} />}
@@ -332,6 +347,10 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => (versionId ? readCollapsed(versionId) : new Set()));
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<HumanError | null>(null);
+  // DEV-75 — a category change refetches the plan; its failure is said above the tree, the plan stays visible.
+  const [planTick, setPlanTick] = useState(0);
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [categoryError, setCategoryError] = useState<HumanError | null>(null);
 
   // Last-seen status per node id, to detect `* → done` transitions for auto-collapse (req 4) WITHOUT re-collapsing
   // on every render (else the Manažér could never keep a done node open). Reset per version. versionIdRef lets the
@@ -384,7 +403,36 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
     return () => {
       cancelled = true;
     };
-  }, [versionId, messages.length]);
+  }, [versionId, messages.length, planTick]);
+
+  async function setCategory(taskIds: string[], category: BillingCategory | null) {
+    if (!versionId || taskIds.length === 0) return;
+    setCategoryBusy(true);
+    setCategoryError(null);
+    try {
+      await setTaskCategories(versionId, taskIds, category);
+      setPlanTick((t) => t + 1);
+    } catch (e: unknown) {
+      setCategoryError(humanizeApiError(e, "Kategóriu úloh sa nepodarilo uložiť"));
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  /** DEV-75 — the category of these tasks, set for all of them at once; nothing for a node without tasks. */
+  function picker(label: string, tasks: TaskPlanTaskNode[]) {
+    if (tasks.length === 0) return null;
+    return (
+      <CategoryPicker
+        label={label}
+        value={commonCategory(tasks.map((t) => t.billing_category ?? null))}
+        fallback={plan?.billing_default ?? null}
+        disabled={categoryBusy}
+        quiet
+        onPick={(c) => setCategory(tasks.map((t) => t.id), c)}
+      />
+    );
+  }
 
   // Auto-collapse on done (req 4): keyed on the fetched plan. The effect separates the two behaviours it used to
   // conflate via the empty-`seen` trick (obs #3 real fix) — `seenStatusRef` resets on every mount, so the old
@@ -795,6 +843,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 text-xs">
+        <ErrorNote error={categoryError} className="mb-1 px-1" />
         {error ? (
           <ErrorNote error={error} className="px-1" />
         ) : !plan ? (
@@ -825,6 +874,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
               isExpanded={expanded.has(epic.id)}
               onToggleTechnical={() => toggleTechnical(epic.id)}
               spend={epic.spend}
+              billing={picker(`Kategória všetkých úloh celku ${epic.number}`, epic.feats.flatMap((f) => f.tasks))}
             >
               {epic.feats.map((feat: TaskPlanFeatNode) => (
                 <PlanNode
@@ -843,6 +893,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
                   isExpanded={expanded.has(feat.id)}
                   onToggleTechnical={() => toggleTechnical(feat.id)}
                   spend={feat.spend}
+                  billing={picker(`Kategória všetkých úloh funkcie ${epic.number}.${feat.number}`, feat.tasks)}
                 >
                   {feat.tasks.map((task: TaskPlanTaskNode) => (
                     // Leaf task — no children (no chevron); keeps only the L2 technical-detail reveal on its title.
@@ -863,6 +914,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci }: Props)
                       isExpanded={expanded.has(task.id)}
                       onToggleTechnical={() => toggleTechnical(task.id)}
                       spend={task.spend}
+                      billing={picker(`Kategória úlohy ${epic.number}.${feat.number}.${task.number}`, [task])}
                     />
                   ))}
                 </PlanNode>

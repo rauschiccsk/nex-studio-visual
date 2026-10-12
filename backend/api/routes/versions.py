@@ -65,8 +65,10 @@ from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
+from backend.services import delivery_statement as statements
 from backend.services import metrics, pipeline_metrics
 from backend.services import version as version_service
 
@@ -294,6 +296,9 @@ class _TaskPlanResponse(BaseModel):
     epic_count: int
     feat_count: int
     task_count: int
+    #: DEV-75 — the billing category of a task without its own (``bug`` / ``request``); ``None`` while the version's
+    #: work kind is undecided.
+    billing_default: Optional[str] = None
 
 
 @router.get(
@@ -315,8 +320,10 @@ def get_task_plan(
     authz.assert_version_access(db, current_user, version_id)
     epics = db.execute(select(Epic).where(Epic.version_id == version_id).order_by(Epic.number)).scalars().all()
 
+    version = db.get(Version, version_id)
+    billing_default = statements.version_category(statements.work_kind(db, version)) if version else None
     if not epics:
-        return _TaskPlanResponse(plan=[], epic_count=0, feat_count=0, task_count=0)
+        return _TaskPlanResponse(plan=[], epic_count=0, feat_count=0, task_count=0, billing_default=billing_default)
 
     epic_ids = [e.id for e in epics]
     feats = (
@@ -352,6 +359,8 @@ def get_task_plan(
                 # STEP 3 (step3-plan-design.md): the plain-language L2 one-liner for the three-layer rail.
                 "plain_description": t.plain_description,
                 "spend": metrics.node_spend(pricing, by_task.get(str(t.id))),
+                # DEV-75: what its delivered work is billed as; None = the version's (``billing_default``).
+                "billing_category": t.billing_category,
             }
         )
 
@@ -392,6 +401,7 @@ def get_task_plan(
         epic_count=len(epics),
         feat_count=len(feats),
         task_count=len(tasks_all),
+        billing_default=billing_default,
     )
 
 

@@ -66,6 +66,7 @@ const issued = (amount: string) => ({
   amount_eur: amount,
   replaces_id: null,
   replaced_at: null,
+  lines: null,
 });
 
 const INBOX_1210: BillingOverview = {

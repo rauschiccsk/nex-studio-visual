@@ -1,7 +1,9 @@
 """DEV-50 — the delivered-token statement of a version: preview, issue, CSV, and the version's work kind.
+DEV-75 — the billing category of the version's tasks and the version's own discounts.
 
 Sync routes on purpose: counting reads git and tokenizes the delivery — FastAPI runs a sync route in a worker thread,
-so the event loop never waits on it.
+so the event loop never waits on it. The reading routes commit too: who wrote each delivered line is kept the first
+time it is counted (seconds of ``git blame`` per version), so the next reading does not count it again.
 """
 
 from __future__ import annotations
@@ -28,16 +30,22 @@ from backend.schemas.delivery_statement import (
     CalibrationRead,
     DeliveredFileRead,
     DeliveryStatementView,
+    DiscountChangeRead,
+    DiscountsWrite,
     IssuedStatementRead,
     IssueStatementWrite,
     KindTotalRead,
     RateChangeRead,
     RatesWrite,
+    StatementLineRead,
     StatementPreviewRead,
+    StatementTaskRead,
+    TaskCategoriesRead,
+    TaskCategoriesWrite,
     WorkKindRead,
     WorkKindWrite,
 )
-from backend.services import claude_agent, delivered_tokens
+from backend.services import billing_category, claude_agent, delivered_tokens
 from backend.services import delivery_statement as statements
 
 router = APIRouter(tags=["Súpis dodaných tokenov"])
@@ -77,6 +85,25 @@ def _preview_read(p: statements.Preview) -> StatementPreviewRead:
         amount_eur=p.amounts.total if p.amounts else None,
         cannot_issue=p.cannot_issue,
         calibration=CalibrationRead(**c.__dict__) if c else None,
+        version_category=p.version_category,
+        discounts=p.discounts,
+        settings_discounts=p.settings_discounts,
+        discounts_own=p.discounts_own,
+        lines=[StatementLineRead(**line.payload()) for line in p.lines],
+        tasks=[
+            StatementTaskRead(
+                id=s.task.id,
+                label=s.task.label,
+                title=s.task.title,
+                epic_title=s.task.epic_title,
+                own_category=s.task.category,
+                category=s.category,
+                lines=s.lines,
+                tokens=s.tokens,
+            )
+            for s in p.tasks
+        ],
+        full_eur=p.amounts.full if p.amounts else None,
     )
 
 
@@ -130,12 +157,14 @@ def get_billing(
         (Decimal(r.preview.amounts.total) for r in rows if r.state == statements.BILLING_READY and r.preview.amounts),
         Decimal("0"),
     )
-    return BillingOverviewRead(
+    overview = BillingOverviewRead(
         rows=[read(r) for r in rows],
         issued_total_eur=issued_total,
         ready_total_eur=ready_total,
         needs_kind=sum(1 for r in rows if r.state == statements.BILLING_NEEDS_KIND),
     )
+    db.commit()  # DEV-75: keeps who wrote each delivered line, counted for the first time just now
+    return overview
 
 
 @router.get("/versions/{version_id}/delivery-statement", response_model=DeliveryStatementView)
@@ -144,11 +173,14 @@ def get_statement(
 ) -> DeliveryStatementView:
     """The statement as it would be issued now, and the ones already issued (the valid one first)."""
     version = authz.assert_version_access(db, current_user, version_id)
-    return DeliveryStatementView(
+    view = DeliveryStatementView(
         preview=_preview_read(statements.preview(db, version, _repo(db, version))),
         issued=_issued(db, version_id),
         rate_changes=_rate_changes(db, version_id),
+        discount_changes=_discount_changes(db, version_id),
     )
+    db.commit()  # DEV-75: keeps who wrote each delivered line, counted for the first time just now
+    return view
 
 
 def _person(user: Optional[User]) -> Optional[str]:
@@ -187,6 +219,64 @@ def set_billing_rates(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     db.commit()
     return _rate_changes(db, version_id)
+
+
+def _discount_changes(db: Session, version_id: UUID) -> list[DiscountChangeRead]:
+    return [
+        DiscountChangeRead(
+            created_at=c.created_at,
+            changed_by=_person(db.get(User, c.changed_by) if c.changed_by else None),
+            previous={
+                billing_category.BUG: c.previous_discount_bug,
+                billing_category.REQUEST: c.previous_discount_request,
+                billing_category.GIFT: c.previous_discount_gift,
+            },
+            current={
+                billing_category.BUG: c.discount_bug,
+                billing_category.REQUEST: c.discount_request,
+                billing_category.GIFT: c.discount_gift,
+            },
+        )
+        for c in billing_category.discount_changes(db, version_id)
+    ]
+
+
+@router.put("/versions/{version_id}/billing-discounts", response_model=list[DiscountChangeRead])
+def set_billing_discounts(
+    version_id: UUID,
+    payload: DiscountsWrite,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> list[DiscountChangeRead]:
+    """DEV-75 — the version's own discount per category in % (``null`` = back to Nastavenia). An issued statement
+    keeps its discounts; only a new statement that replaces it counts with these. Returns every change, the newest
+    first."""
+    version = authz.assert_version_access(db, current_user, version_id)
+    try:
+        billing_category.set_discounts(db, version, payload.model_dump(), current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    db.commit()
+    return _discount_changes(db, version_id)
+
+
+@router.put("/versions/{version_id}/task-categories", response_model=TaskCategoriesRead)
+def set_task_categories(
+    version_id: UUID,
+    payload: TaskCategoriesWrite,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> TaskCategoriesRead:
+    """DEV-75 — what these tasks' delivered work is billed as (``null`` = the version's category); the screen sends
+    every task of an epic or feat to set them at once. A task of another version refuses the whole change (422)."""
+    authz.assert_version_access(db, current_user, version_id)
+    try:
+        changed = billing_category.set_categories(db, version_id, payload.task_ids, payload.category)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    db.commit()
+    return TaskCategoriesRead(changed=changed)
 
 
 @router.post(

@@ -42,6 +42,10 @@ TaskStatus = Literal["todo", "in_progress", "done", "failed"]
 # on the ``tasks`` table.
 TaskPriority = Literal["normal", "high", "urgent"]
 
+# DEV-75 — mirrors ``billing_category IN ('bug', 'request', 'gift')``: what the task's delivered work is billed as —
+# a fix of an error in code we delivered, what the customer asked for, a gift of ICC.
+BillingCategory = Literal["bug", "request", "gift"]
+
 
 class TaskCreate(BaseModel):
     """Payload for creating a new task.
@@ -106,6 +110,10 @@ class TaskCreate(BaseModel):
     priority: TaskPriority = Field(
         default="normal",
         description="Task priority: normal | high | urgent.",
+    )
+    billing_category: Optional[BillingCategory] = Field(
+        default=None,
+        description="DEV-75: bug | request | gift; None = the version's category.",
     )
 
 

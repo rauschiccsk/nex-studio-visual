@@ -465,7 +465,14 @@ def test_a_rate_keeps_its_places_beyond_two_and_an_unsplit_statement_still_shows
 
 
 def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
-    director = st.amounts("change", 94321, 79569, 76087, Decimal("2"), Decimal("1"))
+    from backend.services import billing_category as bc
+
+    def line(category, kind, tokens, rate, discount):
+        return bc.Line(
+            category=category, kind=kind, tasked=True, rate=Decimal(rate), discount_pct=Decimal(discount), tokens=tokens
+        )
+
+    director = st.amounts([line("request", "code", 94321 + 79569, "2", "0"), line("request", "docs", 76087, "1", "0")])
     assert (director.code, director.docs, director.total) == (
         Decimal("347.78"),
         Decimal("76.09"),
@@ -473,11 +480,17 @@ def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
     ), "the first issued statement (NEX Inbox 1.7.0)"
 
     # Half a cent on each line: rounding the total alone would bill 0,01 € while the lines show 0,01 € + 0,01 €.
-    halves = st.amounts("change", 5, 0, 5, Decimal("1"), Decimal("1"))
+    halves = st.amounts([line("request", "code", 5, "1", "0"), line("request", "docs", 5, "1", "0")])
     assert (halves.code, halves.docs, halves.total) == (Decimal("0.01"), Decimal("0.01"), Decimal("0.02"))
 
-    fix = st.amounts("fix", 94321, 79569, 76087, Decimal("2"), Decimal("1"))
-    assert (fix.code, fix.docs, fix.total) == (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+    # DEV-75: a warranty fix is billed at nothing, and still shows what it was worth.
+    fix = st.amounts([line("bug", "code", 94321 + 79569, "2", "100"), line("bug", "docs", 76087, "1", "100")])
+    assert (fix.code, fix.docs, fix.total, fix.full) == (
+        Decimal("0.00"),
+        Decimal("0.00"),
+        Decimal("0.00"),
+        Decimal("423.87"),
+    )
 
 
 def test_a_statement_whose_lines_do_not_add_up_is_refused_by_the_database(project):

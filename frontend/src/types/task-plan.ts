@@ -7,6 +7,8 @@
  * cockpit ``TaskPlanPanel``.
  */
 
+import type { BillingCategory } from "@/lib/billingCategory";
+
 /** Epic lifecycle status (``epics.status``). */
 export type EpicNodeStatus = "planned" | "in_progress" | "done";
 
@@ -41,6 +43,8 @@ export interface TaskPlanTaskNode {
   plain_description: string;
   /** DEV-49 — what the agent spent on this task. */
   spend?: NodeSpend | null;
+  /** DEV-75 — what its delivered work is billed as; null = the version's (``billing_default``). */
+  billing_category?: BillingCategory | null;
 }
 
 export interface TaskPlanFeatNode {
@@ -74,4 +78,6 @@ export interface TaskPlanResponse {
   epic_count: number;
   feat_count: number;
   task_count: number;
+  /** DEV-75 — the category of a task without its own; null while the version's work kind is undecided. */
+  billing_default?: BillingCategory | null;
 }

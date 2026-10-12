@@ -382,7 +382,43 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
             "poznámky k vydaniu). 0 = nenastavené → súpis sa dá pozrieť, ale nie vydať."
         ),
     ),
+    # DEV-75 — the discount of each billing category of a task (Director 12.10.2026): a fix of an error in delivered
+    # code is a warranty fix and a gift an attention of ICC — both on the invoice at full value with a 100 % discount.
+    # A version may have its own on its statement.
+    "billing_discount_bug": _Default(
+        value="100",
+        value_type="float",
+        label="Zľava — oprava chyby",
+        unit="%",
+        description=(
+            "Zľava na súpise dodávky pre úlohy, ktoré opravujú chybu v kóde, ktorý sme už dodali (záručná oprava). "
+            "Zákazník vidí plnú hodnotu aj zľavu. Verzia môže mať vlastnú."
+        ),
+    ),
+    "billing_discount_request": _Default(
+        value="0",
+        value_type="float",
+        label="Zľava — požiadavka zákazníka",
+        unit="%",
+        description=(
+            "Zľava na súpise dodávky pre úlohy, ktoré robia to, čo si zákazník vyžiadal. Verzia môže mať vlastnú."
+        ),
+    ),
+    "billing_discount_gift": _Default(
+        value="100",
+        value_type="float",
+        label="Zľava — dar",
+        unit="%",
+        description=(
+            "Zľava na súpise dodávky pre úlohy, ktoré ICC dáva zákazníkovi ako pozornosť. Zákazník vidí plnú "
+            "hodnotu aj zľavu. Verzia môže mať vlastnú."
+        ),
+    ),
 }
+
+#: DEV-75 — settings that are a share in %: only 0 to 100 is a value.
+PERCENT_KEYS: frozenset[str] = frozenset({"billing_discount_bug", "billing_discount_request", "billing_discount_gift"})
+PERCENT_OUT_OF_RANGE = "Hodnota je v percentách — musí byť od 0 do 100."
 
 
 # ── Process-local cache for typed getters ─────────────────────────────
@@ -647,6 +683,8 @@ def upsert(
         _validate_source_path_template(value)
 
     _validate_value_for_type(value, default.value_type)
+    if key in PERCENT_KEYS and not 0 <= float(value) <= 100:
+        raise ValueError(PERCENT_OUT_OF_RANGE)
 
     row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
 

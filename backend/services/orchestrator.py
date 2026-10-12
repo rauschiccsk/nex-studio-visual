@@ -2754,8 +2754,18 @@ _FEAT_TASKS_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
     '{"tasks":[{"title":"GL tabuľky","task_type":"migration","description":"hlavná kniha + saldokonto",'
     '"plain_description":"Pripravíme tabuľky hlavnej knihy.",'
-    '"checklist_type":null,"priority":"normal","estimated_minutes":90}]}\n'
+    '"checklist_type":null,"priority":"normal","estimated_minutes":90,"billing_category":"request"}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
+)
+
+
+#: DEV-75 — the agent proposes what each task is billed as; the manager confirms or changes it in the task plan
+#: before the delivery statement is issued.
+_BILLING_CATEGORY_RULE = (
+    "`billing_category` navrhuje, ako sa práca úlohy fakturuje: `request` — požiadavka zákazníka (predvolené; "
+    "úloha zo Zásobníka alebo zo zadania verzie), `bug` — oprava chyby v kóde, ktorý sme zákazníkovi UŽ DODALI "
+    "(záručná oprava), `gift` — len keď zadanie výslovne hovorí, že ide o dar či pozornosť ICC. Manažér návrh "
+    "potvrdí alebo zmení v Pláne úloh. "
 )
 
 
@@ -2840,9 +2850,10 @@ def _task_plan_feat_directive(feat_title: str, review_notes: Sequence[tuple[int,
         f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy. Objekt má jedno pole `tasks` "
         "(zoznam, ≥1): KAŽDÁ úloha má `title`, `task_type` (jedno z: backend, frontend, migration, test, "
         "docs), `description`, `plain_description`, `checklist_type` (text alebo null), `priority` "
-        "(normal | high | urgent) a `estimated_minutes`. `plain_description` je JEDNORIADKOVÉ ľudské "
-        "vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
+        "(normal | high | urgent), `estimated_minutes` a `billing_category`. `plain_description` je JEDNORIADKOVÉ "
+        "ľudské vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
         "HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
+        + _BILLING_CATEGORY_RULE
         + _TASK_PLAN_ESTIMATE_NOTE
         + notes_block
         + "\n\n"
@@ -3861,6 +3872,7 @@ def _write_task_plan(
                                 checklist_type=task_in.checklist_type,
                                 priority=task_in.priority,
                                 estimated_minutes=task_in.estimated_minutes,
+                                billing_category=task_in.billing_category,
                             ),
                         )
                         n_tasks += 1
@@ -12307,6 +12319,12 @@ def _directive_for_build_task(
         "línia kvality; nezávislý Auditor príde až raz vo Verifikácii, NIE po každej úlohe). "
         "Commitni zmeny a ukonči <<<PIPELINE_STATUS>>> blokom s commits[] + deliverables[] "
         "(F-007-orchestration-cockpit.md §5.3)."
+    )
+    # DEV-75: the delivery statement bills each delivered line by the category of the task whose commit wrote it —
+    # it knows the task only from the commit's subject.
+    parts.append(
+        f"Predmet KAŽDÉHO commitu tejto úlohy končí `(TASK #{task_label or task.number})` — podľa neho kokpit "
+        "pripíše dodaný kód tejto úlohe na súpise dodávky (kategória a zľava úlohy)."
     )
     if schema_rule:
         parts.append(schema_rule)

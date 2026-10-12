@@ -7,6 +7,7 @@ from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
 from backend.db.models.dedo_proposal import DedoProjectProposal
+from backend.db.models.delivered_authorship import DeliveredAuthorship
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.external_cost import ExternalCost
@@ -19,6 +20,7 @@ from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.uat_check import UatCheck
+from backend.db.models.version_discount_change import VersionDiscountChange
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
 
@@ -43,7 +45,9 @@ __all__ = [
     "PoradcaMessage",
     "Project",
     "ProjectAssignment",
+    "DeliveredAuthorship",
     "UatCheck",
+    "VersionDiscountChange",
     "VersionRateChange",
     "Epic",
     "Feat",

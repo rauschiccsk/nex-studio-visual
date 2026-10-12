@@ -158,6 +158,10 @@ class FileRow:
     tokens: int = 0
     kind: Optional[str] = None
     excluded: Optional[str] = None
+    #: DEV-75: the file's added lines split by the plan task whose commit wrote them — ``{task label or None:
+    #: (lines, tokens)}``; ``None`` = no task (design documents, the visual phase, fixes after verification). Empty when
+    #: the count was made without the authorship. ``tokens`` is then the sum of these groups.
+    by_task: dict[Optional[str], tuple[int, int]] = field(default_factory=dict)
 
 
 @dataclass
@@ -189,15 +193,17 @@ def _git(repo: Path, *args: str, timeout: int = 120) -> str:
     return done.stdout.decode("utf-8", "replace")
 
 
-def added_lines(repo: Path, base: str, head: str) -> tuple[dict[str, list[str]], set[str]]:
-    """Added and changed lines (their new form) per file between ``base`` and ``head``, and the binary files.
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
-    Moved, renamed and copied files count only for what changed in them (``-M -C --find-copies-harder``); deleted
-    lines never appear (Director: „len pridané a zmenené riadky“)."""
+
+def added_lines_numbered(repo: Path, base: str, head: str) -> tuple[dict[str, list[tuple[int, str]]], set[str]]:
+    """Added and changed lines per file between ``base`` and ``head`` — ``(line number in head, new text)`` — and the
+    binary files. One reading of the diff for the count and for the authorship, so the two always line up."""
     diff = _git(repo, "diff", "-M", "-C", "--find-copies-harder", "-U0", "--no-color", f"{base}..{head}")
-    added: dict[str, list[str]] = {}
+    added: dict[str, list[tuple[int, str]]] = {}
     binary: set[str] = set()
     path: Optional[str] = None
+    number = 0
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             path = None
@@ -207,13 +213,107 @@ def added_lines(repo: Path, base: str, head: str) -> tuple[dict[str, list[str]],
                 added.setdefault(path, [])
         elif line.startswith("Binary files ") and " and b/" in line:
             binary.add(line.rsplit(" and b/", 1)[1].removesuffix(" differ"))
+        elif path is not None and (hunk := _HUNK_RE.match(line)):
+            number = int(hunk.group(1))
         elif path is not None and line.startswith("+"):
-            added[path].append(line[1:])
+            added[path].append((number, line[1:]))
+            number += 1
     return added, binary
 
 
-def count(repo: Path, base: str, head: str, version: str = "") -> Count:
-    """Classify and count every file the version delivered (excluded ones listed with their reason)."""
+def added_lines(repo: Path, base: str, head: str) -> tuple[dict[str, list[str]], set[str]]:
+    """Added and changed lines (their new form) per file between ``base`` and ``head``, and the binary files.
+
+    Moved, renamed and copied files count only for what changed in them (``-M -C --find-copies-harder``); deleted
+    lines never appear (Director: „len pridané a zmenené riadky“)."""
+    numbered, binary = added_lines_numbered(repo, base, head)
+    return {path: [text for _n, text in lines] for path, lines in numbered.items()}, binary
+
+
+# ── DEV-75: which plan task wrote each delivered line ──────────────────────
+
+#: A commit belongs to a plan task when its subject names it — the AI Agent writes ``(TASK #20.1.1)``.
+TASK_TAG_RE = re.compile(r"\(TASK #(\d+(?:\.\d+)+)\)")
+_BLAME_HEADER_RE = re.compile(r"^([0-9a-f]{40}) \d+ (\d+)(?: \d+)?$")
+
+#: Who wrote the added lines of a delivered range, per file, run-length in the diff's order of added lines:
+#: ``{path: [[commit sha or task label, how many lines in a row], ...]}``. ``""`` = a commit outside the range
+#: (:func:`line_commits`) or no task (:func:`task_authorship`).
+Authorship = dict[str, list[list]]
+
+
+def _ranges(numbers: list[int]) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for n in sorted(set(numbers)):
+        if out and n == out[-1][1] + 1:
+            out[-1] = (out[-1][0], n)
+        else:
+            out.append((n, n))
+    return out
+
+
+def _runs(values: list[str]) -> list[list]:
+    runs: list[list] = []
+    for value in values:
+        if runs and runs[-1][0] == value:
+            runs[-1][1] += 1
+        else:
+            runs.append([value, 1])
+    return runs
+
+
+def task_of_commits(repo: Path, base: str, head: str) -> dict[str, str]:
+    """``{sha: task label or ""}`` for every commit of the range — a commit outside it (older) has no entry."""
+    log = _git(repo, "log", "--format=%H%x1f%s", f"{base}..{head}")
+    out: dict[str, str] = {}
+    for row in log.splitlines():
+        sha, _sep, subject = row.partition("\x1f")
+        tag = TASK_TAG_RE.search(subject)
+        out[sha] = tag.group(1) if tag else ""
+    return out
+
+
+def line_commits(repo: Path, base: str, head: str) -> Authorship:
+    """Which commit of the range wrote each added line — ``git blame`` of ``head`` over exactly the added lines.
+    A line whose commit is older than the range gets ``""``. Seconds per version, and the answer for a pair of
+    commits never changes — the statement keeps it (:mod:`backend.db.models.delivered_authorship`)."""
+    numbered, binary = added_lines_numbered(repo, base, head)
+    in_range = set(task_of_commits(repo, base, head))
+    out: Authorship = {}
+    for path, lines in numbered.items():
+        if path in binary or not lines:
+            continue
+        args = ["blame", "--line-porcelain", head]
+        for start, end in _ranges([n for n, _t in lines]):
+            args += ["-L", f"{start},{end}"]
+        by_line: dict[int, str] = {}
+        try:
+            for row in _git(repo, *args, "--", path).splitlines():
+                header = _BLAME_HEADER_RE.match(row)
+                if header:
+                    by_line[int(header.group(2))] = header.group(1) if header.group(1) in in_range else ""
+        except GitUnreadable:
+            by_line = {}
+        out[path] = _runs([by_line.get(n, "") for n, _text in lines])
+    return out
+
+
+def task_authorship(commits: Authorship, tasks: dict[str, str]) -> Authorship:
+    """:func:`line_commits` read as plan tasks — each commit replaced by the task its subject names (``""`` none)."""
+    return {path: _runs([tasks.get(sha, "") for sha, n in runs for _ in range(n)]) for path, runs in commits.items()}
+
+
+def _labels(runs: list[list], count: int) -> list[str]:
+    """The run-length authorship of one file expanded to a label per added line (``""`` past its end)."""
+    labels = [label for label, n in runs for _ in range(n)]
+    return (labels + [""] * count)[:count]
+
+
+def count(repo: Path, base: str, head: str, version: str = "", *, authors: Optional[Authorship] = None) -> Count:
+    """Classify and count every file the version delivered (excluded ones listed with their reason).
+
+    With ``authors`` (DEV-75) each counted file's lines are split by the plan task that wrote them and counted per
+    group — the file's tokens are the sum of its groups, so every total adds up to the lines of the statement."""
     added, binary = added_lines(repo, base, head)
     result = Count(base=base, head=head)
     for path in sorted(set(added) | binary):
@@ -222,8 +322,14 @@ def count(repo: Path, base: str, head: str, version: str = "") -> Count:
             result.files.append(FileRow(path=path, excluded=EXCLUDED_BINARY))
             continue
         kind, excluded = classify(path, "\n".join(lines[:5]), version)
-        text = "\n".join(lines)
-        result.files.append(
-            FileRow(path=path, lines=len(lines), tokens=count_tokens(text) if kind else 0, kind=kind, excluded=excluded)
-        )
+        row = FileRow(path=path, lines=len(lines), kind=kind, excluded=excluded)
+        if kind and authors is not None:
+            groups: dict[Optional[str], list[str]] = {}
+            for label, text in zip(_labels(authors.get(path, []), len(lines)), lines):
+                groups.setdefault(label or None, []).append(text)
+            row.by_task = {label: (len(g), count_tokens("\n".join(g))) for label, g in groups.items()}
+            row.tokens = sum(tokens for _n, tokens in row.by_task.values())
+        elif kind:
+            row.tokens = count_tokens("\n".join(lines))
+        result.files.append(row)
     return result

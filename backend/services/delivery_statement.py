@@ -6,11 +6,14 @@ says which) and the previous delivered version's. A version that is the first on
 state when its build began — the template the cockpit founds a project from is not the customer's to pay for.
 Counting is :mod:`delivered_tokens`; this module adds the decisions around it (Director 10.10.2026, all in DEV-50):
 
-* a fix of an error in delivered code is never billed (0 €); a fast fix whose kind nobody decided cannot be issued —
-  the cockpit does not guess it; a new version is new work;
+* a fix of an error in delivered code is a warranty fix — its category's discount is 100 % unless the manager
+  decides otherwise (DEV-75); a fast fix whose kind nobody decided cannot be issued — the cockpit does not guess it;
+  a new version is new work;
 * code and tests share one rate, documentation has its own (Nastavenia); without rates a statement can be previewed
   but not issued;
-* each line (code and tests, documentation) carries its own amount, rounded to cents; the total is their sum;
+* each line carries its own amount, rounded to cents; the total is their sum. DEV-75: the lines are the billing
+  category of the task that wrote the delivered code × (code and tests, documentation), each with its full value,
+  discount and amount (:mod:`billing_category`);
 * a version has one valid statement: issuing again replaces the valid one, only when the Manažér confirms that one
   (DEV-54) — the old one stays, marked as replaced, so it cannot be invoiced by mistake;
 * next to the figures, what the agent's work cost per 1 000 tokens of each kind (Náklady) — so rates rest on data.
@@ -29,15 +32,17 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.core.local_time import local_time
+from backend.db.models.delivered_authorship import DeliveredAuthorship
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
-from backend.services import delivered_tokens, metrics, pipeline_metrics, system_setting
+from backend.services import billing_category, delivered_tokens, metrics, pipeline_metrics, system_setting
 
 WORK_FIX = "fix"
 WORK_CHANGE = "change"
@@ -67,7 +72,7 @@ NO_DELIVERED = (
 )
 NO_BASE = "Nedá sa určiť, od ktorého stavu kódu sa verzia ráta (predchádzajúca verzia ani začiatok stavby)."
 KIND_UNDECIDED = (
-    "Pri rýchlej oprave treba určiť, či opravovala chybu v dodanom kóde (neúčtuje sa), alebo robila zmenu "
+    "Pri rýchlej oprave treba určiť, či opravovala chybu v dodanom kóde (záručná oprava), alebo robila zmenu "
     "(účtuje sa) — kokpit to nehádá."
 )
 RATES_MISSING = "V Nastaveniach chýbajú sadzby fakturácie (kód a skúšky, dokumentácia) — súpis sa nedá vydať."
@@ -81,6 +86,15 @@ def work_kind(db: Session, version: Version) -> Optional[str]:
         return version.work_kind
     flow = db.execute(select(PipelineState.flow_type).where(PipelineState.version_id == version.id)).scalar()
     return WORK_CHANGE if flow == "new_version" else None
+
+
+def version_category(kind: Optional[str]) -> Optional[str]:
+    """DEV-75 — the billing category of a task nobody decided: a fix of our error → bug, a change → request."""
+    if kind == WORK_FIX:
+        return billing_category.BUG
+    if kind == WORK_CHANGE:
+        return billing_category.REQUEST
+    return None
 
 
 def _is_done(db: Session, version: Version) -> bool:
@@ -253,34 +267,65 @@ def rate_changes(db: Session, version_id: uuid.UUID) -> list[VersionRateChange]:
     )
 
 
-CENT = Decimal("0.01")
-
-
 @dataclass(frozen=True)
 class Amounts:
-    """€ for the delivery, per line — code and tests, documentation — and in total.
+    """€ for the delivery, per kind — code and tests, documentation — and in total, summed from the statement's lines.
 
     Each line is rounded to cents and the total is their sum, so an invoice built from the lines never differs from
     the statement by a cent (Director 10.10.2026: „Ešte by som chcel doplniť pre každý riadok na konci sumu“)."""
 
     code: Decimal
     docs: Decimal
+    #: Before the discounts (DEV-75) — what the delivery was worth.
+    full: Decimal
 
     @property
     def total(self) -> Decimal:
         return self.code + self.docs
 
 
-def amounts(
-    kind: str, tokens_code: int, tokens_tests: int, tokens_docs: int, rate_code: Decimal, rate_docs: Decimal
-) -> Amounts:
-    """0 for a fix of our own error; otherwise each line's tokens / 1 000 × its rate, rounded to cents."""
-    if kind == WORK_FIX:
-        return Amounts(code=Decimal("0.00"), docs=Decimal("0.00"))
+def amounts(lines: list[billing_category.Line]) -> Amounts:
+    zero = Decimal("0.00")
     return Amounts(
-        code=(Decimal(tokens_code + tokens_tests) / 1000 * rate_code).quantize(CENT, rounding=ROUND_HALF_UP),
-        docs=(Decimal(tokens_docs) / 1000 * rate_docs).quantize(CENT, rounding=ROUND_HALF_UP),
+        code=sum((ln.value.amount for ln in lines if ln.kind == billing_category.KIND_CODE), zero),
+        docs=sum((ln.value.amount for ln in lines if ln.kind == billing_category.KIND_DOCS), zero),
+        full=sum((ln.value.full for ln in lines), zero),
     )
+
+
+#: DEV-75 — the rule :func:`delivered_tokens.line_commits` is read by; a kept authorship made by another is redone.
+AUTHORSHIP_RULE = 1
+
+
+def _authorship(db: Session, version: Version, repo: Path, base: str, head: str) -> delivered_tokens.Authorship:
+    """Which plan task wrote each delivered line. Who wrote it is kept once per (base, delivered) pair — blame takes
+    seconds and the billing tab counts every version; which task a commit belongs to is read from git each time.
+
+    The kept answer is written in a savepoint and stays only when the caller commits — the statement's routes do."""
+    row = db.execute(
+        select(DeliveredAuthorship).where(
+            DeliveredAuthorship.project_id == version.project_id,
+            DeliveredAuthorship.base_sha == base,
+            DeliveredAuthorship.head_sha == head,
+        )
+    ).scalar_one_or_none()
+    if row is not None and (row.payload or {}).get("rule") == AUTHORSHIP_RULE:
+        commits = row.payload["files"]
+    else:
+        commits = delivered_tokens.line_commits(repo, base, head)
+        payload = {"rule": AUTHORSHIP_RULE, "files": commits}
+        with db.begin_nested():
+            if row is not None:
+                row.payload = payload
+            else:
+                db.execute(
+                    insert(DeliveredAuthorship)
+                    .values(
+                        id=uuid.uuid4(), project_id=version.project_id, base_sha=base, head_sha=head, payload=payload
+                    )
+                    .on_conflict_do_nothing(constraint="uq_delivered_authorship_range")
+                )
+    return delivered_tokens.task_authorship(commits, delivered_tokens.task_of_commits(repo, base, head))
 
 
 @dataclass
@@ -335,6 +380,14 @@ class Preview:
     amounts: Optional[Amounts] = None
     cannot_issue: list[str] = field(default_factory=list)
     calibration: Optional[Calibration] = None
+    #: DEV-75 — the category of a task nobody decided (``None`` while the work kind is undecided), the discounts the
+    #: statement counts with (and Nastavenia's, and which are the version's own), the lines and every task's share.
+    version_category: Optional[str] = None
+    discounts: dict[str, Decimal] = field(default_factory=dict)
+    settings_discounts: dict[str, Decimal] = field(default_factory=dict)
+    discounts_own: dict[str, bool] = field(default_factory=dict)
+    lines: list[billing_category.Line] = field(default_factory=list)
+    tasks: list[billing_category.TaskShare] = field(default_factory=list)
 
 
 def preview(db: Session, version: Version, repo: Path) -> Preview:
@@ -342,6 +395,12 @@ def preview(db: Session, version: Version, repo: Path) -> Preview:
     out.rate_code, out.rate_docs = _rates(db, version)
     out.settings_rate_code, out.settings_rate_docs = settings_rates(db)
     out.rate_code_own, out.rate_docs_own = version.rate_code is not None, version.rate_docs is not None
+    out.version_category = version_category(out.work_kind)
+    out.discounts = billing_category.discounts(db, version)
+    out.settings_discounts = billing_category.settings_discounts(db)
+    out.discounts_own = {c: v is not None for c, v in billing_category.own_discounts(version).items()}
+    plan = billing_category.plan_tasks(db, version.id)
+    out.tasks = [billing_category.TaskShare(task=t, category=t.category or out.version_category) for t in plan]
     if not _is_done(db, version):
         out.blocked = NOT_DONE
         return out
@@ -354,7 +413,10 @@ def preview(db: Session, version: Version, repo: Path) -> Preview:
         out.blocked = NO_BASE
         return out
     try:
-        out.count = delivered_tokens.count(repo, out.base_sha, out.delivered_sha, version.version_number)
+        authors = _authorship(db, version, repo, out.base_sha, out.delivered_sha)
+        out.count = delivered_tokens.count(
+            repo, out.base_sha, out.delivered_sha, version.version_number, authors=authors
+        )
     except delivered_tokens.GitUnreadable as exc:
         out.blocked = f"Kód projektu sa nedá prečítať: {exc}"
         return out
@@ -363,15 +425,10 @@ def preview(db: Session, version: Version, repo: Path) -> Preview:
         out.cannot_issue.append(KIND_UNDECIDED)
     if out.rate_code <= 0 or out.rate_docs <= 0:
         out.cannot_issue.append(RATES_MISSING)
-    if out.work_kind is not None:
-        out.amounts = amounts(
-            out.work_kind,
-            out.count.tokens(delivered_tokens.KIND_CODE),
-            out.count.tokens(delivered_tokens.KIND_TESTS),
-            out.count.tokens(delivered_tokens.KIND_DOCS),
-            out.rate_code,
-            out.rate_docs,
-        )
+    if out.version_category is not None:
+        rates = {billing_category.KIND_CODE: out.rate_code, billing_category.KIND_DOCS: out.rate_docs}
+        out.lines, out.tasks = billing_category.split(out.count, plan, out.version_category, rates, out.discounts)
+        out.amounts = amounts(out.lines)
     return out
 
 
@@ -512,6 +569,7 @@ def issue(
         amount_docs_eur=p.amounts.docs,
         amount_eur=p.amounts.total,
         files=files_payload(p.count),
+        lines=[line.payload() for line in p.lines],
         created_by=user_id,
     )
     db.add(row)
@@ -524,7 +582,7 @@ KIND_LABELS = {
     delivered_tokens.KIND_TESTS: "skúšky",
     delivered_tokens.KIND_DOCS: "dokumentácia",
 }
-WORK_LABELS = {WORK_FIX: "oprava chyby v dodanom kóde (neúčtuje sa)", WORK_CHANGE: "zmena alebo nová práca"}
+WORK_LABELS = {WORK_FIX: "oprava chyby v dodanom kóde (záručná oprava)", WORK_CHANGE: "zmena alebo nová práca"}
 
 
 def _number(value: Decimal, places: int = 2) -> str:
@@ -541,7 +599,8 @@ def _local_time(at: datetime) -> str:
 
 def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
     """The issued statement as CSV for a Slovak spreadsheet (semicolons, decimal commas) — the basis for the invoice:
-    who and what, then the lines as on the screen (lines, tokens, rate, amount — the total is their sum), then every
+    who and what, then the lines as on the screen (DEV-75: category × kind with full value, discount and amount, and
+    which task is on which line; a statement issued before keeps its two lines — the total is their sum), then every
     file and why some do not count."""
     lines = {kind: sum(f["lines"] for f in row.files if f["kind"] == kind) for kind in delivered_tokens.KINDS}
     code_lines = lines[delivered_tokens.KIND_CODE] + lines[delivered_tokens.KIND_TESTS]
@@ -559,6 +618,10 @@ def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
     w.writerow(["Po stav kódu", f"{row.delivered_sha} ({source})"])
     w.writerow(["Tokenizér", row.tokenizer])
     w.writerow([])
+    if row.lines is not None:
+        _csv_category_lines(w, row)
+        _csv_files(w, row)
+        return out.getvalue()
     w.writerow(["Druh", "Riadkov", "Tokenov", "Sadzba (€ / 1 000 tokenov)", "Suma (€)"])
 
     def line_amount(value: Optional[Decimal]) -> str:
@@ -594,8 +657,62 @@ def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
             _number(row.amount_eur),
         ]
     )
+    _csv_files(w, row)
+    return out.getvalue()
+
+
+def _csv_category_lines(w, row: DeliveryStatement) -> None:
+    """DEV-75 — the frozen lines: category × kind, full value, discount and amount; then the tasks on each line."""
+    w.writerow(
+        [
+            "Riadok súpisu",
+            "Riadkov",
+            "Tokenov",
+            "Sadzba (€ / 1 000 tokenov)",
+            "Plná hodnota (€)",
+            "Zľava (%)",
+            "Zľava (€)",
+            "Dôvod zľavy",
+            "Suma (€)",
+        ]
+    )
+    for ln in row.lines:
+        w.writerow(
+            [
+                ln["label"],
+                ln["lines"],
+                ln["tokens"],
+                _number(Decimal(ln["rate"])),
+                _number(Decimal(ln["full_eur"])),
+                _number(Decimal(ln["discount_pct"])),
+                _number(Decimal(ln["discount_eur"])),
+                ln["discount_label"] or "",
+                _number(Decimal(ln["amount_eur"])),
+            ]
+        )
+    w.writerow(
+        [
+            "Spolu",
+            sum(ln["lines"] for ln in row.lines),
+            sum(ln["tokens"] for ln in row.lines),
+            "",
+            _number(sum((Decimal(ln["full_eur"]) for ln in row.lines), Decimal("0"))),
+            "",
+            _number(sum((Decimal(ln["discount_eur"]) for ln in row.lines), Decimal("0"))),
+            "",
+            _number(row.amount_eur),
+        ]
+    )
+    w.writerow([])
+    w.writerow(["Úloha", "Názov", "Riadok súpisu", "Riadkov", "Tokenov"])
+    for ln in row.lines:
+        for task in ln["tasks"]:
+            w.writerow([task["label"], task["title"], ln["label"], task["lines"], task["tokens"]])
+    w.writerow([])
+
+
+def _csv_files(w, row: DeliveryStatement) -> None:
     w.writerow([])
     w.writerow(["Súbor", "Druh", "Riadkov", "Tokenov", "Neráta sa — prečo"])
     for f in row.files:
         w.writerow([f["path"], KIND_LABELS.get(f["kind"] or "", ""), f["lines"], f["tokens"], f["excluded"] or ""])
-    return out.getvalue()
