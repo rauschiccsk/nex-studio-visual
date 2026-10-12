@@ -34,24 +34,23 @@ Expected: the Studio API, ssh and this host's PostgreSQL time out; Qdrant (9130)
 ### The search index and the local model (ICCINT-231)
 
 The same script keeps nex-qdrant (9130, 9131) and nex-ollama (9132) — published on every interface, without a
-password — for docker's own interfaces: chain `NEX-RAG-PORTS` in DOCKER-USER (IPv4, translated to the
-container) and in ip6tables INPUT before Tailscale's `ts-input` (IPv6, answered by docker's proxy on the host).
-Tailscale, the office LAN and the Windows VM get nothing; the cockpit, the build sandboxes and the host itself keep
-both.
+password — for docker's own interfaces and loopback: chain `NEX-RAG-PORTS` in the **raw** table, jumped to from
+PREROUTING, for IPv4 and IPv6. Tailscale, the office LAN and the Windows VM get nothing; the cockpit, the build
+sandboxes and the host itself keep both. Not in DOCKER-USER: Tailscale's `ts-forward` is first in FORWARD and
+accepts everything from the tailnet before DOCKER-USER is reached (measured by Máger Dedo, 12.10.2026).
 
 Verify: from the cockpit container and from a sandbox network `http://192.168.32.1:9130/collections` and
-`:9132/api/version` answer 200; from another machine on the tailnet (MAGER) `http://100.107.134.104:9130/` and the
-IPv6 address on 9130 and 9132 time out.
+`:9132/api/version` answer 200; from another machine on the tailnet (MAGER) `http://100.107.134.104:9130/`,
+`:9131`, `:9132` and the IPv6 address on 9130 and 9132 time out.
 
-Remove it (rollback):
+Remove it (rollback) — delete the section from the script first, or the timer puts it back within a minute:
 
 ```bash
-sudo iptables -D DOCKER-USER -p tcp -m conntrack --ctorigdstport 9130:9132 -j NEX-RAG-PORTS
-sudo iptables -F NEX-RAG-PORTS && sudo iptables -X NEX-RAG-PORTS
-sudo ip6tables -D INPUT -p tcp --dport 9130:9132 -j NEX-RAG-PORTS
-sudo ip6tables -F NEX-RAG-PORTS && sudo ip6tables -X NEX-RAG-PORTS
+for t in iptables ip6tables; do
+  sudo $t -t raw -D PREROUTING -p tcp --dport 9130:9132 -j NEX-RAG-PORTS
+  sudo $t -t raw -F NEX-RAG-PORTS && sudo $t -t raw -X NEX-RAG-PORTS
+done
 ```
-(and delete the section from the script first, or the timer puts it back within a minute)
 
 Remove the sandbox fence (rollback):
 

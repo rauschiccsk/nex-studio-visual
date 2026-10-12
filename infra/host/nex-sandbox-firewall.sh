@@ -62,24 +62,32 @@ ipt -C DOCKER-USER -s "$SANDBOX_NET" -j "$FWD_CHAIN" 2>/dev/null || ipt -I DOCKE
 # (virbr0) reach them the same way. Only the cockpit and the build sandboxes need them — through a docker
 # bridge (QDRANT_URL / OLLAMA_URL point at a bridge gateway) — and the host itself through localhost.
 # Binding the ports to 127.0.0.1 would cut the cockpit off, so the ports stay published and only docker's own
-# interfaces may use them:
-#   • IPv4 is address-translated to the container → FORWARD, i.e. DOCKER-USER, matched before translation;
-#   • IPv6 is answered by docker's proxy on the host itself ([::]:9130) → INPUT — and BEFORE Tailscale's own
-#     ts-input chain, which would accept the tailnet first.
+# interfaces and loopback may use them.
+#
+# WHY THE RAW TABLE. The first version sat in DOCKER-USER (IPv4) and INPUT (IPv6). Máger Dedo measured it
+# from the tailnet: IPv6 closed, IPv4 still open — Tailscale's ts-forward is FIRST in FORWARD and accepts
+# everything from tailscale0 before DOCKER-USER is ever reached, and tailscaled puts its jumps back on top
+# whenever it restarts. raw PREROUTING runs before address translation and before both docker's and
+# Tailscale's filter rules; docker's own raw rules only drop, so nothing ahead of this can accept the packet.
+# The port is still the published one (9130), not the container's.
 RAG_CHAIN="NEX-RAG-PORTS"
 RAG_PORTS="9130:9132"
 
-ipt -N "$RAG_CHAIN" 2>/dev/null || true
-ipt -F "$RAG_CHAIN"
-ipt -A "$RAG_CHAIN" -i docker0 -j RETURN
-ipt -A "$RAG_CHAIN" -i br-+ -j RETURN
-ipt -A "$RAG_CHAIN" -j DROP
-ipt -C DOCKER-USER -p tcp -m conntrack --ctorigdstport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null \
-    || ipt -I DOCKER-USER 1 -p tcp -m conntrack --ctorigdstport "$RAG_PORTS" -j "$RAG_CHAIN"
+for ipt_cmd in iptables ip6tables; do
+    "$ipt_cmd" -t raw -N "$RAG_CHAIN" 2>/dev/null || true
+    "$ipt_cmd" -t raw -F "$RAG_CHAIN"
+    "$ipt_cmd" -t raw -A "$RAG_CHAIN" -i lo -j RETURN
+    "$ipt_cmd" -t raw -A "$RAG_CHAIN" -i docker0 -j RETURN
+    "$ipt_cmd" -t raw -A "$RAG_CHAIN" -i br-+ -j RETURN
+    "$ipt_cmd" -t raw -A "$RAG_CHAIN" -j DROP
+    "$ipt_cmd" -t raw -C PREROUTING -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null \
+        || "$ipt_cmd" -t raw -I PREROUTING 1 -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN"
+done
 
-ip6tables -N "$RAG_CHAIN" 2>/dev/null || true
-ip6tables -F "$RAG_CHAIN"
-ip6tables -A "$RAG_CHAIN" -i lo -j RETURN
-ip6tables -A "$RAG_CHAIN" -j DROP
-ip6tables -C INPUT -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null \
-    || ip6tables -I INPUT 1 -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN"
+# The first version's rules, gone where they still stand (DOCKER-USER for IPv4, INPUT for IPv6).
+while iptables -D DOCKER-USER -p tcp -m conntrack --ctorigdstport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null; do :; done
+while ip6tables -D INPUT -p tcp --dport "$RAG_PORTS" -j "$RAG_CHAIN" 2>/dev/null; do :; done
+for ipt_cmd in iptables ip6tables; do
+    "$ipt_cmd" -t filter -F "$RAG_CHAIN" 2>/dev/null || true
+    "$ipt_cmd" -t filter -X "$RAG_CHAIN" 2>/dev/null || true
+done
