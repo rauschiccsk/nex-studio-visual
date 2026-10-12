@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 WorkKind = Literal["fix", "change"]
 
@@ -107,3 +107,31 @@ class WorkKindWrite(BaseModel):
 
 class WorkKindRead(BaseModel):
     work_kind: Optional[WorkKind] = None
+
+
+class BillingRowRead(BaseModel):
+    """DEV-73 — one version on the billing tab."""
+
+    version_id: UUID
+    version_number: str
+    flow_type: Optional[str] = None
+    state: Literal["issued", "ready", "needs_kind", "cannot", "blocked", "not_done"]
+    reason: Optional[str] = None
+    work_kind: Optional[WorkKind] = None
+    base_sha: Optional[str] = None
+    delivered_sha: Optional[str] = None
+    delivered_source_label: Optional[str] = None
+    tokens_code: Optional[int] = Field(default=None, description="Code and tests, as the statement bills them.")
+    tokens_docs: Optional[int] = None
+    preview_amount_eur: Optional[Decimal] = Field(default=None, description="What a statement issued now would say.")
+    issued: Optional[IssuedStatementRead] = Field(default=None, description="The valid statement, if any.")
+    differs: bool = Field(default=False, description="Issued, but counted today the amount would differ.")
+
+
+class BillingOverviewRead(BaseModel):
+    """DEV-73 — every version of a project for invoicing, the newest first, with the totals."""
+
+    rows: list[BillingRowRead]
+    issued_total_eur: Decimal
+    ready_total_eur: Decimal = Field(description="Not issued yet and issuable now — preview amounts.")
+    needs_kind: int = Field(description="Fast fixes whose work kind waits for the manager.")

@@ -92,7 +92,8 @@ for (const { page, title, overrides } of runs) {
           (await browser.locator('[role="dialog"]:visible').count()) > 0 ||
           (await browser.locator('[data-guard-opener][aria-expanded="true"]').count()) > 0;
         expect.soft(opened, `„${name}“ says it opens something, and nothing opened`).toBe(true);
-        found[`${state} opened „${name}“`.trim()] = report(await problemsOn(browser, hasTouch));
+        // Numbered: several openers share a name („Otvoriť súpis verzie“) and one result must not overwrite another.
+        found[`${state} opened „${name}“ (${i + 1}/${openers})`.trim()] = report(await problemsOn(browser, hasTouch));
       }
     }
 

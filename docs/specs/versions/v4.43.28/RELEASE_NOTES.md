@@ -9,3 +9,9 @@ aplikácii aj s presnou adresou, na ktorej inštalácia beží. Zoznam zákazní
 **Nasadenie bez prístupu sa nespustí.** Ak by heslo správcu nasadenej aplikácie dostalo náhodnú hodnotu, ktorú
 nikto nepozná, alebo ak zákazníkovi chýba povinné nastavenie, nasadenie sa zastaví skôr, než sa čokoľvek zmení,
 a kokpit povie, čo urobiť. Pole „Tajný kľúč“ sa ukazuje len pri aplikácii, ktorá ho naozaj používa.
+
+**Fakturácia na jednom mieste.** Na stránke Náklady pribudla záložka Fakturácia. Ukáže všetky verzie projektu
+od najnovšej a pri každej, či je jej súpis dodávky vydaný, pripravený na vydanie, alebo čaká na rozhodnutie
+(pri rýchlej oprave, či opravovala chybu, alebo robila zmenu). K tomu sumu a hore súčty vydaného a ešte
+nevydaného. Súpis ktorejkoľvek verzie otvoríš a vydáš priamo tam, bez prepínania verzie. Doteraz bolo vidieť len
+súpis vybranej verzie a ostatné verzie vyzerali, akoby zmizli.

@@ -27,7 +27,14 @@ const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFracti
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
 
-export default function DeliveryStatementPanel({ versionId }: { versionId: string }) {
+export default function DeliveryStatementPanel({
+  versionId,
+  onChange,
+}: {
+  versionId: string;
+  /** DEV-73: told after a statement is issued or the work kind decided — the billing overview reloads. */
+  onChange?: () => void;
+}) {
   const [view, setView] = useState<DeliveryStatementView | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -53,6 +60,7 @@ export default function DeliveryStatementPanel({ versionId }: { versionId: strin
     try {
       await run();
       load();
+      onChange?.();
     } catch (e: unknown) {
       setError(humanizeApiError(e, failure));
     } finally {

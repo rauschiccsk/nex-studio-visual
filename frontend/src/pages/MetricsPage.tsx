@@ -19,8 +19,11 @@ import type { AgentModel } from "@/types/user_agent_setting";
 import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
 import type { CostRow, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
 import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
+import BillingTab from "@/components/naklady/BillingTab";
 
-type View = "version" | "cumulative";
+type View = "version" | "cumulative" | "billing";
+
+const VIEW_LABELS: Record<View, string> = { version: "Verzia", cumulative: "Kumulatívne", billing: "Fakturácia" };
 
 // The external + system rows are NOT build phases — their labels live here, not in PHASE_LABELS.
 const EXTERNAL_ROW_LABEL = "Externé (ručne zadané)";
@@ -623,34 +626,47 @@ export default function MetricsPage() {
   const wageEntries = Object.entries(metrics.wages);
   const today = new Date().toISOString().slice(0, 10);
 
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <h1 className="text-base font-bold text-[var(--color-text-primary)]">Náklady — {projectName}</h1>
+      <div
+        role="tablist"
+        aria-label="Náklady za"
+        className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]"
+      >
+        {(["version", "cumulative", "billing"] as View[]).map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={view === v}
+            onClick={() => setView(v)}
+            className={`px-2.5 py-1 ${
+              view === v
+                ? "bg-primary-600 text-white"
+                : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            }`}
+          >
+            {VIEW_LABELS[v]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  // DEV-73: billing — every version of the project for invoicing; the cost tables below belong to the other two.
+  if (view === "billing") {
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        {header}
+        {slug && <BillingTab slug={slug} />}
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <h1 className="text-base font-bold text-[var(--color-text-primary)]">Náklady — {projectName}</h1>
-        <div
-          role="tablist"
-          aria-label="Náklady za"
-          className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]"
-        >
-          {(["version", "cumulative"] as View[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="tab"
-              aria-selected={view === v}
-              onClick={() => setView(v)}
-              className={`px-2.5 py-1 ${
-                view === v
-                  ? "bg-primary-600 text-white"
-                  : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              }`}
-            >
-              {v === "version" ? "Verzia" : "Kumulatívne"}
-            </button>
-          ))}
-        </div>
-      </div>
-
+      {header}
       {/* Assumption strip — always visible, never behind a tooltip. */}
       <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-[11px] text-[var(--color-text-muted)] mb-4">
         {metrics.coefficient_minutes_per_mtok === null ? (

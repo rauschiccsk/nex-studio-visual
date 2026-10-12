@@ -2203,6 +2203,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Billing
+         * @description DEV-73 — the Fakturácia tab: every version of the project, the newest first, with where it stands for
+         *     invoicing (issued, issuable, waiting for the work kind, …) and the totals.
+         *
+         *     Sync like the rest: counting reads git.
+         */
+        get: operations["get_billing_api_v1_projects__slug__billing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/customer-settings": {
         parameters: {
             query?: never;
@@ -3512,6 +3535,76 @@ export interface components {
              * @description Assign the requirement to this version (the service sets status=included).
              */
             version_id?: string | null;
+        };
+        /**
+         * BillingOverviewRead
+         * @description DEV-73 — every version of a project for invoicing, the newest first, with the totals.
+         */
+        BillingOverviewRead: {
+            /** Issued Total Eur */
+            issued_total_eur: string;
+            /**
+             * Needs Kind
+             * @description Fast fixes whose work kind waits for the manager.
+             */
+            needs_kind: number;
+            /**
+             * Ready Total Eur
+             * @description Not issued yet and issuable now — preview amounts.
+             */
+            ready_total_eur: string;
+            /** Rows */
+            rows: components["schemas"]["BillingRowRead"][];
+        };
+        /**
+         * BillingRowRead
+         * @description DEV-73 — one version on the Fakturácia tab.
+         */
+        BillingRowRead: {
+            /** Base Sha */
+            base_sha?: string | null;
+            /** Delivered Sha */
+            delivered_sha?: string | null;
+            /** Delivered Source Label */
+            delivered_source_label?: string | null;
+            /**
+             * Differs
+             * @description Issued, but counted today the amount would differ.
+             * @default false
+             */
+            differs: boolean;
+            /** Flow Type */
+            flow_type?: string | null;
+            /** @description The valid statement, if any. */
+            issued?: components["schemas"]["IssuedStatementRead"] | null;
+            /**
+             * Preview Amount Eur
+             * @description What a statement issued now would say.
+             */
+            preview_amount_eur?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "issued" | "ready" | "needs_kind" | "cannot" | "blocked" | "not_done";
+            /**
+             * Tokens Code
+             * @description Code and tests, as the statement bills them.
+             */
+            tokens_code?: number | null;
+            /** Tokens Docs */
+            tokens_docs?: number | null;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+            /** Work Kind */
+            work_kind?: ("fix" | "change") | null;
         };
         /**
          * BoardTask
@@ -11407,6 +11500,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_ZadaniePeekResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_billing_api_v1_projects__slug__billing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingOverviewRead"];
                 };
             };
             /** @description Validation Error */

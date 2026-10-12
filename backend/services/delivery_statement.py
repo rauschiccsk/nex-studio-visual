@@ -328,6 +328,78 @@ def valid_statement(db: Session, version_id: uuid.UUID) -> Optional[DeliveryStat
     ).scalar_one_or_none()
 
 
+#: DEV-73 — where a version stands for invoicing, as the billing tab shows it.
+BILLING_ISSUED = "issued"  # a valid statement exists
+BILLING_READY = "ready"  # can be issued now
+BILLING_NEEDS_KIND = "needs_kind"  # a fast fix whose work kind nobody decided
+BILLING_CANNOT = "cannot"  # countable, but something else stops the issue (e.g. no rates)
+BILLING_BLOCKED = "blocked"  # cannot be counted at all
+BILLING_NOT_DONE = "not_done"  # still being built
+
+
+@dataclass
+class BillingRow:
+    version: Version
+    flow_type: Optional[str]
+    preview: Preview
+    valid: Optional[DeliveryStatement]
+    state: str
+    #: The sentence why it cannot be issued (``needs_kind`` / ``cannot`` / ``blocked`` / ``not_done``).
+    reason: Optional[str] = None
+
+    @property
+    def differs(self) -> bool:
+        """A valid statement whose amount the preview would count differently today (other rates or delivery)."""
+        if self.valid is None or self.preview.amounts is None:
+            return False
+        return Decimal(self.preview.amounts.total) != Decimal(self.valid.amount_eur)
+
+
+def _billing_state(preview: Preview, valid: Optional[DeliveryStatement]) -> tuple[str, Optional[str]]:
+    if valid is not None:
+        return BILLING_ISSUED, None
+    if preview.blocked == NOT_DONE:
+        return BILLING_NOT_DONE, preview.blocked
+    if preview.blocked:
+        return BILLING_BLOCKED, preview.blocked
+    if KIND_UNDECIDED in preview.cannot_issue:
+        return BILLING_NEEDS_KIND, KIND_UNDECIDED
+    if preview.cannot_issue:
+        return BILLING_CANNOT, " ".join(preview.cannot_issue)
+    return BILLING_READY, None
+
+
+def billing_rows(db: Session, project: Project, repo: Path) -> list[BillingRow]:
+    """DEV-73 — every version of a project for invoicing, the newest first: its statement as it would be issued now
+    and the valid one, if any. 12.10.2026 the statement of only the selected version was visible and the versions
+    between 1.5.0 and 1.7.1 looked lost although nothing was."""
+    from backend.services.deploy import _semver_sort_key
+
+    versions = sorted(
+        db.execute(select(Version).where(Version.project_id == project.id)).scalars(),
+        key=lambda v: _semver_sort_key(v.version_number),
+        reverse=True,
+    )
+    flows = dict(
+        db.execute(
+            select(PipelineState.version_id, PipelineState.flow_type).where(
+                PipelineState.version_id.in_([v.id for v in versions])
+            )
+        ).all()
+    )
+    rows: list[BillingRow] = []
+    for version in versions:
+        p = preview(db, version, repo)
+        valid = valid_statement(db, version.id)
+        state, reason = _billing_state(p, valid)
+        rows.append(
+            BillingRow(
+                version=version, flow_type=flows.get(version.id), preview=p, valid=valid, state=state, reason=reason
+            )
+        )
+    return rows
+
+
 def issue(
     db: Session,
     version: Version,

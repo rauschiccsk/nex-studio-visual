@@ -8,6 +8,7 @@
  *                                                     a new one replaces the valid one only when ``replace`` names it)
  *   - ``PUT  /versions/{id}/work-kind``            → setWorkKind
  *   - ``GET  /delivery-statements/{id}/csv``       → downloadStatementCsv
+ *   - ``GET  /projects/{slug}/billing``           → getProjectBilling (DEV-73, every version for invoicing)
  */
 
 import api, { downloadFile } from "../api";
@@ -85,6 +86,42 @@ export interface IssuedStatement {
 export interface DeliveryStatementView {
   preview: StatementPreview;
   issued: IssuedStatement[];
+}
+
+/** DEV-73 — one version on the billing tab: where it stands for invoicing. */
+export interface BillingRow {
+  version_id: string;
+  version_number: string;
+  flow_type: string | null;
+  state: "issued" | "ready" | "needs_kind" | "cannot" | "blocked" | "not_done";
+  /** Why it cannot be issued — a sentence; null when it can, or is issued. */
+  reason: string | null;
+  work_kind: WorkKind | null;
+  base_sha: string | null;
+  delivered_sha: string | null;
+  delivered_source_label: string | null;
+  tokens_code: number | null;
+  tokens_docs: number | null;
+  /** What a statement issued now would say. */
+  preview_amount_eur: string | null;
+  /** The valid statement, if any. */
+  issued: IssuedStatement | null;
+  /** Issued, but counted today the amount would differ (other rates or delivery). */
+  differs: boolean;
+}
+
+export interface BillingOverview {
+  rows: BillingRow[];
+  issued_total_eur: string;
+  /** Not issued yet and issuable now — preview amounts. */
+  ready_total_eur: string;
+  /** Fast fixes whose work kind waits for the manager. */
+  needs_kind: number;
+}
+
+/** DEV-73 — every version of the project for invoicing, the newest first. */
+export function getProjectBilling(slug: string): Promise<BillingOverview> {
+  return api.get<BillingOverview>(`/projects/${slug}/billing`);
 }
 
 export function getDeliveryStatement(versionId: string): Promise<DeliveryStatementView> {

@@ -6,6 +6,7 @@ so the event loop never waits on it.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -22,6 +23,8 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.delivery_statement import (
+    BillingOverviewRead,
+    BillingRowRead,
     CalibrationRead,
     DeliveredFileRead,
     DeliveryStatementView,
@@ -79,6 +82,51 @@ def _issued(db: Session, version_id: UUID) -> list[IssuedStatementRead]:
         .order_by(DeliveryStatement.replaced_at.desc().nulls_first(), DeliveryStatement.created_at.desc())
     ).scalars()
     return [IssuedStatementRead.model_validate(r) for r in rows]
+
+
+@router.get("/projects/{slug}/billing", response_model=BillingOverviewRead)
+def get_billing(
+    slug: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> BillingOverviewRead:
+    """DEV-73 — the billing tab: every version of the project, the newest first, with where it stands for
+    invoicing (issued, issuable, waiting for the work kind, …) and the totals.
+
+    Sync like the rest: counting reads git."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    rows = statements.billing_rows(db, project, claude_agent.PROJECTS_ROOT / project.slug)
+
+    def read(r: statements.BillingRow) -> BillingRowRead:
+        p, count = r.preview, r.preview.count
+        return BillingRowRead(
+            version_id=r.version.id,
+            version_number=r.version.version_number,
+            flow_type=r.flow_type,
+            state=r.state,
+            reason=r.reason,
+            work_kind=p.work_kind,
+            base_sha=p.base_sha,
+            delivered_sha=p.delivered_sha,
+            delivered_source_label=statements.SOURCE_LABELS.get(p.delivered_source or ""),
+            tokens_code=(count.tokens(delivered_tokens.KIND_CODE) + count.tokens(delivered_tokens.KIND_TESTS))
+            if count
+            else None,
+            tokens_docs=count.tokens(delivered_tokens.KIND_DOCS) if count else None,
+            preview_amount_eur=p.amounts.total if p.amounts else None,
+            issued=IssuedStatementRead.model_validate(r.valid) if r.valid else None,
+            differs=r.differs,
+        )
+
+    issued_total = sum((r.valid.amount_eur for r in rows if r.valid), Decimal("0"))
+    ready_total = sum(
+        (Decimal(r.preview.amounts.total) for r in rows if r.state == statements.BILLING_READY and r.preview.amounts),
+        Decimal("0"),
+    )
+    return BillingOverviewRead(
+        rows=[read(r) for r in rows],
+        issued_total_eur=issued_total,
+        ready_total_eur=ready_total,
+        needs_kind=sum(1 for r in rows if r.state == statements.BILLING_NEEDS_KIND),
+    )
 
 
 @router.get("/versions/{version_id}/delivery-statement", response_model=DeliveryStatementView)

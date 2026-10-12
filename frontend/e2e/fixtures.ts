@@ -855,6 +855,61 @@ export function registerFixtures(): void {
     content: "",
     relative_path: "docs/specs/versions/v1.8.0/ZADANIE.md",
   });
+  // DEV-73: NEX Inbox as it stood 12.10.2026 — an issued fix, an issued version a newer rate would count higher, a
+  // version to issue, a fast fix waiting for its work kind, a version still in build.
+  const issued = (amount: string, kind: "fix" | "change") => ({
+    id: `aaaaaaaa-0000-4000-8000-${amount.replace(".", "").padStart(12, "0")}`,
+    created_at: T1,
+    work_kind: kind,
+    base_sha: "ec28fb9d0000000000000000000000000000000",
+    delivered_sha: "48de08076e594d4b224281b1befd0a5ba0fa9ca3",
+    delivered_source: "verifikacia",
+    tokenizer: "o200k_base (tiktoken 0.14.0)",
+    tokens_code: 173_890,
+    tokens_tests: 0,
+    tokens_docs: 76_087,
+    rate_code: "1",
+    rate_docs: "1",
+    amount_code_eur: null,
+    amount_docs_eur: null,
+    amount_eur: amount,
+    replaces_id: null,
+    replaced_at: null,
+  });
+  const billingRow = {
+    flow_type: "new_version",
+    reason: null,
+    work_kind: "change" as const,
+    base_sha: "4f71c9c0000000000000000000000000000000000",
+    delivered_sha: "ec28fb9d0000000000000000000000000000000",
+    delivered_source_label: "stav, na ktorom prešla Verifikácia",
+    tokens_code: 61_200,
+    tokens_docs: 1_830,
+    issued: null,
+    differs: false,
+  };
+  answer("get", "/api/v1/projects/{slug}/billing", {
+    rows: [
+      { ...billingRow, version_id: VERSION.id, version_number: "1.8.0", state: "not_done", reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", delivered_sha: null, base_sha: null, preview_amount_eur: null, tokens_code: null, tokens_docs: null },
+      { ...billingRow, version_id: RELEASED.id, version_number: "1.7.1", flow_type: "fast_fix", work_kind: "fix", state: "issued", issued: issued("0.00", "fix"), preview_amount_eur: "0.00" },
+      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222170", version_number: "1.7.0", state: "issued", issued: issued("249.98", "change"), preview_amount_eur: "423.87", differs: true },
+      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222160", version_number: "1.6.0", state: "ready", preview_amount_eur: "124.06" },
+      {
+        ...billingRow,
+        version_id: "22222222-2222-4222-8222-222222222156",
+        version_number: "1.5.6",
+        flow_type: "fast_fix",
+        work_kind: null,
+        state: "needs_kind",
+        reason:
+          "Pri rýchlej oprave treba určiť, či opravovala chybu v dodanom kóde (neúčtuje sa), alebo robila zmenu (účtuje sa) — kokpit to nehádá.",
+        preview_amount_eur: null,
+      },
+    ],
+    issued_total_eur: "249.98",
+    ready_total_eur: "124.06",
+    needs_kind: 1,
+  });
   answer("get", "/api/v1/versions/{version_id}/delivery-statement", {
     preview: {
       version_number: VERSION.version_number,
