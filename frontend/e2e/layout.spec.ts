@@ -9,8 +9,8 @@
 
 import { expect, test, type Page as Browser } from "@playwright/test";
 
-import { serveApi } from "./api";
-import { registerFixtures, STORAGE } from "./fixtures";
+import { serveApi, type Override } from "./api";
+import { BUILD_STAGES, registerFixtures, STORAGE } from "./fixtures";
 import { OPENERS, problemsOn, settle, type Problem } from "./layout";
 import { pages } from "./routes";
 
@@ -25,9 +25,27 @@ const nameOf = async (browser: Browser, selector: string, i: number): Promise<st
   return ((await el.getAttribute("aria-label")) || (await el.innerText()) || `#${i + 1}`).trim().slice(0, 40);
 };
 
-for (const page of pages()) {
-  test(`${page.pattern} fits the screen`, async ({ page: browser, hasTouch }) => {
-    const unanswered = await serveApi(browser);
+// A stage named for a page the router does not have would silently measure nothing.
+for (const stage of BUILD_STAGES) {
+  for (const pattern of stage.pages) {
+    if (!pages().some((p) => p.pattern === pattern)) throw new Error(`build stage "${stage.name}": no page ${pattern}`);
+  }
+}
+
+const runs: { page: ReturnType<typeof pages>[number]; title: string; overrides: Override[] }[] = pages().flatMap(
+  (page) => [
+    { page, title: `${page.pattern} fits the screen`, overrides: [] },
+    ...BUILD_STAGES.filter((stage) => stage.pages.includes(page.pattern)).map((stage) => ({
+      page,
+      title: `${page.pattern} fits the screen ${stage.name}`,
+      overrides: stage.overrides,
+    })),
+  ],
+);
+
+for (const { page, title, overrides } of runs) {
+  test(title, async ({ page: browser, hasTouch }) => {
+    const unanswered = await serveApi(browser, overrides);
     if (page.signedIn) {
       await browser.addInitScript((storage: Record<string, unknown>) => {
         for (const [key, value] of Object.entries(storage)) {

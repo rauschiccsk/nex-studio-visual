@@ -11,7 +11,7 @@ import type { AdoptionPreview } from "../src/services/api/deploy";
 import type { AdoptableCandidate, GitStatus, NexsharedStatus } from "../src/services/api/projects";
 import type { KnowledgeDoc } from "../src/types/knowledge";
 import type { TaskPlanResponse } from "../src/types/task-plan";
-import { answer, answerUntyped } from "./api";
+import { answer, answerUntyped, override, type Override } from "./api";
 
 type S = components["schemas"];
 
@@ -217,6 +217,113 @@ const PIPELINE: S["PipelineBoardRead"] = {
   database_schema: null,
   dedo_proposal: null,
 };
+
+const STATE = PIPELINE.state!;
+
+/**
+ * The same build in its other stages — each changes what Riadiace centrum and Vizuál show (other bars, the live
+ * preview, the composer or the Poradca bar). Measured as their own tests on the pages they change.
+ */
+export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
+  {
+    name: "in the Vizuál stage",
+    pages: ["/riadiace-centrum", "/vizual"],
+    overrides: [
+      override("get", "/api/v1/pipeline/{version_id}", {
+        ...PIPELINE,
+        state: {
+          ...STATE,
+          current_stage: "vizual",
+          block_reason: null,
+          next_action: "Prezri si živý náhľad aplikácie a napíš, čo zmeniť, alebo vizuál schváľ",
+        },
+        available_actions: ["schvalit", "pozastavit"],
+        recent_messages: MESSAGES.slice(0, 1),
+        vizual_url: "about:blank",
+        vizual_checklists: [
+          {
+            round: "1",
+            seq: 3,
+            not_verifiable: ["Odoslanie e-mailu obsluhe pri výpadku doručovania"],
+            items: [
+              {
+                screen: "Prehľad",
+                action: "Otvor Prehľad a pozri dlaždicu Čaká na doručenie do NEX Genesis",
+                expected: "Dlaždica ukazuje počet faktúr, ktoré čakajú, a čas posledného pokusu",
+                url: null,
+              },
+            ],
+          },
+        ],
+      }),
+    ],
+  },
+  {
+    name: "while the agent works",
+    pages: ["/riadiace-centrum"],
+    overrides: [
+      override("get", "/api/v1/pipeline/{version_id}", {
+        ...PIPELINE,
+        state: {
+          ...STATE,
+          current_stage: "programovanie",
+          status: "agent_working",
+          block_reason: null,
+          working_since: T2,
+          next_action: "Programujem úlohu 12 — doručovateľ faktúr do zdieľaného priečinka NEX Genesis na pozadí",
+        },
+        available_actions: ["pozastavit"],
+        agent_sessions: [{ role: "ai_agent", status: "active" }],
+        recent_messages: MESSAGES.slice(0, 1),
+      }),
+    ],
+  },
+  {
+    name: "stopped on a fault of the cockpit",
+    pages: ["/riadiace-centrum"],
+    overrides: [
+      override("get", "/api/v1/pipeline/{version_id}", {
+        ...PIPELINE,
+        state: {
+          ...STATE,
+          current_stage: "programovanie",
+          status: "blocked",
+          block_reason: "framework_issue",
+          next_action: "Čakám na opravu kokpitu — náš technický tím o tom vie",
+        },
+        available_actions: [],
+        recent_messages: [
+          ...MESSAGES.slice(0, 1),
+          {
+            ...MESSAGES[1]!,
+            seq: 3,
+            stage: "programovanie",
+            kind: "question",
+            status: "open",
+            content:
+              "Kontrola zostavenia sa nedá spustiť: kontajner skúšok nemá prístup k databáze. Toto nie je chyba aplikácie, ale prostredia kokpitu.",
+            payload: { framework_issue: true, technical_detail: "docker: network nex-inbox-test not found" },
+          },
+        ],
+      }),
+    ],
+  },
+  {
+    name: "when the version is finished",
+    pages: ["/riadiace-centrum"],
+    overrides: [
+      override("get", "/api/v1/pipeline/{version_id}", {
+        ...PIPELINE,
+        state: { ...STATE, current_stage: "done", status: "done", block_reason: null, next_action: "Verzia je hotová" },
+        available_actions: [],
+        all_tasks_done: true,
+        verified: true,
+        verified_provenance: "Verifikácia prešla 11. 10. 2026 o 18:40 na stave kódu af97f37",
+        recent_messages: MESSAGES.slice(0, 1),
+      }),
+    ],
+  },
+];
 
 const TASK_PLAN: TaskPlanResponse = {
   epic_count: 2,

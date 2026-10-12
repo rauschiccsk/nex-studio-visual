@@ -88,17 +88,17 @@ export default function VizualPage() {
   if (inVizual && vizualUrl) {
     return (
       <div className="flex h-full flex-col bg-[var(--color-canvas)]">
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2.5">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2.5">
           <Monitor className="h-4 w-4 text-[var(--color-text-muted)]" />
           <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Vizuál</h1>
           <span className="text-[var(--color-text-muted)]">·</span>
-          <span className="truncate text-xs text-[var(--color-text-secondary)]">
+          <span className="min-w-0 truncate text-xs text-[var(--color-text-secondary)]">
             {selectedProject.name}
             {selectedVersion && (
               <span className="text-[var(--color-text-muted)]"> · {selectedVersion.versionNumber}</span>
             )}
           </span>
-          <div className="ml-auto flex flex-shrink-0 items-center gap-1.5">
+          <div className="ml-auto flex flex-shrink-0 flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
@@ -111,7 +111,7 @@ export default function VizualPage() {
               href={vizualUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] pointer-coarse:min-h-11"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               Otvoriť vo vlastnom okne

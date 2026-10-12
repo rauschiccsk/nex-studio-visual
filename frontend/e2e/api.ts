@@ -37,6 +37,18 @@ interface Answer {
 
 const answers: Answer[] = [];
 
+/** One answer replaced for one test — e.g. the build in another stage. */
+export interface Override {
+  method: string;
+  path: string;
+  body: unknown;
+}
+
+/** Replace the fixture of `method path` in one test, typed like {@link answer}. */
+export function override<P extends keyof paths, M extends Method>(method: M, path: P, body: Body<P, M>): Override {
+  return { method: method.toUpperCase(), path: path as string, body };
+}
+
 function compile(path: string): RegExp {
   const escaped = path.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{\w+\}/g, "[^/]+");
   return new RegExp(`^${escaped}/?$`);
@@ -79,21 +91,23 @@ const literalLength = (path: string): number => path.replace(/\{\w+\}/g, "").len
  * literal path wins (`/projects/adoptable` before `/projects/{project_id}`): without that, a request to a path with
  * no fixture of its own would get the answer of a neighbouring path and the page would render the wrong data.
  */
-function find(method: string, pathname: string): Answer | undefined {
+function find(method: string, pathname: string, overrides: Override[]): Answer | undefined {
   const target = CONTRACT.filter((c) => c.pattern.test(pathname)).sort(
     (a, b) => literalLength(b.path) - literalLength(a.path),
   )[0];
   if (!target) return undefined;
+  const replaced = overrides.find((o) => o.method === method && o.path === target.path);
+  if (replaced) return { method, path: target.path, pattern: target.pattern, body: () => replaced.body };
   return answers.find((a) => a.method === method && a.path === target.path);
 }
 
-/** Route every API call of `page` to the fixtures; returns the calls nobody answered. */
-export async function serveApi(page: Page): Promise<string[]> {
+/** Route every API call of `page` to the fixtures (some replaced); returns the calls nobody answered. */
+export async function serveApi(page: Page, overrides: Override[] = []): Promise<string[]> {
   const unanswered: string[] = [];
   await page.route("**/api/**", async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const found = find(request.method(), url.pathname);
+    const found = find(request.method(), url.pathname, overrides);
     if (!found) {
       unanswered.push(`${request.method()} ${url.pathname}`);
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "no fixture" }) });
