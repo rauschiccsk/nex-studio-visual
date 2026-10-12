@@ -72,7 +72,7 @@ export default function RiadiaceCentrumPage() {
   } = usePipelineWs(versionId);
   // DEV-51: the build's CI, read ONCE — the phase-bar line, the status strip and the rail all show the same answer.
   const ci = useStavZostavenia(versionId);
-  // DEV-62: a phone has room for one column — the conversation or the Plán úloh, switched by the tabs on top.
+  // DEV-62: a phone has room for one column — the conversation or the task plan, switched by the tabs on top.
   // From the tablet up both stand side by side and the tabs are not there.
   const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
   const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
@@ -211,7 +211,7 @@ export default function RiadiaceCentrumPage() {
 
   return (
     <div className="grid h-full grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[auto_minmax(0,1fr)_auto_auto]">
-      {/* DEV-62: on a phone, the switch between the conversation and the Plán úloh. */}
+      {/* DEV-62: on a phone, the switch between the conversation and the task plan. */}
       <div
         role="tablist"
         aria-label="Čo ukázať"

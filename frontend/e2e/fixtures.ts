@@ -221,12 +221,12 @@ const PIPELINE: S["PipelineBoardRead"] = {
 const STATE = PIPELINE.state!;
 
 /**
- * The same build in its other stages — each changes what Riadiace centrum and Vizuál show (other bars, the live
+ * The same build in its other stages — each changes what the control centre and the visual stage show (other bars, the live
  * preview, the composer or the Poradca bar). Measured as their own tests on the pages they change.
  */
 export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
   {
-    name: "in the Vizuál stage",
+    name: "in the visual stage",
     pages: ["/riadiace-centrum", "/vizual"],
     overrides: [
       override("get", "/api/v1/pipeline/{version_id}", {

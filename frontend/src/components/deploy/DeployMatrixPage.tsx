@@ -428,7 +428,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       ) : (
         <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)]">
           {/* DEV-62: on a phone every customer is a card — the columns stack, each under its own label — so the
-              version and the Nasadiť/Akceptovať buttons are reached without sliding the table sideways. */}
+              version and the deploy and accept buttons are reached without sliding the table sideways. */}
           <table className="w-full text-left text-sm max-md:block">
             <thead className="max-md:hidden">
               <tr className="border-b border-[var(--color-border-default)] text-xs text-[var(--color-text-muted)]">
