@@ -5898,6 +5898,23 @@ export interface components {
             /** Project Slug */
             project_slug: string;
         };
+        /**
+         * PoradcaChoiceRead
+         * @description DEV-83 — a choice Poradca marked in its answer, checked against the Decision Card it names.
+         */
+        PoradcaChoiceRead: {
+            /** Card */
+            card?: number | null;
+            /** Label */
+            label: string;
+            /** Question */
+            question?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "on_card" | "not_on_card" | "answer";
+        };
         /** PoradcaConversationCreate */
         PoradcaConversationCreate: {
             /** Attachments */
@@ -6004,6 +6021,8 @@ export interface components {
             backlog_request?: string | null;
             /** Captured Backlog Number */
             captured_backlog_number?: number | null;
+            /** Choices */
+            choices?: components["schemas"]["PoradcaChoiceRead"][];
             /** Content */
             content: string;
             /** Cost */

@@ -13,6 +13,8 @@ export type PoradcaStatus = S["PoradcaStatus"];
 export type PoradcaProjectContext = S["PoradcaProjectContext"];
 export type PoradcaVersionInfo = S["PoradcaVersionInfo"];
 export type PoradcaBacklogSaved = S["PoradcaBacklogSaved"];
+/** DEV-83 — a choice Poradca marked in its answer, checked against the card it names. */
+export type PoradcaChoice = S["PoradcaChoiceRead"];
 
 /** Live progress event — tool and target, never content. */
 export type PoradcaEvent =

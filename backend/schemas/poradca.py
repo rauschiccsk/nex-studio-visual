@@ -45,6 +45,18 @@ class PoradcaAttachmentRead(BaseModel):
     size_bytes: int
 
 
+class PoradcaChoiceRead(BaseModel):
+    """DEV-83 — a choice Poradca marked in its answer, checked against the Decision Card it names."""
+
+    card: Optional[int] = None
+    label: str
+    #: ``on_card`` the card offers exactly this option; ``not_on_card`` it does not (or the card is gone);
+    #: ``answer`` no card — the answer Poradca suggests for the agent's question.
+    status: Literal["on_card", "not_on_card", "answer"]
+    #: The card's question, when the card exists.
+    question: Optional[str] = None
+
+
 class PoradcaMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -72,6 +84,8 @@ class PoradcaMessageRead(BaseModel):
     backlog_request: Optional[str] = None
     #: Číslo požiadavky (REQ-N), ktorú človek z tejto odpovede už uložil do Zásobníka.
     captured_backlog_number: Optional[int] = None
+    #: DEV-83 — the choices the answer marks (``<volba>``), in its order; empty for a question or unfinished answer.
+    choices: list[PoradcaChoiceRead] = Field(default_factory=list)
 
 
 class PoradcaBacklogSaved(BaseModel):

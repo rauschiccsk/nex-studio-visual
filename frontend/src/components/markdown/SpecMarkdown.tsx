@@ -34,12 +34,14 @@ interface Props {
    *  consumer wraps it itself). Scoped this way so bubbles stay padding-free while the phase artifact keeps
    *  its ``px-4 py-3`` (the wrappers are NOT identical). */
   className?: string;
+  /** Extra element renderers over the shared ones (DEV-83: Poradca draws its marked choice as a badge). */
+  components?: Components;
 }
 
 /** The single source of truth for rendering spec / transcript Markdown. */
-export function SpecMarkdown({ body, className }: Props) {
+export function SpecMarkdown({ body, className, components }: Props) {
   const rendered = (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components ? { ...MARKDOWN_COMPONENTS, ...components } : MARKDOWN_COMPONENTS}>
       {body}
     </ReactMarkdown>
   );

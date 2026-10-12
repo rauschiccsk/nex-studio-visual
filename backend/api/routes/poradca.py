@@ -39,6 +39,7 @@ from backend.db.session import SessionLocal, get_db
 from backend.schemas.poradca import (
     PoradcaAsk,
     PoradcaBacklogSaved,
+    PoradcaChoiceRead,
     PoradcaConversationCreate,
     PoradcaConversationDetail,
     PoradcaConversationRead,
@@ -50,7 +51,7 @@ from backend.schemas.poradca import (
     PoradcaVersionInfo,
 )
 from backend.services import metrics
-from backend.services.poradca import attachments, handoff, readiness, runner
+from backend.services.poradca import attachments, choices, handoff, readiness, runner
 
 router = APIRouter(tags=["Poradca"])
 
@@ -118,6 +119,12 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if done_answer else None,
         backlog_request=handoff.backlog_request(msg.content) if done_answer else None,
         captured_backlog_number=_captured_backlog_number(db, msg),
+        choices=[
+            PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
+            for c in choices.choices(db, msg.content, msg.version_id)
+        ]
+        if done_answer
+        else [],
     )
 
 

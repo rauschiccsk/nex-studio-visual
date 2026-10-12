@@ -10,6 +10,21 @@ const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka do Zásobníka" },
 ];
 
+/** DEV-83 — the link a marked choice becomes in the rendered answer; `#volba-3` names card 3, `#volba` no card. */
+export const CHOICE_HREF = "#volba";
+const CHOICE_RE = /<volba(?:\s+karta="(\d{1,3})")?\s*>([\s\S]*?)<\/volba>/g;
+
+/** The card a choice link names — `null` for an answer to the agent's question. */
+export function choiceCard(href: string): number | null {
+  const m = /^#volba-(\d+)$/.exec(href);
+  return m ? Number(m[1]) : null;
+}
+
+/** A marked choice as the server reads it — whitespace collapsed, so the badge finds the server's verdict. */
+function plainChoice(text: string): string {
+  return text.split(/\s+/).filter(Boolean).join(" ");
+}
+
 /**
  * Answer text to display: blocks with tags turn into a quote with a heading. Without that the Markdown renderer
  * (it does not let HTML through) would discard them with the content and a person would not see what a button inserts.
@@ -27,6 +42,12 @@ export function answerForDisplay(content: string): string {
       return `\n**${heading}:**\n\n${quoted}\n`;
     });
   }
+  // DEV-83: a marked choice becomes a link the answer's renderer draws as a badge.
+  out = out.replace(CHOICE_RE, (_m, card: string | undefined, label: string) => {
+    const text = plainChoice(label);
+    if (!text) return "";
+    return `[${text.replace(/[\\[\]]/g, (c) => `\\${c}`)}](${CHOICE_HREF}${card ? `-${card}` : ""})`;
+  });
   return out.trim();
 }
 

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { answerForDisplay, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
+import { answerForDisplay, choiceCard, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
 
 describe("answerForDisplay", () => {
   it("turns the instruction block into a headed quote instead of dropping it", () => {
@@ -17,6 +17,15 @@ describe("answerForDisplay", () => {
       "**Požiadavka do Zásobníka:**",
     );
     expect(answerForDisplay("Len odpoveď.")).toBe("Len odpoveď.");
+  });
+
+  // DEV-83: a marked choice becomes a link the answer draws as a badge — the tag itself never reaches the screen.
+  it("turns a marked choice into a link that names its card", () => {
+    const out = answerForDisplay('Na karte 3 vyber <volba karta="3">Zhasnúť  hneď,\nkeď sa obnoví</volba>. A <volba>Áno</volba>.');
+    expect(out).toBe("Na karte 3 vyber [Zhasnúť hneď, keď sa obnoví](#volba-3). A [Áno](#volba).");
+    expect(answerForDisplay('<volba karta="1">Voľba [A] a \\ B</volba>')).toBe("[Voľba \\[A\\] a \\\\ B](#volba-1)");
+    expect(choiceCard("#volba-3")).toBe(3);
+    expect(choiceCard("#volba")).toBeNull();
   });
 
   it("DEV-29: an answer from before the change shows its request as one for the Zásobník, never a new version", () => {

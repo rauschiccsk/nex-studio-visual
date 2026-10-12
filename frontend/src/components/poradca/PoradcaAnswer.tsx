@@ -15,7 +15,8 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
-import { answerForDisplay, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
+import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
+import { ChoiceSummary, InlineChoice } from "@/components/poradca/ChoiceBadge";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
@@ -36,6 +37,8 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   const [error, setError] = useState<HumanError | null>(null);
   const inFlight = useRef(false);
   const steps = message.steps ?? [];
+  // DEV-83: the choices the answer marks, checked by the server against the card they name.
+  const choices = message.choices ?? [];
   const running = message.status === "running";
 
   async function stop() {
@@ -109,8 +112,24 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
         </div>
       )}
 
+      {!running && <ChoiceSummary choices={choices} />}
       {!running && message.content && (
-        <SpecMarkdown body={answerForDisplay(message.content)} className="prose-sm text-sm text-[var(--color-text-primary)]" />
+        <SpecMarkdown
+          body={answerForDisplay(message.content)}
+          className="prose-sm text-sm text-[var(--color-text-primary)]"
+          components={{
+            a({ href, children, ...props }) {
+              if (href?.startsWith(CHOICE_HREF)) {
+                return <InlineChoice href={href} choices={choices}>{children}</InlineChoice>;
+              }
+              return (
+                <a href={href} {...props}>
+                  {children}
+                </a>
+              );
+            },
+          }}
+        />
       )}
       {message.status === "failed" && (
         <p className="text-xs text-[var(--color-state-error-fg)]">{message.error ?? "Odpoveď zlyhala."}</p>

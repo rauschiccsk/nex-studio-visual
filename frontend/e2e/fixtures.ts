@@ -109,6 +109,21 @@ export const STORAGE: Record<string, unknown> = {
     },
     version: 0,
   },
+  // DEV-83: Poradca reopens the conversation it remembers, so its answer with marked choices is measured too.
+  [`nex.poradca.open.${PROJECT.slug}`]: "99999999-9999-4999-8999-999999999991",
+};
+
+const PORADCA_CONVERSATION = {
+  id: "99999999-9999-4999-8999-999999999991",
+  project_id: PROJECT.id,
+  version_id: VERSION.id,
+  version_number: VERSION.version_number,
+  author_id: USER.id,
+  author_name: "Mária Manažérová",
+  title: "Prečo faktúra Kinekus nemá objednávací kód tovaru pri položkách?",
+  running: false,
+  created_at: T1,
+  updated_at: T2,
 };
 
 const CONSULTATION = {
@@ -800,20 +815,37 @@ export function registerFixtures(): void {
       },
     ],
   });
-  answer("get", "/api/v1/poradca/projects/{slug}/conversations", [
-    {
-      id: "99999999-9999-4999-8999-999999999991",
-      project_id: PROJECT.id,
-      version_id: VERSION.id,
-      version_number: VERSION.version_number,
-      author_id: USER.id,
-      author_name: "Mária Manažérová",
-      title: "Prečo faktúra Kinekus nemá objednávací kód tovaru pri položkách?",
-      running: false,
-      created_at: T1,
-      updated_at: T2,
-    },
-  ]);
+  answer("get", "/api/v1/poradca/projects/{slug}/conversations", [PORADCA_CONVERSATION]);
+  answer("get", "/api/v1/poradca/conversations/{conversation_id}", {
+    ...PORADCA_CONVERSATION,
+    messages: [
+      {
+        id: "99999999-9999-4999-8999-999999999992",
+        author: "human",
+        content: "Ktorú možnosť mám vybrať na kartách?",
+        status: "done",
+        created_at: T1,
+      },
+      {
+        id: "99999999-9999-4999-8999-999999999993",
+        author: "poradca",
+        content:
+          "Agent má v karte presný plán.\n\n" +
+          'Na karte 2 vyber <volba karta="2">Zhasnúť hneď, keď sa doručovanie obnoví</volba>.\n' +
+          'Na karte 1 by som zvolil <volba karta="1">posielať po kúskoch</volba>.\n\n' +
+          "Agentovi potom odpovedz <volba>Áno, súhlasím</volba>.",
+        status: "done",
+        duration_seconds: 41,
+        created_at: T1,
+        finished_at: T2,
+        choices: [
+          { card: 2, label: "Zhasnúť hneď, keď sa doručovanie obnoví", status: "on_card", question: "Kedy zhasne upozornenie?" },
+          { card: 1, label: "posielať po kúskoch", status: "not_on_card", question: "Čo s veľkou faktúrou?" },
+          { card: null, label: "Áno, súhlasím", status: "answer", question: null },
+        ],
+      },
+    ],
+  });
   answer("get", "/api/v1/release-notes", [
     {
       version: "4.43.26",

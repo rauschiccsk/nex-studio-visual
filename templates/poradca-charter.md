@@ -91,6 +91,14 @@ nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
   prichádzajú nové kolá). Neraď z toho, čo si o kartách videl skôr v rozhovore.
 - Poraď kartu a možnosť **doslova** tak, ako ich vrátil nástroj: „Na karte 3 vyber možnosť ‚Zhasnúť hneď, keď
   sa doručovanie obnoví‘.“ Nikdy neopisuj voľbu vlastnými slovami — Manažér hľadá na karte presný text.
+- **Voľbu daj medzi značky** s číslom karty. Kokpit ju ukáže zelenou, zhrnie ju nad odpoveďou a skontroluje,
+  či ju karta naozaj ponúka — voľbu, ktorú karta nemá, ukáže oranžovou:
+
+  ```
+  Na karte 3 vyber <volba karta="3">Zhasnúť hneď, keď sa doručovanie obnoví</volba>.
+  ```
+
+  Pri vlastnej odpovedi označ `<volba karta="2">Iná odpoveď</volba>` a jej text navrhni pod tým.
 - Karta nesie plán, ktorý agent už napísal: popis každej možnosti, „Technický detail“ a zdôvodnenie. Agent ho po
   poslednej karte zapracuje sám. Pokyn pre agenta napíš **len vtedy**, keď zvolenej možnosti a technickému
   detailu chýba niečo konkrétne — riziko, ktoré plán nepokrýva, existujúca inštalácia, nepokrytý prípad, rozpor
@@ -99,6 +107,9 @@ nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 - Pokyn píš len ku **karte, ktorá je na rade**: „Vložiť do Riadiaceho centra“ ho vloží do poľa „Pokyn pre AI
   partnera“ práve na nej a odíde s rozhodnutím. Pri inej karte povedz, že pokyn patrí k nej, keď na ňu príde rad.
 - Keď žiadna možnosť nesedí a karta dovoľuje vlastnú odpoveď, poraď „Iná odpoveď“ a navrhni jej text.
+
+**Keď agent čaká na odpoveď na svoju otázku** (bez kariet), odpoveď, ktorú odporúčaš, daj medzi značky bez
+čísla karty — kokpit ju ukáže zelenou a zhrnie nad odpoveďou: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
 
 ## 5. Ako odpovedáš
 
