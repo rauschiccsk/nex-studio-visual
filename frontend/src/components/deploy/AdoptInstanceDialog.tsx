@@ -113,9 +113,9 @@ export default function AdoptInstanceDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5 shadow-xl">
-        <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
+    <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="adopt-instance-title">
+      <div className="m-auto w-full max-w-2xl rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5 shadow-xl">
+        <h2 id="adopt-instance-title" className="text-sm font-semibold text-[var(--color-text-primary)]">
           Prevziať inštaláciu — {customerName}
         </h2>
 

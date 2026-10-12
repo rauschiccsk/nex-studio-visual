@@ -103,11 +103,13 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-xl rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5">
+    <div className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="adopt-project-title">
+      <div className="m-auto w-full max-w-xl rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5">
         <div className="mb-1 flex items-center gap-2">
           <HardDriveDownload className="h-4 w-4 text-[var(--color-text-muted)]" aria-hidden="true" />
-          <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Prevziať existujúci projekt</h2>
+          <h2 id="adopt-project-title" className="text-sm font-semibold text-[var(--color-text-primary)]">
+            Prevziať existujúci projekt
+          </h2>
         </div>
         <p className="mb-4 text-xs text-[var(--color-text-muted)]">
           Vyber priečinok, ktorý na disku už je. Ostatné si NEX Studio prečíta samo. História, zdrojový

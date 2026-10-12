@@ -8,6 +8,9 @@
  * shows its empty state and the width check would measure nothing.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import type { Page, Route } from "@playwright/test";
 
 import type { paths } from "../src/services/api/pipeline.generated";
@@ -61,11 +64,27 @@ export function answerUntyped<T>(method: Method, path: keyof paths, body: T): vo
   answers.push({ method: method.toUpperCase(), pattern: compile(path as string), path: path as string, body: () => body });
 }
 
+/** Every path of the backend's contract, read from the generated types (the same file the fixtures are typed by). */
+const CONTRACT: { path: string; pattern: RegExp }[] = Array.from(
+  readFileSync(fileURLToPath(new URL("../src/services/api/pipeline.generated.ts", import.meta.url)), "utf-8").matchAll(
+    /^ {4}"(\/api\/[^"]+)": \{/gm,
+  ),
+  ([, path]) => ({ path: path!, pattern: compile(path!) }),
+);
+
+const literalLength = (path: string): number => path.replace(/\{\w+\}/g, "").length;
+
+/**
+ * The answer for a request — only the one registered under the contract path the backend routes it to. The most
+ * literal path wins (`/projects/adoptable` before `/projects/{project_id}`): without that, a request to a path with
+ * no fixture of its own would get the answer of a neighbouring path and the page would render the wrong data.
+ */
 function find(method: string, pathname: string): Answer | undefined {
-  // The most specific path wins: `/projects/new-presets` before `/projects/{project_id}`.
-  return answers
-    .filter((a) => a.method === method && a.pattern.test(pathname))
-    .sort((a, b) => b.path.replace(/\{\w+\}/g, "").length - a.path.replace(/\{\w+\}/g, "").length)[0];
+  const target = CONTRACT.filter((c) => c.pattern.test(pathname)).sort(
+    (a, b) => literalLength(b.path) - literalLength(a.path),
+  )[0];
+  if (!target) return undefined;
+  return answers.find((a) => a.method === method && a.path === target.path);
 }
 
 /** Route every API call of `page` to the fixtures; returns the calls nobody answered. */

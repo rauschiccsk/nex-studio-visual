@@ -479,6 +479,7 @@ export default function KnowledgeBasePage() {
             </button>
             {canWrite && (
               <button
+                aria-expanded={mode === "create"}
                 onClick={() => {
                   setMode("create");
                   setSelectedDoc(null);

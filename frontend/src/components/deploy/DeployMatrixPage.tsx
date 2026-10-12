@@ -515,6 +515,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         {(lastAttemptFailed || !current) && (
                           <button
                             type="button"
+                            aria-haspopup="dialog"
                             onClick={() => setAdopting(row)}
                             className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
                             title="Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží. Netreba na to čakať, kým niečo zlyhá."

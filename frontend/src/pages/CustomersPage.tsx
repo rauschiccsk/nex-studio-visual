@@ -235,6 +235,7 @@ export default function CustomersPage() {
       <div className="mb-1 flex items-center justify-between">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Zákazníci</h1>
         <button
+          aria-expanded={showForm}
           onClick={() => {
             resetForm();
             setShowForm((v) => !v);
@@ -404,7 +405,7 @@ export default function CustomersPage() {
           {items.map((c) => (
             <div key={c.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="font-medium text-[var(--color-text-primary)]">{c.name}</span>
                   <span className="font-mono text-xs text-[var(--color-text-muted)]">{c.slug}</span>
                   {c.has_secret && (

@@ -95,6 +95,8 @@ export function InstallButton({ appName }: InstallButtonProps) {
         size="md"
         type="button"
         onClick={onClick}
+        // Until the browser offers its own installation, the button opens the guide.
+        aria-haspopup={isReady ? undefined : "dialog"}
         aria-describedby={showBubble ? hintId : undefined}
         // Dimmed states keep the same shape and colour, just more transparent. The 0.85
         // value is not a guess: at 0.7 the dark-mode contrast fell to 2.59 : 1, BELOW the
@@ -113,7 +115,7 @@ export function InstallButton({ appName }: InstallButtonProps) {
         <span
           id={hintId}
           role="tooltip"
-          className={`absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-border-default bg-surface-elevated px-3 py-2 text-xs leading-snug text-text-secondary shadow-lg transition-opacity ${
+          className={`absolute right-0 top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border-default bg-surface-elevated px-3 py-2 text-xs leading-snug text-text-secondary shadow-lg transition-opacity ${
             bubbleOpen ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >

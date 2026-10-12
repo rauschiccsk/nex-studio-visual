@@ -539,6 +539,7 @@ export default function ProjectDetailPage() {
                 there is a base version to patch (vX.Y.Z+1). */}
             {versions.length > 0 && (
               <button
+                aria-haspopup="dialog"
                 onClick={openFastFix}
                 className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
               >
@@ -715,6 +716,7 @@ export default function ProjectDetailPage() {
           return (
             <>
               <button
+                aria-haspopup="dialog"
                 onClick={() => {
                   setDeleteError(null);
                   setDeleteConfirmText("");
@@ -740,12 +742,12 @@ export default function ProjectDetailPage() {
           GitHub repo, and a mandatory type-DELETE gate before the irreversible action. */}
       {deleteOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-title"
         >
-          <div className="w-full max-w-lg rounded-xl border border-[var(--color-status-error)]/40 bg-[var(--color-canvas)] p-5 shadow-xl">
+          <div className="m-auto w-full max-w-lg rounded-xl border border-[var(--color-status-error)]/40 bg-[var(--color-canvas)] p-5 shadow-xl">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-4 h-4 text-[var(--color-status-error)]" />
               <h3 id="delete-title" className="text-sm font-bold text-[var(--color-text-primary)]">
@@ -827,12 +829,12 @@ export default function ProjectDetailPage() {
           submit auto-creates a PATCH version + starts the short `fast_fix` pipeline, then opens its board. */}
       {fastFixOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="fastfix-title"
         >
-          <div className="w-full max-w-lg rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-5 shadow-xl">
+          <div className="m-auto w-full max-w-lg rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-5 shadow-xl">
             <div className="flex items-center gap-2 mb-1">
               <Zap className="w-4 h-4 text-[var(--color-accent-primary)]" />
               <h3 id="fastfix-title" className="text-sm font-bold text-[var(--color-text-primary)]">Rýchla oprava</h3>

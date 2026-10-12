@@ -21,6 +21,12 @@ export default function CredentialsPage() {
 
   const [selected, setSelected] = useState<CredentialRead | null>(null);
   const [mode, setMode] = useState<Mode>("view");
+  // DEV-62: a phone has room for one column — the list or the chosen access, switched by the tabs on top.
+  // Choosing an access or starting a new one shows it. From the tablet up both stand side by side.
+  const [pane, setPane] = useState<"zoznam" | "pristup">("zoznam");
+  useEffect(() => {
+    if (selected || mode !== "view") setPane("pristup");
+  }, [selected, mode]);
 
   const [content, setContent] = useState<string>("");
   const [contentLoading, setContentLoading] = useState(false);
@@ -182,6 +188,7 @@ export default function CredentialsPage() {
               enabled and clicking it produced nothing at all: the one interaction on screen, silently
               inert, with no hint that the cause was the failed load reported right below it. */}
           <button
+            aria-expanded={mode === "create"}
             onClick={handleStartCreate}
             disabled={accessError !== null}
             title={accessError ? "Zoznam prístupov sa nenačítal — nový sa zatiaľ pridať nedá." : undefined}
@@ -199,9 +206,43 @@ export default function CredentialsPage() {
       )}
 
       {!accessError && (
+        <div
+          role="tablist"
+          aria-label="Čo ukázať"
+          className="flex shrink-0 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+        >
+          {(
+            [
+              ["zoznam", "Prístupy"],
+              ["pristup", "Prístup"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={pane === id}
+              onClick={() => setPane(id)}
+              className={`flex-1 py-2 text-xs font-medium ${
+                pane === id
+                  ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                  : "text-[var(--color-text-muted)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!accessError && (
         <div className="flex flex-1 overflow-hidden">
           {/* Left: list */}
-          <div className="w-72 flex-shrink-0 border-r border-[var(--color-border-default)] overflow-y-auto">
+          <div
+            className={`flex-1 border-r border-[var(--color-border-default)] overflow-y-auto md:w-72 md:flex-none ${
+              pane === "zoznam" ? "" : "max-md:hidden"
+            }`}
+          >
             {loading && <div className="p-4 text-sm text-[var(--color-text-muted)]">Načítavam…</div>}
             {!loading && items.length === 0 && (
               <div className="p-4 text-sm text-[var(--color-text-muted)]">Žiadne prístupy.</div>
@@ -225,7 +266,7 @@ export default function CredentialsPage() {
           </div>
 
           {/* Right: detail / edit / create */}
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className={`min-w-0 flex-1 overflow-y-auto p-5 ${pane === "pristup" ? "" : "max-md:hidden"}`}>
             {mode === "view" && !selected && (
               <div className="text-sm text-[var(--color-text-muted)]">Vyber prístup zo zoznamu alebo vytvor nový.</div>
             )}

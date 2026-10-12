@@ -302,6 +302,7 @@ export default function BacklogPage() {
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Zásobník</h1>
         <button
+          aria-expanded={showNew}
           onClick={() => setShowNew((v) => !v)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded-lg transition-colors"
         >
@@ -442,9 +443,10 @@ export default function BacklogPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-start justify-between gap-3">
+                    {/* DEV-62: on a phone the actions go under the request, so its text keeps the whole width. */}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-mono text-[var(--color-text-muted)]">REQ-{it.number}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_CLS[it.priority]}`}>
                             {PRIORITY_LABEL[it.priority]}

@@ -739,7 +739,7 @@ export default function MetricsPage() {
 
       {/* Idle panel — separate, NEVER mixed into AI time */}
       {scope && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
           <Card
             label="Čakanie na Manažéra (prestoj A)"
             value={fmtDuration(scope.manager_wait_seconds)}
@@ -786,6 +786,7 @@ export default function MetricsPage() {
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Externé náklady</h2>
         <button
+          aria-expanded={showForm}
           onClick={() => {
             resetForm();
             setShowForm((v) => !v);

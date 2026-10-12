@@ -35,12 +35,12 @@ export function InstallHelpDialog({ title, lines, guide, onClose }: InstallHelpD
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4"
       onClick={onClose}
     >
       {/* A click inside the card does not close the dialog - it would close while selecting text. */}
       <div
-        className="w-full max-w-md rounded-lg border border-border-default bg-canvas p-6 shadow-xl"
+        className="m-auto w-full max-w-md rounded-lg border border-border-default bg-canvas p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id={titleId} className="mb-3 text-lg font-bold text-text-primary">

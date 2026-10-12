@@ -165,6 +165,7 @@ export default function ProjectsPage() {
             vlastné tlačidlo. Robiť ho formulárom pre zakladanie znamenalo ručne prepisovať porty,
             repozitár a typ — a keď sa manažér pomýlil, evidencia začala tvrdiť niečo iné než disk. */}
         <button
+          aria-haspopup="dialog"
           onClick={() => setAdoptOpen(true)}
           className="flex items-center gap-1.5 border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
         >

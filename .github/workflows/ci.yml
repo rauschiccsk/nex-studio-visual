@@ -147,6 +147,27 @@ jobs:
           VITE_APP_VERSION: "0.1.${{ github.run_number }}"
         run: npm run build
 
+      # DEV-62: the browser guard. The suite above runs in jsdom, which has no layout, so nothing else measures
+      # whether a page fits a phone. It opens the build above in Chromium at 375, 768 and 1280 px — every page of
+      # the router, every tab, every dialog — with the API answered from typed fixtures (frontend/e2e/).
+      - name: Browser for the layout guard
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Layout guard (phone, tablet, computer)
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Layout guard report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: layout-guard-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 14
+
   contract:
     name: Contract Drift-Gate
     # v0.7.0 R2-c: the BE↔FE contract single-source-of-truth gate. Regenerates the FE pipeline

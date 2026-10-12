@@ -7,7 +7,8 @@
  */
 
 import type { components } from "../src/services/api/pipeline.generated";
-import type { GitStatus, NexsharedStatus } from "../src/services/api/projects";
+import type { AdoptionPreview } from "../src/services/api/deploy";
+import type { AdoptableCandidate, GitStatus, NexsharedStatus } from "../src/services/api/projects";
 import type { KnowledgeDoc } from "../src/types/knowledge";
 import type { TaskPlanResponse } from "../src/types/task-plan";
 import { answer, answerUntyped } from "./api";
@@ -316,6 +317,17 @@ const CUSTOMER: S["CustomerRead"] = {
   updated_at: T1,
 };
 
+/** Added a week ago, nothing installed yet — the row that offers to adopt a hand-written installation. */
+const NEW_CUSTOMER: S["CustomerRead"] = {
+  ...CUSTOMER,
+  id: "55555555-5555-4555-8555-555555555556",
+  name: "Stavebniny Novák",
+  slug: "novak",
+  subdomain: "novak",
+  has_secret: false,
+  notes: null,
+};
+
 const DEPLOY_MATRIX: S["DeployMatrix"] = {
   project_slug: PROJECT.slug,
   auth_mode: "token",
@@ -346,6 +358,23 @@ const DEPLOY_MATRIX: S["DeployMatrix"] = {
       prod_url: "https://magerstav-inbox.icc.sk",
       prod_last_deploy_at: "2026-10-11T19:53:00Z",
       prod_last_deploy_detail: "Nasadené na MAGER; verejná adresa odpovedá.",
+      prod_last_attempt_failed: false,
+    },
+    {
+      customer_id: NEW_CUSTOMER.id,
+      customer_name: NEW_CUSTOMER.name,
+      customer_slug: NEW_CUSTOMER.slug,
+      subdomain: NEW_CUSTOMER.subdomain,
+      accepted_versions: [],
+      uat_version: null,
+      uat_url: null,
+      uat_last_deploy_at: null,
+      uat_last_deploy_detail: null,
+      uat_last_attempt_failed: false,
+      prod_version: null,
+      prod_url: null,
+      prod_last_deploy_at: null,
+      prod_last_deploy_detail: null,
       prod_last_attempt_failed: false,
     },
   ],
@@ -496,6 +525,19 @@ export function registerFixtures(): void {
     changelog: [{ version: "v0.20.0", body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu." }],
   });
   answer("get", "/api/v1/projects/ports/suggest-block", { base: 9300, block_size: 3, warnings: [] });
+  answer("get", "/api/v1/projects/create-presets", {
+    enable_cicd: true,
+    enable_branch_protection: false,
+    branch_protection_available: false,
+    branch_protection_note: "Ochrana hlavnej vetvy potrebuje platený plán GitHubu pre súkromné repozitáre.",
+    full_smoke: true,
+    custom_development_enabled: false,
+    private_network: false,
+  });
+  answerUntyped<AdoptableCandidate[]>("get", "/api/v1/projects/adoptable", [
+    { slug: "nex-ledger", source_path: "/opt/projects/nex-ledger", name: "NEX Ledger" },
+    { slug: "career-asistent-pre-uchadzacov-o-zamestnanie", source_path: "/opt/projects/career-asistent", name: null },
+  ]);
   answer("get", "/api/v1/versions/{version_id}", VERSION);
   answer("get", "/api/v1/versions/{version_id}/nastavenia", { version_number_lock_reason: null });
   answerUntyped<TaskPlanResponse>("get", "/api/v1/versions/{version_id}/task-plan", TASK_PLAN);
@@ -545,8 +587,23 @@ export function registerFixtures(): void {
     skip: 0,
     limit: 50,
   });
-  answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER]);
+  answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER, NEW_CUSTOMER]);
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
+  answerUntyped<AdoptionPreview>("get", "/api/v1/customers/{customer_id}/adoption-preview", {
+    instance_dir: "/opt/uat/novak/nex-inbox",
+    exists: true,
+    already_ours: false,
+    set_aside: [
+      ["docker-compose.yml", "docker-compose.yml.pred-prevzatim"],
+      [".env", ".env.pred-prevzatim"],
+    ],
+    untouched: ["data/", "originals/", "backups/nex_inbox-2026-10-01.dump"],
+    running_containers: ["novak-inbox-backend", "novak-inbox-frontend", "novak-inbox-postgres"],
+    carried_over: ["POSTGRES_PASSWORD", "IMAP_PASSWORD", "MANAGER_LAUNCH_SIGNING_KEY"],
+    blocking: [],
+    confirmation_phrase: "prevziať novak",
+    can_adopt: true,
+  });
   answer("get", "/api/v1/projects/{slug}/external-costs", [
     {
       id: "77777777-7777-4777-8777-777777777771",

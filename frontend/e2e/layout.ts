@@ -8,10 +8,16 @@
  *    frame that scrolls sideways on purpose — a table's frame, a code block, or a box marked `data-scroll-x`, with
  *    `overflow-x: auto` or `scroll` — whose content may be wider; the frame itself must fit. A frame that only
  *    hides its overflow is no exception: what it hides, a finger cannot reach.
- * 3. Every control (button, link, field, tab) can be reached: scrolled into view, the point in its middle hits the
+ * 3. No text is squeezed: a sentence of four words or more that wraps almost word by word (1.5 words a line or
+ *    fewer) stands in a column too narrow to read — nothing sticks out, and yet nobody can use it.
+ * 4. Every control (button, link, field, tab) can be reached: scrolled into view, the point in its middle hits the
  *    control itself, not something lying over it. On a touch screen it is at least {@link TOUCH_PX} px in both
- *    directions — except a link inside running text, which is as tall as its line.
+ *    directions — except a link inside running text, which is as tall as its line. While a modal dialog is open,
+ *    the controls inside it.
  */
+
+/** What opens something more on a page: a dialog, or content folded away. Each is opened and measured too. */
+export const OPENERS = 'main [aria-haspopup="dialog"]:not(:disabled):visible, main [aria-expanded="false"]:not(:disabled):visible';
 
 import type { Page } from "@playwright/test";
 
@@ -19,7 +25,7 @@ import type { Page } from "@playwright/test";
 export const TOUCH_PX = 44;
 
 export interface Problem {
-  rule: "page-scrolls-sideways" | "sticks-out" | "covered" | "too-small-to-touch";
+  rule: "page-scrolls-sideways" | "sticks-out" | "squeezed" | "covered" | "too-small-to-touch";
   what: string;
   detail: string;
 }
@@ -76,14 +82,17 @@ function measure(touchPx: number): Problem[] {
     let clippedBy: Element | null = null;
     for (let a = from; a && a !== document.body; a = a.parentElement) {
       if (offenders.has(a)) return null;
-      if (!clips(a)) continue;
-      if (scrollsSidewaysOnPurpose(a)) return null;
-      const r = a.getBoundingClientRect();
-      if (r.left > left) left = r.left;
-      if (r.right < right) {
-        right = r.right;
-        clippedBy = a;
+      if (clips(a)) {
+        if (scrollsSidewaysOnPurpose(a)) return null;
+        const r = a.getBoundingClientRect();
+        if (r.left > left) left = r.left;
+        if (r.right < right) {
+          right = r.right;
+          clippedBy = a;
+        }
       }
+      // A fixed box (a dialog, the drawer) is placed against the screen: the boxes around it do not cut it off.
+      if (getComputedStyle(a).position === "fixed") break;
     }
     return { left, right, clippedBy };
   };
@@ -97,7 +106,8 @@ function measure(touchPx: number): Problem[] {
   };
   for (const el of Array.from(document.body.querySelectorAll("*"))) {
     if (!shown(el)) continue;
-    const room = roomIn(el.parentElement);
+    const room =
+      getComputedStyle(el).position === "fixed" ? { left: 0, right: vw, clippedBy: null } : roomIn(el.parentElement);
     if (!room) continue;
     const r = el.getBoundingClientRect();
     if (r.right > room.right + EDGE || r.left < room.left - EDGE) {
@@ -126,11 +136,30 @@ function measure(touchPx: number): Problem[] {
   }
 
   // Rule 3.
+  const squeezed = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = squeezed.nextNode(); node; node = squeezed.nextNode()) {
+    const parent = node.parentElement;
+    const words = (node.textContent ?? "").trim().split(/\s+/).filter(Boolean).length;
+    if (!parent || words < 4 || !shown(parent)) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const lines = new Set(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    if (lines >= 3 && words / lines <= 1.5) {
+      problems.push({
+        rule: "squeezed",
+        what: `text „${(node.textContent ?? "").trim().slice(0, 40)}“ in ${describe(parent)}`,
+        detail: `${words} words on ${lines} lines, ${Math.round(parent.getBoundingClientRect().width)} px wide`,
+      });
+    }
+  }
+
+  // Rule 4. While a modal dialog is open, only its own controls can be reached — the rest lies under its backdrop.
+  const modal = Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).filter(shown).pop();
   const controls = Array.from(
     document.body.querySelectorAll(
       'button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="tab"], [role="link"], [role="switch"], [role="checkbox"]',
     ),
-  ).filter(shown);
+  ).filter((el) => shown(el) && (!modal || modal.contains(el)));
   for (const el of controls) {
     if (Array.from(offenders).some((o) => o.contains(el))) continue; // reported as sticking out
     const html = el as HTMLElement;
