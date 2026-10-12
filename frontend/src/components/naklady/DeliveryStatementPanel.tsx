@@ -14,8 +14,11 @@ import {
   downloadStatementCsv,
   getDeliveryStatement,
   issueDeliveryStatement,
+  setBillingRates,
   setWorkKind,
   type DeliveryStatementView,
+  type RateChange,
+  type StatementPreview,
 } from "@/services/api/deliveryStatements";
 import { WORK_KIND_OPTIONS, type WorkKind } from "@/lib/workKind";
 
@@ -26,6 +29,138 @@ const when = (iso: string) => new Date(iso).toLocaleString("sk-SK");
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / 1 000 tokenov`;
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
+
+/** A rate as typed — with a decimal comma or point; "" = back to Nastavenia; `undefined` = not a rate. */
+function parseRate(text: string): string | null | undefined {
+  const t = text.trim().replace(",", ".");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? t : undefined;
+}
+
+/**
+ * DEV-74 — the rates this version's statement counts with: its own, or those in Nastavenia; changed here for this
+ * version only. An issued statement keeps its rates — a new one replacing it counts with the new ones.
+ */
+function VersionRates({
+  preview,
+  changes,
+  busy,
+  onSave,
+}: {
+  preview: StatementPreview;
+  changes: RateChange[];
+  busy: boolean;
+  onSave: (code: string | null, docs: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [docs, setDocs] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const own = preview.rate_code_own || preview.rate_docs_own;
+  const last = changes[0];
+  const source = (isOwn: boolean, settings: string) =>
+    isOwn ? `vlastná, v Nastaveniach ${rate(settings)}` : "z Nastavení";
+
+  function start() {
+    setCode(preview.rate_code_own ? Number(preview.rate_code).toString().replace(".", ",") : "");
+    setDocs(preview.rate_docs_own ? Number(preview.rate_docs).toString().replace(".", ",") : "");
+    setInvalid(false);
+    setOpen(true);
+  }
+
+  function save(c: string, d: string) {
+    const pc = parseRate(c);
+    const pd = parseRate(d);
+    if (pc === undefined || pd === undefined) {
+      setInvalid(true);
+      return;
+    }
+    onSave(pc, pd);
+    setOpen(false);
+  }
+
+  return (
+    <div className="mb-3 rounded border border-[var(--color-border-default)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+      <div>
+        Sadzby tejto verzie: kód a skúšky {rate(preview.rate_code)} ({source(preview.rate_code_own, preview.settings_rate_code)}
+        ), dokumentácia {rate(preview.rate_docs)} ({source(preview.rate_docs_own, preview.settings_rate_docs)}).
+      </div>
+      {last && (
+        <div>
+          Naposledy zmenil{last.changed_by ? ` ${last.changed_by}` : "i"} {when(last.created_at)}: kód{" "}
+          {last.previous_rate_code ? rate(last.previous_rate_code) : "z Nastavení"} →{" "}
+          {last.rate_code ? rate(last.rate_code) : "z Nastavení"}, dokumentácia{" "}
+          {last.previous_rate_docs ? rate(last.previous_rate_docs) : "z Nastavení"} →{" "}
+          {last.rate_docs ? rate(last.rate_docs) : "z Nastavení"}.
+        </div>
+      )}
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => (open ? setOpen(false) : start())}
+        className="mt-1 text-primary-400 hover:text-primary-300 disabled:opacity-50"
+      >
+        {open ? "Zrušiť zmenu sadzieb" : "Zmeniť sadzby pre túto verziu"}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-[var(--color-text-secondary)]">Kód a skúšky (€ / 1 000 tokenov)</span>
+              <input
+                inputMode="decimal"
+                spellCheck={false}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder={`z Nastavení: ${Number(preview.settings_rate_code).toLocaleString("sk-SK")}`}
+                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[var(--color-text-secondary)]">Dokumentácia (€ / 1 000 tokenov)</span>
+              <input
+                inputMode="decimal"
+                spellCheck={false}
+                value={docs}
+                onChange={(e) => setDocs(e.target.value)}
+                placeholder={`z Nastavení: ${Number(preview.settings_rate_docs).toLocaleString("sk-SK")}`}
+                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+              />
+            </label>
+          </div>
+          {invalid && (
+            <p role="alert" className="text-[var(--color-state-error-fg)]">
+              Sadzba musí byť číslo väčšie ako 0 — prázdne pole znamená sadzbu z Nastavení.
+            </p>
+          )}
+          <p>Prázdne pole = sadzba z Nastavení. Vydaný súpis sa nezmení — novú sadzbu použije až súpis, ktorý ho nahradí.</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => save(code, docs)}
+              className="rounded bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
+            >
+              Uložiť sadzby
+            </button>
+            {own && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => save("", "")}
+                className="rounded border border-[var(--color-border-default)] px-2.5 py-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+              >
+                Vrátiť sadzby z Nastavení
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DeliveryStatementPanel({
   versionId,
@@ -166,6 +301,14 @@ export default function DeliveryStatementPanel({
               </tr>
             </tbody>
           </table>
+          <VersionRates
+            preview={p}
+            changes={view?.rate_changes ?? []}
+            busy={busy}
+            onSave={(code, docs) =>
+              act(() => setBillingRates(versionId, { rate_code: code, rate_docs: docs }), "Sadzby sa nepodarilo uložiť")
+            }
+          />
           <p className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]" data-testid="statement-amount">
             Suma: {eur(p.amount_eur)}
             {p.work_kind === "fix" && (

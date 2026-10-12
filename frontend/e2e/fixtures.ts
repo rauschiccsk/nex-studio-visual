@@ -887,13 +887,16 @@ export function registerFixtures(): void {
     tokens_docs: 1_830,
     issued: null,
     differs: false,
+    rate_code: "2",
+    rate_docs: "1",
+    own_rates: false,
   };
   answer("get", "/api/v1/projects/{slug}/billing", {
     rows: [
       { ...billingRow, version_id: VERSION.id, version_number: "1.8.0", state: "not_done", reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", delivered_sha: null, base_sha: null, preview_amount_eur: null, tokens_code: null, tokens_docs: null },
       { ...billingRow, version_id: RELEASED.id, version_number: "1.7.1", flow_type: "fast_fix", work_kind: "fix", state: "issued", issued: issued("0.00", "fix"), preview_amount_eur: "0.00" },
       { ...billingRow, version_id: "22222222-2222-4222-8222-222222222170", version_number: "1.7.0", state: "issued", issued: issued("249.98", "change"), preview_amount_eur: "423.87", differs: true },
-      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222160", version_number: "1.6.0", state: "ready", preview_amount_eur: "124.06" },
+      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222160", version_number: "1.6.0", state: "ready", preview_amount_eur: "93.03", rate_code: "1.5", own_rates: true },
       {
         ...billingRow,
         version_id: "22222222-2222-4222-8222-222222222156",
@@ -941,6 +944,10 @@ export function registerFixtures(): void {
       ],
       rate_code: "0.012",
       rate_docs: "0.006",
+      settings_rate_code: "0.002",
+      settings_rate_docs: "0.006",
+      rate_code_own: true,
+      rate_docs_own: false,
       amount_code_eur: "2208.00",
       amount_docs_eur: "246.00",
       amount_eur: "2454.00",
@@ -948,5 +955,15 @@ export function registerFixtures(): void {
       calibration: { eur_code: 2208, eur_docs: 246, per_1k_code: 12, per_1k_docs: 6, complete: true },
     },
     issued: [],
+    rate_changes: [
+      {
+        created_at: T2,
+        changed_by: "Mária Manažérová",
+        previous_rate_code: null,
+        previous_rate_docs: null,
+        rate_code: "0.012",
+        rate_docs: null,
+      },
+    ],
   });
 }

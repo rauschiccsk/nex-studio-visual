@@ -9,6 +9,7 @@
  *   - ``PUT  /versions/{id}/work-kind``            → setWorkKind
  *   - ``GET  /delivery-statements/{id}/csv``       → downloadStatementCsv
  *   - ``GET  /projects/{slug}/billing``           → getProjectBilling (DEV-73, every version for invoicing)
+ *   - ``PUT  /versions/{id}/billing-rates``       → setBillingRates (DEV-74, the version's own rates)
  */
 
 import api, { downloadFile } from "../api";
@@ -53,6 +54,11 @@ export interface StatementPreview {
   files: DeliveredFile[];
   rate_code: string;
   rate_docs: string;
+  /** DEV-74 — the rates in Nastavenia, and whether this version counts with its own instead. */
+  settings_rate_code: string;
+  settings_rate_docs: string;
+  rate_code_own: boolean;
+  rate_docs_own: boolean;
   /** € per line, each rounded to cents; ``amount_eur`` is their sum. Null while the work kind is undecided. */
   amount_code_eur: string | null;
   amount_docs_eur: string | null;
@@ -86,6 +92,18 @@ export interface IssuedStatement {
 export interface DeliveryStatementView {
   preview: StatementPreview;
   issued: IssuedStatement[];
+  /** DEV-74 — every change of the version's own rates, the newest first. */
+  rate_changes: RateChange[];
+}
+
+/** DEV-74 — one change of a version's own rates; null = the rate in Nastavenia. */
+export interface RateChange {
+  created_at: string;
+  changed_by: string | null;
+  previous_rate_code: string | null;
+  previous_rate_docs: string | null;
+  rate_code: string | null;
+  rate_docs: string | null;
 }
 
 /** DEV-73 — one version on the billing tab: where it stands for invoicing. */
@@ -108,6 +126,10 @@ export interface BillingRow {
   issued: IssuedStatement | null;
   /** Issued, but counted today the amount would differ (other rates or delivery). */
   differs: boolean;
+  /** DEV-74 — the rates the version counts with now, and whether it has one of its own. */
+  rate_code: string | null;
+  rate_docs: string | null;
+  own_rates: boolean;
 }
 
 export interface BillingOverview {
@@ -122,6 +144,14 @@ export interface BillingOverview {
 /** DEV-73 — every version of the project for invoicing, the newest first. */
 export function getProjectBilling(slug: string): Promise<BillingOverview> {
   return api.get<BillingOverview>(`/projects/${slug}/billing`);
+}
+
+/** DEV-74 — the version's own token rates; null = back to the rate in Nastavenia. Returns every change. */
+export function setBillingRates(
+  versionId: string,
+  rates: { rate_code: string | null; rate_docs: string | null },
+): Promise<RateChange[]> {
+  return api.put<RateChange[]>(`/versions/${versionId}/billing-rates`, rates);
 }
 
 export function getDeliveryStatement(versionId: string): Promise<DeliveryStatementView> {

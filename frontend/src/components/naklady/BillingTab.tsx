@@ -117,6 +117,14 @@ export default function BillingTab({ slug }: { slug: string }) {
                       {row.issued ? ` ${day(row.issued.created_at)}` : ""}
                     </span>
                     <span className="text-xs text-[var(--color-text-secondary)]">{kindLabel(row)}</span>
+                    {row.own_rates && (
+                      <span
+                        className="rounded-full border border-[var(--color-border-default)] px-2 py-0.5 text-[10px] text-[var(--color-text-secondary)]"
+                        title="Táto verzia počíta s vlastnou sadzbou namiesto sadzby z Nastavení."
+                      >
+                        vlastná sadzba
+                      </span>
+                    )}
                   </div>
                   {row.delivered_sha && (
                     <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">

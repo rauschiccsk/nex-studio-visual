@@ -35,6 +35,7 @@ from backend.core.local_time import local_time
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
 from backend.services import delivered_tokens, metrics, pipeline_metrics, system_setting
 
@@ -186,10 +187,69 @@ def base_commit(db: Session, version: Version, repo: Path, delivered: str) -> Op
     return resolve_base(repo, base_plan(db, version), delivered)
 
 
-def _rates(db: Session) -> tuple[Decimal, Decimal]:
+def settings_rates(db: Session) -> tuple[Decimal, Decimal]:
+    """The rates in Nastavenia — code and tests, documentation — per 1 000 tokens."""
     return (
         Decimal(str(system_setting.get_float(db, RATE_CODE_KEY))),
         Decimal(str(system_setting.get_float(db, RATE_DOCS_KEY))),
+    )
+
+
+def _rates(db: Session, version: Optional[Version] = None) -> tuple[Decimal, Decimal]:
+    """The rates a version's statement counts with: its own where it has one (DEV-74), else Nastavenia."""
+    code, docs = settings_rates(db)
+    if version is not None and version.rate_code is not None:
+        code = Decimal(version.rate_code)
+    if version is not None and version.rate_docs is not None:
+        docs = Decimal(version.rate_docs)
+    return code, docs
+
+
+#: DEV-74 — a version's own rate keeps the places the database keeps.
+RATE_PLACES = Decimal("0.0001")
+RATE_NOT_POSITIVE = "Sadzba musí byť väčšia ako 0 € — prázdna znamená sadzbu z Nastavení."
+
+
+def set_rates(
+    db: Session, version: Version, rate_code: Optional[Decimal], rate_docs: Optional[Decimal], changed_by
+) -> Optional[VersionRateChange]:
+    """Set (or, with ``None``, return to Nastavenia) a version's own rates and keep the change — who, when, from what
+    to what. An issued statement keeps the rates it was issued with; only a new one replacing it counts with these.
+    Returns the recorded change, ``None`` when nothing changed."""
+    new = []
+    for value in (rate_code, rate_docs):
+        if value is None:
+            new.append(None)
+            continue
+        value = Decimal(value)
+        if value <= 0:
+            raise ValueError(RATE_NOT_POSITIVE)
+        new.append(value.quantize(RATE_PLACES, rounding=ROUND_HALF_UP))
+    previous = [version.rate_code, version.rate_docs]
+    if [None if v is None else Decimal(v) for v in previous] == new:
+        return None
+    change = VersionRateChange(
+        version_id=version.id,
+        previous_rate_code=previous[0],
+        previous_rate_docs=previous[1],
+        rate_code=new[0],
+        rate_docs=new[1],
+        changed_by=changed_by,
+    )
+    version.rate_code, version.rate_docs = new
+    db.add(change)
+    db.flush()
+    return change
+
+
+def rate_changes(db: Session, version_id: uuid.UUID) -> list[VersionRateChange]:
+    """Every change of a version's own rates, the newest first."""
+    return list(
+        db.execute(
+            select(VersionRateChange)
+            .where(VersionRateChange.version_id == version_id)
+            .order_by(VersionRateChange.created_at.desc())
+        ).scalars()
     )
 
 
@@ -267,6 +327,11 @@ class Preview:
     count: Optional[delivered_tokens.Count] = None
     rate_code: Decimal = Decimal("0")
     rate_docs: Decimal = Decimal("0")
+    #: DEV-74 — the rates in Nastavenia, and whether the version counts with its own instead.
+    settings_rate_code: Decimal = Decimal("0")
+    settings_rate_docs: Decimal = Decimal("0")
+    rate_code_own: bool = False
+    rate_docs_own: bool = False
     amounts: Optional[Amounts] = None
     cannot_issue: list[str] = field(default_factory=list)
     calibration: Optional[Calibration] = None
@@ -274,7 +339,9 @@ class Preview:
 
 def preview(db: Session, version: Version, repo: Path) -> Preview:
     out = Preview(version_number=version.version_number, work_kind=work_kind(db, version))
-    out.rate_code, out.rate_docs = _rates(db)
+    out.rate_code, out.rate_docs = _rates(db, version)
+    out.settings_rate_code, out.settings_rate_docs = settings_rates(db)
+    out.rate_code_own, out.rate_docs_own = version.rate_code is not None, version.rate_docs is not None
     if not _is_done(db, version):
         out.blocked = NOT_DONE
         return out

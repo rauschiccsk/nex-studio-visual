@@ -31,6 +31,8 @@ from backend.schemas.delivery_statement import (
     IssuedStatementRead,
     IssueStatementWrite,
     KindTotalRead,
+    RateChangeRead,
+    RatesWrite,
     StatementPreviewRead,
     WorkKindRead,
     WorkKindWrite,
@@ -66,6 +68,10 @@ def _preview_read(p: statements.Preview) -> StatementPreviewRead:
         files=[DeliveredFileRead(**f) for f in statements.files_payload(p.count)] if p.count else [],
         rate_code=p.rate_code,
         rate_docs=p.rate_docs,
+        settings_rate_code=p.settings_rate_code,
+        settings_rate_docs=p.settings_rate_docs,
+        rate_code_own=p.rate_code_own,
+        rate_docs_own=p.rate_docs_own,
         amount_code_eur=p.amounts.code if p.amounts else None,
         amount_docs_eur=p.amounts.docs if p.amounts else None,
         amount_eur=p.amounts.total if p.amounts else None,
@@ -114,6 +120,9 @@ def get_billing(
             preview_amount_eur=p.amounts.total if p.amounts else None,
             issued=IssuedStatementRead.model_validate(r.valid) if r.valid else None,
             differs=r.differs,
+            rate_code=p.rate_code,
+            rate_docs=p.rate_docs,
+            own_rates=p.rate_code_own or p.rate_docs_own,
         )
 
     issued_total = sum((r.valid.amount_eur for r in rows if r.valid), Decimal("0"))
@@ -136,8 +145,48 @@ def get_statement(
     """The statement as it would be issued now, and the ones already issued (the valid one first)."""
     version = authz.assert_version_access(db, current_user, version_id)
     return DeliveryStatementView(
-        preview=_preview_read(statements.preview(db, version, _repo(db, version))), issued=_issued(db, version_id)
+        preview=_preview_read(statements.preview(db, version, _repo(db, version))),
+        issued=_issued(db, version_id),
+        rate_changes=_rate_changes(db, version_id),
     )
+
+
+def _person(user: Optional[User]) -> Optional[str]:
+    if user is None:
+        return None
+    return " ".join(part for part in (user.first_name, user.last_name) if part) or user.username
+
+
+def _rate_changes(db: Session, version_id: UUID) -> list[RateChangeRead]:
+    return [
+        RateChangeRead(
+            created_at=c.created_at,
+            changed_by=_person(db.get(User, c.changed_by) if c.changed_by else None),
+            previous_rate_code=c.previous_rate_code,
+            previous_rate_docs=c.previous_rate_docs,
+            rate_code=c.rate_code,
+            rate_docs=c.rate_docs,
+        )
+        for c in statements.rate_changes(db, version_id)
+    ]
+
+
+@router.put("/versions/{version_id}/billing-rates", response_model=list[RateChangeRead])
+def set_billing_rates(
+    version_id: UUID,
+    payload: RatesWrite,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> list[RateChangeRead]:
+    """DEV-74 — the version's own token rates (``null`` = back to Nastavenia). An issued statement keeps its rates;
+    only a new statement that replaces it counts with these. Returns every change, the newest first."""
+    version = authz.assert_version_access(db, current_user, version_id)
+    try:
+        statements.set_rates(db, version, payload.rate_code, payload.rate_docs, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    db.commit()
+    return _rate_changes(db, version_id)
 
 
 @router.post(

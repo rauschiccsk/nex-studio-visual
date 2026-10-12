@@ -56,6 +56,11 @@ class StatementPreviewRead(BaseModel):
     files: list[DeliveredFileRead] = []
     rate_code: Decimal
     rate_docs: Decimal
+    # DEV-74 — the rates in Nastavenia, and whether this version counts with its own instead.
+    settings_rate_code: Decimal = Decimal("0")
+    settings_rate_docs: Decimal = Decimal("0")
+    rate_code_own: bool = False
+    rate_docs_own: bool = False
     #: € per line — code and tests, documentation — each rounded to cents; ``amount_eur`` is their sum.
     #: ``None`` while the work kind is undecided.
     amount_code_eur: Optional[Decimal] = None
@@ -90,9 +95,28 @@ class IssuedStatementRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RateChangeRead(BaseModel):
+    """DEV-74 — one change of a version's own rates; ``None`` = the rate in Nastavenia."""
+
+    created_at: datetime
+    changed_by: Optional[str] = Field(default=None, description="Who changed them — the person's name.")
+    previous_rate_code: Optional[Decimal] = None
+    previous_rate_docs: Optional[Decimal] = None
+    rate_code: Optional[Decimal] = None
+    rate_docs: Optional[Decimal] = None
+
+
+class RatesWrite(BaseModel):
+    """DEV-74 — a version's own rates per 1 000 tokens; ``null`` = back to the rate in Nastavenia."""
+
+    rate_code: Optional[Decimal] = None
+    rate_docs: Optional[Decimal] = None
+
+
 class DeliveryStatementView(BaseModel):
     preview: StatementPreviewRead
     issued: list[IssuedStatementRead]
+    rate_changes: list[RateChangeRead] = Field(default_factory=list, description="DEV-74, the newest first.")
 
 
 class IssueStatementWrite(BaseModel):
@@ -126,6 +150,9 @@ class BillingRowRead(BaseModel):
     preview_amount_eur: Optional[Decimal] = Field(default=None, description="What a statement issued now would say.")
     issued: Optional[IssuedStatementRead] = Field(default=None, description="The valid statement, if any.")
     differs: bool = Field(default=False, description="Issued, but counted today the amount would differ.")
+    rate_code: Optional[Decimal] = Field(default=None, description="DEV-74: the rates the version counts with now.")
+    rate_docs: Optional[Decimal] = None
+    own_rates: bool = Field(default=False, description="DEV-74: the version has a rate of its own.")
 
 
 class BillingOverviewRead(BaseModel):

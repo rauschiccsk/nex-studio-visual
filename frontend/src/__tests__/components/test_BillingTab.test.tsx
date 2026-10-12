@@ -42,6 +42,9 @@ const row = (over: Partial<BillingRow>): BillingRow => ({
   preview_amount_eur: "1.00",
   issued: null,
   differs: false,
+  rate_code: "2",
+  rate_docs: "1",
+  own_rates: false,
   ...over,
 });
 

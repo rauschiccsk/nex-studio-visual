@@ -80,6 +80,39 @@ def _alembic_config(db_url: str, monkeypatch) -> Config:
     return config
 
 
+def _seed_versions(engine: Engine, slug: str, *version_numbers: str) -> list:
+    """An owner, a project and its versions, inserted with plain SQL into a database stopped at an old migration.
+
+    The ORM models describe the newest schema: a column added later (``versions.rate_code``, migration 117) is part
+    of their INSERT and the old schema refuses it. A migration test seeds its rows here, naming only the columns
+    every revision it stops at has. Returns the version ids in the order given."""
+    with engine.begin() as conn:
+        owner = conn.execute(
+            text(
+                "INSERT INTO users (id, username, email, password_hash, role) "
+                "VALUES (gen_random_uuid(), :name, :email, 'x', 'ri') RETURNING id"
+            ),
+            {"name": f"u-{slug}", "email": f"u-{slug}@t.sk"},
+        ).scalar()
+        project = conn.execute(
+            text(
+                "INSERT INTO projects (id, name, slug, type, auth_mode, description, created_by) "
+                "VALUES (gen_random_uuid(), 'P', :slug, 'standard', 'password', '', :owner) RETURNING id"
+            ),
+            {"slug": slug, "owner": owner},
+        ).scalar()
+        return [
+            conn.execute(
+                text(
+                    "INSERT INTO versions (id, project_id, version_number, name, status) "
+                    "VALUES (gen_random_uuid(), :project, :number, :number, 'active') RETURNING id"
+                ),
+                {"project": project, "number": number},
+            ).scalar()
+            for number in version_numbers
+        ]
+
+
 @pytest.fixture()
 def upgraded_engine(monkeypatch) -> Engine:
     """Create a clean DB and run ``alembic upgrade 023`` against it."""

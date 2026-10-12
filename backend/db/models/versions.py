@@ -9,6 +9,7 @@ from sqlalchemy import (
     Column,
     Date,
     ForeignKey,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -44,6 +45,10 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # says), never billed; ``change`` — new work or a change, billed. NULL = not decided: a new version counts as
     # ``change``, a fast fix must be decided by the Manažér before its delivered-token statement is issued.
     work_kind = Column(String(10), nullable=True)
+    # DEV-74: the version's own token rates for its delivery statement (per 1 000 tokens) — code and tests,
+    # documentation; NULL = the rate in Nastavenia. Every change is kept in ``version_rate_changes``.
+    rate_code = Column(Numeric(12, 4), nullable=True)
+    rate_docs = Column(Numeric(12, 4), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -56,6 +61,8 @@ class Version(Base, UUIDMixin, TimestampMixin):
             name="ck_versions_status",
         ),
         CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change')", name="ck_versions_work_kind"),
+        # DEV-74: an own rate is a price — empty means Nastavenia, zero is no rate.
+        CheckConstraint("rate_code > 0 AND rate_docs > 0", name="ck_versions_rates_positive"),
     )
 
     # Relationship to the owning Project. The inverse side ``Project.versions``

@@ -557,13 +557,13 @@ def test_an_issued_statement_gets_its_lines_only_where_they_add_up_to_its_total(
     and never touches a total: a statement whose lines would not add up to it keeps its total alone."""
     from alembic import command
     from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import Session
 
     from tests.test_migration_versions import (
         _alembic_config,
         _create_clean_database,
         _drop_database_if_exists,
         _get_test_database_url,
+        _seed_versions,
     )
 
     base_url = _get_test_database_url()
@@ -576,19 +576,7 @@ def test_an_issued_statement_gets_its_lines_only_where_they_add_up_to_its_total(
     try:
         config = _alembic_config(db_url, monkeypatch)
         command.upgrade(config, "110")
-        with Session(engine) as db:
-            owner = User(username="u111", email="u111@t.sk", password_hash="x", role="ri")
-            db.add(owner)
-            db.flush()
-            proj = Project(
-                name="P", slug="p111", type="standard", auth_mode="password", description="", created_by=owner.id
-            )
-            db.add(proj)
-            db.flush()
-            version = Version(project_id=proj.id, version_number="1.7.0", name="1.7.0", status="active")
-            db.add(version)
-            db.commit()
-            version_id = version.id
+        (version_id,) = _seed_versions(engine, "p111", "1.7.0")
         issued = {
             # the Director's NEX Inbox 1.7.0 — lines 347,78 + 76,09 = 423,87
             "director": ("change", 94321, 79569, 76087, "2", "1", "423.87"),

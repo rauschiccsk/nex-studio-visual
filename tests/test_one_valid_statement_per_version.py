@@ -16,9 +16,7 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.db.models.delivery_statement import DeliveryStatement
-from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.db.models.versions import Version
 from backend.services import delivery_statement as st
 from tests.test_delivered_tokens_statement import _as, _issued, _rates, project  # noqa: F401 — the fixture
 
@@ -158,13 +156,13 @@ def test_statements_issued_before_are_read_as_each_issue_replacing_the_one_befor
     from alembic import command
     from sqlalchemy import create_engine, text
     from sqlalchemy.exc import DBAPIError
-    from sqlalchemy.orm import Session
 
     from tests.test_migration_versions import (
         _alembic_config,
         _create_clean_database,
         _drop_database_if_exists,
         _get_test_database_url,
+        _seed_versions,
     )
 
     base_url = _get_test_database_url()
@@ -177,20 +175,7 @@ def test_statements_issued_before_are_read_as_each_issue_replacing_the_one_befor
     try:
         config = _alembic_config(db_url, monkeypatch)
         command.upgrade(config, "111")
-        with Session(engine) as db:
-            owner = User(username="u112", email="u112@t.sk", password_hash="x", role="ri")
-            db.add(owner)
-            db.flush()
-            proj = Project(
-                name="P", slug="p112", type="standard", auth_mode="password", description="", created_by=owner.id
-            )
-            db.add(proj)
-            db.flush()
-            inbox = Version(project_id=proj.id, version_number="1.7.0", name="1.7.0", status="active")
-            other = Version(project_id=proj.id, version_number="1.6.0", name="1.6.0", status="active")
-            db.add_all([inbox, other])
-            db.commit()
-            inbox_id, other_id = inbox.id, other.id
+        inbox_id, other_id = _seed_versions(engine, "p112", "1.7.0", "1.6.0")
         issued = [
             # (version, delivered_sha as a name, issued at, total)
             (inbox_id, "prvy", ISSUED_AT, "423.87"),

@@ -3048,6 +3048,27 @@ export interface paths {
         patch: operations["update_version_api_v1_versions__version_id__patch"];
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/billing-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Billing Rates
+         * @description DEV-74 — the version's own token rates (``null`` = back to Nastavenia). An issued statement keeps its rates;
+         *     only a new statement that replaces it counts with these. Returns every change, the newest first.
+         */
+        put: operations["set_billing_rates_api_v1_versions__version_id__billing_rates_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}/delivery-statement": {
         parameters: {
             query?: never;
@@ -3578,10 +3599,23 @@ export interface components {
             /** @description The valid statement, if any. */
             issued?: components["schemas"]["IssuedStatementRead"] | null;
             /**
+             * Own Rates
+             * @description DEV-74: the version has a rate of its own.
+             * @default false
+             */
+            own_rates: boolean;
+            /**
              * Preview Amount Eur
              * @description What a statement issued now would say.
              */
             preview_amount_eur?: string | null;
+            /**
+             * Rate Code
+             * @description DEV-74: the rates the version counts with now.
+             */
+            rate_code?: string | null;
+            /** Rate Docs */
+            rate_docs?: string | null;
             /** Reason */
             reason?: string | null;
             /**
@@ -4613,6 +4647,11 @@ export interface components {
             /** Issued */
             issued: components["schemas"]["IssuedStatementRead"][];
             preview: components["schemas"]["StatementPreviewRead"];
+            /**
+             * Rate Changes
+             * @description DEV-74, the newest first.
+             */
+            rate_changes?: components["schemas"]["RateChangeRead"][];
         };
         /**
          * DeployBlock
@@ -6709,6 +6748,40 @@ export interface components {
             status?: ("active" | "archived" | "paused") | null;
         };
         /**
+         * RateChangeRead
+         * @description DEV-74 — one change of a version's own rates; ``None`` = the rate in Nastavenia.
+         */
+        RateChangeRead: {
+            /**
+             * Changed By
+             * @description Who changed them — the person's name.
+             */
+            changed_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Previous Rate Code */
+            previous_rate_code?: string | null;
+            /** Previous Rate Docs */
+            previous_rate_docs?: string | null;
+            /** Rate Code */
+            rate_code?: string | null;
+            /** Rate Docs */
+            rate_docs?: string | null;
+        };
+        /**
+         * RatesWrite
+         * @description DEV-74 — a version's own rates per 1 000 tokens; ``null`` = back to the rate in Nastavenia.
+         */
+        RatesWrite: {
+            /** Rate Code */
+            rate_code?: number | string | null;
+            /** Rate Docs */
+            rate_docs?: number | string | null;
+        };
+        /**
          * ReleaseNote
          * @description One version's user-facing release notes.
          *
@@ -6810,8 +6883,28 @@ export interface components {
             files: components["schemas"]["DeliveredFileRead"][];
             /** Rate Code */
             rate_code: string;
+            /**
+             * Rate Code Own
+             * @default false
+             */
+            rate_code_own: boolean;
             /** Rate Docs */
             rate_docs: string;
+            /**
+             * Rate Docs Own
+             * @default false
+             */
+            rate_docs_own: boolean;
+            /**
+             * Settings Rate Code
+             * @default 0
+             */
+            settings_rate_code: string;
+            /**
+             * Settings Rate Docs
+             * @default 0
+             */
+            settings_rate_docs: string;
             tests?: components["schemas"]["KindTotalRead"] | null;
             /** Tokenizer */
             tokenizer: string;
@@ -12897,6 +12990,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_billing_rates_api_v1_versions__version_id__billing_rates_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatesWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateChangeRead"][];
                 };
             };
             /** @description Validation Error */

@@ -15,3 +15,10 @@ od najnovšej a pri každej, či je jej súpis dodávky vydaný, pripravený na 
 (pri rýchlej oprave, či opravovala chybu, alebo robila zmenu). K tomu sumu a hore súčty vydaného a ešte
 nevydaného. Súpis ktorejkoľvek verzie otvoríš a vydáš priamo tam, bez prepínania verzie. Doteraz bolo vidieť len
 súpis vybranej verzie a ostatné verzie vyzerali, akoby zmizli.
+
+**Sadzby za tokeny môžeš zmeniť pre jednu verziu.** Súpis dodávky stále počíta so sadzbami z Nastavení. V súpise
+konkrétnej verzie ich ale cez „Zmeniť sadzby pre túto verziu“ zmeníš len pre ňu, zvlášť pre kód so skúškami
+a zvlášť pre dokumentáciu. Prázdne pole znamená sadzbu z Nastavení a „Vrátiť sadzby z Nastavení“ vráti obe naraz.
+Súpis ukáže, odkiaľ sadzba je a kto ju naposledy zmenil. Každá zmena sa zapíše: kto, kedy, z akej sadzby na akú.
+Už vydaný súpis sa zmenou sadzby nemení. Novú sadzbu použije až súpis, ktorý ho nahradí. V záložke Fakturácia
+majú verzie s vlastnou sadzbou značku „vlastná sadzba“.
