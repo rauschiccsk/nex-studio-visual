@@ -633,6 +633,7 @@ export const LAYOUT = {
 
 /** DEV-84 — the runs GitHub listed for NEX Inbox on 12.10.2026, in the shapes the repository tab draws. */
 export const CI_RUNS: S["CiRunsRead"] = {
+  project_name: PROJECT.name,
   repo: "rauschiccsk/nex-inbox",
   actions_url: "https://github.com/rauschiccsk/nex-inbox/actions",
   total_count: 193,
@@ -859,6 +860,20 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
   // DEV-84: the repository tab — a red proof with its failed step, a run with its task and where it runs, one running.
   answer("get", "/api/v1/projects/{slug}/ci-runs", CI_RUNS);
+  // DEV-85: the main branch is red — the repository tab carries the red mark.
+  answer("get", "/api/v1/projects/{slug}/ci-main", {
+    branch: "main",
+    failing: [
+      {
+        workflow: "CI",
+        number: 168,
+        subject: "feat(1.8.0): disk check of the Genesis share (TASK #33.1.2)",
+        failed_step: "lint › Frontend type-check + lint",
+        url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38302046414",
+      },
+    ],
+    refresh_seconds: 60,
+  });
   // DEV-90: what to try in UAT — a guide with two changes, so the UAT tab is measured with it.
   answer("get", "/api/v1/projects/{slug}/uat-guide", {
     version_number: "1.7.1",

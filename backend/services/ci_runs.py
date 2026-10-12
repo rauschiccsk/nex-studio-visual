@@ -75,6 +75,15 @@ NO_TOKEN = "Kokpit nemá prístup ku GitHubu (chýba prístupový token na serve
 NOT_REACHED = "GitHub neodpovedal"
 
 
+def repo_of(repo_url: Optional[str]) -> Optional[str]:
+    """``owner/name`` from what a project keeps — the short form, or a GitHub address."""
+    text = (repo_url or "").strip().removesuffix(".git")
+    if "github.com" in text:
+        text = text.split("github.com", 1)[1].lstrip("/:")
+    text = text.strip("/")
+    return text if text.count("/") == 1 else None
+
+
 def state_of(status: Optional[str], conclusion: Optional[str]) -> tuple[str, str]:
     """``(state, word)`` of a run — the state picks the colour, the word is what the person reads."""
     if status == "in_progress":

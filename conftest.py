@@ -17,6 +17,10 @@ from backend.main import app
 from backend.services import template_bootstrap
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
+# DEV-85: ``TestClient(app)`` runs the app's real life cycle — the main-branch watch would ask GitHub and send Telegram
+# messages. Here, at the root, so both test trees see it (pytest reads a conftest only upwards from a test).
+settings.ci_watch_enabled = False
+
 
 @pytest.fixture(autouse=True)
 def _isolate_port_registry(tmp_path_factory, monkeypatch):

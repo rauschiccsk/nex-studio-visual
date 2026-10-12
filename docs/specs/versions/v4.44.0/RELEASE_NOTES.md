@@ -44,3 +44,10 @@ ktorý zlyhal. Pri behoch spustených ručne, kde GitHub píše len „CI“, uk
 u zákazníka, má značku „na PROD“ alebo „na UAT“ s menom zákazníka a verziou. Behy filtruješ podľa stavu, vetvy
 a človeka a môžeš v nich hľadať. Záložka sa obnovuje sama každých 30 sekúnd. Kokpit sa GitHubu pýta raz za všetkých,
 nech je otvorených okien koľkokoľvek. Záložka behy len ukazuje, nespúšťa ani nezastavuje ich.
+
+**Keď zlyhajú kontroly hlavnej vetvy projektu, príde ti to na Telegram — raz.** Kokpit každú minútu pozrie behy
+kontrol na hlavnej vetve každého projektu. Keď beh zlyhá, adresát projektu dostane na Telegram správu s menom projektu,
+kontrolou, commitom, krokom, ktorý zlyhal, a odkazom priamo na záložku Repozitár toho projektu. Keď je vetva znovu
+zelená, príde jedna správa „znovu zelené“. Tú istú správu nedostaneš dvakrát, ani po reštarte kokpitu. Staré zlyhania
+spred zapnutia ťa nezasypú, kokpit hlási len to, čo sa stane odteraz. Kým je hlavná vetva vybraného projektu červená,
+záložka Repozitár má v ľavom paneli červenú bodku.

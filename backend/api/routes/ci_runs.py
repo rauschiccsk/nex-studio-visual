@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -13,20 +12,12 @@ from backend.config.settings import settings
 from backend.core import authz
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
+from backend.db.models.project_ci_watch import ProjectCiWatch
 from backend.db.session import get_db
-from backend.schemas.ci_runs import CiRunDeployed, CiRunRead, CiRunsRead, CiRunTask
-from backend.services import ci_runs, claude_agent, system_setting
+from backend.schemas.ci_runs import CiMainFailing, CiMainRead, CiRunDeployed, CiRunRead, CiRunsRead, CiRunTask
+from backend.services import ci_runs, ci_watch, claude_agent, system_setting
 
 router = APIRouter(tags=["CI Runs"])
-
-
-def _repo(repo_url: Optional[str]) -> Optional[str]:
-    """``owner/name`` from what the project keeps — the short form, or a GitHub address."""
-    text = (repo_url or "").strip().removesuffix(".git")
-    if "github.com" in text:
-        text = text.split("github.com", 1)[1].lstrip("/:")
-    text = text.strip("/")
-    return text if text.count("/") == 1 else None
 
 
 @router.get("/projects/{slug}/ci-runs", response_model=CiRunsRead)
@@ -40,7 +31,7 @@ async def get_ci_runs(
     GitHub is asked at most once per ``ci_runs_cache_seconds`` per repository for everybody; the token stays on the
     server. Never fails on GitHub: the reason comes in ``error``, the last answer with ``stale``."""
     project = authz.assert_project_slug_access(db, current_user, slug)
-    repo = _repo(project.repo_url)
+    repo = ci_runs.repo_of(project.repo_url)
     found = await ci_runs.listing(repo, timeout=system_setting.get_int(db, "github_api_timeout_seconds"))
 
     labels = {label for run in found.runs if (label := ci_runs.task_label(run.subject))}
@@ -53,6 +44,7 @@ async def get_ci_runs(
     )
     now = datetime.now(timezone.utc)
     return CiRunsRead(
+        project_name=project.name,
         repo=found.repo,
         actions_url=f"https://github.com/{found.repo}/actions" if found.repo else None,
         total_count=found.total_count,
@@ -83,4 +75,29 @@ async def get_ci_runs(
             )
             for run in found.runs
         ],
+    )
+
+
+@router.get("/projects/{slug}/ci-main", response_model=CiMainRead)
+def get_ci_main(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CiMainRead:
+    """DEV-85 — is the project's main branch red? From what the watch last saw; GitHub is not asked here."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    row = db.get(ProjectCiWatch, project.id)
+    return CiMainRead(
+        branch=row.branch if row else None,
+        failing=[
+            CiMainFailing(
+                workflow=f["workflow"],
+                number=f.get("number") or 0,
+                subject=f.get("subject") or "",
+                failed_step=f.get("failed_step"),
+                url=f.get("url") or "",
+            )
+            for f in ci_watch.failing(row)
+        ],
+        refresh_seconds=settings.ci_watch_interval_seconds,
     )

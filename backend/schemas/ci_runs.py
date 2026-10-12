@@ -50,6 +50,8 @@ class CiRunRead(BaseModel):
 
 
 class CiRunsRead(BaseModel):
+    #: DEV-85 — the project's name, for a link from Telegram that opens the tab of a project not selected yet.
+    project_name: str
     #: ``owner/name`` on GitHub; ``None`` when the project has none.
     repo: Optional[str] = None
     #: The repository's Actions page on GitHub — for the runs older than the list.
@@ -62,3 +64,23 @@ class CiRunsRead(BaseModel):
     #: How often the server asks GitHub — the screen asks no more often.
     refresh_seconds: int
     runs: list[CiRunRead] = []
+
+
+class CiMainFailing(BaseModel):
+    """DEV-85 — a workflow whose newest finished run on the main branch is red."""
+
+    workflow: str
+    number: int
+    subject: str
+    failed_step: Optional[str] = None
+    url: str
+
+
+class CiMainRead(BaseModel):
+    """DEV-85 — the red mark of the repository tab, from what the watch last saw; never asks GitHub."""
+
+    #: The branch the watch follows; ``None`` before its first look at the project.
+    branch: Optional[str] = None
+    failing: list[CiMainFailing] = []
+    #: How often the watch looks — the screen asks no more often.
+    refresh_seconds: int

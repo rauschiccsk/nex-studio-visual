@@ -6,6 +6,7 @@ import { usePresenceStore } from "@/store/usePresenceStore";
 import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import { useBackendVersion } from "@/hooks/useBackendVersion";
+import { useCiMain } from "@/hooks/useCiMain";
 import { verziaDoPanela } from "@/lib/verziaDoPanela";
 import type { UserRole } from "@/types/user";
 import { personName } from "@/utils/person";
@@ -117,6 +118,9 @@ export default function Sidebar() {
 
   const verziaChrbtice = useBackendVersion();
   const hasProject = Boolean(selectedProject);
+  // DEV-85 — the repository tab is red while a workflow's newest run on the project's main branch is red.
+  const ciMain = useCiMain(hasProject && !pipelineAccessDenied ? selectedProject!.slug : null);
+  const ciRed = (ciMain?.failing.length ?? 0) > 0;
   const projectsFallback = "/projects";
 
   // ─── Logo slot (shared Brand — E1 chrome unification, CR-NS-067) ───────────
@@ -312,6 +316,9 @@ export default function Sidebar() {
         onClick={() => navigate(hasProject ? "/repozitar" : projectsFallback)}
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k repozitáru"
+        badge={hasProject && ciRed}
+        badgeTone="danger"
+        badgeLabel="Kontroly hlavnej vetvy zlyhali"
       />
       {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
           their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then

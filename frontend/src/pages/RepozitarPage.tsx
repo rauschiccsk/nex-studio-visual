@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Ban,
   CheckCircle2,
@@ -58,8 +58,12 @@ const FIELD =
 export default function RepozitarPage() {
   const navigate = useNavigate();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
-  const slug = selectedProject?.slug;
+  // DEV-85 — a link from Telegram names the project (`?projekt=nex-inbox`): it opens even when another one is selected.
+  const [params, setParams] = useSearchParams();
+  const linked = params.get("projekt");
+  const slug = linked ?? selectedProject?.slug;
   const [data, setData] = useState<CiRuns | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
   const [filter, setFilter] = useState<RunFilter>(NO_FILTER);
@@ -72,9 +76,14 @@ export default function RepozitarPage() {
       .then((d) => {
         setData(d);
         setError(null);
+        if (linked) {
+          // The link's project becomes the selected one — the other tabs follow it — and the address is plain again.
+          setSelectedProject({ slug: linked, name: d.project_name });
+          setParams({}, { replace: true });
+        }
       })
       .catch((e: unknown) => setError(humanizeApiError(e, "Načítanie behov zlyhalo")));
-  }, [slug]);
+  }, [slug, linked, setSelectedProject, setParams]);
 
   const refreshMs = (data?.refresh_seconds ?? 30) * 1000;
   useEffect(() => {
@@ -93,7 +102,7 @@ export default function RepozitarPage() {
   const branches = useMemo(() => choices(runs, (r) => r.branch), [runs]);
   const actors = useMemo(() => choices(runs, (r) => r.actor), [runs]);
 
-  if (!selectedProject) {
+  if (!slug) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
         <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
@@ -130,7 +139,8 @@ export default function RepozitarPage() {
         </button>
       </div>
       <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-        Behy kontrol (CI) projektu <span className="text-[var(--color-text-secondary)]">{selectedProject.name}</span> z
+        Behy kontrol (CI) projektu{" "}
+        <span className="text-[var(--color-text-secondary)]">{data?.project_name ?? selectedProject?.name}</span> z
         GitHubu{data?.repo ? ` (${data.repo})` : ""}. Obnovujú sa samy každých {refreshMs / 1000} s
         {data?.fetched_at ? `, naposledy ${fmtDeployTime(data.fetched_at)}` : ""}.
       </p>

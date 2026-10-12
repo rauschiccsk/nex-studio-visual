@@ -172,6 +172,27 @@ async def _orchestrator_session_retention_loop() -> None:
             logger.exception("orchestrator session retention loop iteration failed")
 
 
+async def _ci_watch_loop() -> None:
+    """DEV-85 — watches every project's main branch on GitHub and tells its addressee when a run fails or turns green.
+
+    Each pass has its own session and commits per project; a failed pass is logged and the loop goes on — the next
+    pass asks again, and what was told is in the database, so nothing is told twice."""
+    from backend.services import ci_watch
+
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await ci_watch.watch_once(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("CI watch loop iteration failed")
+        await asyncio.sleep(settings.ci_watch_interval_seconds)
+
+
 async def _kb_index_sync_loop() -> None:
     """Úloha na pozadí: dorovnáva RAG index so Znalostnou bázou (ICCINT-111).
 
@@ -277,6 +298,9 @@ async def lifespan(app: FastAPI):
     # siahala na ostrý Qdrant s cestou ku Znalostnej báze prepnutou na dočasný priečinok — presne tak
     # vznikol incident 11.09.2026. Druhá, dôležitejšia poistka je v samotnej službe
     # (``deletion_is_safe``): tá chráni aj ostrú prevádzku, keby sa KB raz nepripojila.
+    ci_watch_task: Optional[asyncio.Task] = None
+    if settings.ci_watch_enabled:
+        ci_watch_task = asyncio.create_task(_ci_watch_loop(), name="ci-watch")
     kb_index_task: Optional[asyncio.Task] = None
     if settings.kb_index_sync_enabled:
         kb_index_task = asyncio.create_task(
@@ -292,7 +316,9 @@ async def lifespan(app: FastAPI):
         orch_session_retention_task.cancel()
         if kb_index_task is not None:
             kb_index_task.cancel()
-        for t in (idle_task, retention_task, orch_session_retention_task, kb_index_task):
+        if ci_watch_task is not None:
+            ci_watch_task.cancel()
+        for t in (idle_task, retention_task, orch_session_retention_task, kb_index_task, ci_watch_task):
             if t is None:
                 continue
             try:

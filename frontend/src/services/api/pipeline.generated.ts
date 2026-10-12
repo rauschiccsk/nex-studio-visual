@@ -2323,6 +2323,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/ci-main": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ci Main
+         * @description DEV-85 — is the project's main branch red? From what the watch last saw; GitHub is not asked here.
+         */
+        get: operations["get_ci_main_api_v1_projects__slug__ci_main_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/ci-runs": {
         parameters: {
             query?: never;
@@ -4116,6 +4136,37 @@ export interface components {
             new_password: string;
         };
         /**
+         * CiMainFailing
+         * @description DEV-85 — a workflow whose newest finished run on the main branch is red.
+         */
+        CiMainFailing: {
+            /** Failed Step */
+            failed_step?: string | null;
+            /** Number */
+            number: number;
+            /** Subject */
+            subject: string;
+            /** Url */
+            url: string;
+            /** Workflow */
+            workflow: string;
+        };
+        /**
+         * CiMainRead
+         * @description DEV-85 — the red mark of the repository tab, from what the watch last saw; never asks GitHub.
+         */
+        CiMainRead: {
+            /** Branch */
+            branch?: string | null;
+            /**
+             * Failing
+             * @default []
+             */
+            failing: components["schemas"]["CiMainFailing"][];
+            /** Refresh Seconds */
+            refresh_seconds: number;
+        };
+        /**
          * CiRunDeployed
          * @description A customer whose UAT or PROD runs the run's commit.
          */
@@ -4198,6 +4249,8 @@ export interface components {
             error?: string | null;
             /** Fetched At */
             fetched_at?: string | null;
+            /** Project Name */
+            project_name: string;
             /** Refresh Seconds */
             refresh_seconds: number;
             /** Repo */
@@ -12648,6 +12701,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BillingOverviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ci_main_api_v1_projects__slug__ci_main_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiMainRead"];
                 };
             };
             /** @description Validation Error */

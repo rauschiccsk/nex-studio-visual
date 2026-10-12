@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # (one question per repository, not one per person), and how many of the newest runs it lists (GitHub's page cap).
     ci_runs_cache_seconds: int = 30
     ci_runs_listed: int = 100
+    # DEV-85: the watch of every project's main branch — how often it looks, whether it runs at all (off in tests: the
+    # app's real life cycle would ask GitHub and send Telegram messages), how long an undelivered message is retried.
+    ci_watch_interval_seconds: int = 60
+    ci_watch_enabled: bool = True
+    ci_watch_retry_hours: int = 6
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

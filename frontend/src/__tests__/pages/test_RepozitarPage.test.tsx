@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
@@ -17,6 +17,7 @@ vi.mock("@/services/api/ciRuns", () => ({ getCiRuns: vi.fn() }));
 const context = {
   selectedProject: { slug: "nex-inbox", name: "NEX Inbox" } as { slug: string; name: string } | null,
   setSelectedVersion: vi.fn(),
+  setSelectedProject: vi.fn(),
 };
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: typeof context) => unknown) => selector(context),
@@ -63,6 +64,7 @@ const TASKED = run(24, {
 
 function answer(over: Partial<CiRuns> = {}): CiRuns {
   return {
+    project_name: "NEX Inbox",
     repo: "rauschiccsk/nex-inbox",
     actions_url: "https://github.com/rauschiccsk/nex-inbox/actions",
     total_count: 193,
@@ -80,11 +82,19 @@ function Where() {
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
 
-function page() {
+function page(address = "/repozitar") {
   return render(
-    <MemoryRouter initialEntries={["/repozitar"]}>
+    <MemoryRouter initialEntries={[address]}>
       <Routes>
-        <Route path="/repozitar" element={<RepozitarPage />} />
+        <Route
+          path="/repozitar"
+          element={
+            <>
+              <RepozitarPage />
+              <Where />
+            </>
+          }
+        />
         <Route path="*" element={<Where />} />
       </Routes>
     </MemoryRouter>,
@@ -94,6 +104,7 @@ function page() {
 beforeEach(() => {
   context.selectedProject = { slug: "nex-inbox", name: "NEX Inbox" };
   context.setSelectedVersion.mockReset();
+  context.setSelectedProject.mockReset();
   vi.mocked(getCiRuns).mockReset().mockResolvedValue(answer());
 });
 
@@ -161,6 +172,23 @@ describe("the repository tab (DEV-84)", () => {
 
     const note = await screen.findByRole("status");
     expect(note.textContent).toMatch(/^GitHub sa teraz nedá opýtať \(GitHub neodpovedal\) — zobrazené behy sú z .+\.$/);
+  });
+
+  it("a link from Telegram opens the project it names and makes it the selected one (DEV-85)", async () => {
+    context.selectedProject = null;
+    // The real store keeps what it is given — the page then reads the project from it, not from the address.
+    context.setSelectedProject.mockImplementation((p: { slug: string; name: string }) => {
+      context.selectedProject = p;
+    });
+    vi.mocked(getCiRuns).mockResolvedValue(answer({ project_name: "NEX Manager" }));
+    page("/repozitar?projekt=nex-manager");
+
+    await screen.findAllByRole("listitem");
+    expect(getCiRuns).toHaveBeenCalledWith("nex-manager");
+    expect(context.setSelectedProject).toHaveBeenCalledWith({ slug: "nex-manager", name: "NEX Manager" });
+    // The router changes the address in a transition — it may land after the list is drawn, so it is waited for.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/repozitar$/));
+    expect(screen.getByText("NEX Manager")).toBeInTheDocument();
   });
 
   it("asks again on the server's schedule, not its own", async () => {

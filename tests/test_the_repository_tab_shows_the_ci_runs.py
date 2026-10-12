@@ -437,6 +437,4 @@ def test_a_project_without_a_repository_says_so(client, nex_inbox, github):
     ],
 )
 def test_the_repository_is_read_from_what_the_project_keeps(stored, repo):
-    from backend.api.routes.ci_runs import _repo
-
-    assert _repo(stored) == repo
+    assert ci_runs.repo_of(stored) == repo
