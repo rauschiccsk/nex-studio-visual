@@ -65,6 +65,18 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   NEX Manager (vzor NEX Inbox), nemá vlastné prihlásenie a MUSÍ implementovať `GET /api/v1/launch?lt=<JWT>` a
   deklarovať premenné `MANAGER_*` presne podľa zručnosti `nex-manager-launch` — inak UAT „Spustiť“ zlyhá.
   (Projekty s `auth_mode=password` používajú `POST /auth/login` + `/auth/me`.)
+- **Nastavenia zákazníka a prvý správca — značky v `.env.example` (DEV-72).** Pri nasadení kokpit vykreslí `.env`
+  inštalácie z tvojho `.env.example` a sám vie len to svoje (databáza, spúšťací lístok). Všetko, čo pre každého
+  zákazníka zadá Manažér, **označ komentárom na riadku tesne nad premennou**; text pre Manažéra daj do úvodzoviek:
+  - `# @customer: „E-mail prvého správcu — ním sa prvý raz prihlásiš“` — bežné nastavenie zákazníka;
+  - `# @customer-secret: „Heslo k schránke s faktúrami“` — tajomstvo (uloží sa do trezoru, späť sa neukáže);
+  - `required` za značkou (`# @customer required: „…“`) — bez hodnoty sa nasadenie nespustí;
+  - `# @public-url` — kokpit zapíše verejnú adresu inštalácie (presne tú, ktorú otvára prehliadač).
+  Aplikácia s vlastným prihlásením (`auth_mode=password`) zakladá **prvého správcu z povinných nastavení
+  zákazníka** (e-mail `@customer required`, heslo `@customer-secret required`, pri prvom prihlásení vynútená
+  zmena hesla), alebo z `ADMIN_INITIAL_PASSWORD`. Heslo správcu, ktoré nič z toho neoznačí, by dostalo náhodnú
+  hodnotu a **kokpit také nasadenie zastaví**. Neoznačené tajomstvá (podpisové kľúče, šifrovacie kľúče) si kokpit
+  vygeneruje sám — tie neoznačuj.
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí

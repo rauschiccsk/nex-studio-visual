@@ -1,5 +1,15 @@
 import api from "../api";
-import type { CustomerCreate, CustomerRead, CustomerUpdate } from "../../types/customer";
+import type {
+  CustomerCreate,
+  CustomerRead,
+  CustomerSettingsContract,
+  CustomerUpdate,
+} from "../../types/customer";
+
+/** DEV-72: what the project asks of each customer — the settings its `.env.example` marks. */
+export function getCustomerSettingsContract(slug: string): Promise<CustomerSettingsContract> {
+  return api.get<CustomerSettingsContract>(`/projects/${slug}/customer-settings`);
+}
 
 /** List a project's customers (newest first). Project-scoped by slug. */
 export function listCustomers(slug: string): Promise<CustomerRead[]> {

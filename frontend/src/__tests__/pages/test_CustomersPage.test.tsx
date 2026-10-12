@@ -41,6 +41,8 @@ vi.mock("@/services/api/customers", () => ({
   createCustomer: createCustomerMock,
   updateCustomer: updateCustomerMock,
   deleteCustomer: deleteCustomerMock,
+  // DEV-72: an app that takes the admin password from the „Tajný kľúč“ field — the field these tests edit.
+  getCustomerSettingsContract: () => Promise.resolve({ settings: [], problems: [], legacy_admin: true }),
 }));
 
 const CUSTOMER: CustomerRead = {
@@ -52,6 +54,8 @@ const CUSTOMER: CustomerRead = {
   integrations: { erp: "nex-genesis" },
   notes: "Interný zákazník.",
   has_secret: true,
+  settings: {},
+  secret_settings_set: [],
   created_at: "2026-07-01T00:00:00Z",
   updated_at: "2026-07-01T00:00:00Z",
 };

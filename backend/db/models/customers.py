@@ -70,6 +70,16 @@ class Customer(Base, UUIDMixin, TimestampMixin):
         ForeignKey("credentials.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # DEV-72: the values the manager entered for the settings the app marks ``@customer`` in its ``.env.example``
+    # (``backend/services/env_contract.py``) — ``{VARIABLE: value}``, never a secret.
+    settings = Column(JSONB, nullable=True)
+    # DEV-72: the app's ``@customer-secret`` values, as one JSON object in the credentials store — only this
+    # pointer is kept here, like ``credential_id``.
+    settings_credential_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Optional free-text note (e.g. contact, deploy caveats).
     notes = Column(Text, nullable=True)
 

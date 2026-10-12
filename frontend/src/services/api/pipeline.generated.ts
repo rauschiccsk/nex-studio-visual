@@ -2203,6 +2203,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/customer-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer Settings Contract
+         * @description DEV-72: what the project asks of each customer — the settings its ``.env.example`` marks ``@customer`` /
+         *     ``@customer-secret`` / ``@public-url``, read from the working tree the deploy renders from.
+         */
+        get: operations["customer_settings_contract_api_v1_projects__slug__customer_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/customers": {
         parameters: {
             query?: never;
@@ -4030,6 +4051,20 @@ export interface components {
              */
             secret?: string | null;
             /**
+             * Secret Settings
+             * @description DEV-72: write-only values of the settings the app marks @customer-secret. Kept in the credentials store, never returned. On update only the given non-empty values change; the others stay.
+             */
+            secret_settings?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Settings
+             * @description DEV-72: values of the settings the app marks @customer in its .env.example, {VARIABLE: value}. On update the map replaces the stored one; an empty value removes the setting.
+             */
+            settings?: {
+                [key: string]: string;
+            } | null;
+            /**
              * Slug
              * @description URL-safe customer slug, unique within the project. Pattern: ^[a-z0-9][a-z0-9-]*$.
              */
@@ -4080,6 +4115,18 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
+            /**
+             * Secret Settings Set
+             * @description DEV-72: the @customer-secret variables that have a value (names only).
+             */
+            secret_settings_set?: string[];
+            /**
+             * Settings
+             * @description DEV-72: the @customer values.
+             */
+            settings?: {
+                [key: string]: string;
+            };
             /** Slug */
             slug: string;
             /** Subdomain */
@@ -4089,6 +4136,41 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * CustomerSettingRead
+         * @description One setting an app marks in its ``.env.example`` (DEV-72).
+         */
+        CustomerSettingRead: {
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "customer" | "customer_secret" | "public_url";
+            /** Label */
+            label: string;
+            /** Required */
+            required: boolean;
+        };
+        /**
+         * CustomerSettingsContractRead
+         * @description What a project asks of each customer, read from its ``.env.example`` (DEV-72).
+         */
+        CustomerSettingsContractRead: {
+            /**
+             * Legacy Admin
+             * @description The app takes its admin password from ADMIN_INITIAL_PASSWORD (Tajný kľúč).
+             */
+            legacy_admin: boolean;
+            /**
+             * Problems
+             * @description Markers that mean nothing (misspelt, misplaced).
+             */
+            problems?: string[];
+            /** Settings */
+            settings: components["schemas"]["CustomerSettingRead"][];
         };
         /**
          * CustomerUpdate
@@ -4112,6 +4194,20 @@ export interface components {
              * @description Write-only — rotates the stored per-customer secret. Never persisted on the row / echoed.
              */
             secret?: string | null;
+            /**
+             * Secret Settings
+             * @description DEV-72: write-only values of the settings the app marks @customer-secret. Kept in the credentials store, never returned. On update only the given non-empty values change; the others stay.
+             */
+            secret_settings?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Settings
+             * @description DEV-72: values of the settings the app marks @customer in its .env.example, {VARIABLE: value}. On update the map replaces the stored one; an empty value removes the setting.
+             */
+            settings?: {
+                [key: string]: string;
+            } | null;
             /** Slug */
             slug?: string | null;
             /** Subdomain */
@@ -11311,6 +11407,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_ZadaniePeekResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    customer_settings_contract_api_v1_projects__slug__customer_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerSettingsContractRead"];
                 };
             };
             /** @description Validation Error */

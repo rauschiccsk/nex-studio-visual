@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -102,6 +102,20 @@ class CustomerCreate(BaseModel):
             "NEVER stored on the customer row and NEVER returned in any response."
         ),
     )
+    settings: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "DEV-72: values of the settings the app marks @customer in its .env.example, {VARIABLE: value}. "
+            "On update the map replaces the stored one; an empty value removes the setting."
+        ),
+    )
+    secret_settings: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "DEV-72: write-only values of the settings the app marks @customer-secret. Kept in the credentials "
+            "store, never returned. On update only the given non-empty values change; the others stay."
+        ),
+    )
 
     @field_validator("slug")
     @classmethod
@@ -135,6 +149,20 @@ class CustomerUpdate(BaseModel):
     secret: Optional[str] = Field(
         default=None,
         description="Write-only — rotates the stored per-customer secret. Never persisted on the row / echoed.",
+    )
+    settings: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "DEV-72: values of the settings the app marks @customer in its .env.example, {VARIABLE: value}. "
+            "On update the map replaces the stored one; an empty value removes the setting."
+        ),
+    )
+    secret_settings: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "DEV-72: write-only values of the settings the app marks @customer-secret. Kept in the credentials "
+            "store, never returned. On update only the given non-empty values change; the others stay."
+        ),
     )
 
     @field_validator("slug")
@@ -182,5 +210,26 @@ class CustomerRead(BaseModel):
     integrations: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
     has_secret: bool = Field(default=False, description="True iff a per-customer secret is recorded in the store.")
+    settings: dict[str, str] = Field(default_factory=dict, description="DEV-72: the @customer values.")
+    secret_settings_set: list[str] = Field(
+        default_factory=list, description="DEV-72: the @customer-secret variables that have a value (names only)."
+    )
     created_at: datetime
     updated_at: datetime
+
+
+class CustomerSettingRead(BaseModel):
+    """One setting an app marks in its ``.env.example`` (DEV-72)."""
+
+    key: str
+    kind: Literal["customer", "customer_secret", "public_url"]
+    required: bool
+    label: str
+
+
+class CustomerSettingsContractRead(BaseModel):
+    """What a project asks of each customer, read from its ``.env.example`` (DEV-72)."""
+
+    settings: list[CustomerSettingRead]
+    problems: list[str] = Field(default_factory=list, description="Markers that mean nothing (misspelt, misplaced).")
+    legacy_admin: bool = Field(description="The app takes its admin password from ADMIN_INITIAL_PASSWORD (Tajný kľúč).")

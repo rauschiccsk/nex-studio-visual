@@ -21,8 +21,9 @@ customer — there is exactly one code path.
 
 from __future__ import annotations
 
+import json
 import re
-from typing import Optional
+from typing import Mapping, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -34,6 +35,7 @@ from backend.db.models.projects import Project
 from backend.schemas.credentials import CredentialCreate
 from backend.schemas.customer import CustomerCreate, CustomerUpdate
 from backend.services import credentials as credentials_service
+from backend.services import env_contract
 
 
 def _credential_filename(project_id: UUID, slug: str) -> str:
@@ -61,6 +63,79 @@ def _store_secret(db: Session, project_id: UUID, slug: str, secret: str) -> UUID
         ),
     )
     return cred.id
+
+
+def _settings_filename(project_id: UUID, slug: str) -> str:
+    """DEV-72: where a customer's ``@customer-secret`` values live in the credentials store (one JSON object)."""
+    return f"customer-{project_id}-{slug}-settings.md"
+
+
+def project_contract(db: Session, project_id: UUID) -> env_contract.Contract:
+    """What the project's ``.env.example`` asks of each customer — read from the same working tree the deploy
+    renders from."""
+    from backend.services import claude_agent
+
+    project = db.get(Project, project_id)
+    if project is None:
+        raise ValueError(f"Project {project_id} not found")
+    return env_contract.for_project(claude_agent.PROJECTS_ROOT / project.slug)
+
+
+def _check_settings(
+    db: Session, project_id: UUID, settings: Optional[Mapping[str, str]], secrets: Optional[Mapping[str, str]]
+) -> None:
+    """Only what the app declares, and of the kind it declares, may be stored — nothing else ever reaches its
+    ``.env``, and a secret never lands readable on the customer row."""
+    if not settings and not secrets:
+        return
+    bad = env_contract.undeclared(project_contract(db, project_id), list(settings or {}), list(secrets or {}))
+    if bad:
+        raise ValueError(
+            "Aplikácia tieto nastavenia zákazníka nedeklaruje (alebo ich deklaruje ako iný druh): " + ", ".join(bad)
+        )
+
+
+def read_secret_settings(db: Session, customer: Customer) -> dict[str, str]:
+    """The customer's ``@customer-secret`` values — for the deploy only; never returned over the API."""
+    if customer.settings_credential_id is None:
+        return {}
+    try:
+        content = credentials_service.read_content(db, customer.settings_credential_id).content
+        data = json.loads(content)
+    except (ValueError, OSError):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if v} if isinstance(data, dict) else {}
+
+
+def secret_setting_keys(db: Session, customer: Customer) -> list[str]:
+    """Which ``@customer-secret`` settings have a value — names only, for the form's „uložené“."""
+    return sorted(read_secret_settings(db, customer))
+
+
+def _write_secret_settings(
+    db: Session, project_id: UUID, slug: str, credential_id: Optional[UUID], values: Mapping[str, str]
+) -> UUID:
+    content = json.dumps(dict(values), ensure_ascii=False, sort_keys=True)
+    if credential_id is not None:
+        credentials_service.write_content(db, credential_id, content)
+        return credential_id
+    cred = credentials_service.create(
+        db,
+        CredentialCreate(
+            title=f"Customer settings: {slug}",
+            filename=_settings_filename(project_id, slug),
+            content=content,
+        ),
+    )
+    return cred.id
+
+
+def _plain_settings(values: Optional[Mapping[str, str]]) -> Optional[dict[str, str]]:
+    """An empty value removes the setting; an empty map is no settings at all."""
+    if values is None:
+        return None
+    kept = {k: v for k, v in values.items() if v and v.strip()}
+    return kept or None
 
 
 def list_customers(db: Session, project_id: UUID) -> list[Customer]:
@@ -170,9 +245,15 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
             f"{dir_slug!r} — two customers cannot share one instance directory"
         )
 
+    _check_settings(db, project_id, data.settings, data.secret_settings)
+
     credential_id: UUID | None = None
     if data.secret:
         credential_id = _store_secret(db, project_id, data.slug, data.secret)
+    settings_credential_id: UUID | None = None
+    secret_values = {k: v for k, v in (data.secret_settings or {}).items() if v}
+    if secret_values:
+        settings_credential_id = _write_secret_settings(db, project_id, data.slug, None, secret_values)
 
     customer = Customer(
         project_id=project_id,
@@ -182,6 +263,8 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
         integrations=data.integrations,
         notes=data.notes,
         credential_id=credential_id,
+        settings=_plain_settings(data.settings),
+        settings_credential_id=settings_credential_id,
     )
     db.add(customer)
     db.flush()
@@ -203,6 +286,7 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
             resolve to another customer's instance directory (router → 404 / 409).
     """
     customer = get_by_id(db, customer_id)
+    _check_settings(db, customer.project_id, data.settings, data.secret_settings)
 
     # Every conflict check runs BEFORE any mutation — a rejected edit must leave the
     # in-session row untouched, not half-applied waiting on the router's rollback.
@@ -250,6 +334,16 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
             credentials_service.write_content(db, customer.credential_id, data.secret)
         else:
             customer.credential_id = _store_secret(db, customer.project_id, customer.slug, data.secret)
+
+    if data.settings is not None:
+        customer.settings = _plain_settings(data.settings)
+    new_secrets = {k: v for k, v in (data.secret_settings or {}).items() if v}
+    if new_secrets:
+        # Write-only: what was not given again stays — the form never has the old values to send back.
+        merged = {**read_secret_settings(db, customer), **new_secrets}
+        customer.settings_credential_id = _write_secret_settings(
+            db, customer.project_id, customer.slug, customer.settings_credential_id, merged
+        )
 
     db.flush()
     return customer

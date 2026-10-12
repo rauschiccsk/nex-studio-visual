@@ -531,6 +531,7 @@ async def adopting_deploy_runner(
     version_number: str,
     force_fresh: bool,
     admin_password: Optional[str] = None,
+    customer_values: Optional[dict[str, str]] = None,
     deploy_host: Optional[str] = None,
     private_network: bool = False,
 ) -> tuple[bool, str, Optional[str]]:
@@ -571,6 +572,7 @@ async def adopting_deploy_runner(
             app=app,
             full_project_slug=project_slug,
             admin_password=admin_password,
+            customer_values=customer_values,
             allow_overwrite=True,
             deploy_host=deploy_host if is_prod else None,
             # DEV-42: prevzatá inštalácia ďalej žije podľa nastavenia projektu, rovnako ako pri bežnom nasadení.

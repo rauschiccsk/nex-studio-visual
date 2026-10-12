@@ -29,7 +29,13 @@ from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.session import get_db
-from backend.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
+from backend.schemas.customer import (
+    CustomerCreate,
+    CustomerRead,
+    CustomerSettingRead,
+    CustomerSettingsContractRead,
+    CustomerUpdate,
+)
 from backend.services import customer as customer_service
 
 router = APIRouter(tags=["Customers"])
@@ -45,8 +51,9 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
-def _to_read(customer: Customer) -> CustomerRead:
-    """Serialise a customer WITHOUT its secret — only the ``has_secret`` flag."""
+def _to_read(customer: Customer, db: Session) -> CustomerRead:
+    """Serialise a customer WITHOUT its secrets — only the ``has_secret`` flag and, for the app's
+    ``@customer-secret`` settings, which of them have a value (DEV-72)."""
     return CustomerRead(
         id=customer.id,
         project_id=customer.project_id,
@@ -56,6 +63,8 @@ def _to_read(customer: Customer) -> CustomerRead:
         integrations=customer.integrations,
         notes=customer.notes,
         has_secret=customer.credential_id is not None,
+        settings=dict(customer.settings or {}),
+        secret_settings_set=customer_service.secret_setting_keys(db, customer),
         created_at=customer.created_at,
         updated_at=customer.updated_at,
     )
@@ -76,7 +85,28 @@ def list_customers(
     # v4.0.35: owner-or-admin — a Junior sees only their OWN project's customers.
     project = authz.assert_project_slug_access(db, current_user, slug)
     rows = customer_service.list_customers(db, project.id)
-    return [_to_read(row) for row in rows]
+    return [_to_read(row, db) for row in rows]
+
+
+@router.get("/projects/{slug}/customer-settings", response_model=CustomerSettingsContractRead)
+def customer_settings_contract(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CustomerSettingsContractRead:
+    """DEV-72: what the project asks of each customer — the settings its ``.env.example`` marks ``@customer`` /
+    ``@customer-secret`` / ``@public-url``, read from the working tree the deploy renders from."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    from backend.services import claude_agent, env_contract
+
+    contract = env_contract.for_project(claude_agent.PROJECTS_ROOT / project.slug)
+    return CustomerSettingsContractRead(
+        settings=[
+            CustomerSettingRead(key=s.key, kind=s.kind, required=s.required, label=s.label) for s in contract.settings
+        ],
+        problems=list(contract.problems),
+        legacy_admin=env_contract.declares_legacy_admin(claude_agent.PROJECTS_ROOT / project.slug),
+    )
 
 
 @router.post(
@@ -107,7 +137,7 @@ def create_customer(
         db.rollback()
         raise _map_value_error(exc) from exc
     db.refresh(customer)
-    return _to_read(customer)
+    return _to_read(customer, db)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +157,7 @@ def get_customer(
         customer = customer_service.get_by_id(db, customer_id)
     except ValueError as exc:
         raise _map_value_error(exc) from exc
-    return _to_read(customer)
+    return _to_read(customer, db)
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerRead)
@@ -154,7 +184,7 @@ def update_customer(
         db.rollback()
         raise _map_value_error(exc) from exc
     db.refresh(customer)
-    return _to_read(customer)
+    return _to_read(customer, db)
 
 
 @router.delete(

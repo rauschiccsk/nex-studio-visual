@@ -2,12 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FolderOpen, Loader2, Plus, Trash2, KeyRound, Pencil } from "lucide-react";
 
-import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/services/api/customers";
+import {
+  listCustomers,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  getCustomerSettingsContract,
+} from "@/services/api/customers";
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import type { CustomerRead } from "@/types/customer";
+import CustomerSettingsFields from "@/components/customers/CustomerSettingsFields";
+import { customerSettings, missingRequired } from "@/lib/customerSettings";
+import type { CustomerRead, CustomerSettingsContract } from "@/types/customer";
 
 /**
  * The shape the deploy path can actually use. `deploy._customer_dir_slug` derives a customer's instance
@@ -67,6 +75,11 @@ export default function CustomersPage() {
   const [integrations, setIntegrations] = useState("");
   const [notes, setNotes] = useState("");
   const [secret, setSecret] = useState("");
+  // DEV-72: what the app asks of each customer (its `.env.example` markers) and what the form holds for them.
+  // `null` = not known (the request failed) — the form then behaves as before DEV-72.
+  const [contract, setContract] = useState<CustomerSettingsContract | null>(null);
+  const [settingValues, setSettingValues] = useState<Record<string, string>>({});
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   // obs #6: when non-null the form is in EDIT mode for this customer (submits via updateCustomer/PATCH
@@ -99,6 +112,21 @@ export default function CustomersPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!slug) return;
+    let alive = true;
+    getCustomerSettingsContract(slug)
+      .then((c) => alive && setContract(c))
+      .catch(() => alive && setContract(null));
+    return () => {
+      alive = false;
+    };
+  }, [slug]);
+
+  // The „Tajný kľúč“ is the admin password only for an app that reads it (ADMIN_INITIAL_PASSWORD); for any other
+  // it would be stored and never used, so it is not offered. Unknown contract → offered, as before DEV-72.
+  const offersLegacySecret = contract === null || contract.legacy_admin;
+
   function resetForm() {
     setName("");
     setCustomerSlug("");
@@ -106,6 +134,8 @@ export default function CustomersPage() {
     setIntegrations("");
     setNotes("");
     setSecret("");
+    setSettingValues({});
+    setSecretValues({});
     setFormError(null);
     setEditingCustomerId(null);
   }
@@ -123,6 +153,8 @@ export default function CustomersPage() {
     setIntegrations(c.integrations ? JSON.stringify(c.integrations, null, 2) : "");
     setNotes(c.notes ?? "");
     setSecret("");
+    setSettingValues({ ...(c.settings ?? {}) });
+    setSecretValues({});
     setFormError(null);
     setShowForm(true);
   }
@@ -164,6 +196,17 @@ export default function CustomersPage() {
       // Write-only: a blank secret sends null, which the PATCH treats as "leave the stored secret unchanged"
       // (the backend skips null fields) — so editing never wipes an existing secret; a typed value rotates it.
       secret: secret ? secret : null,
+      // DEV-72: every plain setting the app asks for (an empty one is removed); only the secrets typed in now.
+      ...(customerSettings(contract).length > 0
+        ? {
+            settings: Object.fromEntries(
+              customerSettings(contract)
+                .filter((s) => s.kind === "customer")
+                .map((s) => [s.key, (settingValues[s.key] ?? "").trim()]),
+            ),
+            secret_settings: Object.fromEntries(Object.entries(secretValues).filter(([, v]) => v)),
+          }
+        : {}),
     };
     try {
       if (editingCustomerId) {
@@ -313,23 +356,33 @@ export default function CustomersPage() {
                 </span>
               )}
             </label>
-            <label className="block text-xs">
-              <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
-              <input
-                spellCheck={false}
-                type="password"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                autoComplete="new-password"
-                placeholder={
-                  editingCustomerId
-                    ? "ponechaj prázdne = bez zmeny; vyplň = zmeň tajný kľúč"
-                    : "uloží sa bezpečne; späť sa už nezobrazí"
-                }
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
-              />
-            </label>
+            {offersLegacySecret && (
+              <label className="block text-xs">
+                <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
+                <input
+                  spellCheck={false}
+                  type="password"
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    editingCustomerId
+                      ? "ponechaj prázdne = bez zmeny; vyplň = zmeň tajný kľúč"
+                      : "uloží sa bezpečne; späť sa už nezobrazí"
+                  }
+                  className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                />
+              </label>
+            )}
           </div>
+          <CustomerSettingsFields
+            contract={contract}
+            values={settingValues}
+            onValue={(key, value) => setSettingValues((v) => ({ ...v, [key]: value }))}
+            secrets={secretValues}
+            onSecret={(key, value) => setSecretValues((v) => ({ ...v, [key]: value }))}
+            storedSecrets={items.find((c) => c.id === editingCustomerId)?.secret_settings_set ?? []}
+          />
           <label className="block text-xs">
             <span className="text-[var(--color-text-secondary)]">Integrácie (JSON, voliteľné)</span>
             <textarea
@@ -408,12 +461,17 @@ export default function CustomersPage() {
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="font-medium text-[var(--color-text-primary)]">{c.name}</span>
                   <span className="font-mono text-xs text-[var(--color-text-muted)]">{c.slug}</span>
-                  {c.has_secret && (
+                  {c.has_secret && offersLegacySecret && (
                     <span className="flex items-center gap-1 rounded bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
                       <KeyRound className="h-3 w-3" /> tajný kľúč uložený
                     </span>
                   )}
                 </div>
+                {missingRequired(contract, c.settings ?? {}, c.secret_settings_set ?? []).length > 0 && (
+                  <div className="mt-0.5 text-[11px] text-[var(--color-state-warning-fg)]">
+                    Pred nasadením doplň: {missingRequired(contract, c.settings ?? {}, c.secret_settings_set ?? []).join("; ")}
+                  </div>
+                )}
                 {c.subdomain && (
                   <div className="mt-0.5 font-mono text-[11px] text-[var(--color-text-muted)]">{c.subdomain}</div>
                 )}

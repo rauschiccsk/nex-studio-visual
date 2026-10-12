@@ -420,6 +420,8 @@ const CUSTOMER: S["CustomerRead"] = {
   has_secret: true,
   integrations: null,
   notes: "Faktúry doručuje do NEX Genesis na srv-mager-w2012 v Tonkovciach.",
+  settings: { BOOTSTRAP_ADMIN_EMAIL: "spravca.faktur@magerstav.example.sk" },
+  secret_settings_set: ["BOOTSTRAP_ADMIN_PASSWORD"],
   created_at: T0,
   updated_at: T1,
 };
@@ -433,6 +435,8 @@ const NEW_CUSTOMER: S["CustomerRead"] = {
   subdomain: "novak",
   has_secret: false,
   notes: null,
+  settings: {},
+  secret_settings_set: [],
 };
 
 const DEPLOY_MATRIX: S["DeployMatrix"] = {
@@ -695,6 +699,22 @@ export function registerFixtures(): void {
     limit: 50,
   });
   answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER, NEW_CUSTOMER]);
+  answer("get", "/api/v1/projects/{slug}/customer-settings", {
+    settings: [
+      { key: "APP_PUBLIC_URL", kind: "public_url", required: false, label: "APP_PUBLIC_URL" },
+      {
+        key: "BOOTSTRAP_ADMIN_EMAIL",
+        kind: "customer",
+        required: true,
+        label: "E-mail prvého správcu — týmto e-mailom sa prvý raz prihlásiš",
+      },
+      { key: "BOOTSTRAP_ADMIN_PASSWORD", kind: "customer_secret", required: true, label: "Heslo prvého správcu" },
+      { key: "INTAKE_IMAP_HOST", kind: "customer", required: false, label: "Server schránky, z ktorej sa čítajú faktúry" },
+      { key: "INTAKE_IMAP_PASSWORD", kind: "customer_secret", required: false, label: "Heslo k schránke s faktúrami" },
+    ],
+    problems: [],
+    legacy_admin: false,
+  });
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
   answerUntyped<AdoptionPreview>("get", "/api/v1/customers/{customer_id}/adoption-preview", {
     instance_dir: "/opt/uat/novak/nex-inbox",

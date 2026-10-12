@@ -19,8 +19,30 @@ export interface CustomerRead {
   integrations: Record<string, unknown> | null;
   notes: string | null;
   has_secret: boolean;
+  /** DEV-72: values of the settings the app marks `@customer`. */
+  settings: Record<string, string>;
+  /** DEV-72: which `@customer-secret` settings have a stored value — names only, never the value. */
+  secret_settings_set: string[];
   created_at: string;
   updated_at: string;
+}
+
+/** DEV-72: one setting an app marks in its `.env.example`. */
+export interface CustomerSetting {
+  key: string;
+  kind: "customer" | "customer_secret" | "public_url";
+  required: boolean;
+  /** What the manager is told about it — the app's own words. */
+  label: string;
+}
+
+/** DEV-72: what a project asks of each customer. */
+export interface CustomerSettingsContract {
+  settings: CustomerSetting[];
+  /** Markers that mean nothing (misspelt, misplaced) — the deploy refuses until they are fixed. */
+  problems: string[];
+  /** The app takes its `admin` password from the customer's „Tajný kľúč“ (ADMIN_INITIAL_PASSWORD). */
+  legacy_admin: boolean;
 }
 
 export interface CustomerCreate {
@@ -31,6 +53,9 @@ export interface CustomerCreate {
   notes?: string | null;
   /** Write-only — handed to the credentials store; never returned. */
   secret?: string | null;
+  settings?: Record<string, string> | null;
+  /** Write-only — kept in the credentials store; never returned. */
+  secret_settings?: Record<string, string> | null;
 }
 
 export interface CustomerUpdate {
@@ -41,4 +66,8 @@ export interface CustomerUpdate {
   notes?: string | null;
   /** Write-only — rotates the stored secret; never returned. */
   secret?: string | null;
+  /** Replaces the stored settings; an empty value removes one. */
+  settings?: Record<string, string> | null;
+  /** Write-only — only the given non-empty values change; the others stay. */
+  secret_settings?: Record<string, string> | null;
 }

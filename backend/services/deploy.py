@@ -876,6 +876,7 @@ async def _default_deploy_runner(
     admin_password: Optional[str] = None,
     deploy_host: Optional[str] = None,
     private_network: bool = False,
+    customer_values: Optional[dict[str, str]] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -920,6 +921,7 @@ async def _default_deploy_runner(
             app=app,
             full_project_slug=project_slug,
             admin_password=admin_password,
+            customer_values=customer_values,
             # ICCINT-151 — predpis a nastavenia sa zapíšu aj na stroj, kde inštalácia beží. Pri
             # testovacej inštalácii nikdy: tá býva vždy tu.
             deploy_host=deploy_host if is_prod else None,
@@ -1194,6 +1196,26 @@ async def deploy(
                 + ". Bez nich by sa appka nasadila, ale nedala by sa otvoriť."
             )
 
+    # DEV-72 — what the app's ``.env.example`` asks of the customer (``@customer`` / ``@customer-secret``) and what
+    # the manager entered. Checked here, BEFORE any teardown, like the two gates above: a missing required setting,
+    # or an admin password the deploy would fill with a random value nobody knows, stops it with what to do.
+    from backend.services import claude_agent as _agent
+    from backend.services import customer as customer_service
+    from backend.services import env_contract
+
+    _project_path = _agent.PROJECTS_ROOT / project.slug
+    contract = env_contract.for_project(_project_path)
+    customer_values = env_contract.customer_values(
+        contract, customer.settings or {}, customer_service.read_secret_settings(db, customer)
+    )
+    blockers = env_contract.deploy_blockers(
+        contract,
+        template_keys=list(uat_provisioner._parse_env_file(_project_path / ".env.example")),
+        values=customer_values,
+    )
+    if blockers:
+        raise ValueError("Nasadenie sa nedá spustiť: " + " ".join(blockers))
+
     # The deployed app's initial admin login (username ``admin``) = the customer's OWN secret (set in Zákazníci),
     # so the manager KNOWS it — otherwise the app seeds ``admin`` with a random synthetic nobody can discover and
     # the manager is locked out of their own instance (self-sufficiency kernel, 2026-07-11). Read via the
@@ -1236,6 +1258,9 @@ async def deploy(
             admin_password=admin_password,
             deploy_host=deploy_host,
             private_network=bool(project.private_network),
+            # Only when the app declares customer settings: every runner written before DEV-72 (and its fakes) keeps
+            # the interface it has, and an app without markers never needed the values.
+            **({"customer_values": customer_values} if contract.customer_keys else {}),
         )
     finally:
         deploy_progress.skonci(instalacia)

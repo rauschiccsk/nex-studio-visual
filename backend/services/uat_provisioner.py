@@ -63,7 +63,7 @@ import httpx
 import jinja2
 import yaml
 
-from backend.services import remote_instance
+from backend.services import env_contract, remote_instance
 
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
@@ -113,7 +113,8 @@ BE_ROUTER_PRIORITY = 20
 UAT_DB_PORT = "5432"
 
 # Synthetic secret detection (case-insensitive suffix match) + the ${VAR} placeholder.
-SECRET_SUFFIXES = ("_password", "_secret", "_key", "_token")
+#: One definition with the contract of who provides a setting (DEV-72).
+SECRET_SUFFIXES = env_contract.SECRET_SUFFIXES
 
 # The env var whose presence MAKES an app token-launch (NEX Manager opens it with a signed ticket instead of a
 # password). Its value is the ONE thing this provisioner cannot produce: it belongs to the paired NEX Manager
@@ -794,6 +795,10 @@ def generate_uat_env(
     synthesised_secrets: Optional[list[str]] = None,
     existing_env: Optional[dict[str, str]] = None,
     kept_identity: Optional[list[str]] = None,
+    customer_keys: frozenset[str] = frozenset(),
+    customer_values: Optional[dict[str, str]] = None,
+    public_url_keys: frozenset[str] = frozenset(),
+    public_url: Optional[str] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -898,6 +903,19 @@ def generate_uat_env(
             # nothing is minted and the preserved value is the right one — never a synthetic, which would make
             # every identity check fail while looking configured.
             rendered[key_str] = manager_api_key or preserved_secrets.get(key_str) or ""
+            continue
+        if key_str in public_url_keys and public_url:
+            # DEV-72: ``@public-url`` — the address the browser opens, the very host the Traefik route carries.
+            rendered[key_str] = public_url
+            continue
+        if key_str in customer_keys:
+            # DEV-72: ``@customer`` / ``@customer-secret`` — what the manager entered for this customer wins. With
+            # nothing entered, what the installation already has stays (set by hand before the marker existed);
+            # otherwise the variable stays unset, so the app keeps its own default ("empty = off"). Never a
+            # synthetic: the customer could not know it, and a random admin password locks everyone out.
+            chosen = (customer_values or {}).get(key_str) or existing_env.get(key_str) or preserved_secrets.get(key_str)
+            if chosen:
+                rendered[key_str] = chosen
             continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
@@ -2445,6 +2463,7 @@ def provision_uat(
     allow_overwrite: bool = False,
     deploy_host: Optional[str] = None,
     private: bool = False,
+    customer_values: Optional[dict[str, str]] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -2580,6 +2599,10 @@ def provision_uat(
         manager_env_path = (prod_root if environment == "prod" else uat_root) / customer_slug / "nex-manager" / ".env"
 
     env_example = _parse_env_file(project_path / ".env.example")
+    # DEV-72: who provides which setting — the app's markers in the same file — and the address the browser opens,
+    # from the one place that also names the Traefik route.
+    contract = env_contract.for_project(project_path)
+    _nb_public, public_host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
 
     # ICCINT-59: finish the pairing. Wiring the launch key alone left the app able to VERIFY a token but unable
     # to finish a sign-in: it must ask the Manager who the visitor is, which needs the Manager's address and a
@@ -2626,6 +2649,10 @@ def provision_uat(
         synthesised_secrets=synthesised_secrets,
         existing_env=existing_env,
         kept_identity=kept_identity,
+        customer_keys=frozenset(contract.customer_keys),
+        customer_values=customer_values,
+        public_url_keys=frozenset(contract.public_url_keys),
+        public_url=f"https://{public_host}",
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
