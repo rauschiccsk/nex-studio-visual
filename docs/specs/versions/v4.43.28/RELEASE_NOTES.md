@@ -22,3 +22,8 @@ a zvlášť pre dokumentáciu. Prázdne pole znamená sadzbu z Nastavení a „V
 Súpis ukáže, odkiaľ sadzba je a kto ju naposledy zmenil. Každá zmena sa zapíše: kto, kedy, z akej sadzby na akú.
 Už vydaný súpis sa zmenou sadzby nemení. Novú sadzbu použije až súpis, ktorý ho nahradí. V záložke Fakturácia
 majú verzie s vlastnou sadzbou značku „vlastná sadzba“.
+
+**Kontrola angličtiny v kóde už nehlási citáty.** Verifikácia kontroluje, či je kód aplikácie po anglicky, a slová
+v úvodzovkách nechá tak, ako sú. Doteraz však poznala len citát v úvodzovkách „…“. Citát zakončený rovnou
+úvodzovkou „…" hlásila ako slovenčinu v kóde, hoci išlo o text obrazovky alebo citát. Teraz pozná oba spôsoby.
+A keď sú na riadku dva citáty, slovenská veta medzi nimi už neprejde bez povšimnutia.

@@ -127,6 +127,27 @@ def test_a_version_that_translates_the_comment_it_touches_is_clean(repo):
     assert source_language.scan(repo, base, head, "1.0.0") == []
 
 
+# DEV-80, 12.10.2026: a quotation opened with „ and closed with a straight " — the way NEX Inbox writes 115 of its
+# lines — was read as Slovak in code, so the verification stage would have reported what is not there. A quotation is
+# one quotation whichever mark closes it; straight quotes inside one stay in it, and Slovak between two quotations is
+# still Slovak.
+@pytest.mark.parametrize(
+    ("line", "slovak"),
+    [
+        ('# The Director: „Áno, súhlasím" — keep it.', False),
+        ("# The Director: „Áno, súhlasím“ — keep it.", False),
+        ('# The screen says „Klikni na "Uložiť" a pokračuj“ after saving.', False),
+        ('# Press „Uložiť" and then „Zrušiť“ to leave.', False),
+        ('# Press „Uložiť" potom vráť „Zrušiť“.', True),
+        ("# Skontroluj vstup a vráť chybu.", True),
+        ("# The Director wrote „Áno, súhlasím and nothing closed it.", True),
+        ('# Press „Uložiť a vráť „Zrušiť" now.', True),
+    ],
+)
+def test_a_quotation_is_one_quotation_whichever_mark_closes_it(line, slovak):
+    assert source_language.is_slovak(line) is slovak
+
+
 # --- Verifikácia ---------------------------------------------------------------------------------------------------
 
 

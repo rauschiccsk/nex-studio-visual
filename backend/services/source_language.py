@@ -28,8 +28,11 @@ from backend.services import delivered_tokens
 
 #: Letters only Slovak (of the languages we meet in code) writes — the mechanical sign of a Slovak sentence.
 SLOVAK_LETTERS = re.compile(r"[áäčďéíľĺňóôŕšťúýž]", re.IGNORECASE)
-#: Quoted text inside a comment or a message — a screen text or a person's words, kept as they are.
-_QUOTED = re.compile(r"„[^“”\n]*[“”]|\"[^\"\n]*\"|`[^`\n]*`")
+#: Quoted text inside a comment or a message — a screen text or a person's words, kept as they are. A Slovak quotation
+#: opens with „ and closes with “ or ” — or with a straight ", as many sources write it (DEV-80). The proper closing
+#: mark is tried first, so straight quotes inside a quotation stay in it; neither form reaches past the next „, so two
+#: quotations on a line never swallow the words between them.
+_QUOTED = re.compile(r"„[^„“”\n]*[“”]|„[^„“”\"\n]*\"|\"[^\"\n]*\"|`[^`\n]*`")
 
 PYTHON = (".py",)
 SCRIPT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
