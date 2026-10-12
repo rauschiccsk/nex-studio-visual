@@ -21,6 +21,7 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.uat_check import UatCheck
 from backend.db.models.user_layout import UserLayout
+from backend.db.models.user_note import UserNote
 from backend.db.models.version_discount_change import VersionDiscountChange
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
@@ -49,6 +50,7 @@ __all__ = [
     "DeliveredAuthorship",
     "UatCheck",
     "UserLayout",
+    "UserNote",
     "VersionDiscountChange",
     "VersionRateChange",
     "Epic",

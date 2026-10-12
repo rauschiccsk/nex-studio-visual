@@ -635,6 +635,35 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/auth/me", USER);
   answer("get", "/api/v1/user-layout", LAYOUT);
   answer("put", "/api/v1/user-layout", LAYOUT);
+  // DEV-89 — an open note with a long first line, and one resolved into a request of the selected project.
+  answer("get", "/api/v1/notes", [
+    {
+      id: "aaaaaaaa-0000-4000-8000-000000000089",
+      body: "Zavolať Tiborovi kvôli faktúram MÁGERSTAV, ktoré čakajú na doručenie do NEX Genesis od piatku\nA spýtať sa na dobropisy.",
+      title: "Zavolať Tiborovi kvôli faktúram MÁGERSTAV, ktoré čakajú na doručenie do NEX Genesis od piatku",
+      revision: 3,
+      created_at: T1,
+      updated_at: T2,
+      resolved_at: null,
+      backlog: null,
+    },
+    {
+      id: "aaaaaaaa-0000-4000-8000-000000000090",
+      body: "Export do CSV pri zozname faktúr\nStĺpce ako v Exceli.",
+      title: "Export do CSV pri zozname faktúr",
+      revision: 1,
+      created_at: T1,
+      updated_at: T1,
+      resolved_at: T2,
+      backlog: {
+        id: "aaaaaaaa-0000-4000-8000-000000000091",
+        project_id: PROJECT.id,
+        project_slug: PROJECT.slug,
+        project_name: PROJECT.name,
+        number: 12,
+      },
+    },
+  ]);
   answerUntyped("get", "/api/v1/version", { version: "4.43.26" });
   answer("get", "/api/v1/projects", { items: [PROJECT], total: 1, skip: 0, limit: 50 });
   answer("get", "/api/v1/projects/{project_id}", PROJECT);

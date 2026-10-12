@@ -14,6 +14,7 @@ import { SETTINGS } from "./config/settings";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import GettingStartedPage from "./pages/GettingStartedPage";
+import NotesPage from "./pages/NotesPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import NewProjectPage from "./pages/NewProjectPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
@@ -69,6 +70,7 @@ function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="getting-started" element={<GettingStartedPage />} />
+            <Route path="notes" element={<NotesPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="projects/new" element={<NewProjectPage />} />
             <Route path="projects/:slug" element={<ProjectDetailPage />} />

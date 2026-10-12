@@ -33,6 +33,7 @@ const ROLE_LABEL: Record<UserRole, string> = {
 // FINAL v2.0.0 sidebar glyphs (CR-V2-019, design §4.1).
 const IconHome = () => <NavIcon glyph="🏠" />;
 const IconGuide = () => <NavIcon glyph="🧭" />;
+const IconNotes = () => <NavIcon glyph="📝" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
@@ -196,6 +197,8 @@ export default function Sidebar() {
       <NavItem icon={<IconHome />} label="Prehľad" active={isActive("/")} onClick={() => navigate("/")} />
       {/* Getting-started guide for a non-expert operator (handover). Always accessible (not project-scoped). */}
       <NavItem icon={<IconGuide />} label="Ako začať" active={isActive("/getting-started")} onClick={() => navigate("/getting-started")} />
+      {/* DEV-89: the person's own quick notes — not tied to the selected project, so among the general entries. */}
+      <NavItem icon={<IconNotes />} label="Poznámky" active={isActive("/notes")} onClick={() => navigate("/notes")} />
       <NavItem icon={<IconFolder />} label="Projekty" active={isActive("/projects")} onClick={() => navigate("/projects")} />
 
       {/* Selected project indicator — placed directly under Projects

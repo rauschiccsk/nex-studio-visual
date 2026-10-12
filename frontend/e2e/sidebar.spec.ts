@@ -14,8 +14,12 @@ import { settle } from "./layout";
 
 registerFixtures();
 
-/** How many more tabs must fit without scrolling (Director: „budeme pridávať ešte 3-4 nových záložiek“). */
-const ROOM_FOR = 4;
+/**
+ * How many tabs the sidebar must hold without scrolling: the 17 it had when DEV-81 made it dense, and four more
+ * (Director: „budeme pridávať ešte 3-4 nových záložiek“). Counted as a total, so a new tab uses up the room it was
+ * meant for instead of lowering the bar — DEV-89's notes tab is the first of the four.
+ */
+const TABS_TO_HOLD = 17 + 4;
 
 /** The server keeps what it is sent: a change of the layout comes back as it went. */
 async function keepLayout(page: Page, saved: unknown[]) {
@@ -46,11 +50,12 @@ test.beforeEach(() => {
   test.skip(test.info().project.name !== "pocitac", "the sidebar stands beside the content only on a computer");
 });
 
-test("the sidebar shows every tab at 1280×800 and keeps room for four more", async ({ page }) => {
+test("the sidebar shows every tab at 1280×800 and holds the four tabs planned beyond DEV-81's 17", async ({ page }) => {
   const unanswered = await open(page, "/riadiace-centrum");
 
   const nav = await page.locator("aside nav").evaluate((el) => {
-    const items = [...el.querySelectorAll("button")].filter((b) => b.closest("nav") === el);
+    // The tabs are the nav's own buttons; the selected project's line is a row of its own, not a tab.
+    const items = [...el.querySelectorAll(":scope > button, :scope > a")];
     const last = el.lastElementChild!.getBoundingClientRect();
     const top = el.getBoundingClientRect().top;
     const padding = parseFloat(getComputedStyle(el).paddingBottom);
@@ -63,7 +68,10 @@ test("the sidebar shows every tab at 1280×800 and keeps room for four more", as
   });
 
   expect(nav.scrolls, `the sidebar scrolls (${nav.entries} tabs)`).toBe(false);
-  expect(nav.free, `room left: ${nav.free} px, a tab takes ${nav.entry} px`).toBeGreaterThanOrEqual(ROOM_FOR * nav.entry);
+  const missing = Math.max(0, TABS_TO_HOLD - nav.entries);
+  expect(nav.free, `${nav.entries} tabs, room left ${nav.free} px for ${missing} more of ${nav.entry} px`).toBeGreaterThanOrEqual(
+    missing * nav.entry,
+  );
   expect(unanswered).toEqual([]);
 });
 

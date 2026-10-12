@@ -1119,6 +1119,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List My Notes */
+        get: operations["list_my_notes_api_v1_notes_get"];
+        put?: never;
+        /** Create Note */
+        post: operations["create_note_api_v1_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Note */
+        put: operations["save_note_api_v1_notes__note_id__put"];
+        post?: never;
+        /** Delete Note */
+        delete: operations["delete_note_api_v1_notes__note_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{note_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Note */
+        post: operations["resolve_note_api_v1_notes__note_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{note_id}/to-backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Note To Backlog
+         * @description A request in the project's backlog, exactly once; the caller must be allowed into the project's backlog.
+         */
+        post: operations["note_to_backlog_api_v1_notes__note_id__to_backlog_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/fast-fix": {
         parameters: {
             query?: never;
@@ -5689,6 +5762,31 @@ export interface components {
             /** Wait Seconds */
             wait_seconds: number;
         };
+        /**
+         * NoteBacklogRead
+         * @description The request a note became.
+         */
+        NoteBacklogRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Number
+             * @description REQ-{number}
+             */
+            number: number;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
+            /** Project Slug */
+            project_slug: string;
+        };
         /** PaginatedResponse[BacklogItemRead] */
         PaginatedResponse_BacklogItemRead_: {
             /** Items */
@@ -7763,6 +7861,67 @@ export interface components {
             sidebar_collapsed?: boolean | null;
             /** Sidebar Width */
             sidebar_width?: number | null;
+        };
+        /**
+         * UserNoteConflictRead
+         * @description 409 — the note changed on another device; ``note`` is how it is now.
+         */
+        UserNoteConflictRead: {
+            /** Detail */
+            detail: string;
+            note: components["schemas"]["UserNoteRead"];
+        };
+        /** UserNoteCreate */
+        UserNoteCreate: {
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+        };
+        /** UserNoteRead */
+        UserNoteRead: {
+            backlog?: components["schemas"]["NoteBacklogRead"] | null;
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Revision */
+            revision: number;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** UserNoteResolve */
+        UserNoteResolve: {
+            /** Resolved */
+            resolved: boolean;
+        };
+        /** UserNoteSave */
+        UserNoteSave: {
+            /** Body */
+            body: string;
+            /** Revision */
+            revision: number;
+        };
+        /** UserNoteToBacklog */
+        UserNoteToBacklog: {
+            /** Project Slug */
+            project_slug: string;
         };
         /**
          * UserRead
@@ -10453,6 +10612,202 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_notes_api_v1_notes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteRead"][];
+                };
+            };
+        };
+    };
+    create_note_api_v1_notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNoteCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_note_api_v1_notes__note_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNoteSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteConflictRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_api_v1_notes__note_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_note_api_v1_notes__note_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNoteResolve"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    note_to_backlog_api_v1_notes__note_id__to_backlog_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserNoteToBacklog"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserNoteRead"];
                 };
             };
             /** @description Validation Error */
