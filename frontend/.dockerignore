@@ -16,3 +16,7 @@ yarn-error.log*
 .idea
 *.tsbuildinfo
 coverage
+
+# Browser guard output (DEV-62)
+test-results
+playwright-report
