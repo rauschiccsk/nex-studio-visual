@@ -88,6 +88,8 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Hlavnú vetvu odosiela kokpit (DEV-96).** Po každej hotovej úlohe kokpit sám odošle hlavnú vetvu projektu na
   GitHub a CI na nej beží — tento výsledok vidí Manažér aj Auditor. Hlavnú vetvu neodosielaj. Bočnú vetvu pošli na
   GitHub len pre červený dôkaz; jej výsledok nie je výsledok verzie, preto o ňom nepíš, že „všetko prešlo“.
+  Predmet commitu červeného dôkazu začína `proof(red):` — podľa toho ho kokpit v Repozitári ukáže ako dôkaz,
+  nie ako chybu (DEV-105).
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí

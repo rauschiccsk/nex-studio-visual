@@ -46,6 +46,11 @@ RUNNING = "running"
 WAITING = "waiting"
 CANCELLED = "cancelled"
 OTHER = "other"
+#: DEV-105 — an agent's planned red proof on a side branch: red is the right result, green is the finding.
+PROOF = "proof"
+PROOF_PASSED = "proof_passed"
+#: The mark a red proof's commit subject starts with — the agent is told it in the task brief and the charter.
+PROOF_MARK = "proof(red):"
 
 STATE_LABELS = {
     SUCCESS: "Prešlo",
@@ -54,6 +59,8 @@ STATE_LABELS = {
     WAITING: "Čaká",
     CANCELLED: "Zrušené",
     OTHER: "Bez výsledku",
+    PROOF: "Dôkaz — červené podľa plánu",
+    PROOF_PASSED: "Dôkaz prešiel — mal byť červený",
 }
 
 #: The finished-but-fine conclusions get their own word; their colour is the success one (they did not fail).
@@ -149,6 +156,12 @@ def run_from_github(row: dict) -> Run:
     commit = (row.get("head_commit") or {}).get("message") or ""
     subject = commit.split("\n", 1)[0].strip() or str(row.get("display_title") or "")
     state, word = state_of(row.get("status"), row.get("conclusion"))
+    if subject.lower().startswith(PROOF_MARK):
+        # DEV-105 — 13.10.2026 a planned red proof on NEX Inbox read „Zlyhalo“ beside a real failure.
+        if state == FAILURE:
+            state, word = PROOF, STATE_LABELS[PROOF]
+        elif state == SUCCESS:
+            state, word = PROOF_PASSED, STATE_LABELS[PROOF_PASSED]
     actor = (row.get("triggering_actor") or row.get("actor") or {}).get("login") or ""
     return Run(
         id=int(row["id"]),
@@ -241,7 +254,7 @@ async def _ask_github(repo: str, timeout: float) -> Listing:
     async with httpx.AsyncClient(timeout=timeout) as client:
         data = await _get(client, f"repos/{repo}/actions/runs", {"per_page": settings.ci_runs_listed})
         runs = [run_from_github(row) for row in data.get("workflow_runs") or []]
-        failed = [r for r in runs if r.state == FAILURE]
+        failed = [r for r in runs if r.state in (FAILURE, PROOF)]
         steps = await asyncio.gather(*(_failed_step(client, repo, r) for r in failed), return_exceptions=True)
     by_id = {r.id: (s if isinstance(s, str) else None) for r, s in zip(failed, steps)}
     runs = [replace(r, failed_step=by_id.get(r.id)) for r in runs]

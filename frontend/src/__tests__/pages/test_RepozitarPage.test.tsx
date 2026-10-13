@@ -48,7 +48,7 @@ function run(id: number, over: Partial<CiRun> = {}): CiRun {
 }
 
 const RED = run(25, {
-  subject: "proof(red): nginx without the .mjs type (do not merge)",
+  subject: "fix(1.8.0): nginx serves .mjs with its type",
   state: "failure",
   state_label: "Zlyhalo",
   branch: "ci/v180-gate-red-mjs",
@@ -127,7 +127,7 @@ describe("the repository tab (DEV-84)", () => {
     const runs = await screen.findAllByRole("listitem");
     expect(getCiRuns).toHaveBeenCalledWith("nex-inbox");
     const red = within(runs[0]!);
-    expect(red.getByText("proof(red): nginx without the .mjs type (do not merge)")).toBeInTheDocument();
+    expect(red.getByText("fix(1.8.0): nginx serves .mjs with its type")).toBeInTheDocument();
     expect(red.getByText("Zlyhalo")).toBeInTheDocument();
     expect(red.getByText("Zlyhal krok: gate › Brána vydania (release_smoke_test.sh)")).toBeInTheDocument();
     expect(red.getByRole("link", { name: "Beh #25 na GitHube" })).toHaveAttribute("href", RED.url);
@@ -135,6 +135,27 @@ describe("the repository tab (DEV-84)", () => {
     expect(tasked.getByText("na PROD · MÁGERSTAV · 1.7.1")).toBeInTheDocument();
     expect(tasked.getByRole("button", { name: "Úloha 32.2.1 · verzia 1.8.0" })).toBeInTheDocument();
     expect(screen.getByText(/Behy: 2 zobrazené z 2 najnovších · GitHub ich má spolu 193\./)).toBeInTheDocument();
+  });
+
+  it("a planned red proof reads as one, with the step that went red as planned (DEV-105)", async () => {
+    const proof = run(28, {
+      subject: "proof(red): variant text copied into Settings.tsx (do not merge)",
+      state: "proof",
+      state_label: "Dôkaz — červené podľa plánu",
+      branch: "ci/v180-gate-red-sp20",
+      failed_step: "gate › Brána vydania (release_smoke_test.sh)",
+    });
+    vi.mocked(getCiRuns).mockResolvedValue(answer({ runs: [proof] }));
+    page();
+
+    const row = within((await screen.findAllByRole("listitem"))[0]!);
+    expect(row.getByText("Dôkaz — červené podľa plánu")).toBeInTheDocument();
+    expect(row.getByText("Červený krok podľa plánu: gate › Brána vydania (release_smoke_test.sh)")).toBeInTheDocument();
+    expect(row.queryByText(/Zlyhal/)).not.toBeInTheDocument();
+    const states = within(screen.getByRole("combobox", { name: /Stav/ })).getAllByRole("option");
+    expect(states.map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(["Dôkaz — červené podľa plánu", "Dôkaz prešiel — mal byť červený"]),
+    );
   });
 
   it("a task opens its version's task plan at the task", async () => {

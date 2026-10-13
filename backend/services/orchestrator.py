@@ -61,6 +61,7 @@ from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
     build_provenance,
+    ci_runs,
     ci_status,
     claude_agent,
     database_schema,
@@ -5168,7 +5169,8 @@ def _git_publish(project_root: Path, args: list[str]) -> tuple[int, str, str]:
 #: DEV-96 — the brief's rule; the charter says the same for a session that has read it.
 PUSH_RULE = (
     "Hlavnú vetvu na GitHub odošle kokpit hneď po tejto úlohe — sám ju neodosielaj. Bočnú vetvu pošli na GitHub "
-    "len pre červený dôkaz; jej výsledok nie je výsledok verzie."
+    "len pre červený dôkaz; jej výsledok nie je výsledok verzie. Predmet commitu červeného dôkazu začína "
+    f"`{ci_runs.PROOF_MARK}` — podľa toho ho kokpit ukáže ako dôkaz, nie ako chybu (DEV-105)."
 )
 
 #: DEV-96 — why a branch did not reach ``origin``, in the words the manager reads.

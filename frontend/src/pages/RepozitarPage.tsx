@@ -6,6 +6,7 @@ import {
   CircleAlert,
   Clock,
   ExternalLink,
+  FlaskConical,
   FolderOpen,
   GitBranch,
   HelpCircle,
@@ -33,6 +34,9 @@ const STATES: { value: string; label: string }[] = [
   { value: "waiting", label: "Čaká" },
   { value: "cancelled", label: "Zrušené" },
   { value: "other", label: "Bez výsledku" },
+  // DEV-105: an agent's planned red proof on a side branch — red is the right result, green is the finding.
+  { value: "proof", label: "Dôkaz — červené podľa plánu" },
+  { value: "proof_passed", label: "Dôkaz prešiel — mal byť červený" },
 ];
 
 interface Look {
@@ -50,6 +54,8 @@ const STATE_LOOK: Record<string, Look> = {
   waiting: { icon: Clock, tone: "text-[var(--color-state-warning-fg)]" },
   cancelled: { icon: Ban, tone: "text-[var(--color-text-muted)]" },
   other: UNKNOWN_LOOK,
+  proof: { icon: FlaskConical, tone: "text-[var(--color-text-secondary)]" },
+  proof_passed: { icon: CircleAlert, tone: "text-[var(--color-state-warning-fg)]" },
 };
 
 const FIELD =
@@ -293,9 +299,16 @@ function RunRow({ run, onTask }: { run: CiRun; onTask: () => void }) {
             <span>{duration(run.duration_seconds)}</span>
           )}
         </p>
-        {run.failed_step && (
-          <p className="mt-1 break-words text-xs text-[var(--color-state-error-fg)]">Zlyhal krok: {run.failed_step}</p>
-        )}
+        {run.failed_step &&
+          (run.state === "proof" ? (
+            <p className="mt-1 break-words text-xs text-[var(--color-text-secondary)]">
+              Červený krok podľa plánu: {run.failed_step}
+            </p>
+          ) : (
+            <p className="mt-1 break-words text-xs text-[var(--color-state-error-fg)]">
+              Zlyhal krok: {run.failed_step}
+            </p>
+          ))}
         {(run.task || run.deployed.length > 0) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {run.task && (
