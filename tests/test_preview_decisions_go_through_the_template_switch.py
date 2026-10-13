@@ -10,6 +10,10 @@ app's code. Director: „Áno, založ tiket do DEV“, „Poďme na ďaľší ti
 Pinned here: the rule (every use of the raw flag has an allowed SHAPE — static guard, comparison, handed-on
 value), the three measured shapes are caught with file and line, the shapes the template, NEX Manager and NEX Inbox
 use today pass, and the shared Verifikácia settle floors a PASS on it for the autonomous and the manual path alike.
+
+DEV-1 (13.10.2026): the build config decides too. NEX Manager's ``frontend/vite.config.ts`` read
+``process.env.VITE_PREVIEW`` as a truth value in three places — a build made with ``VITE_PREVIEW=false`` would keep
+the preview's MSW worker and its release notes — and the rule never saw it, because it read only ``frontend/src``.
 """
 
 from __future__ import annotations
@@ -88,6 +92,8 @@ OTHER_RIGHT_SHAPES = """const raw = import.meta.env.VITE_PREVIEW as string | und
 const orEmpty = import.meta.env.VITE_PREVIEW ?? "";
 const typed = typeof import.meta.env.VITE_PREVIEW === "string";
 const reversed = "1" === import.meta.env.VITE_PREVIEW;
+const explicit = isPreviewEnabled(import.meta.env.VITE_PREVIEW ?? "");
+const listed = ENABLING_VALUES.includes(import.meta.env.VITE_PREVIEW ?? "");
 const url = "https://example.com"; // if (import.meta.env.VITE_PREVIEW) in a comment after a URL
 """
 
@@ -154,6 +160,8 @@ def test_the_shapes_in_use_today_pass(tmp_path):
         "const isPreview = () => import.meta.env.VITE_PREVIEW;",
         "track(import.meta.env.VITE_PREVIEW);",
         'const home = "https://isnex.eu"; if (import.meta.env.VITE_PREVIEW) start();',
+        "if (process.env.VITE_PREVIEW) start();",
+        "const env = import.meta.env; if (env.VITE_PREVIEW) start();",
     ],
 )
 def test_every_other_use_of_the_raw_flag_is_a_finding(tmp_path, line):
@@ -214,6 +222,97 @@ def test_the_fix_names_the_helper_and_every_allowed_shape():
     assert "ak ho projekt nemá, vytvor ho v tvare šablóny" in fix
     assert "`import.meta.env.VITE_PREVIEW && isPreviewEnabled()`" in fix
     assert "aj `VITE_PREVIEW=false` je pravdivé" in fix
+
+
+# ── DEV-1: the build config decides what a release contains ──────────────────────────────────────────────────
+
+# The three places in NEX Manager's build config (frontend/vite.config.ts, 13.10.2026), names in English.
+MANAGER_VITE_CONFIG = """import { defineConfig } from "vite";
+
+if (process.env.VITE_PREVIEW && !process.env.VITE_APP_VERSION) {
+  process.env.VITE_APP_VERSION = latestReleaseNotes();
+}
+
+export default defineConfig({
+  plugins: [
+    {
+      load(id: string) {
+        if (!process.env.VITE_PREVIEW && !process.env.VITEST) {
+          return "export const NOTES = [];";
+        }
+      },
+    },
+    {
+      async closeBundle() {
+        if (process.env.VITE_PREVIEW) return;
+        await rm("dist/mockServiceWorker.js", { force: true });
+      },
+    },
+  ],
+});
+"""
+# The build-config shapes in use today that are right, from NEX Inbox and Dedo Home.
+INBOX_VITE_CONFIG = """export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const isPreview = PREVIEW_ON.includes(env.VITE_PREVIEW ?? "");
+  return { define: { __PREVIEW__: isPreview } };
+});
+"""
+DEDO_HOME_VITE_CONFIG = """import { isPreviewEnabled } from "./src/preview/isPreview";
+
+// `?? ""` on purpose: without it the helper's default would read `import.meta.env`, absent in Node.
+const previewEnabled = isPreviewEnabled(process.env.VITE_PREVIEW ?? "");
+"""
+
+
+def test_the_build_config_is_read_with_the_source(tmp_path):
+    root = _project(
+        tmp_path,
+        {"frontend/vite.config.ts": MANAGER_VITE_CONFIG, "frontend/src/main.tsx": WEBSITES_MAIN},
+    )
+
+    found = preview_switch.find(root)
+
+    assert _where(found) == [
+        ("frontend/src/main.tsx", 2),
+        ("frontend/vite.config.ts", 3),
+        ("frontend/vite.config.ts", 11),
+        ("frontend/vite.config.ts", 18),
+    ]
+    assert found[3].code == "if (process.env.VITE_PREVIEW) return;"
+
+
+@pytest.mark.parametrize(
+    "name", ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs", "vite.config.cjs"]
+)
+def test_a_build_config_alone_is_checked_in_every_form(tmp_path, name):
+    root = _project(tmp_path, {f"frontend/{name}": "// header\nif (process.env.VITE_PREVIEW) return;\n"})
+
+    assert _where(preview_switch.find(root)) == [(f"frontend/{name}", 2)]
+
+
+@pytest.mark.parametrize("config", [INBOX_VITE_CONFIG, DEDO_HOME_VITE_CONFIG])
+def test_the_build_config_shapes_in_use_today_pass(tmp_path, config):
+    root = _project(tmp_path, {"frontend/vite.config.ts": config})
+
+    assert preview_switch.find(root) == []
+
+
+def test_the_test_config_and_vites_leftover_copy_are_not_the_app(tmp_path):
+    truthy = "if (process.env.VITE_PREVIEW) setup();\n"
+    root = _project(
+        tmp_path,
+        {"frontend/vitest.config.ts": truthy, "frontend/vite.config.ts.timestamp-1760331234567-ab12.mjs": truthy},
+    )
+
+    assert preview_switch.find(root) == []
+
+
+def test_the_fix_says_how_the_build_config_hands_the_value_on():
+    fix = preview_switch.fix_instruction()
+
+    assert '`isPreviewEnabled(process.env.VITE_PREVIEW ?? "")`' in fix
+    assert "`frontend/vite.config.*`" in fix
 
 
 # ── the shared Verifikácia settle ────────────────────────────────────────────────────────────────────────────

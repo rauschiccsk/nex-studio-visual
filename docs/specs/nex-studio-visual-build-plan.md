@@ -75,6 +75,9 @@ kontrolou CI) prečíta zdrojáky frontendu (`preview_switch.find`): surové `im
 stáť len ako statická poistka `import.meta.env.VITE_PREVIEW && isPreviewEnabled()`, v porovnaní s hodnotou alebo
 ako hodnota odovzdaná ďalej; každé iné použitie zmení PASS na FAIL (`engine_override=preview_switch`) so súborom,
 riadkom a správnym tvarom, ktoré dostane AI Agent na opravu. Platí pre samostatný beh aj pre ručné schválenie.
+Od v4.44.1 (DEV-1) kontrola číta aj nastavenie stavby (`frontend/vite.config.*`) a premennú v ktoromkoľvek objekte
+prostredia (`import.meta.env`, `process.env`, výsledok `loadEnv`); hodnotou odovzdanou ďalej je aj argument
+`.includes(…)` a `?? ""` za ňou. NEX Manager tam mal tri pravdivostné použitia, ktoré kontrola nevidela.
 
 **Súbory pre agenta (v4.43.14, DEV-44).** Manažér priloží súbor tlačidlom „Priložiť súbor“ v poli odpovede aj
 v rozhovore (`AttachFileButton`); `POST /pipeline/{version_id}/files` ho uloží do `<projekt>/private/`

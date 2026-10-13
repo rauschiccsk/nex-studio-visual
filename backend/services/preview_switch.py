@@ -8,15 +8,21 @@ the login, let the route guard in, or serve the fixtures instead of the backend.
 Asistent's API client, NEX Websites' route guard and its MSW start. The agent charter itself dictated the first
 shape (fixed in DEV-2) and nothing in the cockpit read the app's code.
 
+The build config decides too (DEV-1): it is the one place outside ``frontend/src`` that shapes what a release
+contains. Measured 13.10.2026: NEX Manager's ``frontend/vite.config.ts`` read ``process.env.VITE_PREVIEW`` as a truth
+value in three places, so a build made with ``VITE_PREVIEW=false`` would keep the preview's MSW worker and release
+notes — and this rule, reading only ``frontend/src``, never saw it. The flag is therefore any ``env`` object's
+``VITE_PREVIEW`` — ``import.meta.env``, ``process.env`` or a ``loadEnv`` result.
+
 The rule is about the SHAPE of every use of the raw flag in the app's frontend source, not a list of files.
 A use is allowed only as:
 
 * the static guard ``import.meta.env.VITE_PREVIEW && isPreviewEnabled(…)`` — Vite turns the flag into a literal,
   so without the variable the preview branch is dead code and never reaches the release bundle;
 * an operand of a comparison (``=== "1"``, ``typeof … === "string"``) — a decision by value, not by truth;
-* a value handed on — the first argument of ``isPreviewEnabled(…)``, or the right-hand side of an assignment
-  or a default parameter (``value = import.meta.env.VITE_PREVIEW``), optionally ``as <type>`` or
-  ``?? <fallback>``.
+* a value handed on — the first argument of ``isPreviewEnabled(…)`` or of a list's ``.includes(…)``, or the
+  right-hand side of an assignment or a default parameter (``value = import.meta.env.VITE_PREVIEW``), optionally
+  ``as <type>`` or ``?? <fallback>``.
 
 Anything else — ``if (flag)``, ``!flag``, ``flag ? a : b``, ``flag || x``, ``flag && other()``, ``Boolean(flag)``,
 a bare argument — is a finding. Comments are blanked first (line numbers kept) and tests are not the app. A value
@@ -32,17 +38,22 @@ from pathlib import Path
 
 #: The app's frontend source, relative to the project root.
 FRONTEND_SRC = Path("frontend") / "src"
+#: The build config's name in ``frontend/`` (``vite.config.ts``, ``.mjs``, …). ``vitest.config.*`` is test tooling, and
+#: ``vite.config.ts.timestamp-….mjs`` is Vite's bundled copy of the config, left behind when a dev server dies.
+BUILD_CONFIG_STEM = "vite.config"
 
 #: The template's decision helper every finding points to.
 HELPER_REL = "frontend/src/preview/isPreview.ts"
 
 SOURCE_SUFFIXES = frozenset({".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs"})
+CONFIG_SUFFIXES = SOURCE_SUFFIXES | {".cts", ".cjs"}
 
 #: Directories under ``frontend/src`` that hold tests, not the app.
 _TEST_DIRS = frozenset({"__tests__", "test", "tests"})
 _TEST_FILE = re.compile(r"\.(?:test|spec)\.[^.]+$|^setupTests\.[^.]+$")
 
-_FLAG = re.compile(r"""import\.meta\.env(?:\?\.|\.)VITE_PREVIEW\b|import\.meta\.env\[\s*(["'])VITE_PREVIEW\1\s*\]""")
+_ENV = r"(?:import\.meta\.env|\bprocess\.env|\benv)"
+_FLAG = re.compile(rf"""{_ENV}(?:\?\.|\.)VITE_PREVIEW\b|{_ENV}\[\s*(["'])VITE_PREVIEW\1\s*\]""")
 
 #: Block comments, and line comments not preceded by ``:`` (so a URL in a string is not cut as a comment).
 _COMMENT = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.DOTALL)
@@ -50,8 +61,8 @@ _COMMENT = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.DOTALL)
 _GUARD_AFTER = re.compile(r"\s*&&\s*isPreviewEnabled\s*\(")
 _COMPARE_AFTER = re.compile(r"\s*[!=]==?(?!=)")
 _COMPARE_BEFORE = re.compile(r"[!=]==?\s*$")
-_HELPER_ARG_BEFORE = re.compile(r"\bisPreviewEnabled\s*\(\s*$")
-_HELPER_ARG_AFTER = re.compile(r"\s*[,)]")
+_HELPER_ARG_BEFORE = re.compile(r"(?:\bisPreviewEnabled|\.includes)\s*\(\s*$")
+_HELPER_ARG_AFTER = re.compile(r"\s*(?:\?\?[^,;)\n]+)?[,)]")
 _ASSIGN_BEFORE = re.compile(r"(?<![=!<>+\-*/%&|^?])=\s*$")
 _ASSIGN_AFTER = re.compile(r"\s*(?:as\s+[^;,)\n]+|\?\?[^;,)\n]+)?\s*(?:[;,)\]}]|\n|\Z)")
 
@@ -84,19 +95,35 @@ def _allowed(code: str, start: int, end: int) -> bool:
     return bool(_ASSIGN_BEFORE.search(before) and _ASSIGN_AFTER.match(after))
 
 
-def find(project_root: Path) -> list[PreviewDecision]:
-    """Every use of ``VITE_PREVIEW`` in the app's frontend source the rule does not allow, ordered by path.
-
-    ``[]`` when there is no ``frontend/src`` — nothing there decides about a preview. A source file that cannot
-    be read is a finding itself: an unchecked file is not a checked one."""
-    root = Path(project_root)
+def _app_files(root: Path) -> list[Path]:
+    """The frontend source outside tests, and the build config."""
     src = root / FRONTEND_SRC
-    if not src.is_dir():
-        return []
+    files: list[Path] = []
+    if src.is_dir():
+        files += [
+            p
+            for p in src.rglob("*")
+            if p.suffix in SOURCE_SUFFIXES and p.is_file() and not _is_test(p.relative_to(src))
+        ]
+    frontend = root / FRONTEND_SRC.parent
+    if frontend.is_dir():
+        files += [
+            p
+            for p in frontend.glob(f"{BUILD_CONFIG_STEM}.*")
+            if p.stem == BUILD_CONFIG_STEM and p.suffix in CONFIG_SUFFIXES and p.is_file()
+        ]
+    return sorted(files)
+
+
+def find(project_root: Path) -> list[PreviewDecision]:
+    """Every use of ``VITE_PREVIEW`` in the app's frontend source and build config the rule does not allow, ordered
+    by path.
+
+    ``[]`` when there is neither — nothing there decides about a preview. A file that cannot be read is a finding
+    itself: an unchecked file is not a checked one."""
+    root = Path(project_root)
     found: list[PreviewDecision] = []
-    for path in sorted(src.rglob("*")):
-        if path.suffix not in SOURCE_SUFFIXES or not path.is_file() or _is_test(path.relative_to(src)):
-            continue
+    for path in _app_files(root):
         rel = path.relative_to(root).as_posix()
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -132,6 +159,8 @@ def fix_instruction() -> str:
         f"(`{HELPER_REL}`; ak ho projekt nemá, vytvor ho v tvare šablóny). Na každom uvedenom mieste nahraď "
         "pravdivostné použitie `import.meta.env.VITE_PREVIEW` volaním `isPreviewEnabled()`. Premenná smie ostať "
         "len ako statická poistka v tvare `import.meta.env.VITE_PREVIEW && isPreviewEnabled()`, v porovnaní "
-        "s hodnotou alebo ako hodnota odovzdaná pomocníkovi. Dôvod: aj `VITE_PREVIEW=false` je pravdivé, takže "
+        "s hodnotou alebo ako hodnota odovzdaná pomocníkovi. V nastavení stavby (`frontend/vite.config.*`) "
+        'odovzdaj hodnotu pomocníkovi výslovne: `isPreviewEnabled(process.env.VITE_PREVIEW ?? "")` — bez `?? ""` '
+        "by pomocník čítal `import.meta.env`, ktoré tam nie je. Dôvod: aj `VITE_PREVIEW=false` je pravdivé, takže "
         "aplikácia zostavená s vypnutým náhľadom by sa správala ako náhľad."
     )
