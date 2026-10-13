@@ -307,7 +307,7 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
         calls.append((list(cmd), env))
         return _FakeProc(0, b"deploy log tail")
 
-    async def _serves_ok(project_slug, uat_slug):
+    async def _serves_ok(project_slug, uat_slug, private=False):
         return True, "OK"
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
@@ -347,7 +347,7 @@ async def test_run_uat_deploy_blocks_when_serve_verify_fails(monkeypatch):
     async def _fake_exec(*cmd, stdout=None, stderr=None, env=None):
         return _FakeProc(0, b"Started")
 
-    async def _serves_fail(project_slug, uat_slug):
+    async def _serves_fail(project_slug, uat_slug, private=False):
         return False, "backend 'backend' /api not responding within 120s: connection refused"
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)

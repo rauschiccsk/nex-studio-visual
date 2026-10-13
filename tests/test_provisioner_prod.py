@@ -261,7 +261,7 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
         return _Result()
 
     async def _fake_run_prod(
-        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None
+        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
     ):
         captured["prod_deploy"] = (project_slug, customer_slug, app, full_project_slug)
         # ICCINT-151: napodobenina, ktorá cieľ zahodí, si nevšimne, keď ho služba prestane posielať.

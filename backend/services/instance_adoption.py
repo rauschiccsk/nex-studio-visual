@@ -586,7 +586,13 @@ async def adopting_deploy_runner(
 
     if is_prod:
         ok, detail = await orchestrator._run_prod_deploy(
-            project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
+            project_slug,
+            customer_slug,
+            app,
+            project_slug,
+            version_number=version_number,
+            deploy_host=deploy_host,
+            private=private_network,
         )
         # ICCINT-151 — pri zlyhaní vráť na cieľ predpis, ktorý tam bol. Prevzatie je tá cesta, kde na
         # tom záleží najviac: prepisuje sa ním ručne písaná inštalácia zákazníka.
@@ -601,6 +607,7 @@ async def adopting_deploy_runner(
             app=app,
             full_project_slug=project_slug,
             version_number=version_number,
+            private=private_network,
         )
         # ⚠️ ``ProvisionResult`` žiadne ``url`` nemá — skladá sa z názvu inštalácie, presne ako
         # v ``deploy._default_deploy_runner``. Prvé znenie tu malo ``result.url`` a padlo to až

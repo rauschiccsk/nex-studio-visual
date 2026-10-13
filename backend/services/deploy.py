@@ -940,7 +940,13 @@ async def _default_deploy_runner(
     )
     if is_prod:
         outcome = await orchestrator._run_prod_deploy(
-            project_slug, customer_slug, app, project_slug, version_number=version_number, deploy_host=deploy_host
+            project_slug,
+            customer_slug,
+            app,
+            project_slug,
+            version_number=version_number,
+            deploy_host=deploy_host,
+            private=private_network,
         )
         ok, detail = outcome
         detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host, new_version_started=_started(outcome))
@@ -958,6 +964,7 @@ async def _default_deploy_runner(
             app=app,
             full_project_slug=project_slug,
             version_number=version_number,
+            private=private_network,
         )
         ok, detail = outcome
         url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None

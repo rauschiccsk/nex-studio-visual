@@ -6012,6 +6012,7 @@ async def _run_uat_deploy(
     full_project_slug: Optional[str] = None,
     version_number: Optional[str] = None,
     deploy_host: Optional[str] = None,
+    private: bool = False,
 ) -> tuple[bool, str]:
     """Plain redeploy of an instance's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
 
@@ -6112,9 +6113,10 @@ async def _run_uat_deploy(
             app=app,
             full_project_slug=full_project_slug,
             deploy_host=deploy_host,
+            private=private,
         )
     else:
-        ok, detail = await _verify_uat_serves(project_slug, uat_slug)
+        ok, detail = await _verify_uat_serves(project_slug, uat_slug, private=private)
     if ok and environment == "uat" and not deploy_host:
         # ICCINT-167: read-only Poradca account in the UAT database — after each deployment, so the rights follow
         # the schema (a new column with a password must not stay readable). A deployment never fails because of it.
@@ -6134,6 +6136,7 @@ async def _run_prod_deploy(
     full_project_slug: str,
     version_number: Optional[str] = None,
     deploy_host: Optional[str] = None,
+    private: bool = False,
 ) -> tuple[bool, str]:
     """PROD sibling of :func:`_run_uat_deploy` — redeploy the customer's PROD compose (§2).
 
@@ -6154,6 +6157,7 @@ async def _run_prod_deploy(
         full_project_slug=full_project_slug,
         version_number=version_number,
         deploy_host=deploy_host,
+        private=private,
     )
 
 
@@ -6336,6 +6340,7 @@ async def _verify_uat_serves(
     app: Optional[str] = None,
     full_project_slug: Optional[str] = None,
     deploy_host: Optional[str] = None,
+    private: bool = False,
 ) -> tuple[bool, str]:
     """Post-``up`` readiness gate for a deploy (icc-deploy §5.6 #2): confirm the deployed app actually
     SERVES before :func:`_run_uat_deploy` reports success — every backend ``/api`` responds AND every
@@ -6385,10 +6390,10 @@ async def _verify_uat_serves(
     fe_role = roles["frontend"]
     if fe_role is not None:
         fe_ports = _frontend_ports(services[fe_role])
-        name_base = (
-            (f"{customer_slug}-{app}" if environment == "prod" else f"uat-{customer_slug}-{app}")
-            if customer_slug
-            else f"uat-{uat_slug}"
+        # DEV-102: names and the address come from the one naming rule — a private project (DEV-42) lives in the
+        # private zone; the check once built the public address itself and failed Career Asistent's good deploy.
+        name_base, public_host = uat_provisioner._instance_naming(
+            environment, uat_slug, customer_slug, app, private=private
         )
         fe_host = f"{name_base}-{fe_role}"
         fe_ready, fe_last = await _await_http_ready(base, be_role, fe_ports, host=fe_host, path="/", env=env_ciela)
@@ -6403,7 +6408,6 @@ async def _verify_uat_serves(
             # DEV-68: an installation on another machine is asked at its own addresses, the way its users open them.
             public_host, route_state, route_last = await _verify_remote_public_route(uat_compose)
         else:
-            public_host = f"{name_base}.{uat_provisioner.UAT_DOMAIN_SUFFIX}"
             route_state, route_last = await _verify_public_route(base, be_role, public_host)
         if route_state == "down":
             return False, (

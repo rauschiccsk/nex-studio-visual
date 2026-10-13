@@ -29,7 +29,9 @@ def _zachyt(monkeypatch) -> list[dict]:
     """Zapamätá si, s čím sa volalo nasadenie — a nespustí nič."""
     videne: list[dict] = []
 
-    async def _fake_prod(project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None):
+    async def _fake_prod(
+        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
+    ):
         videne.append({"kde": "prod", "deploy_host": deploy_host, "customer_slug": customer_slug})
         return True, "OK"
 
