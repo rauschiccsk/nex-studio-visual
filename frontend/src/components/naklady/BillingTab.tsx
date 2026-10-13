@@ -1,4 +1,4 @@
-// BillingTab — the billing tab of the costs page (DEV-73): every version of the project for invoicing, the newest first.
+// BillingTab — the body of the billing page (DEV-73): every version of the project for invoicing, the newest first.
 //
 // 12.10.2026 the statement of only the selected version was visible (1.7.1, a fix of our own error, 0 €) and the
 // versions between 1.5.0 and 1.7.1 looked lost although nothing was. Here each version says where it stands — issued,

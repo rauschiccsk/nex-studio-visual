@@ -234,6 +234,16 @@ describe("MetricsPage — Náklady (CR-V2-063)", () => {
 
   // ── case 11 ────────────────────────────────────────────────────────────────
 
+  it("offers the cost views only — billing has a tab of its own in the sidebar (DEV-73)", async () => {
+    await renderPage(CONFIGURED);
+    const views = screen.getByRole("tablist", { name: "Náklady za" });
+    expect(
+      within(views)
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["Verzia", "Kumulatívne"]);
+  });
+
   it("renders a null human cost as — with no 0 in that cell, while a set one keeps its number", async () => {
     const table = await renderPage(CONFIGURED);
     const rows = costRows(table);

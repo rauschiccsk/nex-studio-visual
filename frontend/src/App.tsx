@@ -22,6 +22,7 @@ import NewVersionPage from "./pages/NewVersionPage";
 import VersionDetailPage from "./pages/VersionDetailPage";
 import BacklogPage from "./pages/BacklogPage";
 import MetricsPage from "./pages/MetricsPage";
+import BillingPage from "./pages/BillingPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import UpdatesPage from "./pages/UpdatesPage";
 import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
@@ -80,6 +81,7 @@ function App() {
             <Route path="projects/:slug/versions/:versionId" element={<VersionDetailPage />} />
             <Route path="projects/:slug/backlog" element={<BacklogPage />} />
             <Route path="projects/:slug/metrics" element={<MetricsPage />} />
+            <Route path="projects/:slug/billing" element={<BillingPage />} />
             <Route path="kb" element={<KnowledgeBasePage />} />
             {/* v2 (CR-V2-020): /project-specs (📖 Špecifikácie) removed — the
                 page is retired. The single design doc now lives in Vývoj →

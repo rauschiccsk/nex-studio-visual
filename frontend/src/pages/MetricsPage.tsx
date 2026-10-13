@@ -19,11 +19,10 @@ import type { AgentModel } from "@/types/user_agent_setting";
 import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
 import type { CostRow, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
 import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
-import BillingTab from "@/components/naklady/BillingTab";
 
-type View = "version" | "cumulative" | "billing";
+type View = "version" | "cumulative";
 
-const VIEW_LABELS: Record<View, string> = { version: "Verzia", cumulative: "Kumulatívne", billing: "Fakturácia" };
+const VIEW_LABELS: Record<View, string> = { version: "Verzia", cumulative: "Kumulatívne" };
 
 // The external + system rows are NOT build phases — their labels live here, not in PHASE_LABELS.
 const EXTERNAL_ROW_LABEL = "Externé (ručne zadané)";
@@ -634,7 +633,7 @@ export default function MetricsPage() {
         aria-label="Náklady za"
         className="flex rounded border border-[var(--color-border-default)] overflow-hidden text-[11px]"
       >
-        {(["version", "cumulative", "billing"] as View[]).map((v) => (
+        {(["version", "cumulative"] as View[]).map((v) => (
           <button
             key={v}
             type="button"
@@ -653,16 +652,6 @@ export default function MetricsPage() {
       </div>
     </div>
   );
-
-  // DEV-73: billing — every version of the project for invoicing; the cost tables below belong to the other two.
-  if (view === "billing") {
-    return (
-      <div className="p-6 max-w-6xl mx-auto">
-        {header}
-        {slug && <BillingTab slug={slug} />}
-      </div>
-    );
-  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">

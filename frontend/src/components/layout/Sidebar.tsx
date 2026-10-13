@@ -39,6 +39,7 @@ const IconFolder = () => <NavIcon glyph="📁" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
 const IconMetrics = () => <NavIcon glyph="📊" />;
+const IconBilling = () => <NavIcon glyph="🧾" />;
 
 // v2 spine STEP 1 (Chrbtica): the Riadiace centrum = the ONE conversation-centred
 // build surface (replaces the AI Agent terminal + the 4-phase Vývoj board);
@@ -368,6 +369,15 @@ export default function Sidebar() {
         onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}/metrics` : projectsFallback)}
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k nákladom"
+      />
+      {/* DEV-73: invoicing is its own errand — a tab right below the costs tab, not a view inside it (Director). */}
+      <NavItem
+        icon={<IconBilling />}
+        label="Fakturácia"
+        active={hasProject ? isActive(`/projects/${selectedProject!.slug}/billing`) : false}
+        onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}/billing` : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k fakturácii"
       />
 
       <NavItem icon={<IconKbBook />} label="Dokumentácia" active={isActive("/kb")} onClick={() => navigate("/kb")} />
