@@ -28,6 +28,8 @@ set -euo pipefail
 
 COMPOSE="/opt/customers/dev/nex-studio-visual/docker-compose.yml"
 PROJECT="nex-studio-visual-prod"
+#: Where CI runs for this repository — the green run of the very commit being deployed is the gate (DEV-99).
+CI_REPO="rauschiccsk/nex-studio-visual"
 BACKEND_IMAGE="nex-studio-visual-backend"
 FRONTEND_IMAGE="nex-studio-visual-frontend"
 
@@ -45,6 +47,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 die() { echo "ODMIETNUTÉ: $*" >&2; exit 1; }
+
+# ── Only what git holds and CI passed (DEV-99) ──────────────────────────────────────────────────────
+# The images are built from the working tree. 13.10.2026 it carried an uncommitted fix while 4.44.0 was being
+# deployed: it would have gone live without CI, kept out only by a clean checkout made by hand. Both checks run
+# before Docker is touched, in --dry-run too, and there is no way around them — a fix goes through a commit,
+# a push and a green CI like everything else.
+REPO_ROOT="$(git rev-parse --show-toplevel)" || die "skript nebeží v gitovom repozitári kokpitu — nevidím, čo by som staval."
+DIRTY="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)"
+if [[ -n "$DIRTY" ]]; then
+  DIRTY_FILES="$(cut -c4- <<<"$DIRTY")"
+  die "pracovný priečinok má nezapísané zmeny ($(wc -l <<<"$DIRTY_FILES"): $(head -5 <<<"$DIRTY_FILES" | paste -sd, - | sed 's/,/, /g')) — obraz by sa postavil z kódu, ktorý CI nevidelo. Zapíš ich do gitu, odošli a počkaj na zelené CI."
+fi
+HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+CI_STATE="$(gh run list -R "$CI_REPO" --workflow ci.yml --commit "$HEAD_SHA" --limit 1 \
+  --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null)" \
+  || die "stav CI pre ${HEAD_SHA:0:7} sa nedal zistiť (gh) — bez zeleného CI nenasadzujem."
+[[ "$CI_STATE" == "completed success" ]] \
+  || die "CI pre ${HEAD_SHA:0:7} nie je zelené (${CI_STATE:-žiadny beh}) — nasadzujem až po zelenom CI na GitHube."
 
 # ── Refusals ────────────────────────────────────────────────────────────────────────────────────────
 # Each of these is a way the old script could have deployed somewhere other than the live stack. A
@@ -83,7 +103,7 @@ echo "==> nasadzujem: ${TARGET}"
 # the Aktualizácie tab sat at v4.0.96 while the app ran v4.1.3, seven releases with nothing said about them.
 # Checked BEFORE the --dry-run exit on purpose — a dry-run that passes where the real deploy refuses is a
 # trap, and the whole point is to find out now rather than after the images are built.
-NOTE="$(git rev-parse --show-toplevel)/docs/specs/versions/v${VERSION}/RELEASE_NOTES.md"
+NOTE="${REPO_ROOT}/docs/specs/versions/v${VERSION}/RELEASE_NOTES.md"
 [[ -s "$NOTE" ]] || die "v${VERSION} nemá poznámku k vydaniu. Napíš ju do ${NOTE} — jednou-dvoma vetami po slovensky, čo z toho má ten, kto appku používa (nie čo sa zmenilo v kóde). Bez nej sa v Aktualizáciách toto vydanie nikdy neobjaví."
 
 if [[ "$DRY_RUN" == "1" ]]; then
@@ -91,7 +111,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
 # ── Build ───────────────────────────────────────────────────────────────────────────────────────────
 if [[ "$TARGET" == "all" || "$TARGET" == "backend" ]]; then
