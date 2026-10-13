@@ -95,4 +95,3 @@ export function SpecMarkdown({ body, className, components, codePaths, projectSl
   return className ? <div className={className}>{rendered}</div> : rendered;
 }
 
-export default SpecMarkdown;

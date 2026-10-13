@@ -9,7 +9,6 @@
 import type {
   BlockReason,
   PipelineParticipant,
-  PipelineStage,
 } from "../../services/api/pipeline";
 
 // ── v2.0.0 vocabulary (CR-V2-019 / CR-V2-021) ─────────────────────────────────
@@ -21,8 +20,8 @@ import type {
 // AI Agent (does the work), Auditor (independent verifier), Manažér (approves).
 //
 // CR-V2-021 completed the collapse: the FE openapi-typescript regen flipped the
-// generated PipelineStage/PipelineActor enums to v2, so STAGE_LABELS / STAGE_CODES /
-// ROLE_LABELS below now key on the 4 phases / 3 participants, and the v1 Coordinator/
+// generated PipelineStage/PipelineActor enums to v2, so ROLE_LABELS below now keys on the
+// 3 participants and the phase maps on the 4 phases, and the v1 Coordinator/
 // triage/regate label maps + the 11-stage STAGE_ORDER family are removed (see the NOTEs
 // below). The tone palette (TONE_*/StatusTone/DECISION_BANNER) is intact (salvaged).
 
@@ -97,17 +96,6 @@ export function nextPhaseLabel(phase: BuildPhase): string {
       : undefined;
   return next ? PHASE_LABELS[next] : PHASE_LABELS[phase];
 }
-
-// ── STAGE / ROLE maps over the (now v2) generated enums (CR-V2-021) ──────────────────────
-// The FE openapi-typescript regen flipped ``PipelineStage`` → the 4 phases and ``PipelineActor`` → the two
-// v2 agents (CR-V2-021's dependency, per the note above). These maps therefore now key on the v2 enums.
-// ``STAGE_LABELS`` / ``STAGE_CODES`` collapse to the four phases (they ARE :data:`PHASE_LABELS` /
-// :data:`PHASE_CODES` now — kept as named exports so the still-v1 consumers compile until their own CRs
-// re-home them onto the v2 names); ``ROLE_LABELS`` collapses to the v2 participants.
-export const STAGE_LABELS: Record<PipelineStage, string> = PHASE_LABELS;
-
-// Raw machine code per phase — usable as a hover tooltip alongside the label.
-export const STAGE_CODES: Record<PipelineStage, string> = PHASE_CODES;
 
 // Slovak label per pipeline participant — the v2 3-role vocabulary (AI Agent / Auditor / Manažér + the
 // system author). ``manazer`` is the human operator; ``system`` authors notices. (No Coordinator / Designer
@@ -242,20 +230,13 @@ export const DECISION_BANNER: Partial<Record<StatusTone, string>> = {
   red: "bg-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] border-[var(--color-state-error-fg)]",
 };
 
-// Slovak display label per pipeline flow_type. Only ``new_version`` + ``fast_fix`` survive (OQ-1 dropped
-// ``cr``/``bug``); the fast-fix lane is badged on the board so it reads distinctly from a full version.
-export const FLOW_LABELS: Record<string, string> = {
-  new_version: "Nová verzia",
-  fast_fix: "Rýchla oprava",
-};
-
 // Honest verification (audit honest #6): a version can be `verified === true` yet its verification could NOT
 // actually be CONFIRMED — the PASS was never anchored to a commit (`unbound` / `hotovo_unbound`, signed while
 // the repo was unreadable) or the repo can't be read right now (`repo_unreadable`). For those three the honest
 // surface is an AMBER "overenie sa nedá potvrdiť", never a green "overená". The confirmed-green provenances
 // (`sha_match` / `hotovo_match` / `released`) stay green; the drift ones (`sha_drift` / `hotovo_drift`) already
 // read as a stale-PASS warning via ReverifyBar.
-export const VERIFICATION_UNCONFIRMED_PROVENANCES = [
+const VERIFICATION_UNCONFIRMED_PROVENANCES = [
   "unbound",
   "repo_unreadable",
   "hotovo_unbound",
@@ -279,7 +260,7 @@ export function verificationUnconfirmed(
 // thread, while the status strip and the Plán úloh card kept reading a confident green "pripravené na
 // nasadenie" with a button into the paused deploy screen. Three signals, two of them wrong (Director report,
 // 2026-07-26). Whatever reads `verificationUnconfirmed` for an honest surface must read this too.
-export const VERIFICATION_DRIFTED_PROVENANCES = [
+const VERIFICATION_DRIFTED_PROVENANCES = [
   "sha_drift",
   "hotovo_drift",
 ] as const;
@@ -321,7 +302,7 @@ export function verificationDrifted(
 // ``done`` pribudlo preto, že postavená a schválená verzia niesla ``planned`` a na obrazovke
 // sa nedala odlíšiť od nezačatej. Ponechať ju ``active`` až do nasadenia by ju zase nedalo
 // odlíšiť od tej, ktorá sa práve stavia.
-export const VERSION_STATUS_LABELS: Record<string, string> = {
+const VERSION_STATUS_LABELS: Record<string, string> = {
   planned: "Plánované",
   active: "Prebieha",
   done: "Hotové",

@@ -28,7 +28,7 @@ import {
 } from "@/services/api/agentTerminal";
 import { humanizeApiError } from "@/services/apiError";
 
-export type SlotStatus = "idle" | "loading" | "spawning" | "ending";
+type SlotStatus = "idle" | "loading" | "spawning" | "ending";
 
 export interface SlotState {
   session: AgentTerminalSession | null;

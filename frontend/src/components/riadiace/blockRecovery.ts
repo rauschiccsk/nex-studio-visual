@@ -10,7 +10,7 @@ import type { BlockReason } from "@/services/api/pipeline";
 
 /** Something genuinely FAILED — the agent's turn, an engine step, or the parse. Painted red, offered
  *  "Skús znova": the same input really might succeed on a retry. */
-export const ERROR_REASONS: BlockReason[] = [
+const ERROR_REASONS: BlockReason[] = [
   "agent_error",
   "system_error",
   "parse_exhaustion",
@@ -19,7 +19,7 @@ export const ERROR_REASONS: BlockReason[] = [
 /** A CHECK the engine ran came back negative (ICCINT-43). Nobody failed, so this must not be painted red
  *  under "Niečo zlyhalo" — and "Skús znova" is the wrong offer, because repeating an unchanged build
  *  repeats the same result. What moves it forward is an instruction, not another attempt. */
-export const CHECK_REASONS: BlockReason[] = ["check_failed"];
+const CHECK_REASONS: BlockReason[] = ["check_failed"];
 
 export const DEFAULT_RETRY = "Skús to prosím znova.";
 /** Sent when the Manažér adds no steer of his own: point the agent at the measurement, never at chance. */

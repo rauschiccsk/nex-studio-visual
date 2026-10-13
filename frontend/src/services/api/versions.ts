@@ -119,16 +119,6 @@ export function releaseVersion(id: string): Promise<Version> {
 }
 
 /**
- * Permanently delete a version.
- *
- * Only allowed when the version has no EPICs and is not ``released``.
- * Returns HTTP 204 on success.
- */
-export function deleteVersion(id: string): Promise<void> {
-  return api.delete<void>(`/versions/${id}`);
-}
-
-/**
  * Fetch the EPIC → FEAT → TASK task-plan tree (+ per-node status + counts) the
  * Designer materialized for a version (F-007 task-plan node, CR-NS-020 CR-5).
  * Drives the cockpit ``TaskPlanPanel``; reuses the existing backend endpoint.

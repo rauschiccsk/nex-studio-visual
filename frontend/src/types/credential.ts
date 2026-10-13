@@ -21,10 +21,6 @@ export interface CredentialCreate {
   content: string;
 }
 
-export interface CredentialUpdate {
-  title?: string;
-}
-
 export interface CredentialContent {
   credential_id: string;
   file_path: string;

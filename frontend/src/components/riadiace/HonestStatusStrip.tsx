@@ -88,7 +88,7 @@ interface Props {
   ci?: CiStatus | null;
 }
 
-export function HonestStatusStrip({
+function HonestStatusStrip({
   state,
   projectName,
   versionNumber,

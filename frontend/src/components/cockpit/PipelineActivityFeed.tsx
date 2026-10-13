@@ -18,7 +18,7 @@ interface Props {
   activity: ActivityLine[];
 }
 
-export function PipelineActivityFeed({ activity }: Props) {
+function PipelineActivityFeed({ activity }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

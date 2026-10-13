@@ -5,7 +5,6 @@ import type { components } from "@/services/api/pipeline.generated";
 
 type S = components["schemas"];
 
-export type PoradcaStep = S["PoradcaStep"];
 export type PoradcaMessage = S["PoradcaMessageRead"];
 export type PoradcaConversation = S["PoradcaConversationRead"];
 export type PoradcaConversationDetail = S["PoradcaConversationDetail"];

@@ -5,13 +5,7 @@
 
 import api from "../api";
 import type { components } from "./pipeline.generated";
-import type { PaginatedResponse } from "../../types/common";
 import type { WorkKind } from "@/lib/workKind";
-
-// Debug-attach (CR-V2-015) break-glass targets a v2 orchestrator session — the two agents only. These are
-// CHARTER-PATH SLUGS (hyphen, e.g. `ai-agent`), which the BE bridges to the DB role value (underscore,
-// `ai_agent`) via `db_role_for_charter_slug`; do not pass the underscore form to the debug-terminal route.
-export type DebugAttachRole = "ai-agent" | "auditor";
 
 // ── stage / actor / status enums (GENERATED — single source of truth, v0.7.0 R2) ─────────────
 //
@@ -22,9 +16,9 @@ export type DebugAttachRole = "ai-agent" | "auditor";
 // backend automatically — a BE change that isn't regenerated fails the CI drift-gate (R2-c).
 type PipelineSchemas = components["schemas"];
 
-export type PipelineStage = PipelineSchemas["PipelineStateRead"]["current_stage"];
+type PipelineStage = PipelineSchemas["PipelineStateRead"]["current_stage"];
 
-export type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"];
+type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"];
 
 // `manazer` (the human operator), `system` and `dedo` are message-only participants (never a state ACTOR
 // — the actor union is the two agents). The BE keeps author/recipient as plain str, so this composite
@@ -34,13 +28,13 @@ export type PipelineActor = PipelineSchemas["PipelineStateRead"]["current_actor"
 // It can appear as a message author/recipient but never as `current_actor` — Dedo is never on turn.
 export type PipelineParticipant = PipelineActor | "manazer" | "system" | "dedo";
 
-export type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
+type PipelineStatus = PipelineSchemas["PipelineStateRead"]["status"];
 
 // R4 (D1): the persisted reason a pipeline is `blocked` (generated → single source with the BE Literal +
 // DB CHECK). `NonNullable` strips the `| null` so the union is the four canonical values.
 export type BlockReason = NonNullable<PipelineSchemas["PipelineStateRead"]["block_reason"]>;
 
-export type PipelineMessageKind = PipelineSchemas["PipelineMessageRead"]["kind"];
+type PipelineMessageKind = PipelineSchemas["PipelineMessageRead"]["kind"];
 
 // ── row types ────────────────────────────────────────────────────────────────
 
@@ -84,8 +78,8 @@ export interface PipelineState {
 }
 
 // Per-agent liveness for the who's-up staleness chips (CR-V2-021 — v2: the two agents only).
-export type AgentLiveness = "idle" | "active" | "stale";
-export interface AgentSession {
+type AgentLiveness = "idle" | "active" | "stale";
+interface AgentSession {
   role: PipelineActor;
   status: AgentLiveness;
 }
@@ -112,7 +106,7 @@ export interface PipelineMessage {
 // NOBODY — the AI Agent is not told it exists and no prompt can carry it. It reaches the agent only if the
 // Manažér presses send, and then as HIS message, through `proposed_action` (one of the three verbs he
 // already uses). Mirrors backend DedoProposalRead.
-export interface DedoProposal {
+interface DedoProposal {
   message_id: string;
   /** Dedo's own wording, verbatim — shown EDITABLE; what the Manažér sends is what goes out. */
   content: string;
@@ -123,7 +117,7 @@ export interface DedoProposal {
 
 // DEV-36: what to check in the Vizuál after one turn — on the link message (`payload.vizual_checklist`) and,
 // all of them read from the database, on the board (`vizual_checklists`, each with the `seq` of its message).
-export interface VizualCheck {
+interface VizualCheck {
   screen: string;
   action: string;
   expected: string;
@@ -272,14 +266,6 @@ export interface PipelineActionRequest {
   payload?: Record<string, unknown>;
 }
 
-// Minimal shape of the agent-terminal row returned by the debug-attach endpoint.
-export interface DebugTerminalSession {
-  id: string;
-  role: DebugAttachRole;
-  project_slug: string;
-  pid: number;
-}
-
 // Fast-Fix Lane (F-009, CR-NS-094/095): the result of the "Rýchla oprava" one-prompt entry — the
 // auto-created PATCH version's id + its initial board snapshot. Mirrors backend FastFixStartResponse.
 export interface FastFixStartResponse {
@@ -316,16 +302,6 @@ export function startFastFixApi(
     directive,
     ...(workKind ? { work_kind: workKind } : {}),
   });
-}
-
-export function listPipelineMessagesApi(
-  versionId: string,
-  skip = 0,
-  limit = 50,
-): Promise<PaginatedResponse<PipelineMessage>> {
-  return api.get<PaginatedResponse<PipelineMessage>>(
-    `/pipeline/${versionId}/messages?skip=${skip}&limit=${limit}`,
-  );
 }
 
 export function postPipelineActionApi(
@@ -365,15 +341,6 @@ export function sendDedoProposalApi(
 // the send — otherwise the decline lands on whatever arrived most recently.
 export function rejectDedoProposalApi(versionId: string, messageId: string): Promise<PipelineBoard> {
   return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/reject`, { message_id: messageId });
-}
-
-export function openDebugTerminalApi(
-  versionId: string,
-  role: DebugAttachRole,
-): Promise<DebugTerminalSession> {
-  return api.post<DebugTerminalSession>(
-    `/pipeline/${versionId}/debug-terminal?role=${encodeURIComponent(role)}`,
-  );
 }
 
 // CR-V2-015 / SPIKE-IO Model B: relay a Manažér message to the AI Agent as the engine's next turn. This is

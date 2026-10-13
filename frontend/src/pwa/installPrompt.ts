@@ -15,7 +15,7 @@ import type { InstallSignals } from "./installState";
  * This event type does NOT exist in the TypeScript standard library, so we declare it
  * ourselves. It is the only place in the module with a type assertion.
  */
-export interface BeforeInstallPromptEvent extends Event {
+interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 }
@@ -23,7 +23,7 @@ export interface BeforeInstallPromptEvent extends Event {
 export type InstallPromptOutcome = "accepted" | "dismissed" | "unavailable";
 
 /** Marker "we saw the installation finish". The value says nothing about the person. */
-export const INSTALLED_KEY = "nex_nex-studio-visual_installed";
+const INSTALLED_KEY = "nex_nex-studio-visual_installed";
 
 /** What just happened. `"installed"` is the only change the app reacts to with a dialog. */
 export type InstallNotice = "installed" | undefined;
@@ -144,7 +144,7 @@ export function markInstalled(): boolean {
   }
 }
 
-export function forgetInstalled(): void {
+function forgetInstalled(): void {
   try {
     localStorage.removeItem(INSTALLED_KEY);
   } catch {
@@ -189,8 +189,3 @@ export function __resetInstallCapture(): void {
   listeners.clear();
 }
 
-/** FOR tests only: injects a captured offer without a real browser event. */
-export function __setDeferredPrompt(e: BeforeInstallPromptEvent | null): void {
-  deferred = e;
-  notify();
-}

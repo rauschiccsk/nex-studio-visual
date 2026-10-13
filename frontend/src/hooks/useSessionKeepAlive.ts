@@ -57,14 +57,14 @@ export const KEEPALIVE_RENEW_FRACTION = 0.75;
  * Fallback renewal lead for legacy tokens that carry no ``iat`` claim (issued
  * before this feature shipped) — renew this long before ``exp``.
  */
-export const KEEPALIVE_FALLBACK_LEAD_MS = 5 * 60_000; // 5 min
+const KEEPALIVE_FALLBACK_LEAD_MS = 5 * 60_000; // 5 min
 /**
  * Backoff after a renewal that did NOT get through (backend restarting, a 502, a network
  * blip). Doubles per consecutive failure up to the cap, so a long outage does not mean a
  * refresh call every 30s — while a brief one costs at most one extra minute.
  */
 export const KEEPALIVE_RETRY_BASE_MS = 60_000; // 1 min
-export const KEEPALIVE_RETRY_MAX_MS = 10 * 60_000; // 10 min
+const KEEPALIVE_RETRY_MAX_MS = 10 * 60_000; // 10 min
 /** Coalesce high-frequency activity events (mousemove/scroll) to at most 1/10s. */
 const ACTIVITY_THROTTLE_MS = 10_000;
 

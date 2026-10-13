@@ -132,6 +132,13 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      # DEV-92: no dead code — no file, export, type or dependency nobody uses (knip). The cleanup of 12.10.2026
+      # removed what was there; this keeps it from coming back. The backend has its own check in the test suite
+      # (tests/test_no_dead_code.py, vulture).
+      - name: Dead code (knip)
+        working-directory: frontend
+        run: npm run deadcode
+
       # The frontend suite was executed by nobody: `package.json` had no `test` script (vitest was a
       # dependency with no npm alias), so CI never ran it and 52 files / 368 tests only ever went
       # green on a developer's machine. A test that no gate runs is not a gate. The script now

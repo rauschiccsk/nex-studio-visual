@@ -17,7 +17,7 @@ const GREEN =
 const ORANGE =
   "border-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]";
 
-export function ChoiceBadge({ choice }: { choice: PoradcaChoice }) {
+function ChoiceBadge({ choice }: { choice: PoradcaChoice }) {
   const onCard = choice.status !== "not_on_card";
   const Icon = onCard ? Check : AlertTriangle;
   return (

@@ -39,7 +39,7 @@ const _WS_CLOSE_VERSION_GONE = 4004;
 /** The one plain-Slovak sentence for a permission refusal (mirrors the backend's 403 detail). Exported so
  *  every surface that must SAY it — Riadiace centrum, the sidebar entry — uses the same wording. */
 export const PIPELINE_ACCESS_DENIED_MESSAGE = "Nemáš prístup k tomuto projektu.";
-export const PIPELINE_VERSION_GONE_MESSAGE = "Táto verzia už neexistuje.";
+const PIPELINE_VERSION_GONE_MESSAGE = "Táto verzia už neexistuje.";
 
 /** True for the REST half of the same verdict (`GET /pipeline/{id}` and its `/messages` are owner-or-ri too). */
 function isForbidden(err: unknown): boolean {

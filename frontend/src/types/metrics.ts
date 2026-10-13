@@ -5,7 +5,7 @@
 // (ICCINT-168). Measured and hand-entered figures are summed but never merged — every total carries its
 // `…_external` split. Every euro figure is WHOLE euros rounded up (Director 06.10.2026).
 
-export interface UsageTotals {
+interface UsageTotals {
   input_tokens: number;
   output_tokens: number;
   duration_seconds: number;
@@ -17,7 +17,7 @@ export interface UsageTotals {
 // ICCINT-167: + "poradca" — Poradca answers (measured, without a human comparison).
 export type CostRowKind = "phase" | "external" | "poradca" | "system";
 
-export interface Unpriced {
+interface Unpriced {
   reason: string; // Slovak sentence, e.g. "záznam sedenia sa nezachoval — …"
   turns: number;
   tokens: number;
@@ -76,7 +76,7 @@ export interface ManagerOverhead {
   wait_seconds: number; // measured (idle-a)
 }
 
-export interface VersionCosts {
+interface VersionCosts {
   version_id: string;
   version_number: string;
   // Shipped by the backend, never read by the screen (the per-version section renders `rows`/`totals`

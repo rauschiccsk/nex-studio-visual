@@ -6,7 +6,7 @@
  */
 
 /** Runtime type of ``value`` — mirrors ``ck_system_settings_value_type``. */
-export type SystemSettingValueType = "string" | "int" | "float" | "bool";
+type SystemSettingValueType = "string" | "int" | "float" | "bool";
 
 export interface SystemSettingRead {
   key: string;
@@ -27,6 +27,3 @@ export interface SystemSettingRead {
   is_default: boolean;
 }
 
-export interface SystemSettingUpdate {
-  value: string;
-}

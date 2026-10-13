@@ -18,7 +18,7 @@ import api, { downloadFile } from "../api";
 import type { BillingCategory } from "@/lib/billingCategory";
 import type { WorkKind } from "@/lib/workKind";
 
-export interface DeliveredFile {
+interface DeliveredFile {
   path: string;
   /** ``kod`` · ``skusky`` · ``dokumentacia``; null for a file that is left out. */
   kind: string | null;
@@ -28,12 +28,12 @@ export interface DeliveredFile {
   tokens: number;
 }
 
-export interface KindTotal {
+interface KindTotal {
   tokens: number;
   lines: number;
 }
 
-export interface StatementCalibration {
+interface StatementCalibration {
   eur_code: number | null;
   eur_docs: number | null;
   per_1k_code: number | null;
@@ -42,7 +42,7 @@ export interface StatementCalibration {
 }
 
 /** DEV-75 — a task whose work is on a line of the statement. */
-export interface StatementLineTask {
+interface StatementLineTask {
   /** epic.feat.task — the number in the plan and in the agent's commits. */
   label: string;
   title: string;

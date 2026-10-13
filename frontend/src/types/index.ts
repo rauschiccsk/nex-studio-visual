@@ -13,20 +13,11 @@ export * from "./common";
 
 // Foundation.
 export * from "./user";
-export * from "./userSession";
 
 // Projects.
 export * from "./project";
 
 // Knowledge base.
-
-// Task hierarchy (Epic → Feat → Task).
-export * from "./epic";
-export * from "./feat";
-export * from "./task";
-
-// Bugs.
-export * from "./bug";
 
 // Versions.
 export * from "./version";

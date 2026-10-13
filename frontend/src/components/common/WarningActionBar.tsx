@@ -23,7 +23,7 @@ export const WARNING_CHROME =
   "border-l-4 border-l-[var(--color-state-warning-fg)] bg-[var(--color-state-warning-bg)]";
 
 /** The single call-to-action a warning bar may carry. Omit it when the user has nothing to do here. */
-export interface WarningBarAction {
+interface WarningBarAction {
   label: string;
   icon: LucideIcon;
   /** Spin the icon while the action is in flight. */

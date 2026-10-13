@@ -85,9 +85,6 @@ export const api = createApiClient({
   // errorParser omitted → the lib's default FastAPI `{detail}` parser is used.
 });
 
-/** Low-level request primitive (exported for advanced/streaming cases). */
-export const request = api.request;
-
 /**
  * Download a file the backend serves only to a signed-in user (a CSV statement, DEV-50) and hand it to the browser
  * as a file. A plain link cannot carry the token; the name comes from the server when it sends one.

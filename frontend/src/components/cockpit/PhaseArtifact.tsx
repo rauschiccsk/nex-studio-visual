@@ -24,7 +24,7 @@ const PHASE_ARTIFACT_FILE: Partial<Record<BuildPhase, string>> = {
 
 // The latest message for ``phase`` carrying a renderable artifact body (``payload.report`` — the durable
 // markdown — or, as a fallback, the message ``content`` of the phase's gate_report / verdict turn).
-export function latestPhaseArtifact(messages: PipelineMessage[], phase: BuildPhase): string | null {
+function latestPhaseArtifact(messages: PipelineMessage[], phase: BuildPhase): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (!m || m.stage !== phase) continue;
@@ -94,4 +94,3 @@ export function PhaseArtifact({ phase, messages, placeholder }: Props) {
   );
 }
 
-export default PhaseArtifact;

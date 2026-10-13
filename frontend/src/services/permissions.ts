@@ -13,7 +13,7 @@
 import type { AuthUser } from "@/services/api/auth";
 
 /** The account that may reach every project. An ACCOUNT, not a role — mirrors `authz.ADMIN_USERNAME`. */
-export const ADMIN_USERNAME = "admin";
+const ADMIN_USERNAME = "admin";
 
 export function isAdminAccount(user: AuthUser | null | undefined): boolean {
   return user?.username === ADMIN_USERNAME;

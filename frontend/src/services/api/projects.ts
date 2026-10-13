@@ -42,7 +42,7 @@ export function updateProjectApi(projectId: string, data: ProjectUpdate): Promis
 }
 
 /** One changelog section shown as "Čo prinesie" in the nex-shared upgrade prompt. */
-export interface NexsharedChangelogEntry {
+interface NexsharedChangelogEntry {
   version: string;
   body: string;
 }
@@ -72,7 +72,7 @@ export function upgradeNexsharedApi(
 }
 
 /** One uncommitted entry in the project's working tree (git status --porcelain). */
-export interface GitStatusFile {
+interface GitStatusFile {
   code: string;
   path: string;
 }
@@ -110,14 +110,6 @@ export function discardGitApi(projectId: string): Promise<{ ok: boolean }> {
  */
 export function deleteProjectApi(projectId: string, deleteGithub: boolean): Promise<void> {
   return api.delete<void>(`/projects/${projectId}?delete_github=${deleteGithub}`);
-}
-
-export function suggestPortApi(
-  type: "backend" | "frontend" | "db",
-): Promise<{ suggested_port: number; warnings?: string[] }> {
-  return api.get<{ suggested_port: number; warnings?: string[] }>("/projects/ports/suggest", {
-    params: { type },
-  });
 }
 
 export interface PortBlockSuggestion {

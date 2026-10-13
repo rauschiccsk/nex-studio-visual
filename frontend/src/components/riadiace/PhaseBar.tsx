@@ -102,7 +102,7 @@ interface Props {
   board: PipelineBoard | null;
 }
 
-export function PhaseBar({ board }: Props) {
+function PhaseBar({ board }: Props) {
   const state = board?.state ?? null;
 
   // CONVERSATION (spine) build — the redesign four-phase strip, marked from board signals (STEP 5).

@@ -25,7 +25,7 @@ import api from "../api";
 // `DebugAttachRole` in `pipeline.ts` — a deliberately separate type (spawn ≠ debug-attach).
 export type AgentRole = "ai-agent";
 
-export type TerminatedBy = "idle" | "user" | "crash" | "server_restart";
+type TerminatedBy = "idle" | "user" | "crash" | "server_restart";
 
 export interface AgentTerminalSession {
   id: string;
@@ -55,17 +55,6 @@ export function spawnAgentTerminalApi(
 /** List active (``ended_at IS NULL``) sessions for the current user. */
 export function listAgentTerminalSessionsApi(): Promise<AgentTerminalSession[]> {
   return api.get<AgentTerminalSession[]>("/agent-terminal/sessions");
-}
-
-/** Per-role charter availability for a project (CR-NS-014). A role is
- *  available when its ``.claude/agents/<role>/CLAUDE.md`` exists. In v2 the
- *  only spawnable role is the AI Agent (CR-V2-007). */
-export type AvailableRoles = Record<AgentRole, boolean>;
-
-export function getAvailableRolesApi(projectSlug: string): Promise<AvailableRoles> {
-  return api.get<AvailableRoles>("/agent-terminal/available-roles", {
-    params: { project_slug: projectSlug },
-  });
 }
 
 /** Explicit End session — SIGTERM, grace, SIGKILL. Idempotent. */

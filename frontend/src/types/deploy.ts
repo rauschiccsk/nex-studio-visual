@@ -16,11 +16,11 @@ import type { components } from "@/services/api/pipeline.generated";
 export type DeployEnvironment = "uat" | "prod";
 
 /** A deploy or an acceptance event in the audit-log. */
-export type DeployEventType = "deploy" | "accept";
+type DeployEventType = "deploy" | "accept";
 
 /** Per-deploy outcome (an `accept` event is always `ok`). `unverified` — the new version was started, a check after
  * it failed (DEV-68). */
-export type DeployStatus = "ok" | "failed" | "unverified";
+type DeployStatus = "ok" | "failed" | "unverified";
 
 /** Serialised deploy/accept audit-log row (who / when / version / customer). */
 export interface DeployEventRead {

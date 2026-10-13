@@ -49,12 +49,12 @@ export function activeContextKey(username: string | undefined): string {
   return `nex-active-context:${username ?? "anonymous"}`;
 }
 
-export interface SelectedProject {
+interface SelectedProject {
   slug: string;
   name: string;
 }
 
-export interface SelectedVersion {
+interface SelectedVersion {
   versionId: string;
   versionNumber: string;
 }

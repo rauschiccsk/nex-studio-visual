@@ -22,10 +22,6 @@ export function createCustomer(slug: string, data: CustomerCreate): Promise<Cust
   return api.post<CustomerRead>(`/projects/${slug}/customers`, data);
 }
 
-export function getCustomer(customerId: string): Promise<CustomerRead> {
-  return api.get<CustomerRead>(`/customers/${customerId}`);
-}
-
 /** Partial update / secret rotation. `ri` role only. */
 export function updateCustomer(customerId: string, data: CustomerUpdate): Promise<CustomerRead> {
   return api.patch<CustomerRead>(`/customers/${customerId}`, data);

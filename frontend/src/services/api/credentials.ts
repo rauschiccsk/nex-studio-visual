@@ -2,17 +2,12 @@ import api from "../api";
 import type {
   CredentialRead,
   CredentialCreate,
-  CredentialUpdate,
   CredentialContent,
   CredentialContentUpdate,
 } from "../../types/credential";
 
 export function listCredentials(): Promise<CredentialRead[]> {
   return api.get<CredentialRead[]>("/credentials");
-}
-
-export function getCredential(id: string): Promise<CredentialRead> {
-  return api.get<CredentialRead>(`/credentials/${id}`);
 }
 
 export function getCredentialContent(id: string): Promise<CredentialContent> {
@@ -28,13 +23,6 @@ export function putCredentialContent(
 
 export function createCredential(data: CredentialCreate): Promise<CredentialRead> {
   return api.post<CredentialRead>("/credentials", data);
-}
-
-export function updateCredential(
-  id: string,
-  data: CredentialUpdate,
-): Promise<CredentialRead> {
-  return api.patch<CredentialRead>(`/credentials/${id}`, data);
 }
 
 export function deleteCredential(id: string): Promise<void> {

@@ -21,7 +21,7 @@ function euros(eur: number): string {
 }
 
 /** The price part — „aspoň“ when some spend could not be priced: never a partial figure posing as the whole. */
-export function spendPrice(spend: NodeSpend): string {
+function spendPrice(spend: NodeSpend): string {
   if (spend.eur == null) return "cena sa nedá vyčísliť";
   return spend.eur_complete ? `cena ${euros(spend.eur)}` : `cena aspoň ${euros(spend.eur)}`;
 }

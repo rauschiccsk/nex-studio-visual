@@ -24,7 +24,7 @@ export type ProjectAuthMode = "password" | "token";
  * Mirrors ``status IN ('active', 'archived', 'paused')`` on the
  * ``projects`` table.
  */
-export type ProjectStatus = "active" | "archived" | "paused";
+type ProjectStatus = "active" | "archived" | "paused";
 
 /** Payload for creating a new project (``POST /api/v1/projects``). */
 export interface ProjectCreate {

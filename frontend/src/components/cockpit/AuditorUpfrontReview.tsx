@@ -16,7 +16,7 @@ import type { PipelineMessage } from "../../services/api/pipeline";
 import { WARNING_CHROME } from "../common/WarningActionBar";
 
 /** ICCINT-122: nález nesie aj to, či BLOKUJE — z toho sa skladá smer „blokujúcich 5 → 1 → 0". */
-export interface NalezView {
+interface NalezView {
   text: string;
   blocking: boolean;
 }
@@ -172,4 +172,3 @@ export function AuditorUpfrontReview({ messages }: { messages: PipelineMessage[]
   );
 }
 
-export default AuditorUpfrontReview;

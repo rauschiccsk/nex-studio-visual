@@ -52,16 +52,6 @@ export function uatLaunch(customerId: string, projectSlug: string): Promise<{ la
   return api.post(`/customers/${customerId}/uat-launch`, { project_slug: projectSlug });
 }
 
-/** Every deploy/accept event for a project (newest first) — the audit trail. */
-export function listProjectDeployEvents(slug: string): Promise<DeployEventRead[]> {
-  return api.get<DeployEventRead[]>(`/projects/${slug}/deploy-events`);
-}
-
-/** Every deploy/accept event for one customer (newest first). */
-export function listCustomerDeployEvents(customerId: string): Promise<DeployEventRead[]> {
-  return api.get<DeployEventRead[]>(`/customers/${customerId}/deploy-events`);
-}
-
 /**
  * Nasadiť — deploy a verified version to a customer's UAT/PROD instance (§3.4).
  * `ri` role only. A PROD deploy is rejected (409) unless the customer's UAT of

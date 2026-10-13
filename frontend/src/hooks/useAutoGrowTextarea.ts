@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 /** Fallback when the computed line-height is ``normal`` (no numeric value to read). */
 const FALLBACK_LINE_HEIGHT_PX = 20;
 
-export const DEFAULT_MAX_ROWS = 20;
+const DEFAULT_MAX_ROWS = 20;
 
 export function useAutoGrowTextarea(
   value: string,
