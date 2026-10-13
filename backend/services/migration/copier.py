@@ -92,17 +92,6 @@ def _project_dict(row: Mapping, config: MigrationConfig) -> dict:
     return d
 
 
-def _member_dict(row: Mapping) -> dict:
-    return {
-        "id": row["id"],
-        "project_id": row["project_id"],
-        "user_id": row["user_id"],
-        "role": row.get("role") or "member",
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
-
-
 def _credential_dict(row: Mapping) -> dict:
     # Registry pointer ONLY — the on-disk secret file is never opened (§4).
     return {

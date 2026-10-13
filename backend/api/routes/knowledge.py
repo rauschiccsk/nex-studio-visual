@@ -86,10 +86,6 @@ class UpdateDocumentRequest(BaseModel):
     tenant: str = "icc"
 
 
-class DeleteDocumentRequest(BaseModel):
-    relative_path: str
-
-
 # --- Helpers ---
 
 

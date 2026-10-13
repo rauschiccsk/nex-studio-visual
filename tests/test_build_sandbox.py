@@ -1036,11 +1036,16 @@ async def test_an_unexpected_error_mid_stream_still_reaps_the_container(monkeypa
     proc = MagicMock()
     proc.returncode = 0
 
-    async def _explode():
-        raise ValueError("Separator is not found, and chunk exceed the limit")
-        yield b""  # pragma: no cover
+    class _Explode:
+        """A stream whose first line is too long — the ``ValueError`` asyncio raises then."""
 
-    proc.stdout = _explode()
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise ValueError("Separator is not found, and chunk exceed the limit")
+
+    proc.stdout = _Explode()
     proc.stderr = None
     proc.wait = AsyncMock(return_value=0)
     monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=proc))

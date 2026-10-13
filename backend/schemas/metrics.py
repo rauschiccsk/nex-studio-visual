@@ -26,13 +26,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-class ModelTokensRead(BaseModel):
-    """Token usage attributed to one model family/id within a phase's usage."""
-
-    input_tokens: int
-    output_tokens: int
-
-
 class UsageTotalsRead(BaseModel):
     """Summed token usage + active-compute time for a scope (phase / version / project)."""
 

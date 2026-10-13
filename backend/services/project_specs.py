@@ -111,16 +111,6 @@ def _validate_slug(slug: str) -> None:
         raise ProjectSpecsError(f"Invalid slug: {slug!r}")
 
 
-def _project_docs_dir(slug: str) -> Path:
-    """Resolve and return the docs directory for a given project slug.
-
-    Returns the absolute path even if the directory does not exist
-    (caller decides how to handle missing).
-    """
-    _validate_slug(slug)
-    return PROJECTS_ROOT / slug / "docs"
-
-
 def list_all_specs() -> list[ProjectSpecDoc]:
     """Return all files **and** empty directories under every
     ``/opt/projects/*/docs/``.

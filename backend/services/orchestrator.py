@@ -3061,149 +3061,11 @@ def framework_resume_directive(db: Session, version_id: uuid.UUID) -> Optional[s
 # author + ``gate_e`` stage tokens the v2 DB CHECK rejects, and neither had a live referrer.
 
 
-def _latest_uat_deploy(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
-    """The most recent ``uat_deploy`` notification payload for a version, or ``None`` if no UAT deploy was
-    ever attempted (v0.8.1 CR-2).
-
-    A UAT deploy records a ``{"uat_deploy": {...}}`` ``system→manazer`` notification — a real success
-    (``{ok: True}``), a failure (``{ok: False}``), or a skip (``{skipped: True}``). This reports HONESTLY
-    whether a UAT was ACTUALLY deployed, instead of the ``uat_slug`` proxy (which lies when a configured
-    slug's compose is gone — CR-1 honest-skips, yet the slug stays set). Ordered by the monotonic ``seq``
-    so the latest deploy outcome wins; ``None`` when no deploy was ever recorded.
-
-    (CR-V2-028 NOTE: the in-pipeline auto-deploy that wrote these notes — v1 ``_release_auto_uat_deploy`` /
-    ``_fast_fix_auto_deploy`` — is RETIRED; deploy is OUT of the pipeline, manual + per-customer, OQ-3/D6.
-    This helper + its siblings are v1 release-stage leftovers pending removal with the deploy-subsystem
-    cleanup, NOT called from the v2 lane.)"""
-    rows = (
-        db.execute(
-            select(PipelineMessage.payload)
-            .where(
-                PipelineMessage.version_id == version_id,
-                PipelineMessage.author == "system",
-                PipelineMessage.kind == "notification",
-            )
-            .order_by(PipelineMessage.seq.desc())
-        )
-        .scalars()
-        .all()
-    )
-    for payload in rows:
-        if isinstance(payload, dict) and isinstance(payload.get("uat_deploy"), dict):
-            return payload["uat_deploy"]
-    return None
-
-
-def _uat_render_needs_reprovision(db: Session, version_id: uuid.UUID) -> bool:
-    """Whether the engine must RE-PROVISION (not just re-``up``) the UAT render before redeploying (H2, CR-2).
-
-    Today an EXISTING-but-broken render is re-``up``-ed verbatim on every retry → identical failure (the
-    nex-manager dogfood case). This self-heals it WITHOUT clobbering a working UAT. Reads the LATEST
-    ``uat_deploy`` notification (the same one :func:`_latest_uat_deploy` surfaces) plus its ``seq``:
-
-    * ``ok is False`` (the deploy FAILED — the proven broken-render case) → ``True`` (NARROW core).
-    * ``ok is True`` → ``True`` **iff** the deploy note's seq is BEFORE the current iteration boundary
-      (:func:`_iteration_boundary_seq`, the latest ``verdict`` seq — the SAME anchor
-      :func:`_release_acceptance_satisfied` uses). A current-iteration successful deploy is recorded AFTER
-      that boundary verdict, so its seq > boundary → ``False`` (the working UAT is preserved); a successful
-      deploy from a PRIOR iteration has a newer verdict past it → seq < boundary → ``True`` (the render is
-      stale w.r.t. the new code → re-render, idempotent, secrets preserved). For the fast-fix lane (no
-      gate_g verdict) the boundary is 0, so any ``ok is True`` note is treated as current-iteration → preserved.
-    * no deploy ever recorded / a ``skipped`` / an indeterminate note → the note says nothing about the
-      on-disk render, so the **3rd trigger** (CR-R2-2, :func:`_existing_render_fails_h1`) self-heals the
-      nex-manager orphan: an EXISTING render whose on-disk ``.env`` fails the H1 driver↔URL pair → ``True``;
-      a render that PASSES H1 (or no render on disk) → ``False`` (nothing to heal).
-    """
-    rows = db.execute(
-        select(PipelineMessage.seq, PipelineMessage.payload)
-        .where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.author == "system",
-            PipelineMessage.kind == "notification",
-        )
-        .order_by(PipelineMessage.seq.desc())
-    ).all()
-    deploy_seq: Optional[int] = None
-    deploy: Optional[dict[str, Any]] = None
-    for seq, payload in rows:
-        if isinstance(payload, dict) and isinstance(payload.get("uat_deploy"), dict):
-            deploy_seq, deploy = seq, payload["uat_deploy"]
-            break
-    if deploy is not None and not deploy.get("skipped"):
-        if deploy.get("ok") is False:
-            return True  # the deploy FAILED — re-render the broken render (NARROW core).
-        if deploy.get("ok") is True:
-            # A current-iteration success is recorded AFTER the boundary verdict (seq > boundary) → preserved
-            # (working UAT); a prior-iteration success has a newer verdict past it (seq < boundary) → stale.
-            return deploy_seq < _iteration_boundary_seq(db, version_id)
-    # 3rd trigger (CR-R2-2): no deploy note / a skip note / an indeterminate note — the note tells us nothing
-    # about the on-disk render. Self-heal the nex-manager orphan: an EXISTING render whose on-disk .env FAILS
-    # the H1 driver↔URL pair (a skip note but a non-importable DATABASE_URL that would otherwise be re-`up`-ed
-    # verbatim). Reuses H1 verbatim; a render that PASSES H1 stays untouched (predicate stays False).
-    return _existing_render_fails_h1(db, version_id)
-
-
-def _existing_render_fails_h1(db: Session, version_id: uuid.UUID) -> bool:
-    """Whether an EXISTING UAT render's on-disk ``.env`` FAILS the H1 driver↔URL validator pair (CR-R2-2).
-
-    The 3rd :func:`_uat_render_needs_reprovision` trigger — the nex-manager orphan signature: a skip / no
-    deploy note, yet ``/opt/uat/<uat_slug>/.env`` carries a non-importable ``DATABASE_URL`` (bare
-    ``postgresql://`` while the source ships pg8000) that :func:`_run_uat_deploy` would re-``up`` verbatim →
-    identical failure. Reuses H1 VERBATIM (``detect_sqlalchemy_pg_drivers`` on the source project +
-    ``validate_rendered_db_drivers`` on the rendered ``.env``) — no new validation logic. ``False`` when the
-    project is unresolvable, the UAT compose / ``.env`` is absent or unreadable, or the render PASSES H1
-    (preserve-working-UAT). NEVER raises."""
-    project = db.execute(
-        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
-    ).scalar_one_or_none()
-    if project is None:
-        return False
-    try:
-        uat_slug = project.uat_slug or uat_provisioner.derive_uat_slug(project)
-    except (ValueError, TypeError):
-        return False
-    if not _uat_compose_exists(uat_slug):
-        return False
-    env_path = UAT_ROOT / uat_slug / ".env"
-    if not env_path.is_file():
-        return False
-    try:
-        env_text = env_path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    declared = uat_provisioner.detect_sqlalchemy_pg_drivers(claude_agent.PROJECTS_ROOT / project.slug)
-    fail_msgs, _ = uat_provisioner.validate_rendered_db_drivers(env_text, declared, project_slug=project.slug)
-    return bool(fail_msgs)
-
-
 # (CR-V2-028: the v1 ``_UAT_DEPLOYING_FLOWS`` set is RETIRED — it gated the v1 no-silent-done-WITHOUT-UAT
 # guard, which is itself superseded by the v2 no-silent-done-WITHOUT-VERIFICATION invariant
 # (:func:`_verifikacia_passed`): deploy is OUT of the pipeline (OQ-3/D6), so Hotovo means *verified*, not
 # *deployed*, and there is no in-pipeline UAT deploy to gate. It also referenced the dropped ``cr``/``bug``
 # flows (CR-V2-031). The set had no live referrer after the v1 release stage moved to the deploy subsystem.)
-
-
-def _project_is_deployable(db: Session, version_id: uuid.UUID) -> bool:
-    """Whether the version's project is STRUCTURALLY deployable — its source compose ships BOTH a backend
-    and a db service (CR-R2-1 #1b).
-
-    Deployability is keyed on the actual compose structure, NOT the ``uat_slug`` proxy: after #1a every
-    project carries a ``uat_slug``, so the proxy would over-block a pure-CLI/lib project. A backend+db stack
-    is the signature of an app that MUST have a live UAT before it can be marked done; a pure-lib project
-    (no backend+db) returns ``False`` → it completes normally (the honest "bez UAT testu" branch). Any
-    resolution / parse failure (no project, no ``source_path``, missing or unparseable compose) → ``False``
-    (never block on an indeterminate structure)."""
-    project = db.execute(
-        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
-    ).scalar_one_or_none()
-    if project is None or not project.source_path:
-        return False
-    try:
-        compose = uat_provisioner.load_source_compose(Path(project.source_path))
-        roles = uat_provisioner.identify_service_roles(compose["services"])
-    except Exception:  # noqa: BLE001 — an indeterminate compose must never block completion.
-        return False
-    return roles["backend"] is not None and roles["db"] is not None
 
 
 # NOTE (CR-V2-021): the v1 ``_gate_e_open_findings`` deterministic gap counter (raised by a Designer
@@ -5613,10 +5475,6 @@ def _lost_work_audit_message(db: Session, version_id: uuid.UUID, baseline: str) 
     )
 
 
-def _lost_work_audit_recorded(db: Session, version_id: uuid.UUID, baseline: str) -> bool:
-    return _lost_work_audit_message(db, version_id, baseline) is not None
-
-
 def _turn_metrics_entry(metrics: _DispatchMetrics) -> dict[str, Any]:
     return {"usage": metrics.usage_payload(), "timing": metrics.timing_payload()}
 
@@ -5722,19 +5580,6 @@ async def _audit_lost_work(
     }
 
 
-def _iteration_boundary_seq(db: Session, version_id: uuid.UUID) -> int:
-    """The seq of the latest ``verdict`` message — the current gate_g iteration boundary (a verdict is what
-    increments ``state.iteration``); 0 on the first iteration. Lets the scope-escalation cap (§F1.5) + the
-    prior-Q&A derivation (§F1.6) scope to the CURRENT iteration without an ``iteration`` column on messages."""
-    seq = db.execute(
-        select(func.max(PipelineMessage.seq)).where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.kind == "verdict",
-        )
-    ).scalar_one_or_none()
-    return int(seq or 0)
-
-
 # NOTE (CR-V2-021): the v1 ``_mark_latest_coordinator_brief`` (tagged the latest Coordinator turn
 # ``is_director_brief`` for the FE prominent rail) is REMOVED — the Coordinator hub-and-spoke is gone
 # (design §2.2); there is no Coordinator turn to tag, and it had no live caller.
@@ -5823,11 +5668,6 @@ def _uat_compose_path(
         root = PROD_ROOT if environment == "prod" else UAT_ROOT
         return root / customer_slug / full_project_slug / "docker-compose.yml"
     return UAT_ROOT / uat_slug / "docker-compose.yml"
-
-
-def _uat_compose_exists(uat_slug: str) -> bool:
-    """True if the UAT has a redeployable compose (hand-authored or provisioned)."""
-    return _uat_compose_path(uat_slug).is_file()
 
 
 def _docker_env_for_target(env: dict[str, str], deploy_host: Optional[str]) -> dict[str, str]:
@@ -6521,31 +6361,6 @@ async def _run_publish_step(cmd: list[str], timeout: int) -> tuple[int, str]:
         proc.kill()
         return 124, f"timeout ({timeout}s)"
     return proc.returncode, (stdout or b"").decode("utf-8", "replace")
-
-
-async def _resolve_pushed_ci_run(repo_full_name: str, head_sha: str) -> Optional[str]:
-    """The GitHub Actions run id whose ``headSha`` is exactly the pushed HEAD, or ``None`` when
-    undeterminable (gh error / not yet registered / unparseable).
-
-    Matching on the SHA (not "the latest run") ties the watch to the commit the publish just pushed —
-    a stale already-green run can never be mistaken for this release's CI (a false PASS). The caller
-    polls this (the run registers a few seconds after the push). ``None`` → the caller keeps polling,
-    then treats CI as "still running" (the push already succeeded — never a false block)."""
-    rc, out = await _run_publish_step(
-        ["gh", "run", "list", "-R", repo_full_name, "--limit", "20", "--json", "databaseId,headSha"],
-        RELEASE_PUBLISH_STEP_TIMEOUT,
-    )
-    if rc != 0:
-        return None
-    try:
-        runs = json.loads(out or "[]")
-    except (ValueError, TypeError):
-        return None
-    for run in runs if isinstance(runs, list) else []:
-        if isinstance(run, dict) and run.get("headSha") == head_sha:
-            run_id = run.get("databaseId")
-            return str(run_id) if run_id is not None else None
-    return None
 
 
 def _repo_full_from_remote(url: str) -> Optional[str]:
@@ -9996,58 +9811,6 @@ async def _run_navrh_round(
     return state
 
 
-async def _materialize_inline_navrh_plan(
-    db: Session,
-    state: PipelineState,
-    block: PipelineStatusBlock,
-    *,
-    on_message: Optional[MessageCallback],
-) -> Optional[PipelineState]:
-    """Materialize a SMALL project's inline Návrh plan (the design turn already carried a non-empty
-    ``plan``) — CR-V2-011. Records the AI-Agent navrh gate_report (carries plan + cross_cutting_rules the
-    build loop re-reads) + the Epic/Feat/Task rows via the re-homed :func:`_write_task_plan`. Returns the
-    SETTLED state on a write failure (caller returns it), or ``None`` on success (caller runs the dial)."""
-    # The gate_report message the design turn produced (recorded by invoke_agent) may not carry the plan in
-    # its payload, so record the canonical navrh gate_report the build loop reads (_fetch_cross_cutting_rules
-    # + the audit trail). mode="json" so any UUID in the plan serializes for JSONB.
-    plan_msg = _record_message(
-        db,
-        version_id=state.version_id,
-        stage="navrh",
-        author="ai_agent",
-        recipient="manazer",
-        kind="gate_report",
-        content="Návrh hotový — návrhový dokument + plán úloh (malý projekt, plán v jednom ťahu).",
-        payload={
-            "plan": block.plan.model_dump(mode="json"),
-            "cross_cutting_rules": block.cross_cutting_rules,
-            "phase": "navrh",
-        },
-    )
-    if on_message is not None:
-        await on_message(plan_msg)
-    reason = _write_task_plan(db, state, block)
-    if reason is not None:
-        msg = _record_message(
-            db,
-            version_id=state.version_id,
-            stage="navrh",
-            author="system",
-            recipient="manazer",
-            kind="notification",
-            content=f"Plán úloh sa nepodarilo zapísať: {reason}.",
-            payload={"phase": "navrh"},
-        )
-        if on_message is not None:
-            await on_message(msg)
-        state.status = "blocked"
-        state.block_reason = "system_error"
-        state.next_action = "Plán úloh sa nepodarilo zapísať — usmerni Návrh (Uprav)."
-        db.flush()
-        return state
-    return None
-
-
 def _latest_fix_critique(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
     """CR-V2-058 Part B — the ``fix_critique`` record ({verdict, corrected_scope, why}) for the CURRENT FAIL
     round, or ``None``.
@@ -10559,8 +10322,8 @@ async def _settle_verifikacia_verdict(
         ``system→manazer`` note). Otherwise loop a **TARGETED** fix back to the AI Agent (A+B, Director
         2026-06-30): materialize ONE fix task (:func:`_ensure_verifikacia_fix_task`) carrying the Auditor's
         findings as its brief (threaded by :func:`_run_build_round` via :func:`_latest_verifikacia_fix_scope`)
-        — the already-done plan tasks **STAY done** (B: replaces the v1 gate_g whole-build reset
-        :func:`_reset_done_tasks_for_regate`, the overnight-token-burn cause). Mark ``is_regate``, bump the
+        — the already-done plan tasks **STAY done** (B: replaces the v1 gate_g whole-build reset of every done
+        task, the overnight-token-burn cause). Mark ``is_regate``, bump the
         round counter, re-enter Programovanie. A new_version then **STOPS** (``paused``) for the Manažér to
         confirm the fix re-run (A: mandatory phase gate, dial-independent — 'Pokračovať' resumes); only a
         ``fast_fix`` auto-re-dispatches its bounded one-task lane (warm sessions preserved — never reset mid-loop).
@@ -10715,7 +10478,7 @@ async def _settle_verifikacia_verdict(
         return state
     # Loop a TARGETED fix back to the AI Agent (A+B, Director 2026-06-30).
     # B: materialize ONE fix task carrying the Auditor's findings as its brief — the already-done plan tasks
-    #    STAY done. NO whole-build re-run (the v1 gate_g `_reset_done_tasks_for_regate` reset-all was the
+    #    STAY done. NO whole-build re-run (the v1 gate_g reset of every done task was the
     #    overnight-token-burn cause: a single behavioural-acceptance FAIL re-ran all N tasks from #1).
     # A: GATE the re-run for a new_version — STOP for the Manažér to confirm the fix (status `paused` →
     #    'Pokračovať' resumes Programovanie and runs the fix task), NEVER an unattended auto re-dispatch
@@ -11247,19 +11010,6 @@ def _reset_failed_tasks_to_todo(db: Session, version_id: uuid.UUID) -> None:
     db.flush()
 
 
-def _reset_done_tasks_for_regate(db: Session, version_id: uuid.UUID) -> None:
-    """gate_g FAIL Fix 2 (CR-NS-057 §F2.2): on a FAIL→build re-gate, flip the version's ``done`` tasks back to
-    ``todo`` (existing ``todo`` untouched) so the WHOLE build re-runs against the corrected understanding.
-    Re-run tasks keep their ``baseline_sha`` (a fresh anchor is a separate Director ``move_baseline``).
-
-    SUPERSEDED (A+B, Director 2026-06-30) on the Verifikácia-FAIL path by :func:`_ensure_verifikacia_fix_task`
-    (a TARGETED one-task fix; done stays done). Kept for any other re-gate caller; do NOT re-introduce the
-    whole-build reset on a behavioural-acceptance FAIL — it re-ran all N tasks from #1 (the token-burn bug)."""
-    feat_ids = select(Feat.id).join(Epic, Epic.id == Feat.epic_id).where(Epic.version_id == version_id)
-    db.execute(update(Task).where(Task.feat_id.in_(feat_ids), Task.status == "done").values(status="todo"))
-    db.flush()
-
-
 #: Marker Epic title for the targeted Verifikácia-FAIL fix task — used to find+reuse it across the bounded
 #: fix↔re-verify rounds (so a multi-round loop never accumulates fix tasks). Visible in the task plan (honest).
 #: Title (a plain LABEL, never a lookup key) of the per-round targeted Verifikácia-FAIL fix Epic/Feat/Task.
@@ -11282,8 +11032,8 @@ def _ensure_verifikacia_fix_task(
     findings: Optional[list[str]] = None,
 ) -> None:
     """B (Director 2026-06-30): materialize a fresh TARGETED fix Task for a Verifikácia FAIL so ONLY the fix
-    re-runs — the already-done plan tasks STAY done (replaces the whole-build :func:`_reset_done_tasks_for_regate`,
-    the overnight-token-burn cause). The Auditor's findings ARE the fix brief: set as the task description AND
+    re-runs — the already-done plan tasks STAY done (replaces the v1 whole-build reset of every done task, the
+    overnight-token-burn cause). The Auditor's findings ARE the fix brief: set as the task description AND
     threaded into attempt 1 by :func:`_run_build_round` (``is_regate`` → :func:`_latest_verifikacia_fix_scope`).
 
     v4.0.15 (Director 2026-07-20): IDEMPOTENT. Every fix TRIGGER — a Verifikácia FAIL, a re-verify FAIL, a
@@ -11586,75 +11336,6 @@ async def _route_manazer_fix_to_ai_agent(
         state.next_action = "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí."
         db.flush()
     return state
-
-
-def _resolve_surgical_targets(
-    db: Session, version_id: uuid.UUID, identifiers: list[str]
-) -> tuple[list[Task], list[str]]:
-    """Resolve hierarchical ``<epic>.<feat>.<task>`` task ids (e.g. ``"1.3.1"`` — the exact format the Director
-    reads from ``spec/task-plan.md``, :func:`_render_task_plan_md`) to their version-scoped ``Task`` rows.
-
-    Returns ``(resolved_tasks, unresolved_identifiers)`` — an id is *unresolved* when malformed (not exactly
-    three dot-separated positive integers) OR no matching Task exists under this version. The hierarchical id
-    disambiguates ``Task.number`` (which is unique only WITHIN a feat — ``UNIQUE(feat_id, number)``), so a flat
-    number can't be used to pinpoint one task across the version."""
-    resolved: list[Task] = []
-    unresolved: list[str] = []
-    for ident in identifiers:
-        parts = ident.strip().split(".")
-        try:
-            if len(parts) != 3:
-                raise ValueError
-            epic_num, feat_num, task_num = (int(p) for p in parts)
-        except ValueError:
-            unresolved.append(ident)
-            continue
-        task = db.execute(
-            select(Task)
-            .join(Feat, Feat.id == Task.feat_id)
-            .join(Epic, Epic.id == Feat.epic_id)
-            .where(
-                Epic.version_id == version_id,
-                Epic.number == epic_num,
-                Feat.number == feat_num,
-                Task.number == task_num,
-            )
-        ).scalar_one_or_none()
-        if task is None:
-            unresolved.append(ident)
-        else:
-            resolved.append(task)
-    return resolved, unresolved
-
-
-def _reset_tasks_for_surgical_fix(db: Session, version_id: uuid.UUID, target_task_numbers: list[str]) -> int:
-    """gate-g-hardening GAP 2 (CR-D): the SELECTIVE reset behind a ``surgical_fix`` — flip ONLY the Director-
-    scoped ``done`` tasks back to ``todo`` so :func:`get_next_todo_task` re-runs ONLY those (not the whole
-    build — that is what a FAIL→build re-gate is for).
-
-    Scope = ``target_task_numbers``, a REQUIRED list of hierarchical ``<epic>.<feat>.<task>`` ids (the handler
-    rejects an empty scope upstream). Any id that does not resolve to an existing task → ``OrchestratorError``
-    (clear feedback, never a silent partial scope). Mirrors :func:`_coordinator_reset_task`'s per-row pattern
-    (NOT the bulk :func:`_reset_done_tasks_for_regate`, which skips the per-feat status recompute → board
-    drift); each touched feat is recomputed ONCE. Returns the count actually reset (resolved tasks already in
-    ``todo``/another state are left as-is) so the handler can reject a scope that matched no *resettable* task."""
-    resolved, unresolved = _resolve_surgical_targets(db, version_id, target_task_numbers)
-    if unresolved:
-        raise OrchestratorError(
-            "surgical_fix: neznáme čísla úloh (formát '<epic>.<feat>.<task>', napr. '1.3.1' — z spec/task-plan.md): "
-            + ", ".join(unresolved)
-        )
-    touched_feats: set[uuid.UUID] = set()
-    reset = 0
-    for task in resolved:
-        if task.status == "done":
-            task.status = "todo"  # ORM assignment keeps the in-memory object in sync
-            touched_feats.add(task.feat_id)
-            reset += 1
-    db.flush()
-    for feat_id in touched_feats:
-        task_service.recompute_feat_status(db, feat_id)
-    return reset
 
 
 def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:

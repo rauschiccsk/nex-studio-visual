@@ -21,28 +21,23 @@ creator cannot be deleted out from under the project. Binding rights to ``owner_
 permission follow whoever receives the notifications, and would make a project *unowned* the moment that
 user was removed. Read :func:`project_owner_id` before touching any of this.
 
-Two styles are provided:
-* imperative ``authorize_created_by`` / ``assert_*_access`` — call inside a route body that already has
-  (or resolves) the object;
-* FastAPI dependencies ``require_project_by_id`` etc. — resolve + authorize + return the object in one
-  shot for routes whose path carries the id/slug.
+Called inside a route body that already has (or resolves) the object: ``authorize_created_by`` /
+``assert_*_access``.
 """
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.core.security import require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.db.session import get_db
 
 #: The one account that sees and may do everything, in every project. An ACCOUNT, not a role: giving
 #: somebody the ``ri`` role makes them a Manager of the Knowledge Base, not of everyone else's projects.
@@ -177,38 +172,3 @@ def assert_customer_access(db: Session, user: User, customer_id: UUID) -> Custom
         raise _not_found("Zákazník")
     authorize_project(user, _get_project(db, customer.project_id))
     return customer
-
-
-# ── FastAPI dependencies — resolve from the path param + authorize + return the object ───────────────
-
-
-def require_project_by_id(
-    project_id: UUID,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> Project:
-    return assert_project_id_access(db, current_user, project_id)
-
-
-def require_project_by_slug(
-    slug: str,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> Project:
-    return assert_project_slug_access(db, current_user, slug)
-
-
-def require_version_by_id(
-    version_id: UUID,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> Version:
-    return assert_version_access(db, current_user, version_id)
-
-
-def require_customer_by_id(
-    customer_id: UUID,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> Customer:
-    return assert_customer_access(db, current_user, customer_id)

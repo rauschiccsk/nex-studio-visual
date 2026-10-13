@@ -635,23 +635,6 @@ def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
     return result
 
 
-def get_conflict_project_name(
-    db: Session,
-    port: int,
-    project_id: str | None = None,
-) -> str | None:
-    """Return the name of the project that occupies *port*, or ``None``.
-
-    When *project_id* is given, that project is excluded from the search
-    (useful when editing an existing project).
-
-    Covers the ``projects`` table only — a port held by a neighbouring
-    container has no project name. Use :func:`describe_port_availability`
-    for the full picture including the host.
-    """
-    return _project_holding_port(db, port, project_id)
-
-
 def _get_all_used_ports(db: Session) -> set[int]:
     """Collect every port number currently allocated across all projects."""
     stmt = select(
@@ -889,11 +872,6 @@ def reserved_ranges_status(db: Session) -> ReservedRangesStatus:
         ranges=tuple(ranges),
         malformed=tuple(malformed),
     )
-
-
-def _get_reserved_ports(db: Session) -> set[int]:
-    """Expand ``reserved_port_ranges`` into a set of ports (see :func:`reserved_ranges_status`)."""
-    return reserved_ranges_status(db).ports
 
 
 def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:

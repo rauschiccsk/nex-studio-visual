@@ -13,7 +13,7 @@ uat-snapshot / uat-status).
 Public API:
 - Slug validation: validate_slug()
 - Path utilities: uat_dir, snapshots_dir, project_dir, uat_compose_path,
-  uat_env_path, read_uat_env, nginx_config_path, local_nginx_config_path
+  uat_env_path, read_uat_env, nginx_config_path
 - Port allocation: allocate_port, release_port, get_allocated_port
 - Snapshot filenames: snapshot_filename
 - Subprocess wrappers: docker_compose, docker_exec, wait_healthy, git_describe
@@ -140,15 +140,6 @@ def nginx_config_path(slug: str) -> Path:
     """
     validate_slug(slug)
     return Path("/etc/nginx/sites-available") / f"uat-{slug}.conf"
-
-
-def local_nginx_config_path(slug: str) -> Path:
-    """User-writable nginx config path: /opt/uat/<slug>/nginx-uat-vhost.conf.
-
-    Legacy (pre-Traefik) UATs only — kept so ``uat-teardown.py`` can remove a
-    leftover vhost from a UAT provisioned before the Traefik migration.
-    """
-    return uat_dir(slug) / "nginx-uat-vhost.conf"
 
 
 # ---------- Port allocation ----------

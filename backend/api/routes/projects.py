@@ -256,46 +256,6 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
                 )
 
 
-def _validate_github_repo(repo_url: str | None, *, timeout: float) -> None:
-    """Validate that the GitHub repository exists via the GitHub API.
-
-    Delegates to :func:`backend.services.github_validation.validate_github_repo`
-    and translates its exceptions into appropriate HTTP responses.
-
-    Expects *repo_url* in ``owner/repo`` format (e.g.
-    ``rauschiccsk/nex-horizont``). Raises :class:`~fastapi.HTTPException`
-    422 when the repo is not found or the API call fails.
-    """
-    if not repo_url:
-        return
-
-    try:
-        exists = github_validation_service.validate_github_repo(repo_url, timeout=timeout)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=GitHubRepoNotFoundError(
-                detail=str(exc),
-                repo_url=repo_url,
-            ).model_dump(),
-        ) from exc
-    except (RuntimeError, httpx.HTTPError) as exc:
-        logger.warning("GitHub API request failed for repo %r", repo_url, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Could not verify GitHub repository '{repo_url}': GitHub API unavailable.",
-        ) from exc
-
-    if not exists:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=GitHubRepoNotFoundError(
-                detail=f"GitHub repository '{repo_url}' not found.",
-                repo_url=repo_url,
-            ).model_dump(),
-        )
-
-
 def _map_value_error(exc: ValueError) -> HTTPException:
     """Translate a service-layer ``ValueError`` into an HTTP exception.
 

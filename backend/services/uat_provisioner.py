@@ -1102,15 +1102,6 @@ def load_existing_env_secrets(uat_dir: Path) -> dict[str, str]:
     return out
 
 
-def parse_compose_extra_hosts(uat_dir: Path, be_service: str = "backend") -> list[str]:
-    """The BE service ``extra_hosts`` from an existing UAT compose (preserve host-gateway/hairpin
-    entries a live instance grew). Handles both list (``- "h:ip"``) and mapping (``h: ip``) forms."""
-    compose_path = uat_dir / "docker-compose.yml"
-    if not compose_path.is_file():
-        return []
-    return extra_hosts_from_compose_text(compose_path.read_text(encoding="utf-8"), be_service)
-
-
 def extra_hosts_from_compose_text(text: Optional[str], be_service: str = "backend") -> list[str]:
     """To isté z TEXTU predpisu — dvojča k :func:`facts_from_compose_text` (ICCINT-151)."""
     if not text:
@@ -1146,8 +1137,7 @@ def extra_hosts_from_compose_text(text: Optional[str], be_service: str = "backen
 #
 # These facts are read OFF the instance, never typed into a form: a file that is running is the only
 # record that cannot drift from reality, and no manager should be asked to retype a mount path.
-# ``extra_hosts`` was already preserved this way (:func:`parse_compose_extra_hosts`) — this generalises
-# that one case into the rule.
+# ``extra_hosts`` was the first such fact; the rule covers it with the rest.
 
 #: Keys a service may carry that this provisioner knows how to reproduce. Anything else on a service is
 #: a fact we would silently drop, so adoption REFUSES rather than render a quieter instance. The list is
