@@ -62,10 +62,16 @@ const QUESTION = "Verifikácia našla blokujúcu chybu. Ako chceš pokračovať?
 const EXPLANATION = "Kontrola CI na GitHube je červená — RELEASE_NOTES generated-file check.";
 const CRITIC = "Navrhnutú opravu nezávisle PREVERIL kritik (accept — je vynútená konštrukciou).";
 const FINDING = "- CI aee11b5: RELEASE_NOTES generated-file check zlyhal";
+const RATIONALE = "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril.";
+const ORIGIN = "Nález, ktorý tu bol vždy — nevznikol z tvojho rozhodnutia.";
 const MY_DRAFT = "moja rozpísaná otázka";
 const NEW_DRAFT_KEY = "nex.draft.poradca.new.nex-inbox";
 
-function card(source: string, technicalDetail = `## Verifikácia FAIL\n\n${FINDING}`): PipelineBoard {
+function card(
+  source: string,
+  technicalDetail = `## Verifikácia FAIL\n\n${FINDING}`,
+  roundMax: number | null = null,
+): PipelineBoard {
   return {
     available_actions: ["decide"],
     state: { status: "blocked", block_reason: "decision_needed", current_stage: "verifikacia" },
@@ -86,6 +92,7 @@ function card(source: string, technicalDetail = `## Verifikácia FAIL\n\n${FINDI
             id: "verifikacia-fix-v180-4",
             source,
             round: 4,
+            round_max: roundMax,
             intro: "Verifikácia našla chybu — potrebné je tvoje rozhodnutie.",
             decisions: [
               {
@@ -100,6 +107,7 @@ function card(source: string, technicalDetail = `## Verifikácia FAIL\n\n${FINDI
                   { id: "hold", label: "Zatiaľ podržať (rozhodnem neskôr)" },
                 ],
                 allow_free_text: true,
+                rationale: RATIONALE,
               },
             ],
           },
@@ -202,7 +210,7 @@ describe("DEV-103 — the review-with-Poradca button on the verification card", 
     const [slug, question, versionId, images] = api.createPoradcaConversationApi.mock.lastCall ?? [];
     expect([slug, versionId, images]).toEqual(["nex-inbox", VERSION, []]);
     expect(question.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}\nKolo opráv 4.`)).toBe(true);
-    for (const part of [EXPLANATION, CRITIC, FINDING, "Spustiť pripravenú opravu (odporúčané)"]) {
+    for (const part of [ORIGIN, EXPLANATION, CRITIC, FINDING, "Spustiť pripravenú opravu (odporúčané)", RATIONALE]) {
       expect(question).toContain(part);
     }
     expect(question.endsWith(`\n\n${REQUEST}`)).toBe(true);
@@ -224,7 +232,15 @@ describe("DEV-103 — the review-with-Poradca button on the verification card", 
   });
 
   it("a card never taken is not sent by a later visit that did not come from the button", async () => {
-    handOffReview(VERSION, { position: 1, total: 1, round: 2, question: QUESTION, options: [] });
+    handOffReview(VERSION, {
+      position: 1,
+      total: 1,
+      round: 2,
+      roundMax: null,
+      request: REQUEST,
+      question: QUESTION,
+      options: [],
+    });
 
     tree(card("verifikacia_fix"), `/poradca?verzia=${VERSION}`);
 
@@ -296,9 +312,19 @@ describe("DEV-103 — the review-with-Poradca button on the verification card", 
     expect(api.createPoradcaConversationApi).not.toHaveBeenCalled();
   });
 
-  it("the button is on the verification card only — other cards keep their own questions", () => {
-    tree(card("auditor_upfront"));
-    expect(screen.getByText(QUESTION)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Overiť s Poradcom/ })).not.toBeInTheDocument();
+  // DEV-106 (Director 13.10.2026 approved the requests): every card has the button; a card the agent prepared asks
+  // which option to choose, a card with the Auditor's findings asks to check the finding.
+  it.each([
+    ["the Auditor's upfront review", "auditor_upfront", REQUEST],
+    ["a contradiction with the Vizuál", "vizual_conflict", "Poraď mi, ktorú možnosť zvoliť a prečo."],
+    ["the agent's own question", "agent_ambiguity", "Poraď mi, ktorú možnosť zvoliť a prečo."],
+  ])("every card has the button — %s ends with its own request", async (_kind, source, request) => {
+    tree(card(source, undefined, 5));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1));
+    const question: string = api.createPoradcaConversationApi.mock.lastCall?.[1] ?? "";
+    expect(question.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}\nKolo konzultácie 4 z 5.\n${ORIGIN}`)).toBe(true);
+    expect(question.endsWith(`\n\n${request}`)).toBe(true);
   });
 });

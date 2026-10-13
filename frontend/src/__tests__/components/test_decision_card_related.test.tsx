@@ -7,11 +7,16 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
+
+// Every card leads to Poradca (DEV-106) — it lives in the app's router.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 

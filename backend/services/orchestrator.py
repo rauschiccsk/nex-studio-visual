@@ -2351,6 +2351,9 @@ async def _settle_for_consultation(
         consultation = dict(payload.get("consultation") or {})
         consultation["round"] = kolo
         consultation["round_max"] = AUDITOR_LOOP_MAX
+        # DEV-106: why the consultation came is the engine's to say — the agent may leave it out, and the schema's
+        # default would make every such card look like the Auditor's review (the Poradca button asks by it).
+        consultation["source"] = source
         payload["consultation"] = consultation
         cards.payload = payload
 

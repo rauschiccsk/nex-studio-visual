@@ -1,4 +1,5 @@
-// The review-with-Poradca button (DEV-103) — a verification decision card taken to Poradca without copying anything.
+// The review-with-Poradca button (DEV-103, on every decision card since DEV-106) — a decision card taken to Poradca
+// without copying anything.
 //
 // Director 13.10.2026: he copied the card's heading into Poradca by hand and wrote under it a request to check whether
 // the finding is justified and how to solve it (REVIEW_REQUEST). The card now hands itself off as PENDING for its
@@ -9,8 +10,12 @@
 // The answer comes back the way every answer does — the recommended choice marked for the card (DEV-83), an
 // instruction through „Vložiť do Riadiaceho centra" (DEV-22).
 
-/** The sentence the Director wrote under every card he took to Poradca. */
+/** The sentence the Director wrote under every card he took to Poradca — for a card with the Auditor's findings. */
 export const REVIEW_REQUEST = "Prekontroluj opodstatnenosť tohto nálezu a ako to vyriešiť.";
+/** DEV-106 — for a card the agent prepared: a choice between proposals, not a finding (Director 13.10.2026). */
+export const CHOICE_REQUEST = "Poraď mi, ktorú možnosť zvoliť a prečo.";
+/** The consultations that carry the Auditor's findings; the engine writes the source on every card (DEV-106). */
+const FINDING_SOURCES = new Set(["verifikacia_fix", "verifikacia_fail", "auditor_upfront"]);
 /** Marks the one visit to Poradca that came from the button. */
 export const REVIEW_PARAM = "overit";
 /** Where a shortened part says the rest is — the card itself, which Poradca reads too. */
@@ -23,19 +28,36 @@ export interface ReviewCard {
   /** „Rozhodnutie N z M" — the card's number among the decisions of this consultation. */
   position: number;
   total: number;
-  /** Round of fixes after verification; `null` on old records that do not carry it. */
+  /** The round; `null` on old records that do not carry it. */
   round: number | null;
+  /** The cap of consultation rounds; `null` for fix rounds after verification, which have none. */
+  roundMax: number | null;
+  /** The sentence the question ends with — {@link reviewRequestFor} the card's source. */
+  request: string;
   question: string;
-  /** The Auditor's plain summary and the critic's word on the proposed fix. */
+  /** Where the question came from, as the card says it. */
+  origin?: string;
+  /** The plain explanation — on a verification card the Auditor's summary and the critic's word. */
   explanation?: string;
-  /** The Auditor's findings with the proposed fix. */
+  /** The technical detail — on a verification card the Auditor's findings with the proposed fix. */
   technicalDetail?: string;
   options: { label: string; recommended?: boolean }[];
+  rationale?: string;
+}
+
+/** The request a card's question ends with: check the Auditor's finding, or advise which option to choose. */
+export function reviewRequestFor(source: string | undefined): string {
+  return source && FINDING_SOURCES.has(source) ? REVIEW_REQUEST : CHOICE_REQUEST;
 }
 
 function compose(card: ReviewCard, explanation: string, detail: string): string {
   const head = [`Rozhodnutie ${card.position} z ${card.total} — ${card.question}`];
-  if (card.round != null) head.push(`Kolo opráv ${card.round}.`);
+  if (card.round != null) {
+    head.push(
+      card.roundMax != null ? `Kolo konzultácie ${card.round} z ${card.roundMax}.` : `Kolo opráv ${card.round}.`,
+    );
+  }
+  if (card.origin?.trim()) head.push(card.origin.trim());
   const parts = [head.join("\n")];
   if (explanation) parts.push(explanation);
   if (detail) parts.push(`Technický detail:\n${detail}`);
@@ -43,7 +65,8 @@ function compose(card: ReviewCard, explanation: string, detail: string): string 
     const options = card.options.map((o) => (o.recommended ? `${o.label} (odporúčané)` : o.label));
     parts.push(`Možnosti na karte: ${options.join(" · ")}`);
   }
-  parts.push(REVIEW_REQUEST);
+  if (card.rationale?.trim()) parts.push(`Zdôvodnenie na karte: ${card.rationale.trim()}`);
+  parts.push(card.request);
   return parts.join("\n\n");
 }
 
@@ -60,7 +83,8 @@ function shorten(text: string, room: number): string {
 
 /**
  * The card as a question for Poradca, at most `maxChars` long (the limit Poradca's status reports). What gives way
- * first is the technical detail, then the explanation — the heading, the options and the request stay whole.
+ * first is the technical detail, then the explanation — the heading, the options, the rationale and the request stay
+ * whole.
  */
 export function reviewQuestion(card: ReviewCard, maxChars: number): string {
   let explanation = card.explanation?.trim() ?? "";
@@ -91,6 +115,8 @@ function isCard(value: unknown): value is ReviewCard {
     !!c &&
     typeof c.question === "string" &&
     c.question.trim().length > 0 &&
+    typeof c.request === "string" &&
+    c.request.trim().length > 0 &&
     typeof c.position === "number" &&
     typeof c.total === "number" &&
     Array.isArray(c.options)

@@ -33,6 +33,7 @@ import { smerDoRiadku, ziskKola } from "@/lib/smerKonzultacie";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import ReviewWithPoradcaButton from "@/components/riadiace/ReviewWithPoradcaButton";
+import { reviewRequestFor } from "@/lib/poradcaReview";
 
 interface ConsultOption {
   id: string;
@@ -127,7 +128,7 @@ function uzavreteRozhodnutia(n: number): string {
 interface Consultation {
   id: string;
   intro?: string;
-  /** Where the queue came from; `verifikacia_fix` is the card after a failed verification (DEV-103). */
+  /** Why the consultation came — the engine writes it (DEV-106); the review-with-Poradca request depends on it. */
   source?: string;
   decisions: ConsultDecision[];
   /**
@@ -289,10 +290,6 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
     }
   }
 
-  // DEV-103: the verification card goes to Poradca as it stands — he no longer copies its heading and types the
-  // request under it.
-  const reviewable = consultation.source === "verifikacia_fix";
-
   return (
     <div className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
       {/* (1) Unmissable blocker banner — the build is stopped and needs a decision. */}
@@ -391,20 +388,23 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             </details>
           )}
 
-          {reviewable && (
-            <ReviewWithPoradcaButton
-              versionId={versionId}
-              card={{
-                position: idx + 1,
-                total,
-                round: typeof consultation.round === "number" ? consultation.round : null,
-                question: current.question,
-                explanation: current.explanation,
-                technicalDetail: current.technical_detail,
-                options: current.options.map((o) => ({ label: o.label, recommended: o.recommended })),
-              }}
-            />
-          )}
+          {/* DEV-103/DEV-106: every card goes to Poradca as it stands — nothing to copy, nothing to type. */}
+          <ReviewWithPoradcaButton
+            versionId={versionId}
+            card={{
+              position: idx + 1,
+              total,
+              round: typeof consultation.round === "number" ? consultation.round : null,
+              roundMax: typeof consultation.round_max === "number" ? consultation.round_max : null,
+              request: reviewRequestFor(consultation.source),
+              question: current.question,
+              origin: origin ?? undefined,
+              explanation: current.explanation,
+              technicalDetail: current.technical_detail,
+              options: current.options.map((o) => ({ label: o.label, recommended: o.recommended })),
+              rationale: current.rationale,
+            }}
+          />
 
           {/* Options as clickable buttons; the recommended one is badged. */}
           {!showFree && (

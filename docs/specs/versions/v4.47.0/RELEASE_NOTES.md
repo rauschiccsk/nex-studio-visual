@@ -11,3 +11,9 @@ Poradcu alebo obnovený rozpísaný text — voľba „Zatiaľ podržať“ ho p
 programovania. A aj bez textu karta po podržaní z obrazovky zmizla, takže nebolo čo stlačiť. Teraz stavba počká na
 karte, karta ostane na obrazovke s vetou „Podržané — karta počká na tvoje rozhodnutie.“ a text v poli sa nepošle —
 ostane tam na neskôr. To isté platí pre kartu po vyčerpaných kolách Verifikácie.
+
+**„Overiť s Poradcom“ je na každej rozhodovacej karte.** Doteraz bolo tlačidlo len na karte Verifikácie. Teraz ho
+má každá karta — aj tie, ktoré pripraví agent, keď potrebuje tvoje rozhodnutie. Poradca dostane otázku zloženú
+z karty, ktorá je na rade: nadpis, kolo, odkiaľ otázka prišla, vysvetlenie, technický detail, možnosti so
+zdôvodnením. Pri kartách s nálezmi Auditora končí prosbou „Prekontroluj opodstatnenosť tohto nálezu a ako to
+vyriešiť.“, pri kartách, kde agent ponúka voľbu medzi návrhmi, prosbou „Poraď mi, ktorú možnosť zvoliť a prečo.“

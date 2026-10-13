@@ -11,11 +11,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
 import {
+  CHOICE_REQUEST,
   REVIEW_PARAM,
   REVIEW_REQUEST,
   handOffReview,
   reviewAddress,
   reviewQuestion,
+  reviewRequestFor,
   takeReview,
   type ReviewCard,
 } from "@/lib/poradcaReview";
@@ -24,6 +26,8 @@ const CARD: ReviewCard = {
   position: 1,
   total: 1,
   round: 4,
+  roundMax: null,
+  request: REVIEW_REQUEST,
   question: "Verifikácia našla blokujúcu chybu. Ako chceš pokračovať?",
   explanation:
     "Kontrola CI na GitHube je červená — RELEASE_NOTES generated-file check.\n\n" +
@@ -124,6 +128,47 @@ describe("reviewQuestion — the card as a question", () => {
   });
 });
 
+describe("DEV-106 — every card, its own request", () => {
+  it("a card the agent prepared asks which option to choose, with its round, origin and rationale", () => {
+    const card: ReviewCard = {
+      position: 2,
+      total: 3,
+      round: 2,
+      roundMax: 5,
+      request: reviewRequestFor("vizual_conflict"),
+      question: "Faktúra bez IČO: zobraziť ju v zozname, alebo ju skryť?",
+      origin: "Vyplýva z tvojho rozhodnutia „Zoznam faktúr“ (tvoja voľba: Všetky).",
+      explanation: "Vizuál ju ukazuje, Špecifikácia ju vylučuje.",
+      options: [{ label: "Zobraziť", recommended: true }, { label: "Skryť" }],
+      rationale: "Zobraziť — faktúra bez IČO je stále faktúra.",
+    };
+
+    expect(reviewQuestion(card, 20_000).split("\n")).toEqual([
+      "Rozhodnutie 2 z 3 — Faktúra bez IČO: zobraziť ju v zozname, alebo ju skryť?",
+      "Kolo konzultácie 2 z 5.",
+      "Vyplýva z tvojho rozhodnutia „Zoznam faktúr“ (tvoja voľba: Všetky).",
+      "",
+      "Vizuál ju ukazuje, Špecifikácia ju vylučuje.",
+      "",
+      "Možnosti na karte: Zobraziť (odporúčané) · Skryť",
+      "",
+      "Zdôvodnenie na karte: Zobraziť — faktúra bez IČO je stále faktúra.",
+      "",
+      "Poraď mi, ktorú možnosť zvoliť a prečo.",
+    ]);
+  });
+
+  it("the Auditor's findings ask to check the finding; everything else asks which option to choose", () => {
+    expect(CHOICE_REQUEST).toBe("Poraď mi, ktorú možnosť zvoliť a prečo.");
+    for (const source of ["verifikacia_fix", "verifikacia_fail", "auditor_upfront"]) {
+      expect(reviewRequestFor(source)).toBe(REVIEW_REQUEST);
+    }
+    for (const source of ["vizual_conflict", "agent_ambiguity", "build_blocker", "niečo nové", undefined]) {
+      expect(reviewRequestFor(source)).toBe(CHOICE_REQUEST);
+    }
+  });
+});
+
 describe("the hand-off between the card and Poradca", () => {
   it("is taken exactly once, and only for its own version", () => {
     handOffReview("v13", CARD);
@@ -142,6 +187,8 @@ describe("the hand-off between the card and Poradca", () => {
     window.localStorage.setItem("nex.poradca.review.v13", "{not json");
     expect(takeReview("v13")).toBeNull();
     window.localStorage.setItem("nex.poradca.review.v13", JSON.stringify({ question: "" }));
+    expect(takeReview("v13")).toBeNull();
+    window.localStorage.setItem("nex.poradca.review.v13", JSON.stringify({ ...CARD, request: undefined }));
     expect(takeReview("v13")).toBeNull();
   });
 
