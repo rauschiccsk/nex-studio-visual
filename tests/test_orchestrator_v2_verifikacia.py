@@ -977,7 +977,10 @@ async def test_uprav_at_verifikacia_routes_to_ai_agent_fix_loop(db_session, monk
 
 
 async def test_latest_fix_scope_prefers_operator_directive_over_auditor_fail(db_session):
-    # When a Manažér directive is the most recent verifikacia message, it wins over an older Auditor FAIL.
+    # When a manager directive is the most recent verifikacia message, it wins over the Auditor FAIL it answers —
+    # and since DEV-100 (Director 13.10.2026 approved) it wins ALONGSIDE the findings, not by dropping them: the note
+    # on NEX Inbox 1.8.0 named points the agent then did not have.
+    # The full path: tests/test_a_managers_note_keeps_the_auditors_findings.py.
     version, _ = _make_version(db_session)
     _seed_verifikacia(db_session, version.id)
     # older Auditor FAIL verdict
@@ -1006,7 +1009,8 @@ async def test_latest_fix_scope_prefers_operator_directive_over_auditor_fail(db_
     )
     db_session.flush()
     scope = orchestrator._latest_verifikacia_fix_scope(db_session, version.id)
-    assert "pokynu Manažéra" in scope and "scoping na firmu" in scope and "staré nálezy" not in scope
+    assert "pokynu Manažéra" in scope and "scoping na firmu" in scope and "staré nálezy" in scope
+    assert scope.index("staré nálezy") < scope.index("scoping na firmu"), "the directive comes last and wins"
 
 
 async def test_escalation_decision_card_guide_fix_routes_to_ai_agent(db_session, monkeypatch):

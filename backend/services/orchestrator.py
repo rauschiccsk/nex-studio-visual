@@ -10285,8 +10285,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
         ConsultOption(
             id="guide",
             label="Usmerniť opravu (napíš vlastný pokyn)",
-            detail="NEPOVINNÉ — ak chceš opravu nasmerovať sám, napíš pokyn (pole nižšie); pošle sa AI Agentovi "
-            "namiesto Auditorových nálezov a Auditor ho znova overí.",
+            # DEV-100: the guidance travels with the findings it answers — the card must not promise otherwise.
+            detail="NEPOVINNÉ — ak chceš opravu nasmerovať sám, napíš pokyn (pole nižšie); AI Agent ho dostane "
+            "spolu s nálezmi Auditora (kde sa rozchádzajú, platí tvoj pokyn) a Auditor opravu znova overí.",
             recommended=False,
         )
     )
@@ -11402,13 +11403,14 @@ async def _route_manazer_fix_to_ai_agent(
     concrete fix the operator can trigger, without having to know the fixer/finder split (the bug that made
     the NEX Agents dogfood need Dedo — an 'Uprav' at Verifikácia hit the Auditor, which just re-confirmed).
 
-    The operator's comment (an 'Uprav' or an escalation Decision Card answer) IS the fix brief: record it as a
+    The operator's comment (an 'Uprav' or an escalation Decision Card answer) steers the fix brief: record it as a
     ``manazer→ai_agent`` return (:func:`_latest_verifikacia_fix_scope` reads it as the most-recent verifikacia
-    directive), materialize ONE targeted fix task (the done plan tasks STAY done), RESET the bounded loop
-    counter (a human now steers — ``AUDITOR_LOOP_MAX`` bounds the AUTONOMOUS re-verify loop, not human
-    interventions), and re-enter Programovanie (``paused`` for a ``new_version`` so the Manažér confirms the
-    re-run via 'Pokračovať'; auto-dispatched on the ``fast_fix`` lane, or when ``auto_dispatch`` is set — the
-    v4.0.13 "Nechaj to opraviť" one-click, whose single click IS the confirmation, runs the fix immediately)."""
+    directive, together with the FAIL findings it answers — DEV-100), materialize ONE targeted fix task (the done
+    plan tasks STAY done), RESET the bounded loop counter (a human now steers — ``AUDITOR_LOOP_MAX`` bounds the
+    AUTONOMOUS re-verify loop, not human interventions), and re-enter Programovanie (``paused`` for a
+    ``new_version`` so the manager confirms the re-run with the continue button; auto-dispatched on the ``fast_fix``
+    lane, or when ``auto_dispatch`` is set — the v4.0.13 "Nechaj to opraviť" one-click, whose single click IS the
+    confirmation, runs the fix immediately)."""
     version_id = state.version_id
     ret = _record_message(
         db,
@@ -11422,7 +11424,7 @@ async def _route_manazer_fix_to_ai_agent(
     )
     if on_message is not None:
         await on_message(ret)
-    _ensure_verifikacia_fix_task(db, version_id)  # brief = the manazer directive just recorded (fix-scope reader)
+    _ensure_verifikacia_fix_task(db, version_id)  # brief = the directive just recorded + findings (fix-scope reader)
     state.is_regate = True
     state.iteration = 0  # human-directed fresh attempt — reset the bounded AUTONOMOUS loop counter
     state.current_stage = "programovanie"
@@ -11467,6 +11469,21 @@ def current_build_task(db: Session, version_id: uuid.UUID) -> Optional[Task]:
 # ---------------------------------------------------------------------------
 
 
+#: The headings of the verification fix brief. The one-click fix records the Auditor's brief as the manager's message,
+#: and a record from before DEV-100 is recognised by them (:func:`_is_auditor_brief`) — so they live in one place.
+_AUDITOR_FIX_HEADING = (
+    "## Verifikácia FAIL — oprav podľa nálezov Auditora (cielená oprava, potom Auditor re-verifikuje)\n"
+)
+_VETTED_FIX_HEADING = (
+    "## Verifikácia FAIL — oprav podľa PREVERENÉHO rozsahu (kritik upravil rozsah; potom Auditor re-verifikuje)\n"
+)
+_MANAZER_FIX_HEADING = "## Verifikácia — oprav podľa pokynu Manažéra (cielená oprava, potom Auditor re-verifikuje)\n"
+_MANAZER_AND_AUDITOR_FIX_HEADING = (
+    "## Verifikácia — oprav podľa nálezov Auditora a pokynu Manažéra (cielená oprava, potom Auditor re-verifikuje)\n"
+)
+_MANAZER_NOTE_HEADING = "### Pokyn Manažéra — má prednosť, kde sa s nálezmi Auditora rozchádza"
+
+
 def _fix_plain_description(scope: str) -> str:
     """One plain-Slovak line for the Verifikácia fix rows in the Plán úloh (ICCINT-35).
 
@@ -11501,8 +11518,10 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
 
     CR-V2-054: a Manažér 'Uprav' / escalation-decision at Verifikácia records a ``manazer→ai_agent``
     ``kind=return`` — the OPERATOR's own fix instruction. When that return is the MOST RECENT verifikacia
-    message, it IS the fix brief (the operator is steering the fix directly), taking precedence over a prior
-    Auditor FAIL verdict."""
+    message, it steers the fix. DEV-100: it steers it ALONGSIDE the Auditor's FAIL verdict it answers, never
+    instead of it — the note names the findings (points 3(a) and 3(b) on NEX Inbox 1.8.0) and the agent must have
+    them; the note comes last and wins where the two disagree. A return that IS the Auditor's brief (the
+    one-click fix records it so) is the brief as it stands."""
     latest = db.execute(
         select(PipelineMessage)
         .where(
@@ -11515,17 +11534,51 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     ).scalar_one_or_none()
     if latest is None:
         return None
-    if latest.kind == "return":
-        # CR-V2-054: the operator's directed fix instruction (most recent) IS the brief.
-        directive = (latest.content or "").strip()
-        if not directive:
+    if latest.kind != "return":
+        if not latest.payload or latest.payload.get("verdict") != "FAIL":
             return None
-        return (
-            "## Verifikácia — oprav podľa pokynu Manažéra (cielená oprava, potom Auditor re-verifikuje)\n" + directive
-        )
-    if not latest.payload or latest.payload.get("verdict") != "FAIL":
+        return _auditor_fix_brief(db, version_id, latest)
+    directive = (latest.content or "").strip()
+    if not directive:
         return None
-    findings = latest.payload.get("findings") or []
+    if _is_auditor_brief(directive):
+        return directive
+    # DEV-100: the note answers the latest verdict (the note is newer than every verdict) — a FAIL's findings travel
+    # with it; a PASS's notes are not faults (ICCINT-115), and an older FAIL's findings are not dug up.
+    answered = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    found = (
+        _auditor_fix_parts(db, version_id, answered)
+        if answered is not None and (answered.payload or {}).get("verdict") == "FAIL"
+        else None
+    )
+    if found is None:
+        return _MANAZER_FIX_HEADING + directive
+    auditors, _vetted = found
+    return _MANAZER_AND_AUDITOR_FIX_HEADING + "\n\n".join(auditors) + f"\n\n{_MANAZER_NOTE_HEADING}\n" + directive
+
+
+def _is_auditor_brief(directive: str) -> bool:
+    """Is this ``return`` the Auditor's own brief that the one-click fix recorded, not the manager's words? The
+    brief opens with its heading; the manager's note never does."""
+    return directive.startswith((_AUDITOR_FIX_HEADING, _VETTED_FIX_HEADING))
+
+
+def _auditor_fix_parts(
+    db: Session, version_id: uuid.UUID, verdict: PipelineMessage
+) -> Optional[tuple[list[str], bool]]:
+    """The Auditor's FAIL verdict as the parts of a fix brief, and whether the critic's vetted scope replaced the
+    proposed fix. ``None`` when the verdict carries nothing to fix by."""
+    payload = verdict.payload or {}
+    findings = payload.get("findings") or []
     # CR-V2-058 Part B (read-precedence): when an independent fix-critic vetted THIS round's proposed_fix and
     # returned a non-empty ``corrected_scope`` (a ``narrow`` — or an ``accept``/``reject`` that still supplied a
     # better default), the fix task must materialize the VETTED scope, NOT the Auditor's raw proposed_fix. The
@@ -11533,7 +11586,7 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     # Auditor-verdict branch. No critique / no corrected_scope → the raw proposed_fix, exactly as before.
     critique = _latest_fix_critique(db, version_id)
     corrected = str((critique or {}).get("corrected_scope") or "").strip()
-    proposed_fix = corrected or latest.payload.get("proposed_fix")
+    proposed_fix = corrected or payload.get("proposed_fix")
     # v4.0.46: thread the smoke run's ``technical_detail`` — the CONCRETE, engine-verified reason the
     # boot/acceptance check failed (e.g. "Aktualizácie chýba: /api/v1/release-notes neobsahuje verziu
     # v0.1.0 (vrátené: žiadne)") — into the fix brief AS THE LEAD. Without it the AI Agent saw only the
@@ -11541,7 +11594,7 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
     # "fixed" an unrelated unit test, and the SAME smoke failed again → an endless fix↔re-verify loop. It
     # flows from here into the fix_it one-click brief + the materialized fix task, so a non-expert's single
     # click now hands the AI Agent the actual failure. The loop-breaker.
-    technical_detail = str(latest.payload.get("technical_detail") or "").strip()
+    technical_detail = str(payload.get("technical_detail") or "").strip()
     parts: list[str] = []
     if technical_detail:
         parts.append(f"Konkrétny dôvod zlyhania (zo skúšky po spustení, overené enginom): {technical_detail}")
@@ -11551,12 +11604,16 @@ def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optiona
         parts.append("\n".join(f"- {_finding_text(f)}" for f in findings))
     if not parts:
         return None
-    heading = (
-        "## Verifikácia FAIL — oprav podľa PREVERENÉHO rozsahu (kritik upravil rozsah; potom Auditor re-verifikuje)\n"
-        if corrected
-        else "## Verifikácia FAIL — oprav podľa nálezov Auditora (cielená oprava, potom Auditor re-verifikuje)\n"
-    )
-    return heading + "\n\n".join(parts)
+    return parts, bool(corrected)
+
+
+def _auditor_fix_brief(db: Session, version_id: uuid.UUID, verdict: PipelineMessage) -> Optional[str]:
+    """The fix brief from the Auditor's FAIL verdict alone."""
+    found = _auditor_fix_parts(db, version_id, verdict)
+    if found is None:
+        return None
+    parts, vetted = found
+    return (_VETTED_FIX_HEADING if vetted else _AUDITOR_FIX_HEADING) + "\n\n".join(parts)
 
 
 def _latest_runtime_floor_red(db: Session, version_id: uuid.UUID) -> bool:
