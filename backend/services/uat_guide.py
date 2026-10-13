@@ -175,14 +175,19 @@ class VersionGuide:
 
 
 def for_commit(repo: Path, version_number: str, sha: Optional[str]) -> VersionGuide:
-    """The guide of the commit that was verified (``sha``); its release note's changes when it has none."""
+    """The guide of the commit that was verified (``sha``); its release note's changes when it has none.
+
+    The note is read as the project has it NOW, and only then as the verified commit had it: a version's note is
+    corrected after the version (DEV-97 — Career Asistent 0.1.1 shipped its agent brief as the note), and the
+    corrected text is the one to test by. The guide stays the verified commit's — it describes that code."""
     if not sha:
         return VersionGuide(source=NONE)
     text = read_at(repo, sha, relative_path(version_number))
     if text is not None:
         return VersionGuide(source=GUIDE, guide=parse(text))
     note = (version_notes_dir(Path("."), version_number) / "RELEASE_NOTES.md").as_posix().removeprefix("./")
-    changes = release_note_changes(read_at(repo, sha, note))
+    now = read_at(repo, "HEAD", note)
+    changes = release_note_changes(now if now is not None else read_at(repo, sha, note))
     return VersionGuide(source=RELEASE_NOTES if changes else NONE, changes=changes)
 
 

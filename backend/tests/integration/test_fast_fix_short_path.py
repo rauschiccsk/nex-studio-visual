@@ -575,6 +575,56 @@ def test_customer_note_never_overwrites_a_plan_authored_description(db_session) 
     assert epic.plain_description == "Text z plánu úloh."
 
 
+def test_the_customer_sentence_replaces_the_directive_the_cockpit_copied(db_session, tmp_path) -> None:
+    """DEV-97 — the agent's sentence reaches the changelog on the REAL fast-fix path, not on a hand-made epic.
+
+    ICCINT-63 fills the fix epic with the manager's directive when the fast fix starts (the task plan panel shows
+    it); the sentence was written only into a blank field, so from 07.09.2026 every fast fix shipped its agent brief
+    as the customer's changelog: Career Asistent 0.1.1 listed eight English instruction lines as what to try in UAT.
+    The test above seeds a blank epic by hand, which is why it stayed green the whole time.
+    """
+    from backend.db.models.tasks import Epic, Feat
+    from backend.services import orchestrator, release_note_writer
+
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "v0.1.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="change")
+    directive = (
+        "Mark in `.env.example` what each customer provides.\n\n"
+        "- APP_PUBLIC_URL: `# @public-url`\n- SMTP_PASSWORD: `# @customer-secret`"
+    )
+    _record_kickoff(db_session, patch.id, directive)
+    db_session.add(
+        PipelineState(
+            version_id=patch.id,
+            flow_type="fast_fix",
+            current_stage="programovanie",
+            current_actor="ai_agent",
+            status="agent_working",
+        )
+    )
+    db_session.flush()
+    task = fast_fix.ensure_build_task(db_session, patch.id)
+    epic = db_session.get(Epic, db_session.get(Feat, task.feat_id).epic_id)
+
+    # Until the agent says what changed, the task plan panel keeps showing the manager's own words (ICCINT-63).
+    assert orchestrator._apply_customer_note_to_fix_epic(db_session, patch.id) is False
+    assert epic.plain_description == directive
+
+    note = "Pri nasadení zadáte e-mail a heslo prvého správcu, pod ktorými sa hneď prihlásite."
+    _block_with_note(db_session, patch.id, note)
+
+    assert orchestrator._apply_customer_note_to_fix_epic(db_session, patch.id) is True
+    body = release_note_writer.write_release_note(db_session, patch.id, tmp_path).read_text(encoding="utf-8")
+    assert [line for line in body.splitlines() if line.startswith("- ")] == [f"- {note}"]
+    assert "@public-url" not in body and ".env.example" not in body
+    # The sentence is written once; a later round's sentence does not replace it.
+    _block_with_note(db_session, patch.id, "Aplikácia funguje bez zmeny.")
+    assert orchestrator._apply_customer_note_to_fix_epic(db_session, patch.id) is False
+    assert epic.plain_description == note
+
+
 def test_fast_fix_build_brief_asks_for_the_customer_sentence(db_session) -> None:
     """Nobody can supply what nobody asked for — the fast-fix build brief must request ``customer_note``."""
     from backend.db.models.tasks import Feat, Task
@@ -710,6 +760,147 @@ def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> Non
 
     assert "flagship_features" in brief
     assert "NEX Studiu" in brief  # says explicitly not to declare our own tooling
+
+
+# ---------------------------------------------------------------------------
+# DEV-97: fast fixes built while the sentence was dropped get it back
+# ---------------------------------------------------------------------------
+
+_SENTENCE = "Pri nasadení zadáte e-mail a heslo prvého správcu, pod ktorými sa hneď prihlásite."
+_BRIEF = "Mark in `.env.example` what each customer provides."
+
+
+def _git(root, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout
+
+
+def _past_fast_fix(db, tmp_path):
+    """A fast fix as the cockpit left it before DEV-97: the epic holds the brief, the note was generated from it, the
+    agent's sentence sits recorded and unused."""
+    from backend.services import release_note_writer
+
+    creator = _seed_user(db)
+    project = _seed_project(db, creator=creator)
+    _seed_base_version(db, project, "0.1.0")  # as the cockpit numbers them
+    patch = fast_fix.create_patch_version(db, project_id=project.id, user_id=creator.id, work_kind="change")
+    _record_kickoff(db, patch.id, _BRIEF)
+    db.add(
+        PipelineState(
+            version_id=patch.id, flow_type="fast_fix", current_stage="done", current_actor="auditor", status="done"
+        )
+    )
+    db.flush()
+    fast_fix.ensure_build_task(db, patch.id)
+    root = tmp_path / project.slug
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "studio@isnex.eu")
+    _git(root, "config", "user.name", "NEX Studio")
+    note = release_note_writer.write_release_note(db, patch.id, root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "0.1.1")
+    _block_with_note(db, patch.id, _SENTENCE)
+    patch.status = "done"
+    db.flush()
+    return project, patch, root, note
+
+
+def test_the_repair_puts_the_sentence_back_into_a_past_fast_fix(db_session, tmp_path) -> None:
+    from backend.scripts import repair_fast_fix_notes
+
+    project, patch, root, note = _past_fast_fix(db_session, tmp_path)
+    label = f"{project.slug} {patch.version_number}"
+    before = note.read_text(encoding="utf-8")
+    assert f"- {_BRIEF}" in before
+
+    dry = repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=False)
+
+    assert dry == [
+        f"{label}: veta agenta pre zákazníka nahradí v epike zadanie",
+        f"{label}: poznámky k vydaniu prepíšem vetou agenta",
+    ]
+    assert note.read_text(encoding="utf-8") == before, "a dry run wrote the note"
+    epic = db_session.execute(select(Epic).where(Epic.version_id == patch.id)).scalars().first()
+    assert epic.plain_description == _BRIEF, "a dry run changed the epic"
+
+    applied = repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=True)
+
+    assert applied == dry
+    after = note.read_text(encoding="utf-8")
+    assert [line for line in after.splitlines() if line.startswith("- ")] == [f"- {_SENTENCE}"]
+    assert (
+        _git(root, "log", "-1", "--format=%s").strip()
+        == f"docs(release-notes): v{patch.version_number} — user-facing changelog"
+    )
+    assert repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=True) == []
+
+
+def test_the_repair_leaves_a_written_note_and_a_running_build_alone(db_session, tmp_path) -> None:
+    from backend.scripts import repair_fast_fix_notes
+
+    project, patch, root, note = _past_fast_fix(db_session, tmp_path)
+    label = f"{project.slug} {patch.version_number}"
+    busy = Version(project_id=project.id, version_number="v0.2.0", status="active")
+    db_session.add(busy)
+    db_session.flush()
+    db_session.add(
+        PipelineState(
+            version_id=busy.id,
+            flow_type="new_version",
+            current_stage="programovanie",
+            current_actor="ai_agent",
+            status="agent_working",
+        )
+    )
+    db_session.flush()
+    generated = note.read_text(encoding="utf-8")
+
+    assert repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=True) == [
+        f"{label}: veta agenta pre zákazníka nahradí v epike zadanie",
+        f"{label}: na projekte práve pracuje agent — poznámky prepíšem pri ďalšom spustení",
+    ]
+    assert note.read_text(encoding="utf-8") == generated
+
+    written = "## v0.1.1\n\n- Nastavenia zákazníka zadáte pri nasadení.\n"
+    note.write_text(written, encoding="utf-8")
+    db_session.execute(select(PipelineState).where(PipelineState.version_id == busy.id)).scalar_one().status = "done"
+    db_session.flush()
+
+    assert repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=True) == [
+        f"{label}: poznámky k vydaniu napísal človek alebo agent — nechávam ich tak"
+    ]
+    assert note.read_text(encoding="utf-8") == written
+
+
+def test_the_repair_of_one_project_leaves_the_others_as_they_are(db_session, tmp_path) -> None:
+    from backend.scripts import repair_fast_fix_notes
+
+    chosen, chosen_fix, _root, _note = _past_fast_fix(db_session, tmp_path)
+    other, other_fix, _other_root, other_note = _past_fast_fix(db_session, tmp_path)
+    untouched = other_note.read_text(encoding="utf-8")
+
+    lines = repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={chosen.slug}, apply=True)
+
+    assert [line.split(":")[0] for line in lines] == [f"{chosen.slug} {chosen_fix.version_number}"] * 2
+    assert other_note.read_text(encoding="utf-8") == untouched
+    epic = db_session.execute(select(Epic).where(Epic.version_id == other_fix.id)).scalars().first()
+    assert epic.plain_description == _BRIEF
+
+
+def test_the_repair_never_touches_the_note_of_a_released_version(db_session, tmp_path) -> None:
+    from backend.scripts import repair_fast_fix_notes
+
+    project, patch, root, note = _past_fast_fix(db_session, tmp_path)
+    patch.status = "released"
+    db_session.flush()
+    generated = note.read_text(encoding="utf-8")
+
+    assert repair_fast_fix_notes.repair(db_session, projects_root=tmp_path, only={project.slug}, apply=True) == [
+        f"{project.slug} {patch.version_number}: veta agenta pre zákazníka nahradí v epike zadanie"
+    ]
+    assert note.read_text(encoding="utf-8") == generated
 
 
 # ---------------------------------------------------------------------------

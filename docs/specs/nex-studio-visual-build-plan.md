@@ -79,6 +79,15 @@ Od v4.44.1 (DEV-1) kontrola číta aj nastavenie stavby (`frontend/vite.config.*
 prostredia (`import.meta.env`, `process.env`, výsledok `loadEnv`); hodnotou odovzdanou ďalej je aj argument
 `.includes(…)` a `?? ""` za ňou. NEX Manager tam mal tri pravdivostné použitia, ktoré kontrola nevidela.
 
+**Veta pre zákazníka pri rýchlej oprave (v4.44.1, DEV-97).** Epika rýchlej opravy nesie od jej začiatku zadanie
+Manažéra (ICCINT-63, aby ho bolo vidieť v Pláne úloh). Keď agent v stavovom bloku dodá `customer_note`,
+`_apply_customer_note_to_fix_epic` ním toto skopírované zadanie nahradí — iný text v epike (z plánu úloh) sa
+neprepisuje — a poznámky k vydaniu aj „Čo otestovať“ v UAT ukážu vetu agenta. Od 07.09.2026 do v4.44.1 sa veta
+zahadzovala a do poznámok išlo zadanie. Záložka UAT číta poznámky verzie z aktuálneho stavu projektu (opravený text),
+návod na skúšku z overeného commitu. Staršie rýchle opravy dá do poriadku
+`python -m backend.scripts.repair_fast_fix_notes` (bez `--apply` nanečisto; vydanú verziu, ručne písané poznámky
+a projekt, na ktorom práve pracuje agent, vynechá).
+
 **Súbory pre agenta (v4.43.14, DEV-44).** Manažér priloží súbor tlačidlom „Priložiť súbor“ v poli odpovede aj
 v rozhovore (`AttachFileButton`); `POST /pipeline/{version_id}/files` ho uloží do `<projekt>/private/`
 (`project_files.save`: očistené meno, strop `private_file_max_bytes`, vlastník projektu) a vráti riadok do

@@ -253,6 +253,46 @@ def test_the_uat_tab_reads_the_guide_of_the_verified_commit_or_the_release_notes
     assert client.get(f"/api/v1/projects/{slug}/uat-guide", params={"version": "9.9.9"}).status_code == 404
 
 
+def test_a_release_note_corrected_after_the_version_is_the_one_to_test_by(tmp_path):
+    """DEV-97 — a version's note is read as the project has it now; the guide stays the verified commit's.
+
+    Career Asistent 0.1.1 shipped its agent brief as the release note, and the UAT tab listed it as what to try.
+    The corrected note lands on the main branch after the version; the verified commit keeps the old text."""
+    import subprocess
+
+    repo = tmp_path / "app"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@t.sk")
+    git("config", "user.name", "T")
+    note = repo / "docs/specs/versions/v0.1.1/RELEASE_NOTES.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("## v0.1.1\n\n- Mark in `.env.example` what each customer provides.\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "0.1.1")
+    verified = git("rev-parse", "HEAD").strip()
+    brief = ["Mark in `.env.example` what each customer provides."]
+    assert uat_guide.for_commit(repo, "0.1.1", verified).changes == brief
+
+    note.write_text("## v0.1.1\n\n- Pri nasadení zadáte e-mail prvého správcu.\n", encoding="utf-8")
+    git("commit", "-q", "-am", "corrected note")
+    assert uat_guide.for_commit(repo, "0.1.1", verified).changes == ["Pri nasadení zadáte e-mail prvého správcu."]
+
+    guide = repo / uat_guide.relative_path("0.1.1")
+    guide.write_text(GUIDE, encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "a guide after the version")
+    assert uat_guide.for_commit(repo, "0.1.1", verified).source == uat_guide.RELEASE_NOTES
+
+    git("rm", "-q", str(note.relative_to(repo)))
+    git("commit", "-q", "-m", "note gone")
+    assert uat_guide.for_commit(repo, "0.1.1", verified).changes == brief
+
+
 def test_an_app_on_the_legacy_admin_password_signs_in_as_admin():
     assert uat_guide.admin_login([], {}, legacy_admin=True) == "admin"
     assert uat_guide.admin_login([], {}, legacy_admin=False) is None

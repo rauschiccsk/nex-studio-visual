@@ -5280,7 +5280,7 @@ async def _push_after_task(project_root: Path) -> Optional[str]:
     return None if pushed or why is None else why
 
 
-def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> None:
+def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> bool:
     """ICCINT-53: move the AI Agent's one customer sentence into the fast-fix Epic's ``plain_description``.
 
     The changelog renders ``plain_description`` and falls back to the Epic TITLE when it is blank. A normal
@@ -5292,12 +5292,18 @@ def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> None
     survives every regeneration.
 
     Restart-safe: the sentence is read back from the RECORDED block payload, never from an in-memory parse.
-    Only fills a BLANK ``plain_description`` — a plan-authored one is the agent's own and is never overwritten.
+    Fills a blank ``plain_description``, or replaces the manager's directive the cockpit copied there itself — a
+    plan-authored one is the agent's own and is never overwritten. Returns whether it wrote the sentence.
     Best-effort and silent: a missing note must never sink a sign-off.
+
+    DEV-97: ICCINT-63 (07.09.2026) puts the directive into this field when the fast fix starts, so the task plan panel
+    shows what is being worked on. Filling only a blank field then never filled anything: every fast fix since
+    shipped its agent brief as the customer's changelog — Career Asistent 0.1.1 listed eight English instruction
+    lines as what to try in UAT, NEX Inbox 1.5.2 told its customer to execute a spec file.
     """
     state = _get_state(db, version_id)
     if state is None or state.flow_type != "fast_fix":
-        return
+        return False
     note = db.execute(
         select(PipelineMessage.payload)
         .where(
@@ -5309,16 +5315,20 @@ def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> None
     ).scalar_one_or_none()
     text = str((note or {}).get("customer_note") or "").strip()
     if not text:
-        return
+        return False
     epic = (
         db.execute(select(Epic).where(Epic.version_id == version_id, Epic.title == fast_fix.FAST_FIX_EPIC_TITLE))
         .scalars()
         .first()
     )
-    if epic is None or (epic.plain_description or "").strip():
-        return
+    if epic is None:
+        return False
+    current = (epic.plain_description or "").strip()
+    if current and current != (fast_fix.kickoff_directive(db, version_id) or "").strip():
+        return False
     epic.plain_description = text
     db.flush()
+    return True
 
 
 def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
