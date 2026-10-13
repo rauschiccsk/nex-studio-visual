@@ -397,6 +397,125 @@ def _runs_once(name: str, svc: dict[str, Any], src_services: dict[str, Any], rol
     return _waited_on_to_finish(name, src_services) or is_test_runner_service(name, svc, roles)
 
 
+# ── Files a project mounts (DEV-101) ────────────────────────────────────────────────────────────────────────────────
+# 13.10.2026, Career Asistent on UAT: its compose mounts ``${TLS_CERT_PATH:-./ops/tls/none}`` and
+# ``${TLS_KEY_PATH:-./ops/tls/none}`` into nginx, and the project ships ``ops/tls/none`` as an empty file that keeps
+# the frontend on plain HTTP behind Traefik. The installation's folder never got that file, so Docker created a
+# directory in its place; and the installation's ``.env`` took ``TLS_CERT_PATH=/run/tls/cert.pem`` from the backend's
+# ``environment`` — a path INSIDE the backend container that compose reads as a path ON THE HOST. The frontend's
+# start script took the two directories for a certificate and a key, turned HTTPS on and nginx died in a loop.
+
+_VAR_REF = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+_VAR_DEFAULT = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?-([^}]*)\}")
+
+
+def _mount_source(entry: Any) -> Optional[str]:
+    """The host side of a ``volumes`` entry — ``None`` for an anonymous volume or an entry that cannot be read."""
+    if isinstance(entry, dict):
+        source = entry.get("source")
+        return str(source) if source and entry.get("type", "bind") == "bind" else None
+    if not isinstance(entry, str):
+        return None
+    depth = 0
+    for i, ch in enumerate(entry):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == ":" and depth == 0:
+            return entry[:i]
+    return None
+
+
+def _mount_sources(services: dict[str, Any]) -> list[str]:
+    return [
+        source
+        for svc in services.values()
+        if isinstance(svc, dict)
+        for entry in (svc.get("volumes") or [])
+        if (source := _mount_source(entry))
+    ]
+
+
+def mount_source_vars(services: dict[str, Any]) -> frozenset[str]:
+    """Variables compose reads as the HOST side of a mount — their value is a path on the server, not in a container."""
+    return frozenset(name for source in _mount_sources(services) for name in _VAR_REF.findall(source))
+
+
+def project_mount_files(services: dict[str, Any], project_path: Path) -> dict[str, Path]:
+    """Files the project ships for a relative mount (``./ops/tls/none``, also as a ``${VAR:-…}`` default) —
+    ``{relative path: the file in the project}``. A relative DIRECTORY is the installation's own data (NEX Inbox's
+    originals) and is left out, as is anything outside the project."""
+    root = Path(project_path).resolve()
+    files: dict[str, Path] = {}
+    for source in _mount_sources(services):
+        candidates = [m.group(1) for m in _VAR_DEFAULT.finditer(source)]
+        if not source.startswith("$"):
+            candidates.append(source)
+        for rel in candidates:
+            if not rel.startswith(("./", "../")):
+                continue
+            target = (root / rel).resolve()
+            if target.is_file() and root in target.parents:
+                files[os.path.normpath(rel)] = target
+    return files
+
+
+def place_project_mount_files(instance_dir: Path, files: dict[str, Path]) -> list[str]:
+    """Put the project's mount files into the installation (local). Returns what to tell the manager.
+
+    A file the installation already has is its own (a real certificate) and stays. An EMPTY directory in its place is
+    Docker's stand-in for a file that was missing at the first start — it is replaced. A directory with content is
+    not touched; the deploy says so."""
+    said: list[str] = []
+    for rel, source in sorted(files.items()):
+        target = Path(instance_dir) / rel
+        if target.is_file():
+            continue
+        if target.is_dir():
+            if any(target.iterdir()):
+                said.append(
+                    f"Na mieste súboru {rel} je v inštalácii priečinok s obsahom — súbor z projektu som tam nedal."
+                )
+                continue
+            target.rmdir()
+            said.append(f"{rel}: prázdny priečinok, ktorý vytvoril Docker, je nahradený súborom z projektu.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+    return said
+
+
+def _undo_inner_mount_paths(
+    env: dict[str, str],
+    services: dict[str, Any],
+    be_service: Optional[str],
+    example: dict[str, str],
+    *,
+    remote: bool,
+) -> list[str]:
+    """Undo what DEV-101's bug wrote into an installation's ``.env``: a mount's host path set to the backend's inner
+    path of the same name. A redeploy changes the version only (ICCINT-133), so this is the one value it corrects —
+    and only when nothing on this machine is at that path; on another machine it is reported, not changed."""
+    be_env = (services.get(be_service) or {}).get("environment") if be_service else None
+    if not isinstance(be_env, dict):
+        return []
+    said: list[str] = []
+    for name in sorted(mount_source_vars(services)):
+        inner = str(be_env.get(name) or "")
+        if not inner or env.get(name) != inner:
+            continue
+        if remote:
+            said.append(
+                f"{name} v .env inštalácie ukazuje na cestu vo vnútri backendu ({inner}) — over ju na cieľovom stroji."
+            )
+            continue
+        if Path(inner).is_file():
+            continue
+        env[name] = example.get(name, "")
+        said.append(f"{name} v .env ukazoval na cestu vo vnútri backendu ({inner}) — vrátené na hodnotu z projektu.")
+    return said
+
+
 def _container_port(port_entry: Any) -> Optional[int]:
     """Container-side port from a compose ``ports`` entry (short ``H:C`` / ``IP:H:C`` /
     ``C/tcp`` or long-form ``{target: C}``); ``None`` on parse failure."""
@@ -874,7 +993,10 @@ def generate_uat_env(
     if be_service and isinstance(services.get(be_service), dict):
         be_env = services[be_service].get("environment") or {}
         if isinstance(be_env, dict):
-            raw_env.update(be_env)
+            # DEV-101: a variable compose reads as a mount's host path keeps the example's value — the backend's
+            # value of the same name is a path inside its container (Career Asistent: TLS_CERT_PATH=/run/tls/cert.pem).
+            host_paths = mount_source_vars(services)
+            raw_env.update({k: v for k, v in be_env.items() if str(k) not in host_paths})
 
     # ICCINT-104: appka má o sebe hovoriť tú verziu, ktorá sa nasadila.
     #
@@ -2782,6 +2904,9 @@ def provision_uat(
             )
         compose_text = render_uat_compose(povysene)
         env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
+        warnings.extend(
+            _undo_inner_mount_paths(env_riadky, src_services, roles["backend"], env_example, remote=bool(deploy_host))
+        )
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
     else:
         compose_text = render_uat_compose(compose)
@@ -2790,6 +2915,10 @@ def provision_uat(
 
     env_path.write_text(env_content, encoding="utf-8")
     env_path.chmod(0o600)
+
+    mount_files = project_mount_files(src_services, project_path)
+    if not deploy_host:
+        warnings.extend(place_project_mount_files(uat_dir, mount_files))
 
     if deploy_host:
         # ICCINT-151 — čo tam bolo pred zápisom. Keď nasadenie zlyhá, vráti to volajúci: inak zostane
@@ -2803,11 +2932,20 @@ def provision_uat(
         # tu, poistka proti rozchodu by nasadenie odmietala navždy (a radila „najprv prevezmi", hoci
         # prevzatie práve prebehlo), a súbor na cieli by starol pod rukami toho, kto tam raz bude
         # niečo opravovať ručne.
-        chyba = remote_instance.write_files(
-            uat_dir,
-            {"docker-compose.yml": (compose_text, 0o664), ".env": (env_content, 0o600)},
-            deploy_host=deploy_host,
-        )
+        na_cielo: dict[str, tuple[str, int]] = {
+            "docker-compose.yml": (compose_text, 0o664),
+            ".env": (env_content, 0o600),
+        }
+        # DEV-101 — the project's mount files go along, unless the target already has them (its own certificate).
+        for rel, zdroj in sorted(mount_files.items()):
+            uz_je, chyba = remote_instance.read_text(uat_dir, rel, deploy_host=deploy_host)
+            if chyba or uz_je is not None:
+                continue
+            try:
+                na_cielo[rel] = (zdroj.read_text(encoding="utf-8"), 0o644)
+            except UnicodeDecodeError:
+                warnings.append(f"{rel} z projektu nie je text — na cieľový stroj ho treba dať ručne.")
+        chyba = remote_instance.write_files(uat_dir, na_cielo, deploy_host=deploy_host)
         if chyba:
             raise ValueError(chyba)
 
