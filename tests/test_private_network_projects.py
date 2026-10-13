@@ -122,8 +122,9 @@ def _runner(monkeypatch, *, private: bool, problems=None, uat_slug="icc-uat", de
         return True, "OK"
 
     async def _fake_run_prod(
-        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None
+        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
     ):
+        captured["prod_private"] = private
         return True, "OK"
 
     def _fake_check(compose_path, host):
@@ -181,6 +182,8 @@ def test_a_prod_on_another_machine_is_routed_by_that_machine(monkeypatch):
     _, captured = _runner(monkeypatch, private=True, uat_slug="icc-prod", deploy_host="mager")
 
     assert captured["check"] == []
+    # DEV-102: that machine's own check after the deploy asks the private address too.
+    assert captured["prod_private"] is True
 
 
 # (That the deploy hands the project's option to the runner: tests/test_deploy_service.py, DEV-42 section.)
