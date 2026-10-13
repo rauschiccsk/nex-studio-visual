@@ -15,6 +15,8 @@
 import { useEffect, useRef } from "react";
 
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
+import { useCodePaths } from "@/hooks/useCodePaths";
+import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ActivityLine, PipelineMessage, PipelineParticipant } from "../../services/api/pipeline";
 import PipelineActivityFeed from "../cockpit/PipelineActivityFeed";
 import VizualChecklistBlock from "./VizualChecklistBlock";
@@ -62,6 +64,9 @@ interface Props {
 }
 
 export function ConversationThread({ messages, activity, working, versionId }: Props) {
+  // DEV-88 — a file of the project the agent names is a link into NS Code, at the line it names.
+  const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? undefined);
+  const codePaths = useCodePaths(projectSlug);
   const endRef = useRef<HTMLDivElement>(null);
 
   // Self-sufficiency kernel: hide internal build-loop chatter the Manažér never needs. The per-attempt
@@ -188,6 +193,8 @@ export function ConversationThread({ messages, activity, working, versionId }: P
                   )}
                   {checklistFirst && checklistBlock}
                   <SpecMarkdown
+                    codePaths={codePaths}
+                    projectSlug={projectSlug}
                     body={body}
                     className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                   />
@@ -198,6 +205,8 @@ export function ConversationThread({ messages, activity, working, versionId }: P
                         Otázka — na rade si ty
                       </div>
                       <SpecMarkdown
+                        codePaths={codePaths}
+                        projectSlug={projectSlug}
                         body={question}
                         className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                       />
@@ -209,6 +218,8 @@ export function ConversationThread({ messages, activity, working, versionId }: P
                         Nahlásené technickému tímu
                       </div>
                       <SpecMarkdown
+                        codePaths={codePaths}
+                        projectSlug={projectSlug}
                         body={dedoMessage}
                         className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                       />
@@ -226,6 +237,8 @@ export function ConversationThread({ messages, activity, working, versionId }: P
                       </p>
                       {proposalEdited && proposalOriginal && (
                         <SpecMarkdown
+                          codePaths={codePaths}
+                          projectSlug={projectSlug}
                           body={proposalOriginal}
                           className="prose prose-sm dark:prose-invert mt-1 max-w-none text-xs text-[var(--color-text-secondary)]"
                         />

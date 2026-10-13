@@ -1,9 +1,12 @@
+import type { ReactNode } from "react";
 import { Copy, Check } from "lucide-react";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface CodeBlockProps {
-  children: string;
+  children: ReactNode;
   language?: string;
+  /** DEV-88 — the plain text to copy when `children` carries links; without it `children` is the text. */
+  copyText?: string;
 }
 
 /**
@@ -11,9 +14,9 @@ interface CodeBlockProps {
  * Ported 1:1 from NEX Command `frontend/src/components/chat/CodeBlock.tsx`
  * per Director mandate 2026-05-07 (M1.D milestone).
  */
-export function CodeBlock({ children, language }: CodeBlockProps) {
+export function CodeBlock({ children, language, copyText }: CodeBlockProps) {
   const [copy, isCopied] = useCopyToClipboard();
-  const code = String(children).replace(/\n$/, "");
+  const code = (copyText ?? String(children)).replace(/\n$/, "");
 
   return (
     <div className="relative my-3">
@@ -37,7 +40,9 @@ export function CodeBlock({ children, language }: CodeBlockProps) {
         </button>
       </div>
       <pre className="bg-[var(--color-canvas)] p-3 rounded-b border border-[var(--color-border-default)] border-t-0 overflow-x-auto m-0">
-        <code className={`text-sm ${language ? `language-${language}` : ""}`}>{code}</code>
+        <code className={`text-sm ${language ? `language-${language}` : ""}`}>
+          {copyText === undefined ? code : children}
+        </code>
       </pre>
     </div>
   );

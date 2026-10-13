@@ -12,6 +12,7 @@ import { Archive, ChevronDown, ChevronRight, Loader2, Send, Square } from "lucid
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { useCodePaths } from "@/hooks/useCodePaths";
 import { saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
@@ -30,6 +31,8 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? null);
+  // DEV-88 — a file of the project the answer names is a link into NS Code, at the line it names.
+  const codePaths = useCodePaths(projectSlug);
   // DEV-29: the REQ-N the request was saved as — from the answer itself, or from the click just now.
   const [savedNumber, setSavedNumber] = useState<number | null>(message.captured_backlog_number ?? null);
   const [showSteps, setShowSteps] = useState(false);
@@ -115,6 +118,8 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       {!running && <ChoiceSummary choices={choices} />}
       {!running && message.content && (
         <SpecMarkdown
+          codePaths={codePaths}
+          projectSlug={projectSlug ?? undefined}
           body={answerForDisplay(message.content)}
           className="prose-sm text-sm text-[var(--color-text-primary)]"
           components={{

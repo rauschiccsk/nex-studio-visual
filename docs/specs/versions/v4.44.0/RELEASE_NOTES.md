@@ -70,3 +70,9 @@ naposledy zmenil a ktorý commit to bol. Ak commit nesie číslo úlohy, tlačid
 Tlačidlo „S posledným commitom“ ukáže súbor vedľa seba s tým, čo je v gite. Tlačidlo „So začiatkom verzie“ ho porovná
 so stavom, z ktorého vybraná verzia vychádza, rovnako ako ho ráta súpis dodávky. Nový súbor povie, že predtým
 neexistoval.
+
+**Súbor menovaný v odpovedi Poradcu alebo v správe agenta je odkaz do NS Code.** Keď Poradca alebo agent v Riadiacom
+centre napíše cestu k súboru projektu, napríklad backend/main.py alebo backend/main.py:129, je to odkaz. Klik otvorí
+NS Code na tom súbore a riadku. Platí to v texte aj v blokoch kódu. Tlačidlo Kopírovať pri bloku kódu skopíruje
+pôvodný text bez odkazov. Odkazom sa stane len súbor, ktorý v projekte naozaj je a NS Code ho ukazuje. Súbor
+s tajomstvom, ignorovaný súbor ani neexistujúca cesta odkazom nebude.
