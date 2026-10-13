@@ -67,6 +67,8 @@ def test_a_new_version_from_dedos_brief_needs_no_work_kind(client, db_session, d
 
 def test_dedos_proposal_on_a_version_starts_a_fast_fix_only_with_the_work_kind(client, db_session, no_dispatch):  # noqa: F811
     user, version, _state = _build(db_session, version_number="0.1.0")
+    version.status = "released"  # DEV-110: the fast fix numbers itself from a finished version
+    db_session.flush()
     proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
 
     refused = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.", work_kind=None)

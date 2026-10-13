@@ -40,7 +40,8 @@ def _make_project(db_session, *, version_numbers=()):
     db_session.add(project)
     db_session.flush()
     for vn in version_numbers:
-        db_session.add(Version(project_id=project.id, version_number=vn))
+        # DEV-110: the base of a fast fix is a finished version — these stand for versions the customer has.
+        db_session.add(Version(project_id=project.id, version_number=vn, status="released"))
     db_session.flush()
     return project, user
 
@@ -72,23 +73,23 @@ def test_bump_patch_rejects_non_semver(bad):
 # ── latest semver base ─────────────────────────────────────────────────────────
 
 
-def test_latest_semver_version_picks_semver_max_not_lexicographic(db_session):
+def test_latest_finished_version_picks_semver_max_not_lexicographic(db_session):
     # 0.10.0 > 0.9.0 by semver but '0.10.0' < '0.9.0' lexicographically — the bump must use semver order.
     project, _ = _make_project(db_session, version_numbers=["0.2.0", "0.9.0", "0.10.0"])
-    latest = fast_fix.latest_semver_version(db_session, project.id)
+    latest = fast_fix.latest_finished_version(db_session, project.id)
     assert latest.version_number == "0.10.0"
 
 
-def test_latest_semver_version_skips_non_semver(db_session):
+def test_latest_finished_version_skips_non_semver(db_session):
     project, _ = _make_project(db_session, version_numbers=["0.1.0", "1.deadbeef.0"])
-    latest = fast_fix.latest_semver_version(db_session, project.id)
+    latest = fast_fix.latest_finished_version(db_session, project.id)
     assert latest.version_number == "0.1.0"
 
 
-def test_latest_semver_version_no_base_raises(db_session):
+def test_latest_finished_version_no_base_raises(db_session):
     project, _ = _make_project(db_session, version_numbers=["1.deadbeef.0"])
     with pytest.raises(ValueError):
-        fast_fix.latest_semver_version(db_session, project.id)
+        fast_fix.latest_finished_version(db_session, project.id)
 
 
 # ── create patch version ───────────────────────────────────────────────────────

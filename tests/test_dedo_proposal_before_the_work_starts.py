@@ -90,7 +90,8 @@ def _make_project(db_session, user: User, *, so_semverom: bool = True) -> Projec
     db_session.add(project)
     db_session.flush()
     if so_semverom:
-        db_session.add(Version(project_id=project.id, version_number="1.5.5", name="v1.5.5"))
+        # DEV-110: a fast fix numbers itself from a finished version — the base the project's customer has.
+        db_session.add(Version(project_id=project.id, version_number="1.5.5", name="v1.5.5", status="released"))
         db_session.flush()
     return project
 

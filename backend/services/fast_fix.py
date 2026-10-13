@@ -72,30 +72,38 @@ def bump_patch(version_number: str) -> str:
     return f"{prefix}{major}.{minor}.{patch + 1}"
 
 
-def latest_semver_version(db: Session, project_id: UUID) -> Version:
-    """Return the project's highest version by SEMVER ordering (NOT lexicographic).
+def latest_finished_version(db: Session, project_id: UUID) -> Version:
+    """Return the project's highest FINISHED version by SEMVER ordering (NOT lexicographic).
 
-    ``version_service.list_versions`` orders by ``version_number`` lexicographically, which is wrong
-    for semver (``0.10.0`` < ``0.9.0`` as strings). The PATCH bump must anchor on the true semver max,
-    so this picks the version with the greatest ``(major, minor, patch)`` among parseable ones.
+    DEV-110: a fast fix fixes what the customer has, so it numbers itself from the last version whose build ended or
+    that was released (:func:`version_service.build_finished`) — never from one still being built. With NEX Manager
+    1.3.0 in the preview stage and 1.2.2 on PROD the old rule (highest of any state) gave 1.3.1 instead of 1.2.3.
+
+    ``version_service.list_versions`` orders by ``version_number`` lexicographically, which is wrong for semver
+    (``0.10.0`` < ``0.9.0`` as strings), so this picks the greatest ``(major, minor, patch)`` among parseable ones.
 
     Raises:
-        ValueError: If the project has no semver-parseable version to patch from.
+        ValueError: If the project has no finished semver version to patch from (the sentence is for the manager).
     """
-    versions = version_service.list_versions(db, project_id)
     best: Optional[Version] = None
     best_key: Optional[tuple[int, int, int]] = None
-    for v in versions:
+    for v in version_service.list_versions(db, project_id):
         parsed = _parse_semver(v.version_number)
-        if parsed is None:
+        if parsed is None or not version_service.build_finished(db, v):
             continue
         _, major, minor, patch = parsed
         key = (major, minor, patch)
         if best_key is None or key > best_key:
             best, best_key = v, key
     if best is None:
-        raise ValueError(f"Project {project_id} has no semver version to patch from (Fast-Fix needs a base version)")
+        raise ValueError(NO_FINISHED_VERSION)
     return best
+
+
+#: DEV-110 — what the manager reads when there is nothing a fast fix could fix yet.
+NO_FINISHED_VERSION = (
+    "Projekt nemá hotovú verziu, ktorú by rýchla oprava mohla opraviť — rozrobenú verziu oprav v jej stavbe."
+)
 
 
 #: DEV-56 — what a fast fix must be told before it starts (the delivered-token statement bills by it).
@@ -107,7 +115,7 @@ WORK_KINDS = get_args(WorkKind)
 
 
 def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID, work_kind: Optional[str]) -> Version:
-    """Create the next PATCH version for a Fast-Fix (``vX.Y.Z+1`` from the project's semver max).
+    """Create the next PATCH version for a Fast-Fix (``vX.Y.Z+1`` from the last finished version, DEV-110).
 
     The version is created with the default ``planned`` status and a ``name`` marking it as a
     fast-fix patch; the caller then starts a ``fast_fix`` pipeline on it.
@@ -122,8 +130,16 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID, work_k
     """
     if work_kind not in WORK_KINDS:
         raise ValueError(WORK_KIND_REQUIRED)
-    base = latest_semver_version(db, project_id)
+    base = latest_finished_version(db, project_id)
     next_number = bump_patch(base.version_number)
+    # DEV-110: a fast fix of the same finished version that never finished holds the number — say which, create nothing.
+    held = next((v for v in version_service.list_versions(db, project_id) if v.version_number == next_number), None)
+    if held is not None:
+        state = "hotová" if version_service.build_finished(db, held) else "rozrobená"
+        raise ValueError(
+            f"Rýchla oprava verzie {base.version_number} by mala číslo {next_number}, ale to už má verzia "
+            f"{held.version_number} ({state}). Dokonči alebo zruš ju — novú rýchlu opravu som nezaložil."
+        )
     return version_service.create(
         db,
         project_id,

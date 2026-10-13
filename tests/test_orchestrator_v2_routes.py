@@ -71,7 +71,8 @@ def _make_project_with_semver(db_session, user, version_number="0.3.0") -> Proje
     )
     db_session.add(project)
     db_session.flush()
-    db_session.add(Version(project_id=project.id, version_number=version_number))
+    # DEV-110: the base of a fast fix is a finished version — one the customer has.
+    db_session.add(Version(project_id=project.id, version_number=version_number, status="released"))
     db_session.flush()
     return project
 

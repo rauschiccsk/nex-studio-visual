@@ -43,6 +43,7 @@ from backend.db.models.projects import Project
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
 from backend.services import billing_category, delivered_tokens, metrics, pipeline_metrics, system_setting
+from backend.services import version as version_service
 
 WORK_FIX = "fix"
 WORK_CHANGE = "change"
@@ -95,11 +96,6 @@ def version_category(kind: Optional[str]) -> Optional[str]:
     if kind == WORK_CHANGE:
         return billing_category.REQUEST
     return None
-
-
-def _is_done(db: Session, version: Version) -> bool:
-    stage = db.execute(select(PipelineState.current_stage).where(PipelineState.version_id == version.id)).scalar()
-    return stage == "done" or version.status == "released"
 
 
 def _git(repo: Path, *args: str) -> Optional[str]:
@@ -164,7 +160,9 @@ def base_plan(db: Session, version: Version) -> list[BaseStep]:
         (
             v
             for v in db.execute(select(Version).where(Version.project_id == version.project_id)).scalars()
-            if v.id != version.id and _semver_sort_key(v.version_number) < mine and _is_done(db, v)
+            if v.id != version.id
+            and _semver_sort_key(v.version_number) < mine
+            and version_service.build_finished(db, v)
         ),
         key=lambda v: _semver_sort_key(v.version_number),
         reverse=True,
@@ -401,7 +399,7 @@ def preview(db: Session, version: Version, repo: Path) -> Preview:
     out.discounts_own = {c: v is not None for c, v in billing_category.own_discounts(version).items()}
     plan = billing_category.plan_tasks(db, version.id)
     out.tasks = [billing_category.TaskShare(task=t, category=t.category or out.version_category) for t in plan]
-    if not _is_done(db, version):
+    if not version_service.build_finished(db, version):
         out.blocked = NOT_DONE
         return out
     out.delivered_sha, out.delivered_source = delivered_commit(db, version, repo)

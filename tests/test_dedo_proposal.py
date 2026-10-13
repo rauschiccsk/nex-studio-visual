@@ -785,10 +785,11 @@ class TestAProposalCanStartAFastFix:
     nie raz. Návrh sa preto zavesí na najnovšiu verziu a odtiaľ sa spustí nová.
     """
 
+    # DEV-110: a fast fix numbers itself from a finished version, so these builds have ended.
     def test_the_send_creates_a_patch_version_and_starts_the_lane_with_dedos_text(
         self, client, db_session, no_dispatch
     ) -> None:
-        user, version, _state = _build(db_session, version_number="0.1.0")
+        user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
         proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
 
         response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
@@ -815,7 +816,7 @@ class TestAProposalCanStartAFastFix:
         previous version: the bar vanished, nothing appeared to happen, and the agent was already working. He
         reported it as a failure twice in one evening (05.09.2026).
         """
-        user, version, _state = _build(db_session, version_number="0.1.0")
+        user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
         proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
 
         response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
@@ -843,7 +844,7 @@ class TestAProposalCanStartAFastFix:
     def test_the_proposal_is_archived_so_it_cannot_start_a_second_one(self, client, db_session, no_dispatch) -> None:
         """Archivácia je v tej istej transakcii ako štart — nedá sa odoslať dvakrát a nedá sa označiť
         za odoslaný návrh, ktorý sa nerozbehol."""
-        user, version, _state = _build(db_session, version_number="0.1.0")
+        user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
         proposal = _propose(db_session, version.id, content="Oprav bránu.", action="fast_fix")
 
         assert _send(client, user, version.id, proposal, text="Oprav bránu.").status_code == 200

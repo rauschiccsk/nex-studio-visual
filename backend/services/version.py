@@ -630,6 +630,17 @@ def delete(db: Session, version_id: UUID) -> None:
     db.flush()
 
 
+def build_finished(db: Session, version: Version) -> bool:
+    """Is the version finished — its build ended, or it was released (a released one may predate the pipeline)?
+
+    The one rule (DEV-110): the delivered code statement bills only finished versions, and a fast fix numbers itself
+    from the last finished one — a version still being built is neither delivered nor what the customer has."""
+    from backend.db.models.pipeline import PipelineState
+
+    stage = db.execute(select(PipelineState.current_stage).where(PipelineState.version_id == version.id)).scalar()
+    return stage == "done" or version.status == "released"
+
+
 def mark_done(db: Session, version_id: UUID) -> Version:
     """Zaznamenaj, že sa stavba dokončila: ``planned`` / ``active`` → ``done`` (ICCINT-50).
 

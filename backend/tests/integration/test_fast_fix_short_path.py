@@ -66,8 +66,9 @@ def _seed_project(db, *, creator: User) -> Project:
 
 
 def _seed_base_version(db, project: Project, version_number: str = "v1.2.3") -> Version:
-    """A pre-existing version so ``create_patch_version`` has a semver base to bump."""
-    version = Version(project_id=project.id, version_number=version_number, status="active")
+    """A pre-existing FINISHED version so ``create_patch_version`` has a semver base to bump — since DEV-110 a fast
+    fix numbers itself from what the customer has, never from a version still being built."""
+    version = Version(project_id=project.id, version_number=version_number, status="released")
     db.add(version)
     db.flush()
     return version
