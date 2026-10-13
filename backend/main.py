@@ -25,6 +25,7 @@ from backend.api.routes.feats import router as feats_router
 from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
+from backend.api.routes.ns_code import router as ns_code_router
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.api.routes.poradca import router as poradca_router
 from backend.api.routes.project_files import router as project_files_router
@@ -383,6 +384,7 @@ app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settin
 app.include_router(user_layout_router, prefix="/api/v1/user-layout")
 app.include_router(user_notes_router, prefix="/api/v1/notes")
 app.include_router(ci_runs_router, prefix="/api/v1")
+app.include_router(ns_code_router, prefix="/api/v1")
 app.include_router(poradca_router, prefix="/api/v1/poradca")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")
 app.include_router(pipeline_router, prefix="/api/v1/pipeline")

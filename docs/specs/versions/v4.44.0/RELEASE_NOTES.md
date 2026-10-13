@@ -51,3 +51,14 @@ kontrolou, commitom, krokom, ktorý zlyhal, a odkazom priamo na záložku Repozi
 zelená, príde jedna správa „znovu zelené“. Tú istú správu nedostaneš dvakrát, ani po reštarte kokpitu. Staré zlyhania
 spred zapnutia ťa nezasypú, kokpit hlási len to, čo sa stane odteraz. Kým je hlavná vetva vybraného projektu červená,
 záložka Repozitár má v ľavom paneli červenú bodku.
+
+**Nová záložka NS Code — zdrojový kód projektu ako vo VS Code, len na čítanie.** V ľavom paneli pod Repozitárom je
+záložka NS Code. Vľavo je strom priečinkov a súborov vybraného projektu s ikonami podľa typu súboru, vpravo editor
+z VS Code: zvýraznená syntax, čísla riadkov, vodiace čiary odsadenia, zbaľovanie blokov, náhľad celého súboru
+na pravom okraji, hľadanie v súbore (Ctrl+F) a skok na riadok (Ctrl+G). Otvorené súbory sú v záložkách a nad textom
+je cesta k súboru. Súbor podľa mena otvoríš cez „Otvoriť súbor“ alebo Ctrl+P, text v celom projekte nájdeš poľom
+„Hľadať v kóde“ a klik na nájdený riadok otvorí súbor presne na ňom. Adresa nesie súbor aj riadok, takže sa dá
+poslať ako odkaz. NS Code ukazuje len súbory, ktoré sú v gite alebo ktoré by git pridal. Ignorované súbory
+(napríklad node_modules), súbory s tajomstvami (.env, kľúče, certifikáty) ani súkromné súbory priložené agentovi
+neukáže a server ich odmietne vydať aj na priamu žiadosť. Vzor .env.example ukáže, lebo obsahuje len mená nastavení,
+nie hodnoty. Editor sa načíta až pri otvorení prvého súboru, z vlastného servera kokpitu.

@@ -860,6 +860,38 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
   // DEV-84: the repository tab — a red proof with its failed step, a run with its task and where it runs, one running.
   answer("get", "/api/v1/projects/{slug}/ci-runs", CI_RUNS);
+  // DEV-86: NS Code — a few folders and files of NEX Inbox, one file with a long line, a search with hits.
+  answer("get", "/api/v1/projects/{slug}/code/files", {
+    head: "d626301458a1b2c3d4e5f60718293a4b5c6d7e8f",
+    files: [
+      ".env.example",
+      ".gitignore",
+      "README.md",
+      "backend/apps/xml_exporter/ubl_builder.py",
+      "backend/main.py",
+      "docs/specs/backend/BEHAVIOR.md",
+      "frontend/src/pages/InvoiceDetailPage.tsx",
+      "package.json",
+    ],
+  });
+  answer("get", "/api/v1/projects/{slug}/code/file", {
+    path: "backend/main.py",
+    size: 412,
+    text:
+      '"""NEX Inbox — the backend of the invoice inbox."""\n\nfrom fastapi import FastAPI\n\napp = FastAPI(title="NEX Inbox")\n\n\n' +
+      "@app.get(\"/api/v1/health\")\ndef health() -> dict[str, str]:\n    return {\"status\": \"ok\", \"database\": \"ok\", \"genesis_share\": \"reachable over SMB from srv-mager-w2012\"}\n",
+    binary: false,
+    too_big: false,
+    max_bytes: 1000000,
+  });
+  answer("get", "/api/v1/projects/{slug}/code/search", {
+    query: "SellersItemIdentification",
+    hits: [
+      { path: "backend/apps/xml_exporter/ubl_builder.py", line: 214, text: "    seller_id = SubElement(item, cac('SellersItemIdentification'))" },
+      { path: "docs/specs/backend/BEHAVIOR.md", line: 88, text: "Kód položky dodávateľa ide do SellersItemIdentification (BT-155)." },
+    ],
+    truncated: false,
+  });
   // DEV-85: the main branch is red — the repository tab carries the red mark.
   answer("get", "/api/v1/projects/{slug}/ci-main", {
     branch: "main",

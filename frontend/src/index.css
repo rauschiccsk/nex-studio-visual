@@ -61,3 +61,8 @@
   }
 }
 
+
+/* DEV-86 — the line a link in NS Code points at. */
+.ns-code-line {
+  background: rgb(250 204 21 / 0.18);
+}

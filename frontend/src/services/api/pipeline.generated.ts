@@ -2366,6 +2366,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/code/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Code File
+         * @description One file — only one the list shows; anything else (outside the project, ignored, a secret) is 404.
+         */
+        get: operations["get_code_file_api_v1_projects__slug__code_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/code/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Code Files
+         * @description Every file of the project NS Code shows: what git knows or would add, without secrets.
+         */
+        get: operations["get_code_files_api_v1_projects__slug__code_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/code/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Code
+         * @description Lines with the text (any case) in the files NS Code shows.
+         */
+        get: operations["search_code_api_v1_projects__slug__code_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/customer-settings": {
         parameters: {
             query?: never;
@@ -4295,6 +4355,64 @@ export interface components {
             stav: string;
             /** Url */
             url?: string | null;
+        };
+        /** CodeFileRead */
+        CodeFileRead: {
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /** Text */
+            text?: string | null;
+            /**
+             * Too Big
+             * @default false
+             */
+            too_big: boolean;
+        };
+        /**
+         * CodeFilesRead
+         * @description Every path NS Code shows — the tree and the quick open are drawn from it.
+         */
+        CodeFilesRead: {
+            /**
+             * Files
+             * @default []
+             */
+            files: string[];
+            /** Head */
+            head?: string | null;
+        };
+        /** CodeHit */
+        CodeHit: {
+            /** Line */
+            line: number;
+            /** Path */
+            path: string;
+            /** Text */
+            text: string;
+        };
+        /** CodeSearchRead */
+        CodeSearchRead: {
+            /**
+             * Hits
+             * @default []
+             */
+            hits: components["schemas"]["CodeHit"][];
+            /** Query */
+            query: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * ConsultationDirectionRead
@@ -12763,6 +12881,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CiRunsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_code_file_api_v1_projects__slug__code_file_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeFileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_code_files_api_v1_projects__slug__code_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeFilesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_code_api_v1_projects__slug__code_search_get: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSearchRead"];
                 };
             };
             /** @description Validation Error */

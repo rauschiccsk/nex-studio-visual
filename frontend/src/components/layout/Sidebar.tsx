@@ -48,6 +48,8 @@ const IconPoradca = () => <NavIcon glyph="💬" />;
 const IconSpec = () => <NavIcon glyph="📄" />;
 // DEV-84: the CI runs of the selected project's repository.
 const IconRepozitar = () => <NavIcon glyph="🔀" />;
+// DEV-86: the selected project's files as VS Code shows them, read-only.
+const IconNsCode = () => <NavIcon glyph="💻" />;
 
 // CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) during the vizual phase.
 const IconVizual = () => <NavIcon glyph="🖥️" />;
@@ -319,6 +321,14 @@ export default function Sidebar() {
         badge={hasProject && ciRed}
         badgeTone="danger"
         badgeLabel="Kontroly hlavnej vetvy zlyhali"
+      />
+      <NavItem
+        icon={<IconNsCode />}
+        label="NS Code"
+        active={hasProject ? isActive("/ns-code") : false}
+        onClick={() => navigate(hasProject ? "/ns-code" : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k súborom projektu"
       />
       {/* v2 (CR-V2-019): per-customer deploy surfaces (design §3 / §4.1). Nav items are added now;
           their PAGES land in Milestone G (Zákazníci = CR-V2-025, UAT/PROD = CR-V2-027). Until then

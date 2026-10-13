@@ -42,7 +42,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from backend.config.settings import settings
-from backend.services import build_db, build_sandbox, sandbox_paths
+from backend.services import build_db, build_sandbox, sandbox_paths, secret_files
 from backend.services.project_files import PRIVATE_DIR
 
 logger = logging.getLogger(__name__)
@@ -71,15 +71,9 @@ _USER = "1000:1000"
 #: no database — Poradca writes nothing and the backend serves it "from behind".
 _PASSTHROUGH_ENV: tuple[str, ...] = ("CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER", "LANG")
 
-#: Names of files that carry secrets. They are overlaid with an empty file wherever in the project they lie.
-_SECRET_FILE_RE = re.compile(
-    r"^(?:\.env(?:\..+)?"
-    r"|.+\.(?:pem|key|p12|pfx|jks|keystore|kdbx)"
-    r"|id_(?:rsa|dsa|ecdsa|ed25519)(?:[^.]*|.*(?<!\.pub))"
-    r"|\.netrc|\.pgpass|\.git-credentials|credentials\.json)$",
-    # ``.`` also across a newline: a file ``.env.<newline>…`` must not escape the overlay just because of its name.
-    re.S,
-)
+#: Names of files that carry secrets — the one rule of :mod:`backend.services.secret_files`; overlaid with an empty
+#: file wherever in the project they lie (templates of an ``.env`` too — Poradca's stricter choice).
+_SECRET_FILE_RE = secret_files.SECRET_FILE_RE
 
 #: Characters that start a new field or record in a docker ``--mount`` spec (comma, quotes) — and control
 #: characters. A file with such a name would smuggle its own ``source=`` into the overlay mount and docker would mount

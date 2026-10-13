@@ -67,6 +67,13 @@ function measure(touchPx: number): Problem[] {
       el.querySelector(":scope > table, :scope > * > table") !== null ||
       el.classList.contains("xterm-viewport"));
   const clips = (el: Element): boolean => getComputedStyle(el).overflowX !== "visible";
+  // DEV-86: the editor of VS Code (NS Code) lays out its own inside — a canvas of lines millions of pixels wide that it
+  // scrolls with its own scrollbars, and beside it a text for screen readers placed off the screen
+  // (`.monaco-aria-container`). Its box is measured like any other; what lies inside it is the widget's own business,
+  // as the terminal's viewport above. Its controls are still checked by rule 4.
+  const insideOwnWidget = (node: Node): boolean =>
+    (node instanceof Element && node.matches(".monaco-aria-container")) ||
+    node.parentElement?.closest(".monaco-editor, .monaco-aria-container") != null;
 
   if (doc.scrollWidth > vw) {
     problems.push({ rule: "page-scrolls-sideways", what: "page", detail: `${doc.scrollWidth - vw} px wider than the screen` });
@@ -105,7 +112,7 @@ function measure(touchPx: number): Problem[] {
     });
   };
   for (const el of Array.from(document.body.querySelectorAll("*"))) {
-    if (!shown(el)) continue;
+    if (!shown(el) || insideOwnWidget(el)) continue;
     const room =
       getComputedStyle(el).position === "fixed" ? { left: 0, right: vw, clippedBy: null } : roomIn(el.parentElement);
     if (!room) continue;
@@ -120,7 +127,7 @@ function measure(touchPx: number): Problem[] {
   const texts = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let node = texts.nextNode(); node; node = texts.nextNode()) {
     const parent = node.parentElement;
-    if (!parent || !node.textContent?.trim() || !shown(parent)) continue;
+    if (!parent || !node.textContent?.trim() || !shown(parent) || insideOwnWidget(node)) continue;
     if (Array.from(offenders).some((o) => o.contains(parent))) continue;
     const room = roomIn(parent);
     if (!room || (room.clippedBy && getComputedStyle(room.clippedBy).textOverflow === "ellipsis")) continue;
@@ -140,7 +147,7 @@ function measure(touchPx: number): Problem[] {
   for (let node = squeezed.nextNode(); node; node = squeezed.nextNode()) {
     const parent = node.parentElement;
     const words = (node.textContent ?? "").trim().split(/\s+/).filter(Boolean).length;
-    if (!parent || words < 4 || !shown(parent)) continue;
+    if (!parent || words < 4 || !shown(parent) || insideOwnWidget(node)) continue;
     const range = document.createRange();
     range.selectNodeContents(node);
     const lines = new Set(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;

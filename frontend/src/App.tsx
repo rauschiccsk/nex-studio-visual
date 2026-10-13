@@ -28,6 +28,7 @@ import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
 import PoradcaPage from "./pages/PoradcaPage";
 import SpecifikaciaPage from "./pages/SpecifikaciaPage";
 import RepozitarPage from "./pages/RepozitarPage";
+import NsCodePage from "./pages/NsCodePage";
 import VizualPage from "./pages/VizualPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
@@ -100,6 +101,7 @@ function App() {
             <Route path="vizual" element={<VizualPage />} />
             <Route path="specifikacia" element={<SpecifikaciaPage />} />
             <Route path="repozitar" element={<RepozitarPage />} />
+            <Route path="ns-code" element={<NsCodePage />} />
             <Route path="ai-agent" element={<Navigate to="/riadiace-centrum" replace />} />
             <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />
             <Route path="vyvoj" element={<Navigate to="/riadiace-centrum" replace />} />

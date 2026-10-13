@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     ci_watch_interval_seconds: int = 60
     ci_watch_enabled: bool = True
     ci_watch_retry_hours: int = 6
+    # DEV-86: NS Code — the largest file it shows (a bigger one says so instead of loading the browser), how many lines
+    # a text search lists, and how much of each line.
+    ns_code_max_file_bytes: int = 1_000_000
+    ns_code_search_limit: int = 200
+    ns_code_search_line_chars: int = 300
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

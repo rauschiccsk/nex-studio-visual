@@ -48,6 +48,7 @@ SHELLING_MODULES = {
     "instance_adoption",
     "nexshared",
     "notify",
+    "ns_code",
     "orchestrator",
     "port_registry",
     "project_adoption",
