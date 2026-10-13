@@ -76,3 +76,9 @@ centre napíše cestu k súboru projektu, napríklad backend/main.py alebo backe
 NS Code na tom súbore a riadku. Platí to v texte aj v blokoch kódu. Tlačidlo Kopírovať pri bloku kódu skopíruje
 pôvodný text bez odkazov. Odkazom sa stane len súbor, ktorý v projekte naozaj je a NS Code ho ukazuje. Súbor
 s tajomstvom, ignorovaný súbor ani neexistujúca cesta odkazom nebude.
+
+**Kontrola na GitHube, ktorú kokpit dáva novým projektom, už nemôže zmazať databázu inej inštalácie.** Kontroly (CI)
+nových projektov bežia na serveri, kde bežia aj inštalácie zákazníkov. Doteraz bežali pod menom projektu. Keby na
+serveri bežalo niečo pod rovnakým menom, upratovanie po skúškach by zmazalo jeho databázu. Teraz má každý beh
+kontroly vlastné meno, takže sa ani dva behy naraz navzájom nedotknú. Na konci beh po sebe upratá všetko, čo vytvoril,
+aj keď niektorá kontrola zlyhala.

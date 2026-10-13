@@ -19,6 +19,13 @@ on:
     branches: [main]
   workflow_dispatch:    # CR-030: manual dispatch pre stuck-run recovery
 
+# DEV-71: the runners stand on the server that also runs the customers' installations, on the same Docker. Every
+# `docker compose` call of this run therefore works under the run's OWN project name — never the repository's (a live
+# installation could carry it, and `down -v` would delete its database), never another run's (two runs at once would
+# drop each other's database). The `cleanup` job removes whatever the run left, even when a job failed.
+env:
+  COMPOSE_PROJECT_NAME: ci-{{PROJECT_SLUG}}-${{ github.run_id }}-${{ github.run_attempt }}
+
 jobs:
   lint:
     runs-on: andros-ubuntu-{{PROJECT_SLUG}}
@@ -192,3 +199,25 @@ jobs:
       - name: Tear down
         if: ${{ always() && hashFiles('docker-compose.yml') != '' }}
         run: docker compose down -v
+
+  # cleanup — whatever this run created on the server goes, whichever job failed: containers, volumes and networks
+  # by the run's compose project label, the images it built by their names (the run's project name is their prefix).
+  # Images are removed by NAME, never by id: an image id can be shared with another tag (a base image) that must stay.
+  cleanup:
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
+    needs: [lint, test, build, migrate]
+    if: ${{ always() }}
+    steps:
+      - name: Remove what this run left on the server
+        run: |
+          set -u
+          p="$COMPOSE_PROJECT_NAME"
+          docker ps -aq --filter "label=com.docker.compose.project=$p" | xargs -r docker rm -f
+          docker volume ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker volume rm
+          docker network ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker network rm
+          docker image ls --filter "reference=$p-*" --format '{{.Repository}}:{{.Tag}}' | xargs -r docker rmi
+          left="$(docker ps -aq --filter "label=com.docker.compose.project=$p")$(docker volume ls -q --filter "label=com.docker.compose.project=$p")$(docker image ls -q --filter "reference=$p-*")"
+          if [ -n "$left" ]; then
+            echo "::error::the run $p left something on the server: $left"
+            exit 1
+          fi
