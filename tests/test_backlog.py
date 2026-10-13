@@ -147,19 +147,36 @@ def test_assign_cross_project_rejected(db_session):
     assert client.patch(f"/api/v1/backlog/{item_id}", json={"version_id": str(v2.id)}).status_code == 422
 
 
-def test_delete_only_when_open(db_session):
+def test_delete_open_or_rejected_never_history(db_session):
+    """DEV-98: a rejected request is deletable too — it was never in a version. 13.10.2026 the Director's test request
+    ended up rejected instead of deleted and the bin was gone; an included or realized one stays (history)."""
     user = _make_user(db_session, "ha")
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
     client = _client(db_session, user)
 
-    open_id = client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "del-me"}).json()["id"]
+    def new(title: str) -> str:
+        return client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": title}).json()["id"]
+
+    open_id = new("del-me")
     assert client.delete(f"/api/v1/backlog/{open_id}").status_code == 204
 
-    included_id = client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "keep"}).json()["id"]
+    rejected_id = new("rejected")
+    client.patch(f"/api/v1/backlog/{rejected_id}", json={"status": "rejected"})
+    assert client.delete(f"/api/v1/backlog/{rejected_id}").status_code == 204
+
+    included_id = new("keep")
     client.patch(f"/api/v1/backlog/{included_id}", json={"version_id": str(version.id)})
-    # included item is not deletable (history protection)
     assert client.delete(f"/api/v1/backlog/{included_id}").status_code == 422
+
+    realized_id = new("shipped")
+    client.patch(f"/api/v1/backlog/{realized_id}", json={"version_id": str(version.id)})
+    backlog_service.realize_for_version(db_session, version.id)
+    db_session.flush()
+    assert client.delete(f"/api/v1/backlog/{realized_id}").status_code == 422
+
+    left = {i["title"] for i in client.get(f"/api/v1/backlog?project_id={project.id}").json()["items"]}
+    assert left == {"keep", "shipped"}
 
 
 def test_invalid_priority_rejected(db_session):

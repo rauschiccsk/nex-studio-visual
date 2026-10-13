@@ -154,7 +154,7 @@ def delete_backlog_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
+    """Delete a backlog item — when ``open`` or ``rejected`` (never realized/included History, DEV-98). v4.0.43:
     owner-or-admin/ha of the item's project."""
     try:
         authz.assert_project_id_access(db, current_user, backlog_service.get_by_id(db, item_id).project_id)

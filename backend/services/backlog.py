@@ -146,10 +146,19 @@ def realize_for_version(db: Session, version_id: UUID) -> int:
     return int(result.rowcount or 0)
 
 
+#: What may be deleted: a request never put into a version. Included and realized ones are the History of a version.
+DELETABLE_STATUSES = ("open", "rejected")
+
+
 def delete(db: Session, item_id: UUID) -> None:
-    """Delete a backlog item — ONLY when ``status='open'`` (never delete realized/included History)."""
+    """Delete a backlog item — when it is ``open`` or ``rejected``, never one included in a version or realized.
+
+    DEV-98: a rejected request was not deletable, so a request rejected by mistake (13.10.2026, the Director's test
+    request — the red reject button stands beside the bin) had to be restored before it could go."""
     item = get_by_id(db, item_id)
-    if item.status != "open":
-        raise ValueError(f"Cannot delete backlog item {item_id}: status is '{item.status}' (only 'open' is deletable)")
+    if item.status not in DELETABLE_STATUSES:
+        raise ValueError(
+            f"Cannot delete backlog item {item_id}: status is '{item.status}' (only open or rejected is deletable)"
+        )
     db.delete(item)
     db.flush()

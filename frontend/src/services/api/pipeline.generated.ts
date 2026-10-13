@@ -284,7 +284,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Backlog Item
-         * @description Delete a backlog item — only when ``open`` (never delete realized/included History). v4.0.43:
+         * @description Delete a backlog item — when ``open`` or ``rejected`` (never realized/included History, DEV-98). v4.0.43:
          *     owner-or-admin/ha of the item's project.
          */
         delete: operations["delete_backlog_item_api_v1_backlog__item_id__delete"];

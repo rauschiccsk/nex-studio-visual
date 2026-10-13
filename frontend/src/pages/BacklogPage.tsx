@@ -265,8 +265,11 @@ export default function BacklogPage() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(it: BacklogItemRead) {
     if (!project) return;
+    // DEV-98: deleting is for good — asked like on the notes page, so it is never mistaken for the reject button beside it.
+    if (!window.confirm(`Natrvalo zmazať požiadavku REQ-${it.number} „${it.title}“? Vrátiť sa to nedá.`)) return;
+    const id = it.id;
     setBusyId(id);
     try {
       await deleteBacklogApi(id);
@@ -500,9 +503,9 @@ export default function BacklogPage() {
                             Zamietnuť
                           </button>
                         )}
-                        {it.status === "open" && (
+                        {(it.status === "open" || it.status === "rejected") && (
                           <button
-                            onClick={() => handleDelete(it.id)}
+                            onClick={() => handleDelete(it)}
                             disabled={busyId === it.id}
                             title="Zmazať"
                             className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-status-error)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 rounded"
