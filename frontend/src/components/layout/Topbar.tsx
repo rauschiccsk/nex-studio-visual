@@ -2,13 +2,17 @@ import { useLocation } from "react-router-dom";
 import { Header, ThemeToggle } from "nex-shared";
 import { useTheme } from "@/contexts/ThemeContext";
 
-// Audit Theme 6: the breadcrumb names EVERY page (was only 4 → most read the generic "NEX Studio").
+// Audit Theme 6: the breadcrumb names EVERY page (was only 4 → most read the generic "NEX Studio"). DEV-93: the
+// router's own pages are checked against this list (test_Topbar_names_every_page), so a new page cannot fall out.
 const breadcrumbMap: Record<string, string> = {
   "/": "Prehľad",
+  "/getting-started": "Ako začať",
   "/projects": "Projekty",
   "/projects/new": "Nový projekt",
   "/notes": "Poznámky",
   "/riadiace-centrum": "Riadiace centrum",
+  "/poradca": "Poradca",
+  "/vizual": "Vizuál",
   "/specifikacia": "Dokumenty",
   "/repozitar": "Repozitár",
   "/ns-code": "NS Code",
