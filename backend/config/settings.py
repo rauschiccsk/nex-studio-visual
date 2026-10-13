@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     ns_code_max_file_bytes: int = 1_000_000
     ns_code_search_limit: int = 200
     ns_code_search_line_chars: int = 300
+    # DEV-87: how often NS Code asks whether the agent changed something — the list is cheap, a file is fetched again
+    # only when its stamp moved.
+    ns_code_refresh_seconds: int = 10
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

@@ -106,3 +106,8 @@ export function languageOf(
     .sort((a, b) => b[0].length - a[0].length)[0];
   return byExtension?.[1] ?? "plaintext";
 }
+
+/** DEV-87 — every folder holding a changed or new file, so the tree marks the way to it as VS Code does. */
+export function foldersWithChanges(changes: Record<string, string>): Set<string> {
+  return new Set(Object.keys(changes).flatMap(foldersOf));
+}

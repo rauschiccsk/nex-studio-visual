@@ -73,13 +73,75 @@ def _plain_file(project_root: Path, rel: str) -> Optional[os.stat_result]:
     return st if stat.S_ISREG(st.st_mode) and st.st_nlink == 1 else None
 
 
-def files(project_root: Path) -> list[str]:
-    """Every path NS Code shows, sorted — the tree, the quick open and the guard of :func:`read` all use this list."""
+def _shown(project_root: Path) -> dict[str, os.stat_result]:
+    """``{path: lstat}`` of every file NS Code shows."""
     r = _git(project_root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
     if r.returncode != 0:
         raise NoCheckout(NO_CHECKOUT)
-    found = {p for p in r.stdout.decode("utf-8", "replace").split("\0") if p}
-    return sorted(p for p in found if not withheld(p) and _plain_file(project_root, p) is not None)
+    found: dict[str, os.stat_result] = {}
+    for p in {p for p in r.stdout.decode("utf-8", "replace").split("\0") if p}:
+        if not withheld(p) and (st := _plain_file(project_root, p)) is not None:
+            found[p] = st
+    return found
+
+
+def files(project_root: Path) -> list[str]:
+    """Every path NS Code shows, sorted — the tree, the quick open and the guard of :func:`read` all use this list."""
+    return sorted(_shown(project_root))
+
+
+def stamp(st: os.stat_result) -> str:
+    """What changes when a file changes — its size and the time of its last write, to the nanosecond."""
+    return f"{st.st_size}-{st.st_mtime_ns}"
+
+
+# DEV-87 — VS Code's marks: M = changed against the last commit, U = new (git would add it).
+CHANGED = "M"
+NEW = "U"
+
+
+def changes(project_root: Path) -> dict[str, str]:
+    """``{path: M|U}`` of the working tree against the last commit, as ``git status`` sees it."""
+    r = _git(project_root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if r.returncode != 0:
+        raise NoCheckout(NO_CHECKOUT)
+    entries = r.stdout.decode("utf-8", "replace").split("\0")
+    marks: dict[str, str] = {}
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        xy, path = entry[:2], entry[3:]
+        if xy[0] in "RC":
+            i += 1  # ``-z``: a rename or a copy carries its source path as the next entry
+        if xy == "??" or "A" in xy or xy[0] in "RC":
+            marks[path] = NEW
+        elif "D" not in xy:
+            marks[path] = CHANGED
+    return marks
+
+
+@dataclass(frozen=True)
+class Listing:
+    head: Optional[str]
+    files: list[str]
+    #: ``{path: M|U}`` — only the files the list shows.
+    changes: dict[str, str]
+    #: ``{path: stamp}`` — the screen refetches an open file whose stamp moved.
+    stamps: dict[str, str]
+
+
+def listing(project_root: Path) -> Listing:
+    """The list with what changed — one read for the tree, its marks and the refresh during a build."""
+    shown = _shown(project_root)
+    return Listing(
+        head=head(project_root),
+        files=sorted(shown),
+        changes={p: m for p, m in changes(project_root).items() if p in shown},
+        stamps={p: stamp(st) for p, st in shown.items()},
+    )
 
 
 def head(project_root: Path) -> Optional[str]:
@@ -95,6 +157,15 @@ class FileView:
     text: Optional[str]
     binary: bool = False
     too_big: bool = False
+    stamp: str = ""
+
+
+def _view(rel: str, content: bytes, size: int, file_stamp: str = "") -> FileView:
+    if size > settings.ns_code_max_file_bytes:
+        return FileView(rel, size, None, too_big=True, stamp=file_stamp)
+    if b"\0" in content[:_SNIFF_BYTES]:
+        return FileView(rel, size, None, binary=True, stamp=file_stamp)
+    return FileView(rel, size, content.decode("utf-8", "replace"), stamp=file_stamp)
 
 
 def read(project_root: Path, rel: str) -> FileView:
@@ -107,12 +178,36 @@ def read(project_root: Path, rel: str) -> FileView:
     if st is None or not path.resolve().is_relative_to(project_root.resolve()):
         raise NotServed(NOT_SERVED)
     if st.st_size > settings.ns_code_max_file_bytes:
-        return FileView(rel, st.st_size, None, too_big=True)
+        return FileView(rel, st.st_size, None, too_big=True, stamp=stamp(st))
     with open(path, "rb") as fh:
         content = fh.read(settings.ns_code_max_file_bytes + 1)
-    if b"\0" in content[:_SNIFF_BYTES]:
-        return FileView(rel, st.st_size, None, binary=True)
-    return FileView(rel, st.st_size, content.decode("utf-8", "replace"))
+    return _view(rel, content, st.st_size, stamp(st))
+
+
+def original(project_root: Path, rel: str, rev: str) -> Optional[FileView]:
+    """DEV-87 — the file as it was at commit ``rev``, to compare with; ``None`` when it did not exist then.
+
+    Only for a file :func:`files` shows — the same guard as :func:`read`, so a secret has no past either."""
+    if rel not in set(files(project_root)):
+        raise NotServed(NOT_SERVED)
+    r = _git(project_root, "show", f"{rev}:{rel}")
+    if r.returncode != 0:
+        return None
+    return _view(rel, r.stdout, len(r.stdout))
+
+
+@dataclass(frozen=True)
+class LastCommit:
+    sha: str
+    at: str
+    subject: str
+
+
+def last_commit(project_root: Path, rel: str) -> Optional[LastCommit]:
+    """DEV-87 — the newest commit that changed the file; ``None`` for a file git does not know yet."""
+    r = _git(project_root, "log", "-1", "--format=%H%x00%cI%x00%s", "--", rel)
+    parts = r.stdout.decode("utf-8", "replace").strip().split("\0") if r.returncode == 0 else []
+    return LastCommit(*parts) if len(parts) == 3 else None
 
 
 @dataclass(frozen=True)

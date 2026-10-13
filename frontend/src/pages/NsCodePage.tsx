@@ -13,6 +13,8 @@ import {
   Files,
   Folder,
   FolderOpen,
+  GitCommitHorizontal,
+  GitCompare,
   Loader2,
   Search,
   X,
@@ -20,17 +22,28 @@ import {
 import { useWideScreen } from "nex-shared";
 
 import { useTheme } from "@/contexts/ThemeContext";
-import { buildTree, fileKind, foldersOf, quickOpen, type FileKind, type TreeNode } from "@/lib/nsCode";
+import {
+  buildTree,
+  fileKind,
+  foldersOf,
+  foldersWithChanges,
+  quickOpen,
+  type FileKind,
+  type TreeNode,
+} from "@/lib/nsCode";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import {
   getCodeFile,
   getCodeFiles,
+  getCodeOriginal,
   searchCode,
   type CodeFile,
   type CodeFiles,
+  type CodeOriginal,
   type CodeSearch,
 } from "@/services/api/nsCode";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { fmtDeployTime } from "@/components/deploy/version";
 
 /**
  * DEV-86 — NS Code (NEX Studio Code): the selected project's files as VS Code shows them, read-only. The server decides
@@ -40,6 +53,29 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 
 // The editor of VS Code is several megabytes: its own chunk, loaded when this tab opens, from the cockpit itself.
 const CodeEditor = lazy(() => import("@/components/nscode/CodeEditor"));
+const CodeDiff = lazy(() => import("@/components/nscode/CodeDiff"));
+
+/** DEV-87 — VS Code's marks of a file against the last commit. */
+const MARKS: Record<string, { title: string; tone: string }> = {
+  M: { title: "Zmenený voči poslednému commitu", tone: "text-amber-500" },
+  U: { title: "Nový súbor — ešte nie je v gite", tone: "text-emerald-500" },
+};
+
+function Mark({ mark }: { mark?: string }) {
+  const look = mark ? MARKS[mark] : undefined;
+  if (!mark || !look) return null;
+  return (
+    <span
+      title={look.title}
+      aria-label={look.title}
+      className={`ml-auto flex-shrink-0 pl-1 font-mono text-[10px] font-semibold ${look.tone}`}
+    >
+      {mark}
+    </span>
+  );
+}
+
+type Comparison = { original: CodeOriginal } | { error: HumanError };
 
 const KIND_ICON: Record<FileKind, { icon: typeof File; tone: string }> = {
   code: { icon: FileCode, tone: "text-sky-500" },
@@ -67,6 +103,8 @@ const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 export default function NsCodePage() {
   const navigate = useNavigate();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const slug = selectedProject?.slug;
   const { isDark } = useTheme();
   const wide = useWideScreen();
@@ -86,6 +124,9 @@ export default function NsCodePage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<HumanError | null>(null);
   const [opening, setOpening] = useState(false);
+  // DEV-87 — the open file compared with the last commit or with where the selected version began.
+  const [compare, setCompare] = useState<"head" | "base" | null>(null);
+  const [comparison, setComparison] = useState<Comparison | null>(null);
 
   useEffect(() => {
     setFiles(null);
@@ -107,6 +148,37 @@ export default function NsCodePage() {
     };
   }, [slug]);
 
+  // DEV-87 — during a build the agent writes files: the list is asked again on the server's schedule (cheap), and an
+  // open file is fetched again only when its stamp moved.
+  const refreshMs = (files?.refresh_seconds ?? 10) * 1000;
+  useEffect(() => {
+    if (!slug || !files) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      Promise.resolve()
+        .then(() => getCodeFiles(slug))
+        .then((f) => !cancelled && setFiles(f))
+        .catch(() => undefined); // the last list stays; the next turn asks again
+    }, refreshMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [slug, refreshMs, Boolean(files)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!slug || !files) return;
+    for (const tab of tabs) {
+      const have = loaded[tab];
+      const now = files.stamps[tab];
+      if (!have || !("file" in have) || !now || have.file.stamp === now) continue;
+      Promise.resolve()
+        .then(() => getCodeFile(slug, tab))
+        .then((file) => setLoaded((l) => ({ ...l, [tab]: { file } })))
+        .catch(() => undefined); // the text shown stays; the next turn tries again
+    }
+  }, [files, tabs, loaded, slug]);
+
   const open = useCallback(
     (to: string, at?: number) => {
       const next: Record<string, string> = { path: to };
@@ -119,6 +191,7 @@ export default function NsCodePage() {
 
   // The file in the address is the one shown: it gets a tab, its folders open, its text is fetched once.
   useEffect(() => {
+    setCompare(null);
     if (!slug || !path) return;
     setTabs((t) => (t.includes(path) ? t : [...t, path]));
     setExpanded((e) => new Set([...e, ...foldersOf(path)]));
@@ -152,6 +225,27 @@ export default function NsCodePage() {
   }, []);
 
   const tree = useMemo(() => buildTree(files?.files ?? []), [files]);
+  const changedFolders = useMemo(() => foldersWithChanges(files?.changes ?? {}), [files]);
+
+  // The comparison is fetched for what is chosen, and again when the file itself changes (its stamp).
+  const stampNow = path ? files?.stamps[path] : undefined;
+  useEffect(() => {
+    setComparison(null);
+    if (!slug || !path || !compare) return;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => getCodeOriginal(slug, path, compare, selectedVersion?.versionId))
+      .then((original) => !cancelled && setComparison({ original }))
+      .catch((e: unknown) => !cancelled && setComparison({ error: humanizeApiError(e, "Porovnanie sa nepodarilo") }));
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, path, compare, selectedVersion?.versionId, stampNow]);
+
+  function openTask(task: { version_id: string; version_number: string; label: string }) {
+    setSelectedVersion({ versionId: task.version_id, versionNumber: task.version_number });
+    navigate(`/riadiace-centrum?uloha=${encodeURIComponent(task.label)}`);
+  }
 
   function close(tab: string) {
     const left = tabs.filter((t) => t !== tab);
@@ -279,6 +373,8 @@ export default function NsCodePage() {
                     depth={0}
                     expanded={expanded}
                     active={path}
+                    changes={files.changes}
+                    changedFolders={changedFolders}
                     onToggle={(p) =>
                       setExpanded((e) => {
                         const next = new Set(e);
@@ -322,6 +418,7 @@ export default function NsCodePage() {
                   >
                     {nameOf(tab)}
                   </button>
+                  <Mark mark={files?.changes[tab]} />
                   <button
                     type="button"
                     aria-label={`Zavrieť ${nameOf(tab)}`}
@@ -338,6 +435,16 @@ export default function NsCodePage() {
             <p className="truncate px-3 py-1 font-mono text-[11px] text-[var(--color-text-muted)]" title={path}>
               {path.split("/").join(" › ")}
             </p>
+          )}
+          {path && current && "file" in current && (
+            <FileHeader
+              file={current.file}
+              mark={files?.changes[path]}
+              compare={compare}
+              versionNumber={selectedVersion?.versionNumber ?? null}
+              onCompare={setCompare}
+              onTask={openTask}
+            />
           )}
           <div className="min-h-0 flex-1">
             {!path ? (
@@ -360,6 +467,15 @@ export default function NsCodePage() {
               <p className="p-4 text-xs text-[var(--color-text-secondary)]">
                 Súbor má {sizeWords(current.file.size)}; NS Code ukazuje súbory do {sizeWords(current.file.max_bytes)}.
               </p>
+            ) : compare ? (
+              <Compared
+                path={path}
+                text={current.file.text ?? ""}
+                comparison={comparison}
+                versionNumber={selectedVersion?.versionNumber ?? null}
+                dark={isDark}
+                wide={wide}
+              />
             ) : (
               <Suspense fallback={<p className="p-4 text-xs text-[var(--color-text-muted)]">Otváram editor…</p>}>
                 <CodeEditor path={path} text={current.file.text ?? ""} line={line} dark={isDark} wide={wide} />
@@ -379,10 +495,12 @@ function TreeItem(props: {
   depth: number;
   expanded: Set<string>;
   active: string | null;
+  changes: Record<string, string>;
+  changedFolders: Set<string>;
   onToggle: (path: string) => void;
   onOpen: (path: string) => void;
 }) {
-  const { node, depth, expanded, active, onToggle, onOpen } = props;
+  const { node, depth, expanded, active, changes, changedFolders, onToggle, onOpen } = props;
   const indent = { paddingLeft: `${depth * 12 + 4}px` };
   if (node.folder) {
     const isOpen = expanded.has(node.path);
@@ -396,7 +514,18 @@ function TreeItem(props: {
             <ChevronRight className="h-3 w-3 flex-shrink-0" />
           )}
           <Icon className="h-3.5 w-3.5 flex-shrink-0 text-amber-400" aria-hidden />
-          <span className="truncate text-[var(--color-text-secondary)]">{node.name}</span>
+          <span
+            className={`truncate ${changedFolders.has(node.path) ? "text-amber-500" : "text-[var(--color-text-secondary)]"}`}
+          >
+            {node.name}
+          </span>
+          {changedFolders.has(node.path) && (
+            <span
+              aria-label="Obsahuje zmeny"
+              title="Obsahuje zmenené alebo nové súbory"
+              className="ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500"
+            />
+          )}
         </button>
         {isOpen && (
           <ul>
@@ -420,6 +549,7 @@ function TreeItem(props: {
       >
         <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${tone}`} aria-hidden />
         <span className="truncate">{node.name}</span>
+        <Mark mark={changes[node.path]} />
       </button>
     </li>
   );
@@ -544,5 +674,105 @@ function QuickOpen({
         </ul>
       </div>
     </div>
+  );
+}
+
+/** DEV-87 — when the file last changed and in which task; the comparisons. */
+function FileHeader(props: {
+  file: CodeFile;
+  mark?: string;
+  compare: "head" | "base" | null;
+  versionNumber: string | null;
+  onCompare: (against: "head" | "base" | null) => void;
+  onTask: (task: NonNullable<NonNullable<CodeFile["last_commit"]>["task"]>) => void;
+}) {
+  const { file, mark, compare, versionNumber, onCompare, onTask } = props;
+  const last = file.last_commit;
+  const toggle = "flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] pointer-coarse:min-h-11";
+  const pressed = (on: boolean) =>
+    on
+      ? "border-[var(--color-accent-primary)] text-[var(--color-accent-primary)]"
+      : "border-[var(--color-border-default)] text-[var(--color-text-secondary)]";
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 text-[11px] text-[var(--color-text-muted)]">
+      {last ? (
+        <span className="flex min-w-0 items-center gap-1">
+          <GitCommitHorizontal className="h-3 w-3 flex-shrink-0" aria-hidden />
+          <span className="truncate" title={last.subject}>
+            Posledná zmena {fmtDeployTime(last.at)} · <span className="font-mono">{last.sha.slice(0, 7)}</span>
+          </span>
+        </span>
+      ) : (
+        <span>{mark === "U" ? "Nový súbor — v gite ešte nie je." : ""}</span>
+      )}
+      {last?.task && (
+        <button
+          type="button"
+          onClick={() => onTask(last.task!)}
+          title={last.task.title}
+          className="rounded-full border border-[var(--color-accent-primary)] px-2 py-0.5 text-[11px] text-[var(--color-accent-primary)] pointer-coarse:min-h-11 pointer-coarse:rounded-lg"
+        >
+          Úloha {last.task.label} · verzia {last.task.version_number}
+        </button>
+      )}
+      <span className="ml-auto flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          aria-pressed={compare === "head"}
+          onClick={() => onCompare(compare === "head" ? null : "head")}
+          className={`${toggle} ${pressed(compare === "head")}`}
+        >
+          <GitCompare className="h-3 w-3" /> S posledným commitom
+        </button>
+        {versionNumber && (
+          <button
+            type="button"
+            aria-pressed={compare === "base"}
+            onClick={() => onCompare(compare === "base" ? null : "base")}
+            className={`${toggle} ${pressed(compare === "base")}`}
+          >
+            <GitCompare className="h-3 w-3" /> So začiatkom verzie {versionNumber}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** DEV-87 — the open file side by side with what it was, or why there is nothing to compare. */
+function Compared(props: {
+  path: string;
+  text: string;
+  comparison: Comparison | null;
+  versionNumber: string | null;
+  dark: boolean;
+  wide: boolean;
+}) {
+  const { path, text, comparison, versionNumber, dark, wide } = props;
+  const note = (sentence: string) => <p className="p-4 text-xs text-[var(--color-text-secondary)]">{sentence}</p>;
+  if (!comparison) {
+    return (
+      <p className="flex items-center gap-1.5 p-4 text-xs text-[var(--color-text-muted)]">
+        <Loader2 className="h-3 w-3 animate-spin" /> Pripravujem porovnanie…
+      </p>
+    );
+  }
+  if ("error" in comparison) {
+    return (
+      <p role="alert" className="p-4 text-xs text-[var(--color-state-error-fg)]">
+        {comparison.error.message}
+      </p>
+    );
+  }
+  const { original } = comparison;
+  const when = original.against === "base" ? `na začiatku verzie ${versionNumber ?? ""}`.trim() : "v poslednom commite";
+  if (!original.existed) return note(`Súbor je nový — ${when} ešte neexistoval.`);
+  if (original.binary || original.too_big || original.text == null) {
+    return note(`Súbor ${when} sa nedá porovnať ako text (je binárny alebo príliš veľký).`);
+  }
+  return (
+    <Suspense fallback={<p className="p-4 text-xs text-[var(--color-text-muted)]">Otváram porovnanie…</p>}>
+      <CodeDiff path={path} original={original.text} modified={text} dark={dark} wide={wide} />
+    </Suspense>
   );
 }

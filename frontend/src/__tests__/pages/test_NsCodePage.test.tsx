@@ -11,9 +11,14 @@ import "@testing-library/jest-dom/vitest";
 
 import NsCodePage from "@/pages/NsCodePage";
 import { ApiError } from "@/services/api";
-import { getCodeFile, getCodeFiles, searchCode, type CodeFile } from "@/services/api/nsCode";
+import { getCodeFile, getCodeFiles, searchCode, type CodeFile, type CodeFiles } from "@/services/api/nsCode";
 
-vi.mock("@/services/api/nsCode", () => ({ getCodeFiles: vi.fn(), getCodeFile: vi.fn(), searchCode: vi.fn() }));
+vi.mock("@/services/api/nsCode", () => ({
+  getCodeFiles: vi.fn(),
+  getCodeFile: vi.fn(),
+  getCodeOriginal: vi.fn(),
+  searchCode: vi.fn(),
+}));
 vi.mock("@/components/nscode/CodeEditor", () => ({
   default: ({ path, text, line }: { path: string; text: string; line: number | null }) => (
     <pre data-testid="editor" data-path={path} data-line={line ?? ""}>
@@ -30,8 +35,29 @@ vi.mock("@/store/activeContextStore", () => ({
 
 const FILES = ["README.md", "backend/main.py", "backend/apps/ubl.py", "frontend/src/App.tsx"];
 
+function listing(over: Partial<CodeFiles> = {}): CodeFiles {
+  return {
+    head: "d626301458",
+    files: FILES,
+    changes: {},
+    stamps: Object.fromEntries(FILES.map((f) => [f, "120-1"])),
+    refresh_seconds: 10,
+    ...over,
+  };
+}
+
 function file(path: string, over: Partial<CodeFile> = {}): CodeFile {
-  return { path, size: 120, text: `# ${path}\n`, binary: false, too_big: false, max_bytes: 1_000_000, ...over };
+  return {
+    path,
+    size: 120,
+    text: `# ${path}\n`,
+    binary: false,
+    too_big: false,
+    max_bytes: 1_000_000,
+    stamp: "120-1",
+    last_commit: null,
+    ...over,
+  };
 }
 
 function Where() {
@@ -60,7 +86,7 @@ function page(address = "/ns-code") {
 
 beforeEach(() => {
   context.selectedProject = { slug: "nex-inbox", name: "NEX Inbox" };
-  vi.mocked(getCodeFiles).mockReset().mockResolvedValue({ head: "d626301458", files: FILES });
+  vi.mocked(getCodeFiles).mockReset().mockResolvedValue(listing());
   vi.mocked(getCodeFile)
     .mockReset()
     .mockImplementation(async (_slug, path) => file(path));

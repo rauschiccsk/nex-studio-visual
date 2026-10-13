@@ -32,6 +32,8 @@ import "monaco-editor/editor/contrib/tokenization/browser/tokenization.js";
 import "monaco-editor/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.js";
 import "monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter.js";
 import "monaco-editor/editor/contrib/wordOperations/browser/wordOperations.js";
+// DEV-87 — the side-by-side view of changes, as VS Code compares a file.
+import "monaco-editor/editor/browser/widget/diffEditor/diffEditor.contribution.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 
 // The one worker the core editor needs (it computes e.g. the word occurrences off the page's thread).

@@ -36,12 +36,21 @@ test("a link to a line opens the file in the editor, marks the line and fits the
 
   // On a phone the tree is its own pane — the file's folder must be open there too.
   if ((page.viewportSize()?.width ?? 0) < 768) await page.getByRole("button", { name: "Súbory" }).click();
-  await expect(page.getByRole("button", { name: "backend", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: /^backend/ })).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator('[aria-current="true"]', { hasText: "main.py" })).toBeVisible();
 
   if ((page.viewportSize()?.width ?? 0) < 768) await page.getByRole("button", { name: "Kód" }).click();
   await settle(page);
   expect(await problemsOn(page, hasTouch)).toEqual([]);
+
+  // DEV-87 — the file side by side with the last commit (one column on a narrow screen) still fits.
+  await page.getByRole("button", { name: "S posledným commitom" }).click();
+  const diff = page.locator(".monaco-diff-editor");
+  await expect(diff).toBeVisible({ timeout: 15_000 });
+  await expect(diff).toContainText("def health()");
+  await settle(page);
+  expect(await problemsOn(page, hasTouch)).toEqual([]);
+
   expect(errors).toEqual([]);
   expect(unanswered).toEqual([]);
 });

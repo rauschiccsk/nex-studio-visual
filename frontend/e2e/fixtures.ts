@@ -873,6 +873,19 @@ export function registerFixtures(): void {
       "frontend/src/pages/InvoiceDetailPage.tsx",
       "package.json",
     ],
+    // DEV-87 — the agent is changing main.py and has added a new page.
+    changes: { "backend/main.py": "M", "frontend/src/pages/InvoiceDetailPage.tsx": "U" },
+    stamps: {
+      ".env.example": "52-1",
+      ".gitignore": "40-1",
+      "README.md": "3958-1",
+      "backend/apps/xml_exporter/ubl_builder.py": "18000-1",
+      "backend/main.py": "412-2",
+      "docs/specs/backend/BEHAVIOR.md": "64000-1",
+      "frontend/src/pages/InvoiceDetailPage.tsx": "9000-2",
+      "package.json": "1200-1",
+    },
+    refresh_seconds: 10,
   });
   answer("get", "/api/v1/projects/{slug}/code/file", {
     path: "backend/main.py",
@@ -883,6 +896,28 @@ export function registerFixtures(): void {
     binary: false,
     too_big: false,
     max_bytes: 1000000,
+    stamp: "412-2",
+    last_commit: {
+      sha: "1771419bb2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
+      at: T1,
+      subject: "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
+      task: {
+        label: "32.2.1",
+        task_id: "33333333-3333-4333-8333-333333333321",
+        title: "Brána vydania — tri funkcie a SP-21…SP-27",
+        version_id: VERSION.id,
+        version_number: VERSION.version_number,
+      },
+    },
+  });
+  answer("get", "/api/v1/projects/{slug}/code/original", {
+    path: "backend/main.py",
+    against: "head",
+    rev: "1771419bb2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
+    existed: true,
+    text: '"""NEX Inbox — the backend of the invoice inbox."""\n\nfrom fastapi import FastAPI\n\napp = FastAPI()\n',
+    binary: false,
+    too_big: false,
   });
   answer("get", "/api/v1/projects/{slug}/code/search", {
     query: "SellersItemIdentification",

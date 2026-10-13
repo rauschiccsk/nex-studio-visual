@@ -62,3 +62,11 @@ poslať ako odkaz. NS Code ukazuje len súbory, ktoré sú v gite alebo ktoré b
 (napríklad node_modules), súbory s tajomstvami (.env, kľúče, certifikáty) ani súkromné súbory priložené agentovi
 neukáže a server ich odmietne vydať aj na priamu žiadosť. Vzor .env.example ukáže, lebo obsahuje len mená nastavení,
 nie hodnoty. Editor sa načíta až pri otvorení prvého súboru, z vlastného servera kokpitu.
+
+**NS Code ukáže, čo agent mení.** Súbor zmenený od posledného commitu má v strome aj na záložke značku M, nový súbor
+značku U, ako vo VS Code, a priečinok, v ktorom je zmena, má bodku. Počas stavby sa strom aj otvorený súbor obnovujú
+samy každých 10 sekúnd. Kokpit znova načíta len súbor, ktorý sa naozaj zmenil. Pri otvorenom súbore vidíš, kedy sa
+naposledy zmenil a ktorý commit to bol. Ak commit nesie číslo úlohy, tlačidlo úlohy otvorí Plán úloh priamo na nej.
+Tlačidlo „S posledným commitom“ ukáže súbor vedľa seba s tým, čo je v gite. Tlačidlo „So začiatkom verzie“ ho porovná
+so stavom, z ktorého vybraná verzia vychádza, rovnako ako ho ráta súpis dodávky. Nový súbor povie, že predtým
+neexistoval.

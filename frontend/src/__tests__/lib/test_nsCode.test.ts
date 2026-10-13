@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { buildTree, fileKind, foldersOf, languageOf, quickOpen } from "@/lib/nsCode";
+import { buildTree, fileKind, foldersOf, foldersWithChanges, languageOf, quickOpen } from "@/lib/nsCode";
 
 describe("NS Code's own logic (DEV-86)", () => {
   it("builds the tree with folders first, each level by name", () => {
@@ -20,6 +20,12 @@ describe("NS Code's own logic (DEV-86)", () => {
   it("names the folders on the way to a file", () => {
     expect(foldersOf("backend/apps/xml/ubl.py")).toEqual(["backend", "backend/apps", "backend/apps/xml"]);
     expect(foldersOf("README.md")).toEqual([]);
+  });
+
+  it("marks every folder on the way to a change (DEV-87)", () => {
+    expect(
+      [...foldersWithChanges({ "backend/apps/ubl.py": "M", "README.md": "U", "frontend/x.ts": "U" })].sort(),
+    ).toEqual(["backend", "backend/apps", "frontend"]);
   });
 
   it.each([

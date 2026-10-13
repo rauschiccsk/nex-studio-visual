@@ -2375,7 +2375,8 @@ export interface paths {
         };
         /**
          * Get Code File
-         * @description One file — only one the list shows; anything else (outside the project, ignored, a secret) is 404.
+         * @description One file — only one the list shows; anything else (outside the project, ignored, a secret) is 404. DEV-87: with
+         *     the newest commit that changed it and that commit's task.
          */
         get: operations["get_code_file_api_v1_projects__slug__code_file_get"];
         put?: never;
@@ -2398,6 +2399,27 @@ export interface paths {
          * @description Every file of the project NS Code shows: what git knows or would add, without secrets.
          */
         get: operations["get_code_files_api_v1_projects__slug__code_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/code/original": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Code Original
+         * @description DEV-87 — the file as it was: at the last commit (``head``), or where ``version_id`` began (``base`` — the same
+         *     start the delivery statement counts from). Only for a file NS Code shows.
+         */
+        get: operations["get_code_original_api_v1_projects__slug__code_original_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4363,12 +4385,18 @@ export interface components {
              * @default false
              */
             binary: boolean;
+            last_commit?: components["schemas"]["CodeLastCommit"] | null;
             /** Max Bytes */
             max_bytes: number;
             /** Path */
             path: string;
             /** Size */
             size: number;
+            /**
+             * Stamp
+             * @default
+             */
+            stamp: string;
             /** Text */
             text?: string | null;
             /**
@@ -4383,12 +4411,28 @@ export interface components {
          */
         CodeFilesRead: {
             /**
+             * Changes
+             * @default {}
+             */
+            changes: {
+                [key: string]: string;
+            };
+            /**
              * Files
              * @default []
              */
             files: string[];
             /** Head */
             head?: string | null;
+            /** Refresh Seconds */
+            refresh_seconds: number;
+            /**
+             * Stamps
+             * @default {}
+             */
+            stamps: {
+                [key: string]: string;
+            };
         };
         /** CodeHit */
         CodeHit: {
@@ -4398,6 +4442,45 @@ export interface components {
             path: string;
             /** Text */
             text: string;
+        };
+        /**
+         * CodeLastCommit
+         * @description DEV-87 — the newest commit that changed the file, with its task when the subject names one.
+         */
+        CodeLastCommit: {
+            /** At */
+            at: string;
+            /** Sha */
+            sha: string;
+            /** Subject */
+            subject: string;
+            task?: components["schemas"]["CiRunTask"] | null;
+        };
+        /**
+         * CodeOriginalRead
+         * @description DEV-87 — the file as it was, to compare with: at the last commit, or where the version began.
+         */
+        CodeOriginalRead: {
+            /** Against */
+            against: string;
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
+            /** Existed */
+            existed: boolean;
+            /** Path */
+            path: string;
+            /** Rev */
+            rev: string;
+            /** Text */
+            text?: string | null;
+            /**
+             * Too Big
+             * @default false
+             */
+            too_big: boolean;
         };
         /** CodeSearchRead */
         CodeSearchRead: {
@@ -12945,6 +13028,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CodeFilesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_code_original_api_v1_projects__slug__code_original_get: {
+        parameters: {
+            query: {
+                path: string;
+                against?: "head" | "base";
+                version_id?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeOriginalRead"];
                 };
             };
             /** @description Validation Error */
