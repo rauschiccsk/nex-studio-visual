@@ -73,7 +73,14 @@ from backend.services import fast_fix as fast_fix_service
 from backend.services import git_state as git_state_service
 from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
-from backend.services import orchestrator, pipeline_runner, project_adoption, project_memory, uat_provisioner
+from backend.services import (
+    orchestrator,
+    pipeline_runner,
+    project_adoption,
+    project_memory,
+    uat_provisioner,
+    vizual_sandbox,
+)
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
 from backend.services import system_setting as system_setting_service
@@ -1446,6 +1453,15 @@ def delete_project(
     from backend.services.create_project_postscaffold import deprovision_ci_runner
 
     deprovision_ci_runner(slug)
+
+    # DEV-109: the project's preview — container vizual-<slug> and the route its labels give Traefik — would
+    # otherwise keep serving a deleted project's frontend. Best-effort and logged, like every cleanup around it.
+    try:
+        vizual_sandbox.teardown(slug)
+        if vizual_sandbox.status(slug)["running"]:
+            logger.warning("Preview %s still runs after deleting project %r", vizual_sandbox.container_name(slug), slug)
+    except ValueError as exc:
+        logger.warning("Preview cleanup skipped for deleted project %r: %s", slug, exc)
 
     # KB cleanup — best-effort. A failure here does not undo the DB
     # delete (that has already committed); we log and return 204 so
