@@ -5331,6 +5331,65 @@ def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> bool
     return True
 
 
+#: DEV-104 — the script a project declares in ``frontend/package.json`` to rebuild what it derives from its release
+#: notes (NEX Inbox: ``frontend/src/lib/release-notes.ts``, guarded by its CI's "RELEASE_NOTES generated-file check").
+RELEASE_NOTES_GENERATOR = "generate-release-notes"
+#: How long the project's generator may run — a small script; a hung one must not hold a sign-off.
+RELEASE_NOTES_GENERATOR_CAP = 120
+
+
+def _changed_paths(project_root: Path) -> set[str]:
+    """Paths git reports as changed or new in the working tree (empty when git cannot answer)."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(project_root), "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line[3:] for line in done.stdout.splitlines() if len(line) > 3} if done.returncode == 0 else set()
+
+
+def _run_release_notes_generator(frontend: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["npm", "run", "--silent", RELEASE_NOTES_GENERATOR],
+        cwd=frontend,
+        capture_output=True,
+        text=True,
+        timeout=RELEASE_NOTES_GENERATOR_CAP,
+        check=False,
+    )
+
+
+def _regenerate_release_note_derivatives(project_root: Path) -> tuple[list[str], Optional[str]]:
+    """DEV-104 — after the cockpit wrote a release note, rebuild what the project derives from its notes.
+
+    13.10.2026 the cockpit corrected NEX Inbox 1.5.2's note (DEV-97) and committed ``RELEASE_NOTES.md`` alone; the
+    app's ``frontend/src/lib/release-notes.ts`` stayed stale, its CI failed on the generated-file check and the 1.8.0
+    build got a verification round for it. The project says what it derives — the ``generate-release-notes`` script in
+    its ``frontend/package.json``; without it nothing is derived and nothing runs. Returns the files the generator
+    changed (to be committed with the note) and, when it failed, why."""
+    frontend = Path(project_root) / "frontend"
+    try:
+        scripts = json.loads((frontend / "package.json").read_text(encoding="utf-8")).get("scripts") or {}
+    except (OSError, ValueError, AttributeError):
+        return [], None
+    if RELEASE_NOTES_GENERATOR not in scripts:
+        return [], None
+    before = _changed_paths(project_root)
+    try:
+        done = _run_release_notes_generator(frontend)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], f"generátor sa nespustil ({exc.__class__.__name__})"
+    if done.returncode != 0:
+        lines = (done.stderr or done.stdout or "").strip().splitlines()
+        return [], f"generátor skončil chybou: {lines[-1][:200] if lines else f'kód {done.returncode}'}"
+    return sorted(_changed_paths(project_root) - before), None
+
+
 def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
     """Part 1 (per-app-changelog-standard.md §1): NEX Studio OWNS the user-facing ``RELEASE_NOTES.md`` —
     (re)generate it from the completing version's Epics + commit it INTO the app repo. BEST-EFFORT, NEVER
@@ -5355,13 +5414,39 @@ def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path,
         rel = str(path.relative_to(project_root))
     except ValueError:
         return
-    if not _git_ok(project_root, ["add", "-A", "--", rel]):
+    # DEV-104: what the project derives from its notes goes into the same commit — or the note does not go in at all.
+    derived, why = _regenerate_release_note_derivatives(project_root)
+    if why:
+        _tell_manager_the_note_is_not_committed(db, version_id, version_number, why)
         return
-    # Pathspec-scoped commit → only the note lands, even if the worktree carries other changes. A no-op
-    # (note unchanged since the last commit) exits non-zero — harmless, the artifact is already in place.
+    paths = [rel, *derived]
+    if not _git_ok(project_root, ["add", "-A", "--", *paths]):
+        return
+    # Pathspec-scoped commit → only the note (and what is derived from it) lands, even if the worktree carries other
+    # changes. A no-op (note unchanged since the last commit) exits non-zero — harmless, the artifact is in place.
     _git_ok(
         project_root,
-        ["commit", "-m", f"docs(release-notes): v{version_number} — user-facing changelog", "--", rel],
+        ["commit", "-m", f"docs(release-notes): v{version_number} — user-facing changelog", "--", *paths],
+    )
+
+
+def _tell_manager_the_note_is_not_committed(db: Session, version_id: uuid.UUID, version_number: str, why: str) -> None:
+    """DEV-104: a note committed without what the app derives from it fails the project's CI — say so instead."""
+    state = _get_state(db, version_id)
+    stage = state.current_stage if state is not None else "verifikacia"
+    _record_message(
+        db,
+        version_id=version_id,
+        stage=stage,
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            f"Poznámky k vydaniu v{version_number} sú zapísané, ale nie v gite: generátor projektu (npm run "
+            f"{RELEASE_NOTES_GENERATOR}) neprešiel — {why}. Bez neho by kontrola projektu zlyhala na súbore, ktorý si "
+            "z poznámok robí aplikácia; AI Agent ho musí pregenerovať a zapísať spolu s poznámkami."
+        ),
+        payload={"phase": stage, "release_note_generator_failed": why},
     )
 
 
@@ -5435,7 +5520,11 @@ def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root
 
     try:
         _apply_customer_note_to_fix_epic(db, version_id)  # ICCINT-53 — before the note is rendered
-        release_note_writer.write_release_note(db, version_id, project_root)
+        if release_note_writer.write_release_note(db, version_id, project_root) is not None:
+            # DEV-104: the smoke image is built from this tree — what the app derives from its notes must match.
+            _derived, why = _regenerate_release_note_derivatives(project_root)
+            if why:
+                logger.warning("pre-smoke release-note generator failed (version_id=%s): %s", version_id, why)
     except Exception:  # noqa: BLE001 — a served artifact, never a release gate; a hiccup must not sink the smoke
         logger.warning("pre-smoke release-note write failed (version_id=%s)", version_id, exc_info=True)
 
