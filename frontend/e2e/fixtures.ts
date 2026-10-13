@@ -1048,6 +1048,7 @@ export function registerFixtures(): void {
     attachment_max_bytes: 10_485_760,
     attachments_max_count: 5,
     attachments_max_total_bytes: 26_214_400,
+    question_max_chars: 20_000,
     attachment_types: ["pdf", "png", "jpg", "txt", "md"],
   });
   answer("get", "/api/v1/poradca/projects/{slug}/context", {

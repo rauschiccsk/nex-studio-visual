@@ -194,3 +194,5 @@ class PoradcaStatus(BaseModel):
     attachments_max_count: int = 0
     attachments_max_total_bytes: int = 0
     attachment_types: list[str] = Field(default_factory=list)
+    #: DEV-103 — how long a question may be, so a question composed from a decision card fits before it is sent.
+    question_max_chars: int = MAX_QUESTION_CHARS

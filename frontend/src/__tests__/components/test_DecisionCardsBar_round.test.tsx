@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
@@ -41,7 +42,12 @@ const decisions = [
 ];
 
 function bar(consultation: Record<string, unknown>) {
-  return <DecisionCardsBar board={board(consultation)} versionId="v1" onBoard={vi.fn()} />;
+  // The verification card leads to Poradca (DEV-103) — it lives in the app's router.
+  return (
+    <MemoryRouter>
+      <DecisionCardsBar board={board(consultation)} versionId="v1" onBoard={vi.fn()} />
+    </MemoryRouter>
+  );
 }
 
 describe("DecisionCardsBar — kolo konzultácie", () => {

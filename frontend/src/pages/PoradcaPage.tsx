@@ -6,7 +6,9 @@
 // a prompt with a button to Projekty, no access — a sentence saying why, otherwise Poradca.
 //
 // The address carries the selected conversation (`?c=`) and the default version of a new one (`?verzia=`) — the
-// „Opýtaj sa Poradcu" button on a finished version leads here with it.
+// „Opýtaj sa Poradcu" button on a finished version leads here with it. The review-with-Poradca button on
+// a verification card adds `?overit=1`: that visit sends the card's question by itself (DEV-103,
+// `@/lib/poradcaReview`).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -35,6 +37,8 @@ import {
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { versionOptionLabel } from "@/lib/poradcaAnswer";
+import { appendInstruction } from "@/lib/poradcaHandoff";
+import { REVIEW_PARAM, reviewQuestion, takeReview } from "@/lib/poradcaReview";
 import {
   EMPTY_CLIPBOARD,
   addImages,
@@ -47,6 +51,16 @@ import {
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
 
 const WHOLE_PROJECT = "";
+
+/** DEV-103 — why a card's question waits in the box: its version is not one of this project's. */
+const CARD_NOT_IN_PROJECT =
+  "Otázka z karty nebola odoslaná — verzia karty v tomto projekte nie je. Skontroluj ju a pošli sám.";
+
+/** DEV-103 — a question composed elsewhere for the composer to send; `held` says why it waits in the box instead. */
+interface IncomingQuestion {
+  question: string;
+  held: string | null;
+}
 
 // DEV-24: the sidebar opens bare /poradca. Coming back from another screen must land where the Manažér
 // left — the conversation he had open (or the new one he was starting) — not on an empty new conversation.
@@ -82,6 +96,8 @@ export default function PoradcaPage() {
   const [pane, setPane] = useState<"rozhovory" | "rozhovor">("rozhovor");
   const [conversations, setConversations] = useState<PoradcaConversation[]>([]);
   const [status, setStatus] = useState<PoradcaStatus | null>(null);
+  // Until the status has answered (or failed), the length a question may have is not known.
+  const [statusSettled, setStatusSettled] = useState(false);
   const [loadError, setLoadError] = useState<HumanError | null>(null);
   // The project whose conversation list has arrived — until then a remembered conversation cannot be checked.
   const [listedSlug, setListedSlug] = useState<string | null>(null);
@@ -112,7 +128,8 @@ export default function PoradcaPage() {
     void refreshList();
     getPoradcaStatusApi()
       .then(setStatus)
-      .catch(() => setStatus(null));
+      .catch(() => setStatus(null))
+      .finally(() => setStatusSettled(true));
   }, [slug, refreshList]);
 
   // When the answer finishes, the list refreshes its "running" flag and the order.
@@ -168,6 +185,26 @@ export default function PoradcaPage() {
   const [newScope, setNewScope] = useState<string>(WHOLE_PROJECT);
   useEffect(() => setNewScope(defaultScope), [defaultScope]);
 
+  // DEV-103: the visit from the review-with-Poradca button — the card is taken once, the mark leaves the address
+  // (a reload or the way back sends nothing again) and the composer sends the question like one he typed. A card of
+  // a version this project does not have is not sent under another scope: it waits in the box, with why.
+  const [incoming, setIncoming] = useState<IncomingQuestion | null>(null);
+  const reviewRequested = params.has(REVIEW_PARAM);
+  useEffect(() => {
+    const versionId = params.get("verzia");
+    if (!reviewRequested || conversationId || !context || !statusSettled) return;
+    const next = new URLSearchParams(params);
+    next.delete(REVIEW_PARAM);
+    setParams(next, { replace: true });
+    const card = versionId ? takeReview(versionId) : null;
+    if (!card) return;
+    const known = context.versions?.some((v) => v.id === versionId) ?? false;
+    setIncoming({
+      question: reviewQuestion(card, status?.question_max_chars ?? Number.POSITIVE_INFINITY),
+      held: known ? null : CARD_NOT_IN_PROJECT,
+    });
+  }, [reviewRequested, conversationId, context, statusSettled, status, params, setParams]);
+
   const scopeId = conversationId ? (detail?.version_id ?? WHOLE_PROJECT) : newScope;
   const scopeVersion = context?.versions?.find((v) => v.id === scopeId) ?? null;
 
@@ -205,6 +242,9 @@ export default function PoradcaPage() {
     const next = new URLSearchParams(params);
     if (id) next.set("c", id);
     else next.delete("c");
+    // DEV-103: the card's visit is over once a conversation opens — `params` here may still be the address the
+    // visit came with, and a mark left in it would send a later card again on the way back.
+    next.delete(REVIEW_PARAM);
     if (slug) rememberOpen(slug, id);
     setParams(next);
   }
@@ -398,6 +438,7 @@ export default function PoradcaPage() {
                 : null
           }
           limits={status}
+          incoming={incoming}
           onAsk={async (question, images) => {
             thread.follow(); // his own question: show what comes back, wherever he had scrolled to
             const uploads = await Promise.all(images.map(toUpload));
@@ -426,6 +467,7 @@ function PoradcaComposer({
   onAsk,
   disabledReason,
   limits,
+  incoming,
 }: {
   /** Where the half-written question lives — one per conversation, one for the new conversation (DEV-24). */
   draftKey: string | null;
@@ -433,6 +475,8 @@ function PoradcaComposer({
   disabledReason: string | null;
   /** DEV-52 — the backend's limits for pasted screenshots; null until Poradca's status is known. */
   limits: ImageLimits | null;
+  /** DEV-103 — the question from a decision card, sent once by itself (or left in the box when it cannot go). */
+  incoming: IncomingQuestion | null;
 }) {
   const { text, setText, clear, restored } = useDraft(key);
   const [sending, setSending] = useState(false);
@@ -479,23 +523,44 @@ function PoradcaComposer({
   async function submit() {
     const question = text.trim();
     if (!question || locked) return;
+    await send(question, true);
+  }
+
+  // `own` — the text of the box, with its images. A question from a card is not his draft: it leaves the draft
+  // alone when it goes out, and lands under it when it does not.
+  async function send(question: string, own: boolean) {
     setSending(true);
     setError(null);
     try {
-      await onAsk(
-        question,
-        images.map((i) => i.file),
-      );
-      clear(); // only once it went out — a failed question stays in the box, with its images
-      images.forEach((i) => URL.revokeObjectURL(i.url));
-      setImages([]);
-      setRefused(null);
+      await onAsk(question, own ? images.map((i) => i.file) : []);
+      if (own) {
+        clear(); // only once it went out — a failed question stays in the box, with its images
+        images.forEach((i) => URL.revokeObjectURL(i.url));
+        setImages([]);
+        setRefused(null);
+      }
     } catch (e: unknown) {
+      if (!own) setText(appendInstruction(text, question));
       setError(humanizeApiError(e, "Otázku sa nepodarilo poslať"));
     } finally {
       setSending(false);
     }
   }
+
+  // DEV-103: the card's question goes out once, through the same path as a typed one. When it cannot go (Poradca
+  // cannot run, the version is not this project's) it waits in the box under his draft, and the box says why.
+  useEffect(() => {
+    if (!incoming) return;
+    if (incoming.held || disabledReason) {
+      setText(appendInstruction(text, incoming.question));
+      if (incoming.held) setRefused(incoming.held);
+      return;
+    }
+    void send(incoming.question, false);
+    // Once per card: what else it reads (the box, the reason it is locked) is current when the card arrives — the
+    // page hands it over only after Poradca's status answered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming]);
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {

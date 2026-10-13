@@ -15,3 +15,10 @@ naozaj chytí, schválne ju pokazí na bočnej vetve a kontrola zčervenie. Repo
 rovnako ako skutočnú chybu. Teraz taký beh ukáže ako „Dôkaz — červené podľa plánu“ aj s krokom, ktorý zčervenel.
 Ak by dôkaz nečakane prešiel, ukáže „Dôkaz prešiel — mal byť červený“, lebo to znamená, že kontrola nič nechytila.
 Agenti dostali pravidlo, ako taký dôkaz označiť.
+
+**Kartu Verifikácie preveríš s Poradcom jedným klikom.** Na karte „Verifikácia našla blokujúcu chybu“ pribudlo
+tlačidlo „Overiť s Poradcom“. Otvorí Poradcu na tej istej verzii a sám mu pošle otázku zloženú z karty: nadpis,
+číslo kola, vysvetlenie so slovom kritika, nálezy Auditora s navrhnutou opravou a možnosti — a na konci prosbu
+„Prekontroluj opodstatnenosť tohto nálezu a ako to vyriešiť.“ Nič sa nekopíruje. Veľmi dlhý technický detail sa
+skráti tak, aby sa otázka vošla do limitu Poradcu; celý ho Poradca aj tak číta z karty. Keď Poradca práve bežať
+nevie, otázka počká v poli a pošleš ju sám. Odpoveď sa ku karte vracia ako doteraz — odporúčaná voľba je označená.

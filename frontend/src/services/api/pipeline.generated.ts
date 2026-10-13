@@ -6752,6 +6752,11 @@ export interface components {
             max_concurrent: number;
             /** Problems */
             problems?: string[];
+            /**
+             * Question Max Chars
+             * @default 20000
+             */
+            question_max_chars: number;
             /** Ready */
             ready: boolean;
             /** Running */
