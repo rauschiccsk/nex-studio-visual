@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from alembic import command
@@ -194,6 +195,31 @@ async def _ci_watch_loop() -> None:
         await asyncio.sleep(settings.ci_watch_interval_seconds)
 
 
+async def kb_publish_loop() -> None:
+    """DEV-94 — sends the Knowledge Base's commits to GitHub, where the copy on MAGER reads it from.
+
+    Every cockpit write publishes at once; this pass sends again what could not leave then (network, GitHub). GitHub
+    ahead of this tree is said, never merged (:mod:`backend.services.kb_git`). The reason is logged when it changes,
+    not every pass."""
+    from backend.services import kb_git
+
+    said: Optional[str] = None
+    while True:
+        try:
+            reason = await asyncio.to_thread(kb_git.publish, Path(settings.knowledge_base_path))
+            if reason != said:
+                if reason:
+                    logger.warning("Knowledge Base not on GitHub: %s", reason)
+                else:
+                    logger.info("Knowledge Base on GitHub again")
+                said = reason
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("KB publish loop iteration failed")
+        await asyncio.sleep(settings.kb_publish_interval_seconds)
+
+
 async def _kb_index_sync_loop() -> None:
     """Úloha na pozadí: dorovnáva RAG index so Znalostnou bázou (ICCINT-111).
 
@@ -302,6 +328,9 @@ async def lifespan(app: FastAPI):
     ci_watch_task: Optional[asyncio.Task] = None
     if settings.ci_watch_enabled:
         ci_watch_task = asyncio.create_task(_ci_watch_loop(), name="ci-watch")
+    kb_publish_task: Optional[asyncio.Task] = None
+    if settings.kb_publish_enabled:
+        kb_publish_task = asyncio.create_task(kb_publish_loop(), name="kb-publish")
     kb_index_task: Optional[asyncio.Task] = None
     if settings.kb_index_sync_enabled:
         kb_index_task = asyncio.create_task(
@@ -319,7 +348,16 @@ async def lifespan(app: FastAPI):
             kb_index_task.cancel()
         if ci_watch_task is not None:
             ci_watch_task.cancel()
-        for t in (idle_task, retention_task, orch_session_retention_task, kb_index_task, ci_watch_task):
+        if kb_publish_task is not None:
+            kb_publish_task.cancel()
+        for t in (
+            idle_task,
+            retention_task,
+            orch_session_retention_task,
+            kb_index_task,
+            ci_watch_task,
+            kb_publish_task,
+        ):
             if t is None:
                 continue
             try:

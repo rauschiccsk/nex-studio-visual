@@ -3477,6 +3477,12 @@ def _schema_change_sentence(cmp: database_schema.SchemaComparison) -> str:
 #: DEV-7: the ceiling for writing an approved schema into the Knowledge Base (a handful of local git commands).
 SCHEMA_PUBLISH_CAP = 120
 
+
+def _schema_publish_cap() -> int:
+    """DEV-94: the local commit, then the way to GitHub — a lookup and a push, each with its own ceiling."""
+    return SCHEMA_PUBLISH_CAP + 2 * settings.kb_publish_timeout_seconds
+
+
 #: DEV-7: what the Manažér is told when a database change waits for an approval he cannot give.
 SCHEMA_APPROVER_ONLY = (
     "Štruktúru databázy schvaľuje len Ri (SCHEMA_GOVERNANCE) — tento krok musí schváliť účet s rolou Ri."
@@ -3540,7 +3546,7 @@ async def _publish_approved_schema(
             content=cmp.version_doc or "",
             version_number=version.version_number,
             approved_by=acting_user.username,
-            cap=SCHEMA_PUBLISH_CAP,
+            cap=_schema_publish_cap(),
         )
     except database_schema.SchemaPublishRefused as exc:
         raise OrchestratorError(f"Štruktúra databázy sa nezapísala do Znalostnej bázy: {exc}") from exc
@@ -3549,6 +3555,15 @@ async def _publish_approved_schema(
             "Zápis štruktúry databázy do Znalostnej bázy neskončil včas — schválenie sa nezapísalo, skús ho znova."
         ) from exc
     saved = f", uložené ako {result.commit[:7]}" if result.commit else ""
+    content = (
+        f"Štruktúru databázy schválil {acting_user.username} (Ri) — kokpit ju zapísal do Znalostnej bázy "
+        f"({result.kb_path}{saved})."
+    )
+    if result.unpublished:
+        # DEV-94: the copy on MAGER reads GitHub — a write that stayed on ANDROS is not passed off as done.
+        content += (
+            f" Na GitHub sa zatiaľ nedostala, takže kópia Znalostnej bázy na MAGERi ju ešte nemá: {result.unpublished}"
+        )
     _record_message(
         db,
         version_id=state.version_id,
@@ -3556,13 +3571,15 @@ async def _publish_approved_schema(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=(
-            f"Štruktúru databázy schválil {acting_user.username} (Ri) — kokpit ju zapísal do Znalostnej bázy "
-            f"({result.kb_path}{saved})."
-        ),
+        content=content,
         payload={
             "phase": state.current_stage,
-            "database_schema_published": {"kb_path": result.kb_path, "commit": result.commit, "files": result.changed},
+            "database_schema_published": {
+                "kb_path": result.kb_path,
+                "commit": result.commit,
+                "files": result.changed,
+                "unpublished": result.unpublished,
+            },
         },
     )
     _schedule_kb_reindex(result.changed)

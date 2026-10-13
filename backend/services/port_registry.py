@@ -60,6 +60,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.db.models.projects import Project
+from backend.services import kb_git
 from backend.services import system_setting as system_setting_service
 
 logger = logging.getLogger(__name__)
@@ -1004,6 +1005,9 @@ def record_allocation(
     A project without ports records nothing and warns about nothing — ``backend_port`` is
     nullable and a project may legitimately have none. There is no block to write down, so
     silence here is the honest answer rather than a swallowed failure.
+
+    DEV-94: the block is then committed, alone, and sent to GitHub, where the copy of the
+    knowledge base on MAGER reads it — a block that stayed on ANDROS is a warning as well.
     """
     if base is None:
         return None
@@ -1024,8 +1028,35 @@ def record_allocation(
             f"({PORT_REGISTRY_FILE}): {exc}. Dopíš ho ručne, inak ho ďalší projekt môže dostať tiež."
         )
 
+    updated = _with_block(text, slug=slug, base=base, block_size=block_size, entry=entry)
+    if updated is None:
+        return (
+            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov: v súbore chýba sekcia "
+            f"„mimo_rozsahu“, podľa ktorej sa hľadá koniec zoznamu blokov. Dopíš blok ručne."
+        )
+    if updated != text:  # an entry already there is not written twice
+        try:
+            # Write via a sibling temp file + rename: a half-written registry would read as
+            # "no reservations" on the next allocation, which is the failure we are removing.
+            tmp = PORT_REGISTRY_FILE.with_suffix(".yaml.tmp")
+            tmp.write_text(updated, encoding="utf-8")
+            tmp.replace(PORT_REGISTRY_FILE)
+        except OSError as exc:
+            return (
+                f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov "
+                f"({PORT_REGISTRY_FILE}): {exc}. Dopíš ho ručne, inak ho ďalší projekt môže dostať tiež."
+            )
+        logger.info("Port block %s-%s recorded in %s for %s", base, end, PORT_REGISTRY_FILE, slug)
+    return _commit_block(slug=slug, base=base, block_size=block_size, entry=entry)
+
+
+def _with_block(text: str, *, slug: str, base: int, block_size: int, entry: str) -> str | None:
+    """*text* with the block written in: unchanged when it is already there, ``None`` when there is no anchor.
+
+    Applied to the file on disk and to the file as the Knowledge Base last committed it alike (DEV-94)."""
+    end = base + block_size - 1
     if re.search(rf"^\s*-\s*rozsah:\s*{base}-{end}\s*$", text, re.MULTILINE):
-        return None  # already recorded — a re-run must not duplicate the entry
+        return text
 
     # A project whose ports were CHANGED must not end up owning two blocks. Drop the old
     # entry first, otherwise the registry grows a second claim for the same slug and the
@@ -1035,10 +1066,7 @@ def record_allocation(
     lines = text.splitlines(keepends=True)
     anchor = next((i for i, line in enumerate(lines) if line.startswith("mimo_rozsahu:")), None)
     if anchor is None:
-        return (
-            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov: v súbore chýba sekcia "
-            f"„mimo_rozsahu“, podľa ktorej sa hľadá koniec zoznamu blokov. Dopíš blok ručne."
-        )
+        return None
     # Walk back over the blank lines and the comment block that introduce `mimo_rozsahu`,
     # so the new entry lands at the END of `bloky` rather than inside someone's heading.
     while anchor > 0 and (not lines[anchor - 1].strip() or lines[anchor - 1].lstrip().startswith("#")):
@@ -1046,21 +1074,31 @@ def record_allocation(
 
     updated = "".join(lines[:anchor]) + entry + "".join(lines[anchor:])
     updated = re.sub(r"^(\s*next_free:\s*)\d+", rf"\g<1>{base + block_size}", updated, count=1, flags=re.MULTILINE)
-    updated = re.sub(
-        r"^(aktualizované:\s*).*$", rf"\g<1>{date.today().isoformat()}", updated, count=1, flags=re.MULTILINE
-    )
+    return re.sub(r"^(aktualizované:\s*).*$", rf"\g<1>{date.today().isoformat()}", updated, count=1, flags=re.MULTILINE)
 
+
+def _commit_block(*, slug: str, base: int, block_size: int, entry: str) -> str | None:
+    """DEV-94: commit only this block into the Knowledge Base and send it to GitHub. A warning, or ``None``.
+
+    The block goes onto the registry as the Knowledge Base last committed it — blocks somebody wrote into the file
+    and never committed stay in the working tree, uncommitted, as they were. A registry outside a git repository
+    (a test, a machine without the Knowledge Base) has the file as its only record and is left at that."""
+    root = kb_git.repo_of(PORT_REGISTRY_FILE.parent)
+    if root is None:
+        return None
+    end = base + block_size - 1
+    stayed = f"Blok {base}-{end} je zapísaný v evidencii portov na ANDROSe, ale"
+    rel = PORT_REGISTRY_FILE.resolve().relative_to(root.resolve()).as_posix()
     try:
-        # Write via a sibling temp file + rename: a half-written registry would read as
-        # "no reservations" on the next allocation, which is the failure we are removing.
-        tmp = PORT_REGISTRY_FILE.with_suffix(".yaml.tmp")
-        tmp.write_text(updated, encoding="utf-8")
-        tmp.replace(PORT_REGISTRY_FILE)
-    except OSError as exc:
-        return (
-            f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov "
-            f"({PORT_REGISTRY_FILE}): {exc}. Dopíš ho ručne, inak ho ďalší projekt môže dostať tiež."
+        committed = kb_git.committed(root, rel)
+        updated = (
+            _with_block(committed, slug=slug, base=base, block_size=block_size, entry=entry) if committed else None
         )
-
-    logger.info("Port block %s-%s recorded in %s for %s", base, end, PORT_REGISTRY_FILE, slug)
-    return None
+        if updated is None:
+            return f"{stayed} v Znalostnej báze nie je uložená evidencia portov, ku ktorej by sa dal pridať."
+        if updated != committed:
+            kb_git.commit_files(root, {rel: updated}, f"chore(porty): blok {base}-{end} pre {slug} — pridelil kokpit")
+    except kb_git.Refused as exc:
+        return f"{stayed} do gitu Znalostnej bázy sa neuložil: {exc}"
+    unpublished = kb_git.publish(root)
+    return f"{stayed} na GitHub sa nedostal: {unpublished}" if unpublished else None

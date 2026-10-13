@@ -92,6 +92,16 @@ function extractProjectFromPath(relativePath: string): string | null {
 
 // --- Component ---
 
+/** What a create, save or delete answers — why the change did not reach GitHub, when it did not (DEV-94). */
+interface WriteResult {
+  unpublished?: string | null;
+}
+
+/** DEV-94: the copy of the Knowledge Base on MAGER reads GitHub — a change that stayed here is said, not hidden. */
+function unpublishedNotice(reason: string): string {
+  return `Zmena je uložená na ANDROSe, ale na GitHub sa nedostala — kópia Znalostnej bázy na MAGERi ju zatiaľ nemá. ${reason}`;
+}
+
 export default function KnowledgeBasePage() {
   const user = useAuthStore((s) => s.user);
   const isDirector = user?.role === "ri";
@@ -157,6 +167,7 @@ export default function KnowledgeBasePage() {
 
   // Error — plain-Slovak HumanError (never a raw English backend detail).
   const [error, setError] = useState<HumanError | null>(null);
+  const [unpublished, setUnpublished] = useState<string | null>(null);
 
   // --- API calls ---
 
@@ -272,14 +283,16 @@ export default function KnowledgeBasePage() {
     if (!newTitle.trim() || !newCategory || !newContent.trim()) return;
     setSaving(true);
     setError(null);
+    setUnpublished(null);
     const filename = newFilename.trim() || titleToFilename(newTitle);
     try {
-      await api.post("/knowledge/documents", {
+      const saved = await api.post<WriteResult>("/knowledge/documents", {
         category: newCategory,
         filename,
         content: newContent,
         tenant: "icc",
       });
+      setUnpublished(saved?.unpublished ?? null);
       setMode("browse");
       setNewTitle("");
       setNewCategory("icc");
@@ -297,12 +310,14 @@ export default function KnowledgeBasePage() {
     if (!selectedDoc || !editContent.trim()) return;
     setSaving(true);
     setError(null);
+    setUnpublished(null);
     try {
-      await api.put("/knowledge/documents", {
+      const saved = await api.put<WriteResult>("/knowledge/documents", {
         relative_path: selectedDoc.relative_path,
         content: editContent,
         tenant: "icc",
       });
+      setUnpublished(saved?.unpublished ?? null);
       setDocContent(editContent);
       editDraft.clear();
       setMode("browse");
@@ -317,10 +332,12 @@ export default function KnowledgeBasePage() {
     if (!selectedDoc) return;
     setDeleting(true);
     setError(null);
+    setUnpublished(null);
     try {
-      await api.delete("/knowledge/documents", {
+      const deleted = await api.delete<WriteResult>("/knowledge/documents", {
         params: { relative_path: selectedDoc.relative_path, tenant: "icc" },
       });
+      setUnpublished(deleted?.unpublished ?? null);
       setSelectedDoc(null);
       setDocContent("");
       setConfirmDelete(false);
@@ -514,6 +531,22 @@ export default function KnowledgeBasePage() {
           <div className="px-3 py-2 bg-[var(--color-state-error-bg)] border-b border-[var(--color-border-default)] text-[var(--color-state-error-fg)] text-xs flex items-center justify-between">
             <span className="truncate">{error.message}</span>
             <button onClick={() => setError(null)} className="text-[var(--color-state-error-fg)] hover:opacity-80 ml-2">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
+        {unpublished && (
+          <div
+            role="status"
+            className="px-3 py-2 bg-[var(--color-state-warning-bg)] border-b border-[var(--color-border-default)] text-[var(--color-state-warning-fg)] text-xs flex items-start justify-between gap-2"
+          >
+            <span>{unpublishedNotice(unpublished)}</span>
+            <button
+              aria-label="Zavrieť upozornenie"
+              onClick={() => setUnpublished(null)}
+              className="text-[var(--color-state-warning-fg)] hover:opacity-80 shrink-0"
+            >
               <X size={12} />
             </button>
           </div>

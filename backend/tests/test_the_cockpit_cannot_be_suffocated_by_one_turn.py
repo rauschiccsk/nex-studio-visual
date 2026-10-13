@@ -46,6 +46,7 @@ SHELLING_MODULES = {
     "git_state",
     "host_docker_guard",
     "instance_adoption",
+    "kb_git",
     "nexshared",
     "notify",
     "ns_code",

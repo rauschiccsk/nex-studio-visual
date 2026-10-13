@@ -12,3 +12,11 @@ odvodí od poslednej hotovej verzie. Keď je číslo obsadené nedokončenou opr
 **Zmazanie projektu zastaví aj jeho náhľad Vizuálu.** Kokpit pri zmazaní projektu uprace UAT, Znalostnú bázu aj
 priečinok projektu, ale náhľad Vizuálu nechal bežať — frontend zmazaného projektu bol ďalej dostupný na adrese
 náhľadu. Teraz sa zastaví a odstráni spolu s ostatným.
+
+**Čo kokpit zapíše do Znalostnej bázy, dostane sa na GitHub.** Schválená štruktúra databázy sa doteraz uložila len
+na ANDROSe a kópia Znalostnej bázy na MAGERi ju nevidela; blok portov nového projektu, zmazanie priečinka projektu
+a dokument vytvorený, upravený či zmazaný na stránke Znalostnej bázy sa neuložili do gitu vôbec. Teraz kokpit každý
+taký zápis uloží samostatným commitom, v ktorom sú len jeho súbory — cudzia rozrobená práca v Znalostnej báze ostane
+nedotknutá — a odošle ho na GitHub. Keď sa to nepodarí, povie to vetou správa po schválení schémy, upozornenie pri
+založení projektu aj stránka Znalostnej bázy; čo sa nepodarilo odoslať, skúša kokpit znova sám každých päť minút.
+Keď má GitHub novšie zmeny, kokpit nič nezlučuje ani neprepisuje a ohlási to.

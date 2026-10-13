@@ -18,10 +18,14 @@ Differences from NEX Command source:
   return a ``warning`` field instead of failing the request.
 * Knowledge proposal workflow (proposal_repo) is OUT of scope for the
   feature parity audit.
+* DEV-94: POST / PUT / DELETE commit the one document they wrote and send
+  the Knowledge Base to GitHub, where its copy on MAGER reads it from;
+  ``unpublished`` says why it did not get there (``None`` when it did).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
@@ -35,6 +39,7 @@ from backend.core.security import get_current_user, has_full_kb_access
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.rag.indexer import RAGIndexer
+from backend.services import kb_git
 from backend.services.knowledge_manager import KnowledgeManager
 from backend.utils.kb_access import (
     filter_kb_documents as _filter_documents_by_role,
@@ -95,6 +100,17 @@ def _get_manager() -> KnowledgeManager:
 
 def _get_indexer() -> RAGIndexer:
     return RAGIndexer()
+
+
+async def _record_in_git(
+    manager: KnowledgeManager, relative_path: str, content: Optional[str], done: str, user: User
+) -> Optional[str]:
+    """Commit the one document the page wrote (``None`` = removed) and send it to GitHub (DEV-94).
+
+    Why it did not reach GitHub, or ``None``. Git and the network run off the main loop."""
+    rel = relative_path.replace("\\", "/").strip("/")
+    message = f"docs(kb): {rel} — {done} {user.username} v kokpite"
+    return await asyncio.to_thread(kb_git.record, manager.base_path, {rel: content}, message)
 
 
 # --- Routes ---
@@ -208,6 +224,7 @@ async def create_document(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    unpublished = await _record_in_git(manager, relative_path, request.content, "vytvoril", user)
 
     if request.project_slug:
         expected_prefix = f"projects/{request.project_slug}"
@@ -233,6 +250,7 @@ async def create_document(
             "chunks": 0,
             "tenant": request.tenant,
             "warning": f"Saved to disk but Qdrant ingest failed: {e}",
+            "unpublished": unpublished,
         }
 
     return {
@@ -242,6 +260,7 @@ async def create_document(
         "size_bytes": len(request.content.encode("utf-8")),
         "chunks": result["chunks"],
         "tenant": request.tenant,
+        "unpublished": unpublished,
     }
 
 
@@ -271,6 +290,7 @@ async def update_document(
         raise HTTPException(status_code=404, detail="Document not found") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    unpublished = await _record_in_git(manager, request.relative_path, request.content, "upravil", user)
 
     try:
         result = await indexer.reindex_document(
@@ -287,6 +307,7 @@ async def update_document(
             "chunks": 0,
             "tenant": request.tenant,
             "warning": f"Updated on disk but Qdrant reindex failed: {e}",
+            "unpublished": unpublished,
         }
 
     return {
@@ -294,6 +315,7 @@ async def update_document(
         "size_bytes": len(request.content.encode("utf-8")),
         "chunks": result["chunks"],
         "tenant": request.tenant,
+        "unpublished": unpublished,
     }
 
 
@@ -343,6 +365,7 @@ async def delete_document(
         "relative_path": relative_path,
         "chunks_removed": deleted_chunks,
         "tenant": tenant,
+        "unpublished": await _record_in_git(manager, relative_path, None, "zmazal", user),
     }
 
     if qdrant_error:

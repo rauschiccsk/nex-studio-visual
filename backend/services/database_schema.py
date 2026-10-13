@@ -12,8 +12,9 @@ The flow this module serves:
   project whose Knowledge Base lags behind catches up on its next approval);
 * :func:`compare` says whether that document differs from the Knowledge Base — the gate and the screen read it;
 * only a user with :data:`APPROVER_ROLE` may approve a difference;
-* :class:`KnowledgeBaseSchemaPublisher` writes the document and the project's rows and commits exactly those
-  files. The agent keeps the Knowledge Base read-only (Director, 23.08.2026) — the cockpit server writes it.
+* :class:`KnowledgeBaseSchemaPublisher` writes the document and the project's rows, commits exactly those
+  files and sends the commit to GitHub (DEV-94). The agent keeps the Knowledge Base read-only (Director,
+  23.08.2026) — the cockpit server writes it.
 """
 
 from __future__ import annotations
@@ -21,13 +22,14 @@ from __future__ import annotations
 import difflib
 import os
 import re
-import subprocess
-import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from backend.config.settings import settings
+from backend.services import kb_git
 
 #: The schema document's name — in the version's spec folder and in the Knowledge Base alike.
 SCHEMA_FILENAME = "DATABASE_SCHEMAS.md"
@@ -47,12 +49,6 @@ _GOVERNANCE_HEADING = "## Kde sú schémy"
 _INDEX_HEADING = "## Active"
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-
-#: How long one git command may take on the Knowledge Base repository.
-_GIT_TIMEOUT_SECONDS = 30
-
-#: The identity the cockpit commits under (the same one the backend image configures for project repositories).
-_GIT_AUTHOR = ("NEX Studio", "studio@isnex.eu")
 
 #: The longest project description that goes into the project index — one line of a table.
 _INDEX_DESCRIPTION_MAX = 200
@@ -141,6 +137,19 @@ class PublishResult:
     commit: Optional[str]
     kb_path: str
     changed: list[str] = field(default_factory=list)
+    #: Why the Knowledge Base did not reach GitHub, or ``None`` when GitHub holds it (DEV-94).
+    unpublished: Optional[str] = None
+
+
+@contextmanager
+def _refused_in_these_words() -> Iterator[None]:
+    """A git refusal as this module's refusal — repeating the approval is what the manager can do."""
+    try:
+        yield
+    except kb_git.Moved as exc:
+        raise SchemaPublishRefused("Znalostná báza sa práve menila — schválenie skús ešte raz.") from exc
+    except kb_git.Refused as exc:
+        raise SchemaPublishRefused(str(exc)) from exc
 
 
 def _table_end(lines: list[str], heading: str) -> Optional[int]:
@@ -186,7 +195,7 @@ class KnowledgeBaseSchemaPublisher:
     table and in the project index. The commit is built on a private index from the committed versions of those
     files, so somebody's uncommitted work — in other files or inside a file that gets a row — is never committed;
     it stays in the working tree as it was. The schema document itself is refused rather than written over an
-    edit. Git runs as the owner of the repository, so the root-run backend leaves no file only root can touch.
+    edit. The commit then goes to GitHub; when it cannot, the result says why (:mod:`backend.services.kb_git`).
     """
 
     def __init__(self, base_path: Path | str) -> None:
@@ -214,14 +223,6 @@ class KnowledgeBaseSchemaPublisher:
             target = (self._root / rel).resolve()
             if not target.is_relative_to(self._root):
                 raise SchemaPublishRefused(f"Cesta {rel} vedie mimo Znalostnej bázy — nezapísalo sa nič.")
-
-        staged = set(self._git("diff", "--cached", "--name-only").split())
-        busy = [rel for rel in (schema_rel, GOVERNANCE_REL, INDEX_REL) if rel in staged]
-        if busy:
-            raise SchemaPublishRefused(
-                f"V Znalostnej báze sú pripravené na uloženie cudzie zmeny v {', '.join(busy)} — kokpit ich "
-                "nepribalí ani neprepíše. Treba ich najprv uložiť alebo vrátiť."
-            )
 
         document = content.replace("\r\n", "\n").strip("\n") + "\n"
         head_doc = self._committed(schema_rel)
@@ -253,12 +254,14 @@ class KnowledgeBaseSchemaPublisher:
                 on_disk[rel] = _with_row(work_text, heading, row, present, label) if work_text is not None else new_head
 
         if not committed:
-            return PublishResult(commit=None, kb_path=schema_rel)
+            return PublishResult(commit=None, kb_path=schema_rel, unpublished=kb_git.publish(self._root))
 
-        commit = self._commit(
-            committed,
-            f"docs({slug}): schválená štruktúra databázy v{version_number} — schválil {approved_by} v kokpite",
-        )
+        with _refused_in_these_words():
+            commit = kb_git.commit_files(
+                self._root,
+                committed,
+                f"docs({slug}): schválená štruktúra databázy v{version_number} — schválil {approved_by} v kokpite",
+            )
         for rel, text in on_disk.items():
             self._write(rel, text)
 
@@ -267,72 +270,15 @@ class KnowledgeBaseSchemaPublisher:
                 raise SchemaPublishRefused(f"Po zápise sa {rel} v Znalostnej báze nezhoduje so schválenou podobou.")
         if _read(self._root / schema_rel) != (on_disk.get(schema_rel) or head_doc):
             raise SchemaPublishRefused(f"Po zápise sa {schema_rel} na disku nezhoduje so schválenou podobou.")
-        return PublishResult(commit=commit, kb_path=schema_rel, changed=sorted(committed))
+        return PublishResult(
+            commit=commit, kb_path=schema_rel, changed=sorted(committed), unpublished=kb_git.publish(self._root)
+        )
 
     # ── git plumbing ──────────────────────────────────────────────────────────────────────────────────────────
 
-    def _owner(self) -> tuple[int, int]:
-        st = self._root.stat()
-        return st.st_uid, st.st_gid
-
-    def _git(self, *args: str, stdin: Optional[str] = None, env: Optional[dict[str, str]] = None) -> str:
-        uid, gid = self._owner()
-        as_owner = os.geteuid() == 0 and uid != 0
-        run_env = {
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-            "HOME": tempfile.gettempdir(),
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_AUTHOR_NAME": _GIT_AUTHOR[0],
-            "GIT_AUTHOR_EMAIL": _GIT_AUTHOR[1],
-            "GIT_COMMITTER_NAME": _GIT_AUTHOR[0],
-            "GIT_COMMITTER_EMAIL": _GIT_AUTHOR[1],
-            **(env or {}),
-        }
-        try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=self._root,
-                input=stdin,
-                capture_output=True,
-                text=True,
-                timeout=_GIT_TIMEOUT_SECONDS,
-                env=run_env,
-                user=uid if as_owner else None,
-                group=gid if as_owner else None,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise SchemaPublishRefused(f"Git v Znalostnej báze neodpovedal ({exc.__class__.__name__}).") from exc
-        if result.returncode != 0:
-            raise SchemaPublishRefused(f"Git v Znalostnej báze odmietol príkaz: {result.stderr.strip()[:300]}")
-        return result.stdout
-
     def _committed(self, rel: str) -> Optional[str]:
-        listed = self._git("ls-tree", "--name-only", "HEAD", "--", rel).strip()
-        return self._git("show", f"HEAD:{rel}") if listed == rel else None
-
-    def _commit(self, files: dict[str, str], message: str) -> str:
-        """Commit ``files`` on top of HEAD through a private index; the shared index gets only these paths."""
-        branch = self._git("symbolic-ref", "-q", "HEAD").strip()
-        old = self._git("rev-parse", "HEAD").strip()
-        blobs = {rel: self._git("hash-object", "-w", "--stdin", stdin=text).strip() for rel, text in files.items()}
-        with tempfile.TemporaryDirectory() as tmp:
-            private = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
-            if os.geteuid() == 0:
-                uid, gid = self._owner()
-                os.chown(tmp, uid, gid)
-            self._git("read-tree", "HEAD", env=private)
-            for rel, blob in blobs.items():
-                self._git("update-index", "--add", "--cacheinfo", f"100644,{blob},{rel}", env=private)
-            tree = self._git("write-tree", env=private).strip()
-        new = self._git("commit-tree", tree, "-p", old, "-m", message).strip()
-        # Compare-and-swap: a commit somebody made meanwhile is never thrown away.
-        try:
-            self._git("update-ref", "-m", message, branch, new, old)
-        except SchemaPublishRefused as exc:
-            raise SchemaPublishRefused("Znalostná báza sa práve menila — schválenie skús ešte raz.") from exc
-        for rel, blob in blobs.items():
-            self._git("update-index", "--add", "--cacheinfo", f"100644,{blob},{rel}")
-        return new
+        with _refused_in_these_words():
+            return kb_git.committed(self._root, rel)
 
     def _write(self, rel: str, text: str) -> None:
         target = self._root / rel
@@ -341,6 +287,6 @@ class KnowledgeBaseSchemaPublisher:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, target)
         if os.geteuid() == 0:
-            uid, gid = self._owner()
-            os.chown(target, uid, gid)
-            os.chown(target.parent, uid, gid)
+            st = self._root.stat()
+            os.chown(target, st.st_uid, st.st_gid)
+            os.chown(target.parent, st.st_uid, st.st_gid)

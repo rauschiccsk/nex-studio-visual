@@ -20,6 +20,7 @@ from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 # DEV-85: ``TestClient(app)`` runs the app's real life cycle — the main-branch watch would ask GitHub and send Telegram
 # messages. Here, at the root, so both test trees see it (pytest reads a conftest only upwards from a test).
 settings.ci_watch_enabled = False
+settings.kb_publish_enabled = False
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +45,29 @@ def _isolate_port_registry(tmp_path_factory, monkeypatch):
 
     absent = tmp_path_factory.mktemp("no-registry") / "port-registry.yaml"
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", absent)
+
+
+#: The Knowledge Base the cockpit runs against — read before any test points the setting elsewhere.
+_LIVE_KNOWLEDGE_BASE = Path(settings.knowledge_base_path).resolve()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_knowledge_base_git(monkeypatch):
+    """No test commits into the LIVE Knowledge Base or sends it to GitHub (DEV-94).
+
+    Every git command the cockpit runs on a Knowledge Base goes through ``kb_git._run``. On the live one it fails the
+    test instead of running: a test that gets there is a gap in its isolation, and a commit there would be pushed.
+    """
+    from backend.services import kb_git
+
+    real_run = kb_git._run
+
+    def _run(root, args, **kwargs):
+        if Path(root).resolve() == _LIVE_KNOWLEDGE_BASE:
+            pytest.fail(f"a test ran `git {' '.join(args[:2])}` on the live Knowledge Base {root}")
+        return real_run(root, args, **kwargs)
+
+    monkeypatch.setattr(kb_git, "_run", _run)
 
 
 @pytest.fixture(autouse=True)

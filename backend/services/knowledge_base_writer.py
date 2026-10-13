@@ -39,9 +39,14 @@ Design notes (per ``docs/architect/live-docs-port.md``):
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
+
+from backend.services import kb_git
+
+logger = logging.getLogger(__name__)
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -144,6 +149,10 @@ class KnowledgeBaseWriter:
         Guards against path traversal via the same slug regex that
         protects writes, then physically verifies the resolved path
         is inside ``{base}/projects/`` before ``rmtree``-ing.
+
+        DEV-94: the removal is committed and sent to GitHub, so the copy
+        of the Knowledge Base on MAGER loses the folder too. A commit or
+        a push that fails is logged — like every cleanup of the delete.
         """
         if not _SLUG_RE.match(project_slug):
             raise ValueError(f"Invalid project slug: {project_slug!r}. Expected lowercase alphanumeric with hyphens.")
@@ -156,13 +165,29 @@ class KnowledgeBaseWriter:
         except ValueError as exc:
             raise ValueError(f"Resolved path escapes Knowledge Base projects root: {target}") from exc
 
-        if not target.is_dir():
-            return False
+        existed = target.is_dir()
+        if existed:
+            import shutil
 
-        import shutil
+            shutil.rmtree(target)
+        self._commit_removal(project_slug)
+        return existed
 
-        shutil.rmtree(target)
-        return True
+    def _commit_removal(self, project_slug: str) -> None:
+        if not kb_git.is_repo(self._base_path):
+            return
+        try:
+            tracked = kb_git.tracked_under(self._base_path, f"projects/{project_slug}")
+        except kb_git.Refused as exc:
+            logger.warning("Removal of projects/%s not committed in the Knowledge Base: %s", project_slug, exc)
+            return
+        if not tracked:
+            return
+        unpublished = kb_git.record(
+            self._base_path, dict.fromkeys(tracked), f"chore({project_slug}): projekt zmazaný v kokpite"
+        )
+        if unpublished:
+            logger.warning("Removal of projects/%s did not reach GitHub: %s", project_slug, unpublished)
 
     # ── internals ─────────────────────────────────────────────────────
 
