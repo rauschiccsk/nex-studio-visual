@@ -21,7 +21,7 @@ Make `backend/services/{uat_provisioner,deploy,orchestrator}.py` **environment-a
 | Example containers | `uat-andros-uat-backend` | `andros-payables-backend` |
 | Public URL / Traefik host | `uat-<instance-slug>.isnex.eu` | `<customer-slug>-<app>.isnex.eu` |
 | Traefik router names | `uat-<instance-slug>` / `-api` | `<customer-slug>-<app>` / `-api` |
-| restart policy | `no` (keep) | `unless-stopped` |
+| restart policy | `unless-stopped`, one-shot services `no` (DEV-11) | `unless-stopped`, one-shot services `no` |
 
 Where:
 - **`customer-slug`** = `(customer.subdomain or customer.slug).strip().lower()` — e.g. `andros`.
@@ -47,7 +47,7 @@ Add an `environment: str` parameter (values `'uat'` | `'prod'`, default `'uat'` 
 - `:723 image` — uat `uat-{slug}-{name}:latest`, prod `{customer}-{app}-{name}:latest`.
 - `:811 compose name` — uat `uat-{slug}`, prod `{customer}-{app}`.
 - backend service networks: ensure BOTH `default` + `nex-proxy-net` (networking fix), both envs.
-- backend restart: prod `unless-stopped`, uat keep `no`.
+- restart: both envs `unless-stopped`; a service that runs once and exits stays `no` (DEV-11, Director 15.07.2026 — UAT had `no` until cockpit 4.44.0).
 - `build_uat_compose(...)` + `provision_uat(...)`: add `environment`, `customer_slug`, `app`, `full_project_slug` params; select `PROD_ROOT / customer_slug / full_project_slug` vs `UAT_ROOT / uat_slug`.
 
 **`backend/services/deploy.py`:**

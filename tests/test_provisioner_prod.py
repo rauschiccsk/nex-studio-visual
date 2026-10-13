@@ -228,7 +228,7 @@ def test_uat_default_still_yields_uat_names_and_host(tmp_path):
     assert res.uat_dir == tmp_path / "uat" / "andros-uat"
     assert data["name"] == "uat-andros-uat"
     assert data["services"]["backend"]["container_name"] == "uat-andros-uat-backend"
-    assert data["services"]["backend"]["restart"] == "no"
+    assert data["services"]["backend"]["restart"] == "unless-stopped"  # DEV-11: UAT comes back like PROD
     assert (
         "traefik.http.routers.uat-andros-uat.rule=Host(`uat-andros-uat.isnex.eu`)"
         in (data["services"]["frontend"]["labels"])

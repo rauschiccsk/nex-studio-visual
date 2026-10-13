@@ -82,3 +82,9 @@ nových projektov bežia na serveri, kde bežia aj inštalácie zákazníkov. Do
 serveri bežalo niečo pod rovnakým menom, upratovanie po skúškach by zmazalo jeho databázu. Teraz má každý beh
 kontroly vlastné meno, takže sa ani dva behy naraz navzájom nedotknú. Na konci beh po sebe upratá všetko, čo vytvoril,
 aj keď niektorá kontrola zlyhala.
+
+**Testovacia inštalácia po reštarte servera nabehne sama, rovnako ako ostrá.** Doteraz dostávala testovacia
+inštalácia nastavenie „bez automatického štartu". Po reštarte servera preto ostala vypnutá a museli ju zapnúť ručne.
+Teraz sa po reštarte vráti všetko, čo bežalo. Inštalácia, ktorú niekto zámerne zastavil, ostane zastavená. Bez
+automatického štartu ostanú len kroky, ktoré sa spustia raz a skončia, napríklad migrácia databázy. To platí aj
+pre ostrú inštaláciu.

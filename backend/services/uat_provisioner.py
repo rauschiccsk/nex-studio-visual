@@ -371,6 +371,32 @@ def _depended_on_by_others(name: str, src_services: dict[str, Any]) -> bool:
     return False
 
 
+def _waited_on_to_finish(name: str, src_services: dict[str, Any]) -> bool:
+    """Does another service wait for this one to EXIT (``service_completed_successfully``)?"""
+    for other, svc in src_services.items():
+        if other == name or not isinstance(svc, dict):
+            continue
+        deps = svc.get("depends_on")
+        dep = deps.get(name) if isinstance(deps, dict) else None
+        if isinstance(dep, dict) and dep.get("condition") == "service_completed_successfully":
+            return True
+    return False
+
+
+def _runs_once(name: str, svc: dict[str, Any], src_services: dict[str, Any], roles: dict[str, Optional[str]]) -> bool:
+    """Is this service a step that runs and exits, rather than a part of the running app? (DEV-11)
+
+    Such a service must not come back after a server restart, and must not be restarted after it exits 0 — whoever
+    waits for it to finish would wait forever ("timeout waiting for dependencies", live PROD validation 07.07.2026).
+    The compose says which it is: the source marks it ``restart: "no"``, another service waits for it to finish, or
+    it is the test runner.
+    """
+    source_restart = svc.get("restart")
+    if source_restart == "no" or source_restart is False:
+        return True
+    return _waited_on_to_finish(name, src_services) or is_test_runner_service(name, svc, roles)
+
+
 def _container_port(port_entry: Any) -> Optional[int]:
     """Container-side port from a compose ``ports`` entry (short ``H:C`` / ``IP:H:C`` /
     ``C/tcp`` or long-form ``{target: C}``); ``None`` on parse failure."""
@@ -2054,7 +2080,7 @@ def build_uat_compose(
 
     Per-service transform: rename ``container_name`` + built-image tag to ``<name_base>-<svc>``
     (``name_base`` = ``uat-<slug>`` for UAT / ``<customer>-<app>`` for PROD, design §2), absolutize
-    build contexts, set ``restart`` (uat ``"no"`` / prod ``"unless-stopped"``), preserve
+    build contexts, set ``restart`` (``"unless-stopped"``, ``"no"`` for a service that runs once), preserve
     environment/volumes/healthcheck/depends_on/extra_hosts/networks, and force the DB password to the
     synthetic ``${POSTGRES_PASSWORD}``. The FE + BE services additionally join ``nex-proxy-net`` and
     get the exact Traefik labels on the per-env host. Top-level ``name: <name_base>`` namespaces all
@@ -2067,7 +2093,6 @@ def build_uat_compose(
     src_services: dict[str, Any] = source["services"]
 
     name_base, host = _instance_naming(environment, slug, customer_slug, app, private=private)
-    restart_policy = "unless-stopped" if environment == "prod" else "no"
 
     services: dict[str, Any] = {}
     for name, src_svc in src_services.items():
@@ -2078,13 +2103,10 @@ def build_uat_compose(
         # stack. Kept in the file rather than deleted — the rendered compose stays a faithful copy.
         if is_test_runner_service(name, svc, roles) and not _depended_on_by_others(name, src_services):
             svc["profiles"] = [TEST_RUNNER_PROFILE]
-        # One-shot services (e.g. migrate ``alembic upgrade head``) are marked ``restart: "no"``
-        # in the source and are depended on via ``service_completed_successfully``. Forcing PROD's
-        # ``unless-stopped`` on them makes docker restart them after exit 0 → the dependency never
-        # satisfies → deploy hangs ("timeout waiting for dependencies"). Preserve the one-shot
-        # marker; apply the env restart policy only to long-running services.
-        _src_restart = svc.get("restart")
-        svc["restart"] = "no" if (_src_restart == "no" or _src_restart is False) else restart_policy
+        # DEV-11: what runs comes back after a server restart — in UAT exactly as in PROD. UAT installations serve
+        # customers for acceptance for months and hold no host port; with ``"no"`` they stayed down after ANDROS
+        # moved (06.10.2026). The Director decided on 15.07.2026: fix the generator now.
+        svc["restart"] = "no" if _runs_once(name, svc, src_services, roles) else "unless-stopped"
 
         # Built services → tag + absolutize context; image-only services pass through.
         build = svc.get("build")
@@ -2459,9 +2481,9 @@ def provision_uat(
 
     Environment-aware (design §2): UAT renders under ``/opt/uat/<uat_slug>/`` with ``uat-<slug>-*``
     names; PROD renders under ``/opt/customers/<customer_slug>/<full_project_slug>/`` with
-    ``<customer_slug>-<app>-*`` names, the clean ``<customer_slug>-<app>.isnex.eu`` Traefik host, and
-    ``restart: unless-stopped``. ``environment`` defaults to ``'uat'`` (back-compat); PROD requires
-    ``customer_slug`` + ``app`` + ``full_project_slug``. BOTH route via Traefik on ``nex-proxy-net``.
+    ``<customer_slug>-<app>-*`` names and the clean ``<customer_slug>-<app>.isnex.eu`` Traefik host.
+    ``environment`` defaults to ``'uat'`` (back-compat); PROD requires ``customer_slug`` + ``app`` +
+    ``full_project_slug``. BOTH route via Traefik on ``nex-proxy-net`` and come back after a server restart.
 
     Pure provisioning — it does **NOT** build or start anything (Phase-3 ``_run_uat_deploy`` /
     ``_run_prod_deploy`` does). Synchronous; an async caller should wrap it via ``asyncio.to_thread``.

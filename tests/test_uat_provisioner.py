@@ -282,9 +282,9 @@ def test_provision_renames_containers_and_built_images(tmp_path):
     assert data["services"]["qdrant"]["container_name"] == "uat-asistent-qdrant"
     # Pull-through image preserved (qdrant not rebuilt).
     assert data["services"]["qdrant"]["image"] == "qdrant/qdrant:v1.13.6"
-    # All services ephemeral.
+    # DEV-11: a UAT installation comes back after a server restart, like PROD (Director 15.07.2026).
     for svc in data["services"].values():
-        assert svc["restart"] == "no"
+        assert svc["restart"] == "unless-stopped"
 
 
 def test_provision_absolutizes_build_context(tmp_path):
