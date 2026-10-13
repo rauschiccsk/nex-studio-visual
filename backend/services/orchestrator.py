@@ -3927,6 +3927,18 @@ def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[t
     return source, [_finding_text(f) for f in findings]
 
 
+#: DEV-107 — the option that holds an engine verification card until the manager decides, and the cards it holds.
+_HOLD_OPTION = "hold"
+_HOLDING_SOURCES = ("verifikacia_fix", "verifikacia_fail")
+
+
+def _answer_holds(consultation: dict[str, Any], option_id: Optional[str]) -> bool:
+    """Does this answer keep the card open? The hold option of a verification card does — whatever stands in the
+    guidance field; until DEV-107 a text there turned the hold into a prepared fix. On a card the agent prepared an
+    option named the same is an ordinary choice."""
+    return option_id == _HOLD_OPTION and consultation.get("source") in _HOLDING_SOURCES
+
+
 def _consultation_answers(db: Session, version_id: uuid.UUID, after_seq: int) -> dict[str, dict[str, Any]]:
     """CR-V2-041: map ``decision.key`` → its recorded ``decide`` answer for the consultation whose message
     seq is ``after_seq`` — the durable kind=answer decide-records (``payload.consultation_decision``) with a
@@ -14308,6 +14320,8 @@ async def apply_action(
                     "free_text": free_text,
                     "label": label,
                     "note": (str(payload.get("note", "")).strip() or None),
+                    # DEV-107: the answer that keeps the card open — the screen reads it, never its own copy.
+                    "held": _answer_holds(c, option_id),
                 },
             },
         )
@@ -14320,11 +14334,11 @@ async def apply_action(
             return state
         # CR-V2-054: a verifikacia_fail escalation Decision Card routes to the AI-Agent FIX loop, NOT a
         # re-dispatch of the current actor (the Auditor). The operator's answer (free text preferred, else the
-        # chosen option label) is the fix brief; a plain 'hold' keeps the build blocked (they can steer later
-        # via 'Uprav').
+        # chosen option label) is the fix brief; a 'hold' keeps the build blocked whatever stands in the guidance
+        # field (DEV-107) — they can steer later via the card or 'Uprav'.
         if c.get("source") == "verifikacia_fail":
             ans = answered.get("verifikacia_fail_next") or {}
-            if ans.get("option_id") == "hold" and not ans.get("free_text") and not ans.get("note"):
+            if ans.get("held"):
                 state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
                 db.flush()
                 return state
@@ -14339,11 +14353,12 @@ async def apply_action(
         #     ``get_next_todo_task``) — NO second task, NO second iteration bump (both happened in the settle).
         #     Only offered when the fix was positively vetted (:func:`_build_fix_consultation` invariant).
         #   * ``guide`` — route the operator's own fix brief to the AI Agent (the fixer), resetting the loop.
-        #   * ``hold`` — re-block WITHOUT consuming the card: the card stays the action surface (no dead-end).
+        #   * ``hold`` — re-block WITHOUT consuming the card: the card stays the action surface (no dead-end), also
+        #     with text in the guidance field (DEV-107); the answer carries ``held`` so the screen keeps the card.
         if c.get("source") == "verifikacia_fix":
             ans = answered.get("verifikacia_fix_next") or {}
             opt = ans.get("option_id")
-            if opt == "hold" and not ans.get("free_text") and not ans.get("note"):
+            if ans.get("held"):
                 state.next_action = (
                     "Podržané — rozhodni neskôr (Decision Card): spusti opravu, usmerni ju, alebo podrž."
                 )

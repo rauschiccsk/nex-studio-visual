@@ -165,15 +165,37 @@ function latestConsultation(messages: PipelineMessage[]): { consultation: Consul
 // — i.e. with a seq strictly AFTER the consultation message. SEQ-scoped (not consultation_id-scoped) so a re-
 // consultation that reuses an id or keys can NEVER fold an old answer into the new card (mirrors backend
 // `_consultation_answers` — the verify-round blocker fix).
+//
+// DEV-107: an answer the backend recorded as ``held`` (a verification card held until he decides) does not close the
+// card; the decision that comes after it does.
 function answeredLabels(messages: PipelineMessage[], afterSeq: number): Record<string, string> {
   const out: Record<string, string> = {};
   for (const m of messages) {
-    if (!m || m.kind !== "answer" || m.seq <= afterSeq) continue;
-    const cd = (m.payload as { consultation_decision?: { key?: string; label?: string } } | null)
-      ?.consultation_decision;
-    if (cd && cd.key) out[cd.key] = cd.label ?? "—";
+    const cd = decisionAnswer(m, afterSeq);
+    if (cd?.key && !cd.held) out[cd.key] = cd.label ?? "—";
   }
   return out;
+}
+
+interface DecisionAnswer {
+  key?: string;
+  label?: string;
+  held?: boolean;
+}
+
+function decisionAnswer(m: PipelineMessage | undefined, afterSeq: number): DecisionAnswer | null {
+  if (!m || m.kind !== "answer" || m.seq <= afterSeq) return null;
+  return (m.payload as { consultation_decision?: DecisionAnswer } | null)?.consultation_decision ?? null;
+}
+
+/** DEV-107: is the newest answer to this card a hold? Then the card waits — and says so. */
+function heldNow(messages: PipelineMessage[], key: string, afterSeq: number): boolean {
+  let newest: { seq: number; held: boolean } | null = null;
+  for (const m of messages) {
+    const cd = decisionAnswer(m, afterSeq);
+    if (cd?.key === key && (newest === null || m.seq > newest.seq)) newest = { seq: m.seq, held: !!cd.held };
+  }
+  return newest?.held ?? false;
 }
 
 interface Props {
@@ -238,6 +260,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const context = board.decision_context?.[current.key];
   const origin = povodVeta(current, context);
   const reopens = znovuOtvara(context);
+  const held = latest ? heldNow(messages, current.key, latest.seq) : false;
 
   const canSubmit = !submitting && (showFree ? freeText.trim().length > 0 : picked != null);
 
@@ -252,10 +275,13 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
       const nextBoard = await postPipelineActionApi(versionId, { action: "decide", payload });
       onBoard(nextBoard);
       setPicked(null);
-      freeTextDraft.clear();
-      noteDraft.clear();
-      dismissPoradca();
-      setShowFree(false);
+      // DEV-107: a hold sends nothing — what stands in the fields stays there for the decision still to come.
+      if (!(latest && heldNow(nextBoard.recent_messages ?? [], current.key, latest.seq))) {
+        freeTextDraft.clear();
+        noteDraft.clear();
+        dismissPoradca();
+        setShowFree(false);
+      }
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Rozhodnutie zlyhalo"));
     } finally {
@@ -333,6 +359,11 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             Rozhodnutie {idx + 1} z {total}
           </div>
           <div className="text-sm font-medium text-[var(--color-text-primary)]">{current.question}</div>
+          {held && (
+            <p role="status" className="mt-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
+              Podržané — karta počká na tvoje rozhodnutie.
+            </p>
+          )}
           {/* ICCINT-123: jedna veta o pôvode. Nemení to POČET otázok — mení to, čo si o tom počte
               Manažér myslí. Pri NEX Inbox v1.5.0 vyzeralo štvrté kolo najhoršie a bol to čistý objav:
               nevyvolalo ho žiadne jeho rozhodnutie, a z karty to nijako nevyplývalo. */}
@@ -442,7 +473,10 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           {fromPoradca && (
             <p className="mt-2 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
           )}
-          {noteDraft.restored && !fromPoradca && (
+          {held && note.trim() && (
+            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">Text v poli sa neposlal — ostáva tu na neskôr.</p>
+          )}
+          {noteDraft.restored && !fromPoradca && !held && (
             <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
           )}
           <textarea
