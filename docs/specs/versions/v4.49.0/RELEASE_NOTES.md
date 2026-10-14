@@ -6,3 +6,8 @@ obrazov, kým ešte beží stará verzia, vypíše databázu do priečinka inšt
 dá prečítať, a až potom vymení kontajnery. Keď sa záloha nepodarí alebo na disku nie je miesto, nasadenie sa nezačne
 a stará verzia beží ďalej. Priebeh nasadenia ukáže krok „zálohujem databázu“ a hlásenie povie, kde záloha leží;
 ponechá sa posledných päť záloh.
+
+**Bežiace nasadenie je vidieť aj po návrate na stránku.** Keď si počas nasadenia odišiel na inú záložku a vrátil
+sa, riadok na stránke UAT či PROD ukazoval starý stav a svietiace „Nasadiť“, akoby sa nič nedialo. Teraz sa riadok
+sám pýta kokpitu, či na inštalácii beží nasadenie: ukáže krok a ako dlho trvá, „Nasadiť“ aj „Prevziať inštaláciu…“
+sú dovtedy zašednuté a po skončení sa riadok sám obnoví na výsledok. Platí to aj pre nasadenie spustené z iného okna.

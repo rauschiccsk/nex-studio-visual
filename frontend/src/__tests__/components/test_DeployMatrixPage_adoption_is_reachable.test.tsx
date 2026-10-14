@@ -31,6 +31,8 @@ vi.mock("@/services/api/deploy", () => ({
   deployCustomer: vi.fn(),
   acceptCustomerUat: vi.fn(),
   uatLaunch: vi.fn(),
+  // DEV-115: each row asks whether a deploy runs on its installation; in these tests none does.
+  getDeployProgress: vi.fn(() => Promise.resolve({ bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 })),
 }));
 
 const contextMock = { selectedProject: { slug: "nex-inbox", name: "NEX Inbox" } };

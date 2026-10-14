@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
@@ -10,7 +10,15 @@ import {
   UploadCloud,
 } from "lucide-react";
 
-import { acceptCustomerUat, deployCustomer, getDeployMatrix, getUatChecks, uatLaunch } from "@/services/api/deploy";
+import {
+  acceptCustomerUat,
+  deployCustomer,
+  getDeployMatrix,
+  getDeployProgress,
+  getUatChecks,
+  uatLaunch,
+  type DeployProgress,
+} from "@/services/api/deploy";
 import UatGuidePanel from "@/components/deploy/UatGuidePanel";
 import { ApiError } from "@/services/api";
 import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
@@ -20,6 +28,7 @@ import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } f
 import { acceptanceTesting } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
 import { fmtDeployTime, fmtVer } from "./version";
+import { popisPriebehu } from "./popisPriebehu";
 
 /**
  * Shared version × customer matrix page for the UAT and PROD tabs (CR-V2-027,
@@ -87,6 +96,12 @@ function backupNote(detail: string | null): string | null {
   const at = head.indexOf(BACKUP_SENTENCE);
   return at < 0 ? null : (head.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
 }
+
+// DEV-115 — how often a row asks whether a deploy runs on its installation: often while one runs (the step and the
+// time are what tells work from a freeze), rarely otherwise (a deploy started from another window or by someone else).
+const PROGRESS_POLL_RUNNING_MS = 2000;
+const PROGRESS_POLL_IDLE_MS = 15000;
+const RUNNING_REASON = "Na tejto inštalácii práve beží nasadenie — počkaj, kým skončí.";
 
 export default function DeployMatrixPage({ environment }: DeployMatrixPageProps) {
   const navigate = useNavigate();
@@ -162,6 +177,45 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     const timer = window.setInterval(() => load(true), REVERIFY_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [reverifyRunning, load]);
+
+  // DEV-115 — which rows have a deploy running, asked from the SERVER (backend/services/deploy_progress.py). The
+  // click's own `busy` lives only in this page: Director 14.10.2026 left for Zásobník mid-deploy and came back to the
+  // old version, „Posledný pokus zlyhal“ and a live „Nasadiť“ — „Z toho mi nie je jasné či nasadenie sa prerušilo
+  // alebo je to v poriadku.“ When a deploy ends, the matrix reloads so the row shows its result.
+  const [running, setRunning] = useState<Record<string, DeployProgress>>({});
+  const runningRef = useRef<Record<string, DeployProgress>>({});
+  const rowIds = (matrix?.rows ?? []).map((r) => r.customer_id).join(",");
+  const anyRunning = Object.keys(running).length > 0;
+  useEffect(() => {
+    if (!rowIds) return;
+    let cancelled = false;
+    const ids = rowIds.split(",");
+    const tick = () => {
+      void Promise.all(
+        ids.map((id) =>
+          getDeployProgress(id, environment).then(
+            (p) => [id, p] as const,
+            // Progress is an extra — a failed question keeps what the row showed, it never breaks the page.
+            () => [id, runningRef.current[id] ?? null] as const,
+          ),
+        ),
+      ).then((answers) => {
+        if (cancelled) return;
+        const next: Record<string, DeployProgress> = {};
+        for (const [id, p] of answers) if (p?.bezi) next[id] = p;
+        const ended = Object.keys(runningRef.current).some((id) => !(id in next));
+        runningRef.current = next;
+        setRunning(next);
+        if (ended) load(true);
+      });
+    };
+    tick();
+    const timer = window.setInterval(tick, anyRunning ? PROGRESS_POLL_RUNNING_MS : PROGRESS_POLL_IDLE_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [rowIds, environment, anyRunning, load]);
 
   function setRowMsg(customerId: string, msg: string | null) {
     setRowError((prev) => {
@@ -453,7 +507,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
             </thead>
             <tbody className="divide-y divide-[var(--color-border-default)] max-md:block">
               {rows.map((row) => {
-                const isBusy = busy === row.customer_id;
+                const progress = running[row.customer_id];
+                const isBusy = busy === row.customer_id || progress !== undefined;
                 const blocked = deployBlock(row);
                 const current = currentCol(row);
                 const chosen = pickedVersion(row);
@@ -530,9 +585,14 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           <button
                             type="button"
                             aria-haspopup="dialog"
+                            disabled={progress !== undefined}
                             onClick={() => setAdopting(row)}
                             className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                            title="Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží. Netreba na to čakať, kým niečo zlyhá."
+                            title={
+                              progress
+                                ? RUNNING_REASON
+                                : "Ak v cieľovom priečinku leží ručne písané nasadenie, tu ho prevezmeš pod správu NEX Studia — s náhľadom, čo sa odloží. Netreba na to čakať, kým niečo zlyhá."
+                            }
                           >
                             Prevziať inštaláciu…
                           </button>
@@ -541,6 +601,14 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                       {/* ICCINT-117: KEDY sa to stalo — zo servera, takže to prežije refresh. Potvrdenie
                           z kliku („✓ Nasadené“) zostáva ako okamžitá odozva, ale už nie je JEDINÉ miesto,
                           kde sa dá zistiť, že nasadenie prebehlo. */}
+                      {progress && (
+                        <div
+                          role="status"
+                          className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary-600 dark:text-primary-400"
+                        >
+                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadenie beží: {popisPriebehu(progress)}
+                        </div>
+                      )}
                       {lastDeployAt && (
                         <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
                           nasadené {fmtDeployTime(lastDeployAt)}
@@ -630,7 +698,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             onClick={() => handleAccept(row)}
                             disabled={isBusy || !row.uat_version || !canAccept}
                             title={
-                              !canAccept
+                              progress
+                                ? RUNNING_REASON
+                                : !canAccept
                                 ? ACCEPT_ROLE_REASON
                                 : row.uat_version
                                   ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
@@ -650,6 +720,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           onClick={() => handleDeploy(row)}
                           disabled={isBusy || verified.length === 0 || blocked !== null}
                           title={
+                            (progress ? RUNNING_REASON : null) ??
                             blocked?.title ??
                             (redeploy
                               ? `Verzia ${fmtVer(chosen)} už na ${labels.title} beží — toto ju postaví a nasadí znova.`

@@ -28,6 +28,8 @@ vi.mock("@/services/api/deploy", () => ({
   deployCustomer: vi.fn(),
   acceptCustomerUat: vi.fn(),
   uatLaunch: vi.fn(),
+  // DEV-115: each row asks whether a deploy runs on its installation; in these tests none does.
+  getDeployProgress: vi.fn(() => Promise.resolve({ bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 })),
   // DEV-90: the UAT tab also asks what to try; never answering keeps that panel out of these tests.
   getUatGuide: vi.fn(() => new Promise(() => {})),
   // DEV-91: the acceptance asks how much was tested; without an answer the question stays as before.
