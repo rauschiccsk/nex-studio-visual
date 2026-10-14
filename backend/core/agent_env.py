@@ -27,7 +27,9 @@ import os
 from collections.abc import Mapping
 
 #: Environment variables NEVER handed to a spawned agent.
-WITHHELD_FROM_AGENTS: tuple[str, ...] = ("DEDO_API_TOKEN",)
+#: DEV-117: ``PLANE_API_TOKEN`` is the cockpit's own identity in Plane. Tickets are founded by a person's click; an
+#: agent holding the key could write into the ticket register as the cockpit — the impersonation Dedo's token guards.
+WITHHELD_FROM_AGENTS: tuple[str, ...] = ("DEDO_API_TOKEN", "PLANE_API_TOKEN")
 
 
 def agent_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:

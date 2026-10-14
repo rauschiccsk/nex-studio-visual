@@ -190,6 +190,14 @@ class Settings(BaseSettings):
     predeploy_backup_keep: int = 5
     predeploy_backup_min_free_bytes: int = 1024**3
 
+    # DEV-117: Plane, the ICC ticket register. The cockpit writes there under its OWN account and key, never a
+    # Dedo's or a person's. An empty address or key makes the cockpit say plainly that it has no access to Plane.
+    plane_url: str = ""
+    plane_api_token: str = Field(default="", repr=False)
+    plane_workspace: str = "icc"
+    # The register of development work — every application's tickets, each in the module named after it.
+    plane_dev_project: str = "DEV"
+
     # KB access matrix per Shuhari role.
     # Mirrors NEX Command's ``KB_ACCESS`` config (M2 feature parity, 2026-05-07).
     # * "*"          — full access (every category)

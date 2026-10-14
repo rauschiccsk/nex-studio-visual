@@ -64,6 +64,9 @@ class Project(Base, UUIDMixin, TimestampMixin):
     # via ``scripts/uat-deploy.py <uat_slug> --project <slug>``. NULL = no UAT
     # configured → the fast-fix auto-deploy is skipped gracefully.
     uat_slug = Column(String(100), nullable=True)
+    # DEV-117: the module of this project's application in Plane's DEV register, by id — a renamed project keeps its
+    # tickets. NULL until the cockpit first files a ticket for the project (found by name or created then).
+    plane_module_id = Column(String(64), nullable=True)
     # Per-project Miera autonómie override (v2.0.0, CR-V2-008 / AUTON-6). The MIDDLE layer of
     # the dial resolution order (per-build → per-project → global): a non-NULL value here
     # overrides the global ``DEFAULT_SETTINGS['miera_autonomie']`` for every build of this
