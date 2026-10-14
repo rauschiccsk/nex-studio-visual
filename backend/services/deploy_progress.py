@@ -30,6 +30,8 @@ from typing import Optional
 KROK_PRIPRAVA = "pripravujem predpis a nastavenia"
 #: DEV-68: the build runs while the installation is untouched; the outage starts only with the next step.
 KROK_STAVBA = "prenášam zdrojový kód a staviam obrazy — bežiaca inštalácia sa zatiaľ nemení"
+#: DEV-116: the database is backed up after the build, before anything is replaced.
+KROK_ZALOHA = "zálohujem databázu — bežiaca inštalácia sa zatiaľ nemení"
 KROK_SPUSTENIE = "spúšťam novú verziu — aplikácia je teraz chvíľu nedostupná"
 KROK_MIGRACIA = "migrujem databázu"
 KROK_OVERENIE = "overujem, že aplikácia odpovedá"

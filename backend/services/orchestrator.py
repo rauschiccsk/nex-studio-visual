@@ -72,6 +72,7 @@ from backend.services import (
     failure_framing,
     fast_fix,
     host_docker_guard,
+    predeploy_backup,
     preview_switch,
     public_route,
     release_note_writer,
@@ -6113,12 +6114,28 @@ async def _run_uat_deploy(
     built, failure = await _deploy_compose_step(base + ["build"], env, deadline, limit)
     if not built:
         return InstanceDeployResult(False, failure)
+    # DEV-116 — a PROD installation's database is backed up while the running version still serves, before anything
+    # is replaced. No backup, no deploy: a migration of the customer's data must always have a way back.
+    backup_note = ""
+    if environment == "prod":
+        deploy_progress.krok(compose.parent, deploy_progress.KROK_ZALOHA)
+        backup = await predeploy_backup.back_up(
+            compose,
+            project_slug=full_project_slug or project_slug,
+            version=build_ver,
+            deploy_host=deploy_host,
+            timeout=deadline - asyncio.get_running_loop().time(),
+        )
+        if not backup.ok:
+            return InstanceDeployResult(False, backup.detail)
+        backup_note = f" {backup.detail}" if backup.detail else ""
     deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
     # From here the new version is on the machine: whatever fails later, the containers it replaced are gone and a
-    # migration may have run — the compose on the target must stay the new one (DEV-68).
+    # migration may have run — the compose on the target must stay the new one (DEV-68). Every report from here on
+    # carries where the backup lies: a failure after this point is exactly when someone needs it.
     started, failure = await _deploy_compose_step(base + ["up", "-d", "--force-recreate"], env, deadline, limit)
     if not started:
-        return InstanceDeployResult(False, failure, new_version_started=True)
+        return InstanceDeployResult(False, failure + backup_note, new_version_started=True)
     # v4.0.21: migrate the DB before serve-verify — an alembic app with no migrate service of its
     # own boots against an un-migrated schema otherwise (crash-test 2026-07-21). No-op for apps that
     # already migrate on ``up``; a migration failure is a hard deploy failure (broken schema).
@@ -6132,7 +6149,7 @@ async def _run_uat_deploy(
         deploy_host=deploy_host,
     )
     if not mig_ok:
-        return InstanceDeployResult(False, mig_detail, new_version_started=True)
+        return InstanceDeployResult(False, mig_detail + backup_note, new_version_started=True)
     deploy_progress.krok(compose.parent, deploy_progress.KROK_OVERENIE)
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
@@ -6159,7 +6176,7 @@ async def _run_uat_deploy(
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
         (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
     return InstanceDeployResult(
-        ok, await _uprac_na_cieli(ok, detail, deploy_host, compose.parent), new_version_started=True
+        ok, await _uprac_na_cieli(ok, detail + backup_note, deploy_host, compose.parent), new_version_started=True
     )
 
 

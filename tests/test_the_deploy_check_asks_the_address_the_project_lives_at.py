@@ -110,6 +110,14 @@ async def test_a_deploy_hands_the_projects_choice_to_the_check(monkeypatch):
     monkeypatch.setattr(orchestrator, "_build_provenance_env", _no_provenance)
     monkeypatch.setattr(orchestrator, "_uat_compose_path", lambda *a, **k: Path(__file__))
 
+    async def _backed_up(*_a, **_k):
+        # DEV-116's backup before ``up`` is not what this test is about; it has its own tests.
+        from backend.services.predeploy_backup import BackupOutcome
+
+        return BackupOutcome(True, "")
+
+    monkeypatch.setattr(orchestrator.predeploy_backup, "back_up", _backed_up)
+
     await orchestrator._run_prod_deploy("career-asistent", "icc", "career-asistent", "career-asistent", private=True)
 
     assert seen == [True]

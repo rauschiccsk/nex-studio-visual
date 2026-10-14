@@ -23,6 +23,7 @@ import yaml
 from backend.services import deploy as deploy_service
 from backend.services import deploy_progress, orchestrator, public_route, remote_instance
 from backend.services import uat_provisioner as P
+from backend.tests import _fake_backup_docker as fake_backup
 
 #: The routers of the live installation on MAGER, as its compose has them (11.10.2026).
 MAGER_FRONTEND_LABELS = [
@@ -179,11 +180,14 @@ def _docker(monkeypatch, compose: Path, fail_on: str | None = None):
         step["now"] = krok
         real_krok(instance_dir, krok)
 
-    async def _spawn(*cmd, stdout=None, stderr=None, env=None):
+    async def _spawn(*cmd, stdin=None, stdout=None, stderr=None, env=None):
         cmd = list(cmd)
         events.append((cmd, env, step["now"]))
         if fail_on and fail_on in cmd:
             return _Proc(1, f"{fail_on} failed")
+        backup = fake_backup.reply(cmd)  # DEV-116: the database backup between the build and ``up``
+        if backup is not None:
+            return _Proc(0, backup)
         if cmd[-1] == "/target/docker-compose.yml":  # the compose read back from the target
             return _Proc(0, compose.read_text(encoding="utf-8"))
         return _Proc(0, "port 8000: 200")
@@ -238,10 +242,12 @@ def test_the_build_runs_before_anything_is_replaced(tmp_path, monkeypatch):
     _deploy_to_mager()
 
     compose_steps = [(cmd[4], step) for cmd, _env, step in events if cmd[:2] == ["docker", "compose"]]
-    assert compose_steps[:2] == [
-        ("build", deploy_progress.KROK_STAVBA),
-        ("up", deploy_progress.KROK_SPUSTENIE),
-    ]
+    up_at = [name for name, _step in compose_steps].index("up")
+    assert compose_steps[0] == ("build", deploy_progress.KROK_STAVBA)
+    assert compose_steps[up_at] == ("up", deploy_progress.KROK_SPUSTENIE)
+    # DEV-116: between them only the database backup, while the running version still serves.
+    between = compose_steps[1:up_at]
+    assert between and {step for _name, step in between} == {deploy_progress.KROK_ZALOHA}
     up = next(cmd for cmd, _env, _step in events if cmd[:2] == ["docker", "compose"] and cmd[4] == "up")
     assert "--build" not in up, "up must not build: the build already ran while the installation was untouched"
 
@@ -270,10 +276,13 @@ def test_a_route_that_fails_after_the_start_is_a_failure_of_a_started_version(tm
     result = _deploy_to_mager()
 
     assert result[0] is False
-    assert result[1] == (
+    route, _, backup = result[1].partition(" Záloha databázy pred nasadením: ")
+    assert route == (
         "appka beží, ale verejná adresa https://magerstav-inbox.icc.sk/ nie je dostupná — smerovanie zlyhalo: "
         "https://magerstav-inbox.icc.sk/ 404"
     )
+    # DEV-116: a failure after the start is exactly when the backup is needed — the report says where it lies.
+    assert backup.startswith(f"{compose.parent}/pre-deploy-backups/nex-inbox-1.7.1-"), result[1]
     assert result.new_version_started is True
 
 

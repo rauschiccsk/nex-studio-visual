@@ -367,8 +367,16 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
     async def _serves_ok(*_a, **_k):
         return True, "OK"
 
+    async def _backed_up(*_a, **_k):
+        # DEV-116 backs the database up before ``up``; this test is about WHICH compose is deployed, and the
+        # backup has its own tests (test_a_prod_deploy_backs_the_database_up_first.py).
+        from backend.services.predeploy_backup import BackupOutcome
+
+        return BackupOutcome(True, "")
+
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)
+    monkeypatch.setattr(orchestrator.predeploy_backup, "back_up", _backed_up)
 
     ok, detail = await orchestrator._run_prod_deploy("nex-payables", "andros", "payables", "nex-payables")
 

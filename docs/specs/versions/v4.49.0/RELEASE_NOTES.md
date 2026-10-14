@@ -1,0 +1,8 @@
+# v4.49.0
+
+**Pred nasadením na PROD kokpit zálohuje databázu.** Doteraz sa nová verzia dostala na ostrú inštaláciu zákazníka aj
+s migráciou databázy bez zálohy — keby sa migrácia pokazila, nebolo by kam sa vrátiť. Teraz kokpit po postavení
+obrazov, kým ešte beží stará verzia, vypíše databázu do priečinka inštalácie na tom istom stroji, overí, že sa výpis
+dá prečítať, a až potom vymení kontajnery. Keď sa záloha nepodarí alebo na disku nie je miesto, nasadenie sa nezačne
+a stará verzia beží ďalej. Priebeh nasadenia ukáže krok „zálohujem databázu“ a hlásenie povie, kde záloha leží;
+ponechá sa posledných päť záloh.

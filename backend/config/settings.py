@@ -184,6 +184,12 @@ class Settings(BaseSettings):
     # export). It is held in memory once while it is stored, so the cap protects the backend too.
     private_file_max_bytes: int = 25 * 1024 * 1024
 
+    # DEV-116: a PROD deploy backs the installation's database up before it replaces the containers. How many of
+    # those backups stay next to the installation, and how much of the target disk must remain free besides the
+    # database's own size — a backup that fills the customer's disk would stop the installation it protects.
+    predeploy_backup_keep: int = 5
+    predeploy_backup_min_free_bytes: int = 1024**3
+
     # KB access matrix per Shuhari role.
     # Mirrors NEX Command's ``KB_ACCESS`` config (M2 feature parity, 2026-05-07).
     # * "*"          — full access (every category)

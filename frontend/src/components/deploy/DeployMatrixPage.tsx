@@ -78,7 +78,15 @@ const DEPLOY_PROD_ROLE_REASON = "Nasadenie do PROD môže vykonať iba Manažér
 // like the blocked state for the WHOLE run (minutes). Poll quietly so the screen unblocks itself instead of
 // leaving the manager to guess whether the click did anything.
 const REVERIFY_POLL_INTERVAL_MS = 15000;
+// DEV-116 — the sentence the backend (backend/services/predeploy_backup.py) puts into the deploy's report: where the
+// database backup taken before the deploy lies. It sits in the report's first part, which the row does not otherwise show.
+const BACKUP_SENTENCE = "Záloha databázy pred nasadením:";
 
+function backupNote(detail: string | null): string | null {
+  const head = (detail ?? "").split(" | ")[0] ?? "";
+  const at = head.indexOf(BACKUP_SENTENCE);
+  return at < 0 ? null : (head.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
+}
 
 export default function DeployMatrixPage({ environment }: DeployMatrixPageProps) {
   const navigate = useNavigate();
@@ -462,6 +470,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const lastDeployDetail =
                   environment === "uat" ? row.uat_last_deploy_detail : row.prod_last_deploy_detail;
                 // Upozornenia sa do `detail` pripájajú za „ | “. Prvý diel je holé „OK“ — nie je čo čítať.
+                const lastDeployBackup = backupNote(lastDeployDetail);
                 const lastDeployWarnings = (lastDeployDetail ?? "")
                   .split(" | ")
                   .slice(1)
@@ -536,6 +545,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
                           nasadené {fmtDeployTime(lastDeployAt)}
                         </div>
+                      )}
+                      {lastDeployBackup && (
+                        <div className="mt-0.5 break-all text-[11px] text-[var(--color-text-muted)]">{lastDeployBackup}</div>
                       )}
                       {lastDeployWarnings.map((w, idx) => (
                         <div key={idx} className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
