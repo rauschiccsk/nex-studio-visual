@@ -52,6 +52,7 @@ SHELLING_MODULES = {
     "ns_code",
     "orchestrator",
     "port_registry",
+    "predeploy_backup",
     "project_adoption",
     "project_files",
     "remote_instance",
