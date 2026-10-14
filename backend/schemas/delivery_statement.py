@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 
 from backend.schemas.task import BillingCategory
 
-WorkKind = Literal["fix", "change"]
+#: DEV-50: a fix of an error in delivered code, or a change; DEV-118: or a gift — an attention of ICC for the whole
+#: piece of work (Director 14.10.2026: „BUG - oprava, GIFT - Dar, a požiadavka zákazníka.“).
+WorkKind = Literal["fix", "change", "gift"]
 
 
 class DeliveredFileRead(BaseModel):

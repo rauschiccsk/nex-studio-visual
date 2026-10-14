@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, get_args
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -42,12 +42,20 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.version_rate_change import VersionRateChange
 from backend.db.models.versions import Version
+from backend.schemas.delivery_statement import WorkKind
 from backend.services import billing_category, delivered_tokens, metrics, pipeline_metrics, system_setting
 from backend.services import version as version_service
 
 WORK_FIX = "fix"
 WORK_CHANGE = "change"
-WORK_KINDS = (WORK_FIX, WORK_CHANGE)
+WORK_GIFT = "gift"
+WORK_KINDS = get_args(WorkKind)
+#: DEV-75, DEV-118 — the billing category of a task nobody decided, by the work kind of its version.
+CATEGORY_OF_KIND = {
+    WORK_FIX: billing_category.BUG,
+    WORK_CHANGE: billing_category.REQUEST,
+    WORK_GIFT: billing_category.GIFT,
+}
 
 SOURCE_SIGNOFF = "hotovo"
 SOURCE_VERIFIED = "verifikacia"
@@ -73,8 +81,8 @@ NO_DELIVERED = (
 )
 NO_BASE = "Nedá sa určiť, od ktorého stavu kódu sa verzia ráta (predchádzajúca verzia ani začiatok stavby)."
 KIND_UNDECIDED = (
-    "Pri rýchlej oprave treba určiť, či opravovala chybu v dodanom kóde (záručná oprava), alebo robila zmenu "
-    "(účtuje sa) — kokpit to nehádá."
+    "Pri rýchlej oprave treba určiť, či opravovala chybu v dodanom kóde (záručná oprava), robila zmenu (účtuje sa), "
+    "alebo je dar — pozornosť ICC; kokpit to nehádá."
 )
 RATES_MISSING = "V Nastaveniach chýbajú sadzby fakturácie (kód a skúšky, dokumentácia) — súpis sa nedá vydať."
 REPLACE_UNCONFIRMED = "Verzia už má platný súpis z {when} za {amount} € — nový ho nahradí, len keď to potvrdíš."
@@ -90,12 +98,9 @@ def work_kind(db: Session, version: Version) -> Optional[str]:
 
 
 def version_category(kind: Optional[str]) -> Optional[str]:
-    """DEV-75 — the billing category of a task nobody decided: a fix of our error → bug, a change → request."""
-    if kind == WORK_FIX:
-        return billing_category.BUG
-    if kind == WORK_CHANGE:
-        return billing_category.REQUEST
-    return None
+    """DEV-75 — the billing category of a task nobody decided: a fix of our error → bug, a change → request,
+    DEV-118: a gift → gift."""
+    return CATEGORY_OF_KIND.get(kind) if kind else None
 
 
 def _git(repo: Path, *args: str) -> Optional[str]:
@@ -580,7 +585,11 @@ KIND_LABELS = {
     delivered_tokens.KIND_TESTS: "skúšky",
     delivered_tokens.KIND_DOCS: "dokumentácia",
 }
-WORK_LABELS = {WORK_FIX: "oprava chyby v dodanom kóde (záručná oprava)", WORK_CHANGE: "zmena alebo nová práca"}
+WORK_LABELS = {
+    WORK_FIX: "oprava chyby v dodanom kóde (záručná oprava)",
+    WORK_CHANGE: "zmena alebo nová práca",
+    WORK_GIFT: "dar — pozornosť ICC",
+}
 
 
 def _number(value: Decimal, places: int = 2) -> str:

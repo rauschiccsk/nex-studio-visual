@@ -46,7 +46,7 @@ class DeliveryStatement(Base, UUIDMixin, TimestampMixin):
     replaced_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     __table_args__ = (
-        CheckConstraint("work_kind IN ('fix', 'change')", name="ck_delivery_statements_work_kind"),
+        CheckConstraint("work_kind IN ('fix', 'change', 'gift')", name="ck_delivery_statements_work_kind"),
         CheckConstraint(
             "tokens_code >= 0 AND tokens_tests >= 0 AND tokens_docs >= 0 AND amount_eur >= 0",
             name="ck_delivery_statements_nonneg",

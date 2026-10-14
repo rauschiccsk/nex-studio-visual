@@ -11,12 +11,14 @@ import itertools
 import json
 import os
 from types import SimpleNamespace
+from typing import get_args
 
 import httpx
 import pytest
 
 from backend.core.agent_env import agent_env
-from backend.services import plane_tickets
+from backend.schemas.delivery_statement import WorkKind
+from backend.services import delivery_statement, plane_tickets
 from backend.services.plane_gateway import PlaneError, PlaneGateway, PlaneMismatch
 
 KEY = "cockpit-key"
@@ -41,6 +43,9 @@ class FakePlane:
             {"id": "l-task", "name": "Typ: Task"},
             {"id": "l-bug", "name": "Typ: Bug"},
             {"id": "l-andros", "name": "Zodpovedný: Andros Dedo"},
+            {"id": "l-fix", "name": "Druh práce: Oprava (BUG)"},
+            {"id": "l-gift", "name": "Druh práce: Dar (GIFT)"},
+            {"id": "l-change", "name": "Druh práce: Požiadavka (CHR)"},
         ]
         self.modules: list[dict] = []
         self.issues: dict[str, dict] = {}
@@ -126,6 +131,7 @@ def _file(plane: FakePlane, project, **over):
         description="Čo sa deje: …",
         labels=("Typ: Bug",),
         doer="Zoltán Rausch",
+        work_kind="fix",
     )
     args.update(over)
     return plane_tickets.file_ticket(_Db(), _gateway(plane), **args)
@@ -142,7 +148,7 @@ def test_a_ticket_lands_in_the_projects_module_says_who_founded_it_and_is_read_b
     assert project.plane_module_id == "m1", "and remembered on the project"
     assert plane.module_issues == {"m1": [ref.id]}
     issue = plane.issues[ref.id]
-    assert issue["state"] == "s-todo" and issue["labels"] == ["l-bug"]
+    assert issue["state"] == "s-todo" and issue["labels"] == ["l-bug", "l-fix"]
     assert issue["description_html"].startswith("<p>Robí: Zoltán Rausch</p>")
     assert issue["description_html"].endswith(
         "<p>Založil: Zoltán Rausch cez NEX Studio Visual (zo Zásobníka), projekt NEX Inbox.</p>"
@@ -165,10 +171,11 @@ def test_a_problem_of_the_cockpit_goes_to_its_own_module():
     plane.modules = [{"id": "m-nsv", "name": "NEX Studio Visual"}]
     project = SimpleNamespace(name="NEX Inbox", plane_module_id=None)
 
-    ref = _file(plane, project, module_name="NEX Studio Visual", doer="Andros Dedo", source="poradca")
+    ref = _file(plane, project, module_name="NEX Studio Visual", doer="Andros Dedo", source="poradca", work_kind=None)
 
     assert plane.module_issues == {"m-nsv": [ref.id]}
     assert project.plane_module_id is None, "a cockpit ticket does not rebind the project"
+    assert plane.issues[ref.id]["labels"] == ["l-bug"], "a problem of the cockpit is nobody's bill"
 
 
 def test_what_plane_keeps_differently_is_not_reported_as_written():
@@ -281,3 +288,46 @@ def test_the_check_says_a_refusal_as_a_sentence(monkeypatch, capsys):
 
     assert plane_check.main([]) == 1
     assert capsys.readouterr().err.strip() == "Plane kľúč kokpitu neuznal (401)."
+
+
+# ── DEV-118: who pays — the „Druh práce" label ──────────────────────────────────────────────────────────────────
+
+
+def test_a_project_ticket_carries_its_work_kind_and_plane_keeps_it():
+    """Director 14.10.2026: „BUG - oprava, GIFT - Dar, a požiadavka zákazníka.“ — set already in the ticket."""
+    plane = FakePlane()
+
+    ref = _file(plane, SimpleNamespace(name="NEX Inbox", plane_module_id=None), labels=("Typ: Task",), work_kind="gift")
+
+    assert sorted(plane.issues[ref.id]["labels"]) == ["l-gift", "l-task"]
+
+
+@pytest.mark.parametrize("work_kind", [None, "bonus"])
+def test_a_project_ticket_without_a_known_work_kind_is_not_written(work_kind):
+    plane = FakePlane()
+
+    with pytest.raises(PlaneError) as caught:
+        _file(plane, SimpleNamespace(name="NEX Inbox", plane_module_id=None), work_kind=work_kind)
+
+    assert str(caught.value) == plane_tickets.WORK_KIND_MISSING
+    assert plane.requests == [], "nothing is asked or written before the work kind is known"
+
+
+def test_the_work_kind_is_read_back_from_the_tickets_labels():
+    assert plane_tickets.work_kind_of(["Typ: Bug", "Druh práce: Dar (GIFT)"]) == "gift"
+    assert plane_tickets.work_kind_of(["typ: bug", "druh práce: oprava (bug)"]) == "fix"
+    assert plane_tickets.work_kind_of(["Typ: Task", "Zodpovedný: Andros Dedo"]) is None
+    with pytest.raises(PlaneError, match="dva druhy práce"):
+        plane_tickets.work_kind_of(["Druh práce: Oprava (BUG)", "Druh práce: Požiadavka (CHR)"])
+
+
+def test_every_work_kind_has_its_label_its_billing_category_and_its_words():
+    """One list of work kinds (the schema's ``Literal``); a kind added there and forgotten here would be a ticket
+    nobody can found, a version billed as nothing, or a statement saying a raw code."""
+    kinds = set(get_args(WorkKind))
+
+    assert kinds == {"fix", "change", "gift"}
+    assert set(plane_tickets.WORK_KIND_LABELS) == kinds
+    assert set(delivery_statement.CATEGORY_OF_KIND) == kinds
+    assert set(delivery_statement.WORK_LABELS) == kinds
+    assert len(set(plane_tickets.WORK_KIND_LABELS.values())) == len(kinds)

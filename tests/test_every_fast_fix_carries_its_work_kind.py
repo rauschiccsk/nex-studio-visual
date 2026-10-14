@@ -54,6 +54,19 @@ def test_dedos_brief_starts_a_fast_fix_only_with_the_work_kind(client, db_sessio
     assert db_session.get(Version, uuid.UUID(started.json()["version_id"])).work_kind == "change"
 
 
+def test_a_fast_fix_may_be_a_gift(client, db_session, dedo_token, no_dispatch):  # noqa: F811
+    """DEV-118 — Director 14.10.2026: „GIFT - Dar“; a whole fast fix may be an attention of ICC, not only a task."""
+    user = _make_user(db_session)
+    project = _make_project(db_session, user)
+    db_session.commit()
+    brief = _navrhni(client, project.id).json()
+
+    started = _posli(client, user, project.id, brief["id"], work_kind="gift")
+
+    assert started.status_code == 200, started.text
+    assert db_session.get(Version, uuid.UUID(started.json()["version_id"])).work_kind == "gift"
+
+
 def test_a_new_version_from_dedos_brief_needs_no_work_kind(client, db_session, dedo_token, no_dispatch):  # noqa: F811
     user = _make_user(db_session)
     project = _make_project(db_session, user)

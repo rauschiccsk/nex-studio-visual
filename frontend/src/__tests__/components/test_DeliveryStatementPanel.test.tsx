@@ -122,6 +122,22 @@ describe("Statement of delivered tokens", () => {
     expect(getDeliveryStatement).toHaveBeenCalledTimes(2);
   });
 
+  it("a quick fix may be decided as a gift and a gift says so, with the other two kinds to change to (DEV-118)", async () => {
+    // Director 14.10.2026: „BUG - oprava, GIFT - Dar, a požiadavka zákazníka.“
+    vi.mocked(getDeliveryStatement)
+      .mockResolvedValueOnce(view({ work_kind: null, cannot_issue: ["Pri rýchlej oprave treba určiť … kokpit to nehádá."] }))
+      .mockResolvedValue(view({ work_kind: "gift", version_category: "gift" }));
+    vi.mocked(setWorkKind).mockResolvedValue({ work_kind: "gift" });
+    render(<DeliveryStatementPanel versionId="v-151" />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Dar — pozornosť ICC" }));
+
+    await waitFor(() => expect(setWorkKind).toHaveBeenCalledWith("v-151", "gift"));
+    expect(await screen.findByRole("button", { name: "Zmeniť na: Oprava chyby v dodanom kóde" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zmeniť na: Zmena alebo nová práca" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zmeniť na: Dar — pozornosť ICC" })).not.toBeInTheDocument();
+  });
+
   it("a bug fix in delivered code is a warranty fix — 0 € with the full value it had (DEV-75)", async () => {
     const line = {
       category: "bug" as const,

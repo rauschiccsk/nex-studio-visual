@@ -108,8 +108,8 @@ NO_FINISHED_VERSION = (
 
 #: DEV-56 — what a fast fix must be told before it starts (the delivered-token statement bills by it).
 WORK_KIND_REQUIRED = (
-    "Pri rýchlej oprave urči, či opraví chybu v dodanom kóde (neúčtuje sa), alebo urobí zmenu (účtuje sa) — "
-    "kokpit to nehádá."
+    "Pri rýchlej oprave urči, či opraví chybu v dodanom kóde (neúčtuje sa), urobí zmenu (účtuje sa), alebo je dar — "
+    "pozornosť ICC (neúčtuje sa); kokpit to nehádá."
 )
 WORK_KINDS = get_args(WorkKind)
 
@@ -120,9 +120,10 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID, work_k
     The version is created with the default ``planned`` status and a ``name`` marking it as a
     fast-fix patch; the caller then starts a ``fast_fix`` pipeline on it.
 
-    ``work_kind`` is required (DEV-56): a fix of an error in delivered code (``fix`` — never billed) or a change
-    (``change`` — billed). Every way a fast fix starts — the „Rýchla oprava“ dialog, Dedo's brief on the project,
-    Dedo's proposal on a version — passes the Manažér's choice through HERE, so none can start one undecided.
+    ``work_kind`` is required (DEV-56): a fix of an error in delivered code (``fix`` — never billed), a change
+    (``change`` — billed) or a gift (``gift`` — an attention of ICC, DEV-118). Every way a fast fix starts — the
+    „Rýchla oprava“ dialog, Dedo's brief on the project, Dedo's proposal on a version — passes the Manažér's choice
+    through HERE, so none can start one undecided.
 
     Raises:
         ValueError: If the work kind is not decided, the project has no semver base version, or the bumped

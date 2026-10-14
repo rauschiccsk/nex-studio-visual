@@ -206,6 +206,28 @@ def test_a_fast_fix_of_our_error_is_a_warranty_fix_at_full_value_and_zero(billed
     assert p.amounts.total == 0 and p.amounts.full > 0
 
 
+def test_a_fast_fix_given_as_a_gift_is_a_gift_at_full_value_and_zero(billed):
+    """DEV-118 — Director 14.10.2026: „GIFT - Dar“ for a whole piece of work, not only task by task; the statement
+    shows what it was worth and the discount the gift has in Nastavenia."""
+    db, root, owner, _v010, _t, v011, _tasks = billed
+    v011.work_kind = st.WORK_GIFT
+    db.flush()
+
+    p = st.preview(db, v011, root)
+
+    assert p.version_category == bc.GIFT
+    assert _lines(p) == [(bc.GIFT, bc.KIND_CODE, True, ["2.1.1"])]
+    line = p.lines[0].payload()
+    assert line["discount_label"] == "pozornosť ICC" and Decimal(line["discount_pct"]) == 100
+    assert Decimal(line["full_eur"]) > 0 and Decimal(line["amount_eur"]) == 0
+
+    row = st.issue(db, v011, root, owner.id)
+
+    assert row.work_kind == st.WORK_GIFT
+    csv_rows = st.csv_text(row, v011, db.get(Project, v011.project_id)).splitlines()
+    assert "Druh práce;dar — pozornosť ICC" in csv_rows
+
+
 def test_a_task_that_names_no_task_of_this_plan_is_work_without_a_task(billed):
     db, root, _owner, v010, tasks, _v011, _t2 = billed
 

@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                     "a zápis číta späť. Po overení sa zruší.",
                     labels=("Typ: Task",),
                     doer="Andros Dedo",
+                    work_kind="change",
                 )
                 print(f"založený a prečítaný späť: {ref.identifier} {ref.url}")
             db.commit()

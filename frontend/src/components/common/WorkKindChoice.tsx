@@ -1,5 +1,5 @@
-// WorkKindChoice — „oprava chyby v dodanom kóde“ or „zmena alebo nová práca“, chosen when a version or a fast fix
-// starts (DEV-50). It decides whether the delivered-token statement bills the work.
+// WorkKindChoice — „oprava chyby v dodanom kóde“, „zmena alebo nová práca“ or „dar — pozornosť ICC“ (DEV-118), chosen
+// when a version or a fast fix starts (DEV-50). It decides how the delivered-token statement bills the work.
 
 import { WORK_KIND_OPTIONS, type WorkKind } from "@/lib/workKind";
 

@@ -8,6 +8,8 @@
  * on the ``versions`` table (``planned | active | released``).
  */
 
+import type { WorkKind } from "@/lib/workKind";
+
 /**
  * Mirrors ``status IN ('planned', 'active', 'released')`` on the
  * ``versions`` table.
@@ -44,8 +46,8 @@ export interface VersionCreate {
   name?: string;
   description?: string;
   target_date?: string;
-  /** DEV-50 — a fix of our own error (never billed) or a change (billed). */
-  work_kind?: "fix" | "change";
+  /** DEV-50 — a fix of our own error (never billed), a change (billed); DEV-118 — or a gift. */
+  work_kind?: WorkKind;
 }
 
 /** Partial update for an existing version (``PATCH /versions/{id}``). */

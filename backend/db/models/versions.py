@@ -64,7 +64,7 @@ class Version(Base, UUIDMixin, TimestampMixin):
             "status IN ('planned', 'active', 'done', 'released')",
             name="ck_versions_status",
         ),
-        CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change')", name="ck_versions_work_kind"),
+        CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change', 'gift')", name="ck_versions_work_kind"),
         # DEV-74: an own rate is a price — empty means Nastavenia, zero is no rate.
         CheckConstraint("rate_code > 0 AND rate_docs > 0", name="ck_versions_rates_positive"),
         CheckConstraint(

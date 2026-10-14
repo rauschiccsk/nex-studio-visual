@@ -295,7 +295,7 @@ export function startFastFixApi(
   projectId: string,
   directive: string,
   /** DEV-50 — decided when the fast fix starts; omitted (a Dedo proposal) leaves it for the statement to ask. */
-  workKind?: "fix" | "change",
+  workKind?: WorkKind,
 ): Promise<FastFixStartResponse> {
   return api.post<FastFixStartResponse>("/pipeline/fast-fix", {
     project_id: projectId,

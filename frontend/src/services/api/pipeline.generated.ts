@@ -3942,7 +3942,7 @@ export interface components {
             /** Version Number */
             version_number: string;
             /** Work Kind */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * BoardTask
@@ -5063,7 +5063,7 @@ export interface components {
             /** Text */
             text: string;
             /** Work Kind */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * DedoProjectProposalSendResponse
@@ -5175,7 +5175,7 @@ export interface components {
              * Work Kind
              * @description DEV-56 — for a proposal that starts a fast fix: a fix of an error in delivered code ('fix') or a change ('change'). Required for that verb (400 without it); other verbs ignore it.
              */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * DedoUnblockRequest
@@ -5785,7 +5785,7 @@ export interface components {
              */
             project_id: string;
             /** Work Kind */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * FastFixStartResponse
@@ -6019,7 +6019,7 @@ export interface components {
              * Work Kind
              * @enum {string}
              */
-            work_kind: "fix" | "change";
+            work_kind: "fix" | "change" | "gift";
         };
         /**
          * KbIndexStatusRead
@@ -7670,7 +7670,7 @@ export interface components {
             /** Version Number */
             version_number: string;
             /** Work Kind */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * StatementTaskRead
@@ -8564,7 +8564,7 @@ export interface components {
              * Work Kind
              * @description DEV-50: 'fix' — fixes an error in delivered code (never billed); 'change' — new work or a change (billed). None: a new version counts as 'change'.
              */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * VersionRead
@@ -8712,7 +8712,7 @@ export interface components {
         /** WorkKindRead */
         WorkKindRead: {
             /** Work Kind */
-            work_kind?: ("fix" | "change") | null;
+            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /** WorkKindWrite */
         WorkKindWrite: {
@@ -8720,7 +8720,7 @@ export interface components {
              * Work Kind
              * @enum {string}
              */
-            work_kind: "fix" | "change";
+            work_kind: "fix" | "change" | "gift";
         };
         /**
          * _AdoptRequest

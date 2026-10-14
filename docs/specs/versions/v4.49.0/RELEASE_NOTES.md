@@ -11,3 +11,9 @@ ponechá sa posledných päť záloh.
 sa, riadok na stránke UAT či PROD ukazoval starý stav a svietiace „Nasadiť“, akoby sa nič nedialo. Teraz sa riadok
 sám pýta kokpitu, či na inštalácii beží nasadenie: ukáže krok a ako dlho trvá, „Nasadiť“ aj „Prevziať inštaláciu…“
 sú dovtedy zašednuté a po skončení sa riadok sám obnoví na výsledok. Platí to aj pre nasadenie spustené z iného okna.
+
+**Celá verzia či rýchla oprava môže byť darom.** Doteraz sa dalo za dar — pozornosť ICC — označiť len jednotlivú
+úlohu; pri verzii a rýchlej oprave si si vyberal len medzi opravou chyby v dodanom kóde a zmenou. Teraz je pri
+druhu práce tretia možnosť „Dar — pozornosť ICC“: úlohy takej práce sú na súpise dodaných tokenov v kategórii Dar,
+súpis ukáže, akú mala hodnotu, a zľava je tá z Nastavení (predvolene 100 %). Tie isté tri druhy práce — Oprava (BUG),
+Dar (GIFT), Požiadavka (CHR) — nesú od tejto verzie aj tikety v Plane, ktoré zakladá kokpit.
