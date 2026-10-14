@@ -237,7 +237,8 @@ const STATE = PIPELINE.state!;
 
 /**
  * The same build in its other stages — each changes what the control centre and the visual stage show (other bars, the live
- * preview, the composer or the Poradca bar). Measured as their own tests on the pages they change.
+ * preview, the composer or the Poradca bar) — and a deploy running on the UAT and PROD pages. Measured as their own tests on
+ * the pages they change.
  */
 export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
   {
@@ -270,6 +271,19 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
             ],
           },
         ],
+      }),
+    ],
+  },
+  {
+    // DEV-115: a deploy runs — every row says its step and time, and its buttons are greyed out until it ends.
+    name: "while a deploy runs",
+    pages: ["/uat", "/prod"],
+    overrides: [
+      override("get", "/api/v1/customers/{customer_id}/deploy-progress", {
+        bezi: true,
+        krok: "zálohujem databázu — bežiaca inštalácia sa zatiaľ nemení",
+        krok_trva_sekund: 42,
+        trva_sekund: 312,
       }),
     ],
   },
@@ -858,6 +872,13 @@ export function registerFixtures(): void {
     legacy_admin: false,
   });
   answer("get", "/api/v1/projects/{slug}/deploy-matrix", DEPLOY_MATRIX);
+  // DEV-115: no deploy runs — the pages as they are most of the time; a running one is a stage of its own (BUILD_STAGES).
+  answer("get", "/api/v1/customers/{customer_id}/deploy-progress", {
+    bezi: false,
+    krok: null,
+    krok_trva_sekund: 0,
+    trva_sekund: 0,
+  });
   // DEV-84: the repository tab — a red proof with its failed step, a run with its task and where it runs, one running.
   answer("get", "/api/v1/projects/{slug}/ci-runs", CI_RUNS);
   // DEV-86: NS Code — a few folders and files of NEX Inbox, one file with a long line, a search with hits.

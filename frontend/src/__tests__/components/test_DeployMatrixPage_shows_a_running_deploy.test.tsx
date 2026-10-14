@@ -10,11 +10,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import DeployMatrixPage from "@/components/deploy/DeployMatrixPage";
-import { getDeployMatrix, getDeployProgress, type DeployProgress } from "@/services/api/deploy";
+import { deployCustomer, getDeployMatrix, getDeployProgress, type DeployProgress } from "@/services/api/deploy";
 import type { DeployMatrix } from "@/types/deploy";
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -102,6 +102,27 @@ describe("Bežiace nasadenie je vidieť v riadku", () => {
     const adopt = screen.getByRole("button", { name: /Prevziať inštaláciu/ });
     expect(adopt).toBeDisabled();
     expect(adopt).toHaveAttribute("title", RUNNING_REASON);
+    // One line about one deploy — the click's guess „~2 min“ would contradict the measured 13 min.
+    expect(screen.queryByText(/Nasadzujem…/)).not.toBeInTheDocument();
+  });
+
+  it("po vlastnom kliku stojí odhad len dovtedy, kým server nepovie krok a čas", async () => {
+    vi.mocked(getDeployMatrix).mockResolvedValue(matrix("1.7.1", false));
+    vi.mocked(getDeployProgress).mockResolvedValueOnce(IDLE).mockResolvedValue(BUILDING);
+    vi.mocked(deployCustomer).mockReturnValue(new Promise(() => {}));
+
+    render(<DeployMatrixPage environment="prod" />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nasadiť/ }));
+
+    expect(screen.getByText(/Nasadzujem…/)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Nasadenie beží: prenášam zdrojový kód");
+    expect(screen.queryByText(/Nasadzujem…/)).not.toBeInTheDocument();
   });
 
   it("keď nasadenie skončí, riadok sa sám obnoví na výsledok", async () => {

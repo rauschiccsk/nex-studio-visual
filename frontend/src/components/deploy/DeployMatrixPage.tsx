@@ -185,7 +185,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   const [running, setRunning] = useState<Record<string, DeployProgress>>({});
   const runningRef = useRef<Record<string, DeployProgress>>({});
   const rowIds = (matrix?.rows ?? []).map((r) => r.customer_id).join(",");
-  const anyRunning = Object.keys(running).length > 0;
+  // The page's own click asks often too — its row says the server's step within seconds, not after the idle pause.
+  const askOften = Object.keys(running).length > 0 || busy !== null;
   useEffect(() => {
     if (!rowIds) return;
     let cancelled = false;
@@ -210,12 +211,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       });
     };
     tick();
-    const timer = window.setInterval(tick, anyRunning ? PROGRESS_POLL_RUNNING_MS : PROGRESS_POLL_IDLE_MS);
+    const timer = window.setInterval(tick, askOften ? PROGRESS_POLL_RUNNING_MS : PROGRESS_POLL_IDLE_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [rowIds, environment, anyRunning, load]);
+  }, [rowIds, environment, askOften, load]);
 
   function setRowMsg(customerId: string, msg: string | null) {
     setRowError((prev) => {
@@ -587,7 +588,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             aria-haspopup="dialog"
                             disabled={progress !== undefined}
                             onClick={() => setAdopting(row)}
-                            className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                            className="rounded-full border border-[var(--color-border-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-40"
                             title={
                               progress
                                 ? RUNNING_REASON
@@ -650,7 +651,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           ))}
                         </select>
                       )}
-                      {isBusy && (
+                      {/* DEV-115: the guess stands only until the server says the step and the time — then the
+                          running line says it, and „~2 min“ would contradict its measured minutes. */}
+                      {isBusy && !progress && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
                           <Loader2 className="h-3 w-3 animate-spin" /> Nasadzujem… (~2 min, počkaj)
                         </div>
