@@ -48,8 +48,8 @@ def req(item: BacklogItem) -> str:
 
 
 def gateway() -> PlaneGateway:
-    """The cockpit's door to Plane — one per request; tests replace it."""
-    return PlaneGateway()
+    """The cockpit's door to Plane (:func:`plane_tickets.gateway`) — one per request; tests replace it."""
+    return plane_tickets.gateway()
 
 
 def responsible_people(plane: PlaneGateway) -> list[str]:

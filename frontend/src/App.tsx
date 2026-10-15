@@ -21,6 +21,7 @@ import ProjectDetailPage from "./pages/ProjectDetailPage";
 import NewVersionPage from "./pages/NewVersionPage";
 import VersionDetailPage from "./pages/VersionDetailPage";
 import BacklogPage from "./pages/BacklogPage";
+import PlaneTicketsPage from "./pages/PlaneTicketsPage";
 import MetricsPage from "./pages/MetricsPage";
 import BillingPage from "./pages/BillingPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
@@ -30,7 +31,6 @@ import PoradcaPage from "./pages/PoradcaPage";
 import SpecifikaciaPage from "./pages/SpecifikaciaPage";
 import RepozitarPage from "./pages/RepozitarPage";
 import NsCodePage from "./pages/NsCodePage";
-import VizualPage from "./pages/VizualPage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UatPage from "./pages/UatPage";
@@ -80,6 +80,7 @@ function App() {
             <Route path="projects/:slug/versions/new" element={<NewVersionPage />} />
             <Route path="projects/:slug/versions/:versionId" element={<VersionDetailPage />} />
             <Route path="projects/:slug/backlog" element={<BacklogPage />} />
+            <Route path="projects/:slug/plane-tikety" element={<PlaneTicketsPage />} />
             <Route path="projects/:slug/metrics" element={<MetricsPage />} />
             <Route path="projects/:slug/billing" element={<BillingPage />} />
             <Route path="kb" element={<KnowledgeBasePage />} />
@@ -97,10 +98,6 @@ function App() {
             <Route path="riadiace-centrum" element={<RiadiaceCentrumPage />} />
             {/* ICCINT-167: Poradca — chats with a read-only agent; beside the build, above the pinned project */}
             <Route path="poradca" element={<PoradcaPage />} />
-            {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) shown during the
-                vizual phase while the AI edits it. Thin wrapper pattern (UatPage / ProdPage); project- +
-                version-scoped, gated in the Sidebar. */}
-            <Route path="vizual" element={<VizualPage />} />
             <Route path="specifikacia" element={<SpecifikaciaPage />} />
             <Route path="repozitar" element={<RepozitarPage />} />
             <Route path="ns-code" element={<NsCodePage />} />

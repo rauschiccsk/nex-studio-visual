@@ -28,6 +28,7 @@ from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.ns_code import router as ns_code_router
 from backend.api.routes.pipeline import router as pipeline_router
+from backend.api.routes.plane_tickets import router as plane_tickets_router
 from backend.api.routes.poradca import router as poradca_router
 from backend.api.routes.project_files import router as project_files_router
 from backend.api.routes.project_specs import router as project_specs_router
@@ -405,6 +406,7 @@ app.include_router(versions_router, prefix="/api/v1")
 # because it spans two URL families (``/projects/{slug}/customers`` and
 # ``/customers/{id}``) — see design §3.2 Zákazníci.
 app.include_router(customers_router, prefix="/api/v1")
+app.include_router(plane_tickets_router, prefix="/api/v1")  # DEV-120 „Plane tikety“
 # The deploy router (CR-V2-026) also mounts under the bare ``/api/v1`` prefix
 # because it spans two URL families (``/projects/{slug}/deploy-events`` and
 # ``/customers/{id}/deploy`` | ``/accept``) — see design §3 Deploy & Customers.

@@ -12,7 +12,6 @@ const breadcrumbMap: Record<string, string> = {
   "/notes": "Poznámky",
   "/riadiace-centrum": "Riadiace centrum",
   "/poradca": "Poradca",
-  "/vizual": "Vizuál",
   "/specifikacia": "Dokumenty",
   "/repozitar": "Repozitár",
   "/ns-code": "NS Code",

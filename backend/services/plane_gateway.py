@@ -158,6 +158,14 @@ class PlaneGateway:
             }
         return self._cache.states
 
+    def state_names(self) -> dict[str, tuple[str, str]]:
+        """Every column by its id: ``(name, group)`` — the group (``completed``, ``cancelled``, …) says whether a
+        ticket is closed, whatever the column is called (DEV-120)."""
+        return {
+            s["id"]: (s.get("name", ""), s.get("group", ""))
+            for s in self._results(self._request("GET", self._project_path("states/")))
+        }
+
     def state_id(self, name: str) -> str:
         found = self.states().get(name_key(name))
         if not found:
@@ -208,6 +216,25 @@ class PlaneGateway:
             identifier=f"{self.project()['identifier']}-{issue.get('sequence_id')}",
             url=self.ticket_url(issue),
         )
+
+    def module_tickets(self, module_id: str) -> list[dict]:
+        """The live tickets of a module — Plane deletes and archives softly, such a ticket is not shown (DEV-120)."""
+        return [
+            issue
+            for issue in self._results(self._request("GET", self._project_path(f"modules/{module_id}/module-issues/")))
+            if not issue.get("deleted_at") and not issue.get("archived_at")
+        ]
+
+    def find_module(self, module_id: str | None, name: str) -> dict | None:
+        """A project's module without founding one — by the id it remembers, else by its name (DEV-120)."""
+        live = self.modules()
+        by_id = [m for m in live if module_id and m.get("id") == module_id]
+        if by_id:
+            return by_id[0]
+        by_name = [m for m in live if name_key(m.get("name", "")) == name_key(name)]
+        if len(by_name) > 1:
+            raise PlaneError(f"V evidencii {self.project_identifier} sú dva moduly „{name}“ — treba ich zlúčiť.")
+        return by_name[0] if by_name else None
 
     def get_ticket(self, issue_id: str) -> dict:
         return self._request("GET", self._project_path(f"issues/{issue_id}/"))

@@ -2637,6 +2637,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/plane-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Plane Tickets
+         * @description The tickets of the project's module, newest change first; a ticket of the Zásobník names its REQ-N.
+         */
+        get: operations["list_project_plane_tickets_api_v1_projects__slug__plane_tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/uat-guide": {
         parameters: {
             query?: never;
@@ -6579,6 +6599,65 @@ export interface components {
             /** Working Since */
             working_since?: string | null;
         };
+        /** PlaneTicketRead */
+        PlaneTicketRead: {
+            /**
+             * Closed
+             * @description Done or cancelled — whatever the column is called.
+             */
+            closed: boolean;
+            /**
+             * Doer
+             * @description Who works on it now — the ticket's „Robí:“ line.
+             */
+            doer?: string | null;
+            /**
+             * Identifier
+             * @description DEV-n
+             */
+            identifier: string;
+            /**
+             * Requirement
+             * @description REQ-N of the Zásobník that founded the ticket.
+             */
+            requirement?: string | null;
+            /**
+             * Requirement Version
+             * @description The version that requirement is in.
+             */
+            requirement_version?: string | null;
+            /**
+             * State
+             * @description The ticket's column in Plane.
+             */
+            state: string;
+            /**
+             * Ticket Type
+             * @description Bug or Task, from the „Typ“ label.
+             */
+            ticket_type?: string | null;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Url */
+            url: string;
+            /**
+             * Warning
+             * @description What is wrong with the ticket's labels, in words.
+             */
+            warning?: string | null;
+            /**
+             * Work Kind
+             * @description From the „Druh práce“ label.
+             */
+            work_kind?: ("fix" | "change" | "gift") | null;
+            /**
+             * Work Kind Label
+             * @description The label's words, e.g. „Oprava (BUG)“.
+             */
+            work_kind_label?: string | null;
+        };
         /** PoradcaAsk */
         PoradcaAsk: {
             /** Attachments */
@@ -7276,6 +7355,16 @@ export interface components {
             full_smoke: boolean;
             /** Private Network */
             private_network: boolean;
+        };
+        /** ProjectPlaneTicketsRead */
+        ProjectPlaneTicketsRead: {
+            /**
+             * Module
+             * @description The project's module in DEV; none until its first ticket.
+             */
+            module: string | null;
+            /** Tickets */
+            tickets: components["schemas"]["PlaneTicketRead"][];
         };
         /**
          * ProjectRead
@@ -13586,6 +13675,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectCostsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_plane_tickets_api_v1_projects__slug__plane_tickets_get: {
+        parameters: {
+            query?: {
+                /** @description Done and cancelled tickets instead of the open ones. */
+                closed?: boolean;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectPlaneTicketsRead"];
                 };
             };
             /** @description Validation Error */

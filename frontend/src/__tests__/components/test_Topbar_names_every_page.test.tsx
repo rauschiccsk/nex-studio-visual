@@ -54,7 +54,9 @@ const FALLBACK = () => nameAt("/no-such-page-in-the-cockpit");
 describe("DEV-93 — the top bar names every page", () => {
   it("the router gives this guard its pages", () => {
     expect(pages().length).toBeGreaterThan(20);
-    expect(pages()).toEqual(expect.arrayContaining(["/", "/poradca", "/vizual", "/getting-started", "/projects/x"]));
+    expect(pages()).toEqual(
+      expect.arrayContaining(["/", "/poradca", "/riadiace-centrum", "/getting-started", "/projects/x/plane-tikety"]),
+    );
   });
 
   it.each(pages())("%s has a name of its own", (path) => {
@@ -70,7 +72,7 @@ describe("DEV-93 — the top bar names every page", () => {
   it.each([
     ["/getting-started", "Ako začať"],
     ["/poradca", "Poradca"],
-    ["/vizual", "Vizuál"],
+    ["/riadiace-centrum", "Riadiace centrum"],
   ])("%s reads as in the sidebar: %s", (path, name) => {
     topbarAt(path);
     expect(screen.getByText(name)).toBeInTheDocument();

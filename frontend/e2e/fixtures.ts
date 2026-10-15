@@ -243,7 +243,8 @@ const STATE = PIPELINE.state!;
 export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
   {
     name: "in the visual stage",
-    pages: ["/riadiace-centrum", "/vizual"],
+    // DEV-120: the Vizuál page is gone — the live preview opens from the Riadiace centrum (ZivyNahladBar).
+    pages: ["/riadiace-centrum"],
     overrides: [
       override("get", "/api/v1/pipeline/{version_id}", {
         ...PIPELINE,
@@ -883,6 +884,42 @@ export function registerFixtures(): void {
     responsible: "Zoltán",
     plane_identifier: null,
     plane_url: null,
+  });
+  // DEV-120: the „Plane tikety" tab — one ticket the Zásobník founded, one from a Dedo.
+  answer("get", "/api/v1/projects/{slug}/plane-tickets", {
+    module: PROJECT.name,
+    tickets: [
+      {
+        identifier: "DEV-130",
+        title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
+        state: "In Progress",
+        closed: false,
+        ticket_type: "Task",
+        work_kind: "change",
+        work_kind_label: "Požiadavka (CHR)",
+        warning: null,
+        doer: "Zoltán",
+        updated_at: T1,
+        url: "http://plane.test/icc/projects/p1/issues/i130",
+        requirement: "REQ-7",
+        requirement_version: "v1.9.0",
+      },
+      {
+        identifier: "DEV-114",
+        title: "NEX Inbox: faktúra FLORASERVIS sa nespracuje z ISDOC — číslo faktúry je v ISDOC len vo variabilnom symbole",
+        state: "In Progress",
+        closed: false,
+        ticket_type: "Bug",
+        work_kind: "fix",
+        work_kind_label: "Oprava (BUG)",
+        warning: null,
+        doer: "Zoltán Rausch",
+        updated_at: T0,
+        url: "http://plane.test/icc/projects/p1/issues/i114",
+        requirement: null,
+        requirement_version: null,
+      },
+    ],
   });
   answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER, NEW_CUSTOMER]);
   answer("get", "/api/v1/projects/{slug}/customer-settings", {

@@ -65,8 +65,8 @@ const STEPS: Step[] = [
             <strong>Návrh</strong> — pripraví návrh riešenia a rozpíše ho na plán úloh.
           </li>
           <li>
-            <strong>Vizuál</strong> — ukáže ti <strong>živý náhľad aplikácie</strong>: klikneš si po
-            obrazovkách presne tak, ako budú vyzerať. Tu si vypýtaj zmeny vzhľadu — po tvojom schválení sa
+            <strong>Vizuál</strong> — ukáže ti <strong>živý náhľad aplikácie</strong>: otvoríš ho v Riadiacom centre
+            tlačidlom „Otvoriť živý náhľad“ a klikneš si po obrazovkách presne tak, ako budú vyzerať. Tu si vypýtaj zmeny vzhľadu — po tvojom schválení sa
             podľa neho programuje a už sa neprerába. Bez tvojho schválenia sa ďalej nepokračuje.
           </li>
           <li>

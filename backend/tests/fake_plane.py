@@ -60,10 +60,10 @@ class FakePlane:
                 200,
                 json={
                     "results": [
-                        {"id": "s-todo", "name": "Todo"},
-                        {"id": "s-ip", "name": "In Progress"},
-                        {"id": "s-done", "name": "Done"},
-                        {"id": "s-cancelled", "name": "Cancelled"},
+                        {"id": "s-todo", "name": "Todo", "group": "unstarted"},
+                        {"id": "s-ip", "name": "In Progress", "group": "started"},
+                        {"id": "s-done", "name": "Done", "group": "completed"},
+                        {"id": "s-cancelled", "name": "Cancelled", "group": "cancelled"},
                     ]
                 },
             )
@@ -83,6 +83,9 @@ class FakePlane:
                 "state": body["state"],
                 "labels": [] if self.drop_labels else body["labels"],
                 "assignees": body["assignees"],
+                "updated_at": f"2026-10-15T08:{len(self.issues):02d}:00Z",
+                "deleted_at": None,
+                "archived_at": None,
             }
             self.issues[issue["id"]] = issue
             return httpx.Response(201, json=issue)
@@ -101,7 +104,10 @@ class FakePlane:
             if method == "POST":
                 self.module_issues.setdefault(parts[1], []).extend(body["issues"])
                 return httpx.Response(201, json={})
-            return httpx.Response(200, json={"results": [{"id": i} for i in self.module_issues.get(parts[1], [])]})
+            # Plane returns the whole tickets of the module (measured 15.10.2026), soft-deleted ones included.
+            return httpx.Response(
+                200, json={"results": [self.issues.get(i, {"id": i}) for i in self.module_issues.get(parts[1], [])]}
+            )
         return httpx.Response(404, json={"detail": f"unknown {method} {path}"})
 
 

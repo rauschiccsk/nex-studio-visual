@@ -49,6 +49,7 @@ import PrenosDoRiadnejVerzieBar from "@/components/riadiace/PrenosDoRiadnejVerzi
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
+import ZivyNahladBar from "@/components/riadiace/ZivyNahladBar";
 import StavZostavenia from "@/components/riadiace/StavZostavenia";
 import { useStavZostavenia } from "@/components/riadiace/useStavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -265,6 +266,8 @@ export default function RiadiaceCentrumPage() {
         {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
         <StavZostavenia stav={ci} />
+        {/* DEV-120: the live preview in its own window, during the Vizuál step — the Vizuál tab is gone. */}
+        <ZivyNahladBar board={board ?? null} />
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}

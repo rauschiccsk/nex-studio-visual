@@ -38,6 +38,7 @@ const IconNotes = () => <NavIcon glyph="📝" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
+const IconPlaneTickets = () => <NavIcon glyph="🎫" />;
 const IconMetrics = () => <NavIcon glyph="📊" />;
 const IconBilling = () => <NavIcon glyph="🧾" />;
 
@@ -52,8 +53,6 @@ const IconRepozitar = () => <NavIcon glyph="🔀" />;
 // DEV-86: the selected project's files as VS Code shows them, read-only.
 const IconNsCode = () => <NavIcon glyph="💻" />;
 
-// CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2) during the vizual phase.
-const IconVizual = () => <NavIcon glyph="🖥️" />;
 
 // v2 per-customer deploy surfaces (pages land in Milestone G — CR-V2-025/027).
 const IconCustomers = () => <NavIcon glyph="👥" />;
@@ -256,6 +255,16 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k zásobníku"
       />
+      {/* DEV-120: the tickets of the pinned project's module in Plane's DEV register — beside the Zásobník, whose
+          requirements found them. Project-scoped like it: disabled with a reason when no project is pinned. */}
+      <NavItem
+        icon={<IconPlaneTickets />}
+        label="Plane tikety"
+        active={hasProject ? isActive(`/projects/${selectedProject!.slug}/plane-tikety`) : false}
+        onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}/plane-tikety` : projectsFallback)}
+        disabled={!hasProject}
+        disabledTitle="Vyber projekt pre prístup k tiketom v Plane"
+      />
       {/* v2 spine STEP 1 (Chrbtica): the Riadiace centrum — the ONE conversation-centred build
           surface that replaces the AI Agent terminal + the 4-phase Vývoj board. Project- +
           version-scoped per design §4.1 — disabled when no project is pinned. The "čaká na Manažéra"
@@ -289,17 +298,6 @@ export default function Sidebar() {
             ? "Nemáš prístup k tomuto projektu — Poradcu k nemu môže otvoriť jeho vlastník alebo Manažér. V Projektoch si pripni vlastný projekt."
             : "Vyber projekt pre prístup k Poradcovi"
         }
-      />
-      {/* CR-1 (nex-studio-visual): the Vizuál surface — the live app preview (monitor 2), shown while the AI
-          edits the FE during the vizual phase. Project-scoped like the other build items → disabled (not
-          hidden, per the disabled-over-hidden convention) when no project is pinned. */}
-      <NavItem
-        icon={<IconVizual />}
-        label="Vizuál"
-        active={hasProject ? isActive("/vizual") : false}
-        onClick={() => navigate(hasProject ? "/vizual" : projectsFallback)}
-        disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k Vizuálu"
       />
       {/* v2 spine STEP 1: Špecifikácia — the read-only spec shell (the agreed .md is wired in a
           later step). Project-scoped — disabled (not hidden) when no project is pinned. */}
