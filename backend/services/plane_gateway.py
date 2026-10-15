@@ -68,6 +68,16 @@ def _html_to_text(value: str) -> str:
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", value or "")).split())
 
 
+def html_to_paragraphs(value: str) -> str:
+    """The HTML Plane stores → plain text with its paragraphs and line breaks kept (DEV-122: a ticket's text is a
+    fast fix's directive, so its shape matters)."""
+    text = re.sub(r"(?i)<br\s*/?>", "\n", value or "")
+    text = re.sub(r"(?i)</(p|div|li|h[1-6])>", "\n\n", text)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text))
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 class PlaneGateway:
     """Reads and writes one Plane project (by its identifier, e.g. ``DEV``) under the cockpit's own identity."""
 

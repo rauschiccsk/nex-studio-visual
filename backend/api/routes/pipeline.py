@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.foundation import User
 from backend.db.models.orchestrator import OrchestratorSession
@@ -54,12 +55,13 @@ from backend.schemas.pipeline import (
     VizualPreviewRead,
 )
 from backend.services import agent_terminal as agent_terminal_service
-from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner
+from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
+from backend.services.plane_gateway import PlaneError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline"])
@@ -386,8 +388,12 @@ async def start_fast_fix(
     — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
+
+    DEV-122: started from a ticket of the project's module (``plane_issue_id``), the version remembers it — the ticket
+    goes In Progress now and follows the deploys; one ticket starts one fix.
     """
-    authz.assert_project_id_access(db, current_user, payload.project_id)
+    project = authz.assert_project_id_access(db, current_user, payload.project_id)
+    ticket = await _fix_ticket(db, project, payload.plane_issue_id) if payload.plane_issue_id else None
 
     pre_count = db.execute(
         select(func.count()).select_from(Version).where(Version.project_id == payload.project_id)
@@ -396,6 +402,12 @@ async def start_fast_fix(
         version = fast_fix_service.create_patch_version(
             db, project_id=payload.project_id, user_id=current_user.id, work_kind=payload.work_kind
         )
+        if ticket is not None:
+            version.plane_issue_id, version.plane_identifier, version.plane_url = (
+                ticket.issue_id,
+                ticket.identifier,
+                ticket.url,
+            )
         state = await orchestrator.apply_action(
             db,
             version_id=version.id,
@@ -410,8 +422,10 @@ async def start_fast_fix(
         # No semver base version / bumped collision — a client/data precondition, not a server fault.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     version_id = version.id
+    version_number = version.version_number
     db.commit()
     db.refresh(state)
+    plane_warning = await _fix_ticket_started(ticket, version_number, current_user) if ticket else None
 
     # Stream the fresh board to any already-open sockets (none yet for a brand-new version, but
     # symmetric with post_action and harmless). The kickoff Coordinator runs in the background.
@@ -423,7 +437,41 @@ async def start_fast_fix(
         pipeline_runner.schedule_dispatch(version_id, None)
 
     logger.info("Fast-Fix started: version %s (project had %d versions before)", version_id, pre_count)
-    return FastFixStartResponse(version_id=version_id, board=_board(db, version_id))
+    return FastFixStartResponse(version_id=version_id, board=_board(db, version_id), plane_warning=plane_warning)
+
+
+async def _fix_ticket(db: Session, project: Project, issue_id: str) -> plane_tickets.LinkedTicket:
+    """The ticket a fast fix starts from — of this project's module, gone neither to the Zásobník nor to another fix;
+    else 400/409/502 in words."""
+    taken = plane_tickets.way_taken(db, project.id, issue_id)
+    if taken is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=taken)
+    try:
+        return await run_blocking(
+            plane_tickets.linked_ticket,
+            plane_tickets.gateway(),
+            project.plane_module_id,
+            project.name,
+            issue_id,
+            cap=60,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except PlaneError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except BlockingWorkTimedOut as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Plane do minúty neodpovedal — rýchla oprava nezačala."
+        ) from exc
+
+
+async def _fix_ticket_started(ticket: plane_tickets.LinkedTicket, version_number: str, user: User) -> Optional[str]:
+    """In Progress with a comment once the fix runs; the sentence when Plane did not follow (the fix runs anyway)."""
+    words = {"version": f"v{version_number}", "who": plane_tickets.person(user)}
+    try:
+        return await run_blocking(plane_tickets.follow_fix, plane_tickets.gateway, ticket, "started", **words, cap=60)
+    except BlockingWorkTimedOut:
+        return plane_tickets.fix_failed(ticket, "started", "Plane do minúty neodpovedal.")
 
 
 @router.get("/{version_id}/ci", response_model=CiStatusRead)

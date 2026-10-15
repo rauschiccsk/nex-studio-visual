@@ -21,6 +21,7 @@ import PlaneTicketsPage from "@/pages/PlaneTicketsPage";
 
 function ticket(over: Partial<PlaneTicket> = {}): PlaneTicket {
   return {
+    issue_id: "i130",
     identifier: "DEV-130",
     title: "Import faktúr z ISDOC",
     state: "In Progress",
@@ -34,6 +35,8 @@ function ticket(over: Partial<PlaneTicket> = {}): PlaneTicket {
     url: "http://plane.test/i/130",
     requirement: "REQ-7",
     requirement_version: "v1.9.0",
+    text: "",
+    fix_version: null,
     ...over,
   };
 }

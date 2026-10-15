@@ -56,7 +56,7 @@ provision+up leg is async (a ~1–2 min docker build) and is injected via
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 from uuid import UUID
@@ -1365,6 +1365,11 @@ async def deploy(
     # failed deploy.
     if ok and environment == "prod":
         warnings.extend(await _close_requirement_tickets(db, version, deployed_version, customer))
+    # DEV-122: a fast fix started from a ticket tells it where it runs — UAT a comment, PROD Done.
+    if ok and version.plane_issue_id:
+        warning = await _follow_fix_ticket(version, deployed_version, customer, environment)
+        if warning:
+            warnings.append(warning)
 
     # A failed deploy did not graduate the project — drop the bump signal.
     if not ok:
@@ -1392,6 +1397,30 @@ async def _close_requirement_tickets(db: Session, version, deployed_version: str
         )
     except BlockingWorkTimedOut:
         return [f"Tikety požiadaviek verzie v{deployed_version} sa do 2 minút neuzavreli — Plane neodpovedal."]
+
+
+async def _follow_fix_ticket(version, deployed_version: str, customer: Customer, environment: str) -> Optional[str]:
+    """The ticket of a fast fix follows its deploy (DEV-122); the sentence when Plane did not follow."""
+    from backend.core.local_time import local_time
+    from backend.core.offload import BlockingWorkTimedOut, run_blocking
+    from backend.services import plane_tickets
+
+    ticket = plane_tickets.LinkedTicket(
+        version.plane_issue_id, version.plane_identifier or version.plane_issue_id, version.plane_url or ""
+    )
+    try:
+        return await run_blocking(
+            plane_tickets.follow_fix,
+            plane_tickets.gateway,
+            ticket,
+            environment,
+            version=f"v{deployed_version}",
+            customer=customer.name,
+            date=local_time(datetime.now(timezone.utc)).strftime("%d.%m.%Y"),
+            cap=120,
+        )
+    except BlockingWorkTimedOut:
+        return plane_tickets.fix_failed(ticket, environment, "Plane do 2 minút neodpovedal.")
 
 
 def _customer_dir_slug(customer: Customer) -> str:

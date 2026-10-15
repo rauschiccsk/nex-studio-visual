@@ -21,7 +21,9 @@ from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.services.plane_gateway import PlaneError, PlaneGateway, TicketRef
+from backend.schemas.backlog import BacklogItemCreate
+from backend.services import backlog as backlog_service
+from backend.services.plane_gateway import PlaneError, PlaneGateway, TicketRef, html_to_paragraphs
 
 #: Where a ticket came from — said in its text, so the register shows which door of the cockpit founded it.
 SOURCES = {
@@ -132,6 +134,7 @@ _DOER = re.compile(r"Robí:\s*([^<\n]+)")
 
 @dataclass(frozen=True)
 class ProjectTicket:
+    issue_id: str
     identifier: str
     title: str
     state: str
@@ -144,6 +147,8 @@ class ProjectTicket:
     url: str
     requirement: Optional[str]
     requirement_version: Optional[str]
+    text: str
+    fix_version: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -184,6 +189,12 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
             .where(BacklogItem.project_id == project.id, BacklogItem.plane_issue_id.is_not(None))
         ).all()
     }
+    fixes = {
+        version.plane_issue_id: f"v{version.version_number}"
+        for version in db.execute(
+            select(Version).where(Version.project_id == project.id, Version.plane_issue_id.is_not(None))
+        ).scalars()
+    }
     rows: list[ProjectTicket] = []
     for issue in gateway.module_tickets(module["id"]):
         state, group = states.get(issue.get("state"), ("", ""))
@@ -198,7 +209,8 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
         requirement, version = linked.get(issue["id"], (None, None))
         rows.append(
             ProjectTicket(
-                identifier=f"{gateway.project()['identifier']}-{issue.get('sequence_id')}",
+                issue_id=issue["id"],
+                identifier=identifier(gateway, issue),
                 title=issue.get("name", ""),
                 state=state,
                 closed=group in CLOSED_GROUPS,
@@ -210,7 +222,153 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
                 url=gateway.ticket_url(issue),
                 requirement=requirement,
                 requirement_version=version,
+                text=ticket_text(issue),
+                fix_version=fixes.get(issue["id"]),
             )
         )
     rows.sort(key=lambda t: t.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return ProjectTickets(module.get("name"), rows)
+
+
+# --- from a ticket to the Zásobník or to a fast fix (DEV-122) -----------------------------------------------------
+
+#: How the ticket of a fast fix follows its version: the column (``None`` = only the comment), the comment for people,
+#: and the sentence when Plane did not follow — the fix itself never waits for Plane.
+FIX_MOVES = {
+    "started": (
+        "In Progress",
+        "Rýchla oprava {version} je spustená z tohto tiketu. Spustil: {who}.",
+        "Rýchla oprava je spustená, ale tiket {ticket} sa v Plane neposunul",
+    ),
+    "uat": (
+        None,
+        "Rýchla oprava {version} je nasadená na UAT u zákazníka {customer} ({date}).",
+        "Tiket {ticket} rýchlej opravy sa o nasadení na UAT nedozvedel",
+    ),
+    "prod": (
+        "Done",
+        "Rýchla oprava {version} je nasadená na PROD u zákazníka {customer} ({date}).",
+        "Tiket {ticket} rýchlej opravy sa po nasadení na PROD neuzavrel",
+    ),
+}
+BACKLOG_COMMENT = "Tiket je zaradený do Zásobníka projektu {project} ako {req}. Zaradil: {who}."
+_DOER_LINE = re.compile(r"^Robí:.*$", re.MULTILINE)
+
+
+class TicketTaken(Exception):
+    """The ticket already went one way — to the Zásobník or to a fast fix; one ticket goes one way.
+
+    Director 15.10.2026: „Súhlasím“ — otherwise the requirement and the fix would both move the ticket.
+    """
+
+
+@dataclass(frozen=True)
+class LinkedTicket:
+    """A ticket a fast fix is started from — plain data, safe to hand to a thread."""
+
+    issue_id: str
+    identifier: str
+    url: str
+
+
+def identifier(gateway: PlaneGateway, issue: dict) -> str:
+    return f"{gateway.project()['identifier']}-{issue.get('sequence_id')}"
+
+
+def ticket_text(issue: dict) -> str:
+    """The ticket's text without its ``Robí:`` line (who works on the ticket, not what to do)."""
+    text = html_to_paragraphs(issue.get("description_html", ""))
+    return re.sub(r"\n{3,}", "\n\n", _DOER_LINE.sub("", text)).strip()
+
+
+def find_project_ticket(gateway: PlaneGateway, module_id: Optional[str], project_name: str, issue_id: str) -> dict:
+    """A live ticket of the project's module — else a sentence: a ticket of another project never starts anything."""
+    module = gateway.find_module(module_id, project_name)
+    if module is None:
+        raise ValueError(f"Projekt {project_name} ešte nemá modul v evidencii DEV — tiket do neho nepatrí.")
+    for issue in gateway.module_tickets(module["id"]):
+        if issue.get("id") == issue_id:
+            return issue
+    raise ValueError(f"Tiket v module projektu {project_name} nie je (zmazaný, archivovaný alebo z iného projektu).")
+
+
+def linked_ticket(gateway: PlaneGateway, module_id: Optional[str], project_name: str, issue_id: str) -> LinkedTicket:
+    issue = find_project_ticket(gateway, module_id, project_name, issue_id)
+    return LinkedTicket(issue["id"], identifier(gateway, issue), gateway.ticket_url(issue))
+
+
+def ticket_to_backlog(db: Session, gateway: PlaneGateway, project: Project, issue_id: str) -> tuple[BacklogItem, bool]:
+    """The ticket becomes a requirement of the Zásobník, linked to it — once; ``(item, created_now)``.
+
+    The project's row is locked while it is looked up and founded, so a second click returns the same requirement.
+    From then on the requirement moves its ticket like one founded from the Zásobník (DEV-121).
+    """
+    db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
+    existing = requirement_of_ticket(db, project.id, issue_id)
+    if existing is not None:
+        return existing, False
+    fix = fix_of_ticket(db, project.id, issue_id)
+    if fix is not None:
+        raise TicketTaken(f"Z tohto tiketu už je spustená rýchla oprava v{fix.version_number} — do Zásobníka nepatrí.")
+    issue = find_project_ticket(gateway, project.plane_module_id, project.name, issue_id)
+    item = backlog_service.create(
+        db,
+        BacklogItemCreate(
+            project_id=project.id,
+            title=(issue.get("name") or "Tiket z Plane")[:500],
+            description=ticket_text(issue) or None,
+        ),
+    )
+    item.plane_issue_id = issue["id"]
+    item.plane_identifier = identifier(gateway, issue)
+    item.plane_url = gateway.ticket_url(issue)
+    db.flush()
+    return item, True
+
+
+def requirement_of_ticket(db: Session, project_id, issue_id: str) -> Optional[BacklogItem]:
+    return db.execute(
+        select(BacklogItem).where(BacklogItem.project_id == project_id, BacklogItem.plane_issue_id == issue_id)
+    ).scalar_one_or_none()
+
+
+def way_taken(db: Session, project_id, issue_id: str) -> Optional[str]:
+    """Where the ticket already went, in words — ``None`` while it may still go either way."""
+    fix = fix_of_ticket(db, project_id, issue_id)
+    if fix is not None:
+        return f"Z tohto tiketu už je spustená rýchla oprava v{fix.version_number}."
+    item = requirement_of_ticket(db, project_id, issue_id)
+    if item is not None:
+        return f"Tiket je už v Zásobníku ako REQ-{item.number} — pôjde s verziou, do ktorej ho zaradíš."
+    return None
+
+
+def fix_of_ticket(db: Session, project_id, issue_id: str) -> Optional[Version]:
+    """The version a fast fix from this ticket already runs in — one ticket, one fix."""
+    return (
+        db.execute(
+            select(Version)
+            .where(Version.project_id == project_id, Version.plane_issue_id == issue_id)
+            .order_by(Version.created_at)
+        )
+        .scalars()
+        .first()
+    )
+
+
+def follow_fix(plane_factory, ticket: LinkedTicket, event: str, **words: str) -> Optional[str]:
+    """Comment, then (when the event moves it) the column; ``None`` when the ticket followed, else the sentence."""
+    state, sentence, _ = FIX_MOVES[event]
+    try:
+        plane = plane_factory()
+        plane.comment(ticket.issue_id, sentence.format(**words))
+        if state is not None:
+            plane.set_state(ticket.issue_id, state)
+    except PlaneError as exc:
+        return fix_failed(ticket, event, str(exc))
+    return None
+
+
+def fix_failed(ticket: LinkedTicket, event: str, why: str) -> str:
+    """The sentence when the ticket of a fast fix did not follow its version."""
+    return f"{FIX_MOVES[event][2].format(ticket=ticket.identifier)}: {why}"

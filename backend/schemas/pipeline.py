@@ -389,6 +389,9 @@ class FastFixStartRequest(BaseModel):
     #: DEV-50: a fix of an error in delivered code (``fix`` — never billed) or a change (``change`` — billed).
     #: Required (DEV-56): without it the fast fix does not start — 400 with the sentence why, never a guess.
     work_kind: Optional[WorkKind] = None
+    #: DEV-122: the ticket of the project's module in Plane the fix is started from — it then follows the version
+    #: (started → In Progress, UAT → a comment, PROD → Done).
+    plane_issue_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class FastFixStartResponse(BaseModel):
@@ -396,3 +399,6 @@ class FastFixStartResponse(BaseModel):
 
     version_id: UUID
     board: PipelineBoardRead
+    plane_warning: Optional[str] = Field(
+        default=None, description="The fix started, but its ticket in Plane did not follow — said in words."
+    )

@@ -1236,6 +1236,9 @@ export interface paths {
          *     — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
          *     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
          *     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
+         *
+         *     DEV-122: started from a ticket of the project's module (``plane_issue_id``), the version remembers it — the ticket
+         *     goes In Progress now and follows the deploys; one ticket starts one fix.
          */
         post: operations["start_fast_fix_api_v1_pipeline_fast_fix_post"];
         delete?: never;
@@ -2691,6 +2694,29 @@ export interface paths {
         get: operations["list_project_plane_tickets_api_v1_projects__slug__plane_tickets_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/plane-tickets/{issue_id}/backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plane Ticket To Backlog
+         * @description „Do Zásobníka" — the requirement linked to the ticket; a second click returns the same one.
+         *
+         *     The requirement is saved first; the ticket's comment comes after and, when Plane does not take it, the sentence
+         *     says so (``plane_warning``) instead of undoing the requirement.
+         */
+        post: operations["plane_ticket_to_backlog_api_v1_projects__slug__plane_tickets__issue_id__backlog_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5936,6 +5962,8 @@ export interface components {
              * @description The Director's fast-fix directive (the task brief).
              */
             directive: string;
+            /** Plane Issue Id */
+            plane_issue_id?: string | null;
             /**
              * Project Id
              * Format: uuid
@@ -5950,6 +5978,11 @@ export interface components {
          */
         FastFixStartResponse: {
             board: components["schemas"]["PipelineBoardRead"];
+            /**
+             * Plane Warning
+             * @description The fix started, but its ticket in Plane did not follow — said in words.
+             */
+            plane_warning?: string | null;
             /**
              * Version Id
              * Format: uuid
@@ -6652,10 +6685,20 @@ export interface components {
              */
             doer?: string | null;
             /**
+             * Fix Version
+             * @description The fast fix started from the ticket (DEV-122).
+             */
+            fix_version?: string | null;
+            /**
              * Identifier
              * @description DEV-n
              */
             identifier: string;
+            /**
+             * Issue Id
+             * @description The ticket's id in Plane — what „Do Zásobníka“ and a fast fix name it by.
+             */
+            issue_id: string;
             /**
              * Requirement
              * @description REQ-N of the Zásobník that founded the ticket.
@@ -6671,6 +6714,12 @@ export interface components {
              * @description The ticket's column in Plane.
              */
             state: string;
+            /**
+             * Text
+             * @description The ticket's text without its „Robí:“ line — a fast fix's directive.
+             * @default
+             */
+            text: string;
             /**
              * Ticket Type
              * @description Bug or Task, from the „Typ“ label.
@@ -7403,6 +7452,14 @@ export interface components {
              * @description The project's module in DEV; none until its first ticket.
              */
             module: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             * @description The project a fast fix from a ticket starts in (DEV-122).
+             */
+            project_id: string;
+            /** Project Name */
+            project_name: string;
             /** Tickets */
             tickets: components["schemas"]["PlaneTicketRead"][];
         };
@@ -13834,6 +13891,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectPlaneTicketsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plane_ticket_to_backlog_api_v1_projects__slug__plane_tickets__issue_id__backlog_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacklogItemRead"];
                 };
             };
             /** @description Validation Error */

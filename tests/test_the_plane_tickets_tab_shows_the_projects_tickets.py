@@ -140,7 +140,12 @@ def test_a_project_without_a_module_has_no_tickets_and_reading_founds_none(db_se
     owner = _make_user(db_session, "ha")
     project = _make_project(db_session, owner)
     r = _client(db_session, owner).get(f"/api/v1/projects/{project.slug}/plane-tickets")
-    assert r.status_code == 200 and r.json() == {"module": None, "tickets": []}
+    assert r.status_code == 200 and r.json() == {
+        "project_id": str(project.id),
+        "project_name": project.name,
+        "module": None,
+        "tickets": [],
+    }
     assert {req.method for req in plane.requests} == {"GET"}  # only read — no module founded
     assert project.plane_module_id is None
 

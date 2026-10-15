@@ -271,6 +271,8 @@ export interface PipelineActionRequest {
 export interface FastFixStartResponse {
   version_id: string;
   board: PipelineBoard;
+  /** DEV-122 — the fix started, but its ticket in Plane did not follow; said in words. */
+  plane_warning?: string | null;
 }
 
 // CR-V2-015 / SPIKE-IO Model B: the result of relaying a Manažér message to the AI Agent. The engine is the
@@ -296,11 +298,14 @@ export function startFastFixApi(
   directive: string,
   /** DEV-50 — decided when the fast fix starts; omitted (a Dedo proposal) leaves it for the statement to ask. */
   workKind?: WorkKind,
+  /** DEV-122 — the ticket in Plane the fix starts from; it then follows the version up to PROD. */
+  planeIssueId?: string,
 ): Promise<FastFixStartResponse> {
   return api.post<FastFixStartResponse>("/pipeline/fast-fix", {
     project_id: projectId,
     directive,
     ...(workKind ? { work_kind: workKind } : {}),
+    ...(planeIssueId ? { plane_issue_id: planeIssueId } : {}),
   });
 }
 

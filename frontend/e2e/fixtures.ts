@@ -894,10 +894,14 @@ export function registerFixtures(): void {
     plane_url: null,
   });
   // DEV-120: the „Plane tikety" tab — one ticket the Zásobník founded, one from a Dedo.
+  // DEV-122: an open ticket goes to the Zásobník or starts a fast fix — the layout check opens the fast fix panel.
   answer("get", "/api/v1/projects/{slug}/plane-tickets", {
+    project_id: PROJECT.id,
+    project_name: PROJECT.name,
     module: PROJECT.name,
     tickets: [
       {
+        issue_id: "i130",
         identifier: "DEV-130",
         title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
         state: "In Progress",
@@ -911,8 +915,11 @@ export function registerFixtures(): void {
         url: "http://plane.test/icc/projects/p1/issues/i130",
         requirement: "REQ-7",
         requirement_version: "v1.9.0",
+        text: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
+        fix_version: null,
       },
       {
+        issue_id: "i114",
         identifier: "DEV-114",
         title: "NEX Inbox: faktúra FLORASERVIS sa nespracuje z ISDOC — číslo faktúry je v ISDOC len vo variabilnom symbole",
         state: "In Progress",
@@ -926,6 +933,8 @@ export function registerFixtures(): void {
         url: "http://plane.test/icc/projects/p1/issues/i114",
         requirement: null,
         requirement_version: null,
+        text: "Číslo faktúry je v ISDOC len vo variabilnom symbole.\n\nOver aj dobropis.",
+        fix_version: null,
       },
     ],
   });

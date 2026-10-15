@@ -45,6 +45,11 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # says), never billed; ``change`` — new work or a change, billed. NULL = not decided: a new version counts as
     # ``change``, a fast fix must be decided by the Manažér before its delivered-token statement is issued.
     work_kind = Column(String(10), nullable=True)
+    # DEV-122: the ticket in Plane's DEV register a fast fix was started from — it follows the version on its own
+    # (started → In Progress, deployed to UAT → a comment, deployed to PROD → Done).
+    plane_issue_id = Column(String(64), nullable=True)
+    plane_identifier = Column(String(32), nullable=True)
+    plane_url = Column(String(500), nullable=True)
     # DEV-74: the version's own token rates for its delivery statement (per 1 000 tokens) — code and tests,
     # documentation; NULL = the rate in Nastavenia. Every change is kept in ``version_rate_changes``.
     rate_code = Column(Numeric(12, 4), nullable=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,7 @@ from backend.schemas.delivery_statement import WorkKind
 
 
 class PlaneTicketRead(BaseModel):
+    issue_id: str = Field(description="The ticket's id in Plane — what „Do Zásobníka“ and a fast fix name it by.")
     identifier: str = Field(description="DEV-n")
     title: str
     state: str = Field(description="The ticket's column in Plane.")
@@ -24,8 +26,12 @@ class PlaneTicketRead(BaseModel):
     url: str
     requirement: Optional[str] = Field(default=None, description="REQ-N of the Zásobník that founded the ticket.")
     requirement_version: Optional[str] = Field(default=None, description="The version that requirement is in.")
+    text: str = Field(default="", description="The ticket's text without its „Robí:“ line — a fast fix's directive.")
+    fix_version: Optional[str] = Field(default=None, description="The fast fix started from the ticket (DEV-122).")
 
 
 class ProjectPlaneTicketsRead(BaseModel):
+    project_id: UUID = Field(description="The project a fast fix from a ticket starts in (DEV-122).")
+    project_name: str
     module: Optional[str] = Field(description="The project's module in DEV; none until its first ticket.")
     tickets: list[PlaneTicketRead]
