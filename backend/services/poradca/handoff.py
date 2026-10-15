@@ -11,6 +11,10 @@ DEV-29, Director 08.10.2026: „O verziách rozhodujem ja. Treba, aby zapísal l
 Tlačidlo predtým založilo aj ďalšiu verziu so zadaním z požiadavky; do ktorej verzie požiadavka pôjde,
 rozhoduje Director. Odpovede spred tejto zmeny nesú blok ``<poziadavka-na-novu-verziu>`` — číta sa rovnako.
 
+DEV-119: a third block proposes a ticket in Plane — ``<tiket-nsv>`` for a problem of the cockpit itself (Andros Dedo
+solves it), ``<tiket-projektu druh="…" cesta="…">`` for work on the project, proposed for the next version or for a
+fast fix. The ticket is founded by a person's click after a preview (:mod:`backend.services.poradca.tickets`).
+
 The request text is taken from the STORED answer (it passed the secret filter), never from the browser. The second
 kliknutie vráti už uloženú požiadavku — nezaloží druhú.
 """
@@ -35,6 +39,16 @@ BLOCK_BACKLOG = "poziadavka-do-zasobnika"
 #: The block answers carried before DEV-29 — still saved to the backlog, never to a version.
 BLOCK_BACKLOG_LEGACY = "poziadavka-na-novu-verziu"
 
+BLOCK_TICKET_NSV = "tiket-nsv"
+BLOCK_TICKET_PROJECT = "tiket-projektu"
+#: What Poradca writes in ``druh="…"`` and ``cesta="…"`` of a project ticket → the cockpit's work kind and way.
+TICKET_WORK_KINDS = {"oprava": "fix", "dar": "gift", "poziadavka": "change"}
+TICKET_WAYS = {"verzia": "version", "rychla-oprava": "fast_fix"}
+_TICKET = re.compile(
+    rf"<({BLOCK_TICKET_NSV}|{BLOCK_TICKET_PROJECT})((?:\s+[a-z-]+=\"[^\"]*\")*)\s*>\s*(.*?)\s*</\1>", re.S
+)
+_ATTRIBUTE = re.compile(r'([a-z-]+)="([^"]*)"')
+
 #: Najkratšia požiadavka, ktorú má zmysel ukladať.
 _MIN_REQUEST_CHARS = 10
 _TITLE_MAX = 200
@@ -52,6 +66,17 @@ class SavedRequest:
     created: bool
 
 
+@dataclass(frozen=True)
+class TicketProposal:
+    """A ticket Poradca proposes: ``nsv`` (the cockpit's own problem) or ``project``; the first line is the title."""
+
+    kind: str
+    title: str
+    description: str
+    work_kind: Optional[str]
+    way: Optional[str]
+
+
 def extract_block(text: str, name: str) -> Optional[str]:
     """Content of the first ``<name>…</name>`` block without edge whitespace; ``None`` if absent or empty."""
     match = re.search(rf"<{name}>\s*(.*?)\s*</{name}>", text or "", re.S)
@@ -64,6 +89,23 @@ def extract_block(text: str, name: str) -> Optional[str]:
 def backlog_request(text: str) -> Optional[str]:
     """Požiadavka do Zásobníka v odpovedi — nový blok, inak blok odpovedí spred DEV-29."""
     return extract_block(text, BLOCK_BACKLOG) or extract_block(text, BLOCK_BACKLOG_LEGACY)
+
+
+def ticket_proposal(text: str) -> Optional[TicketProposal]:
+    """The first ticket block of the answer; ``None`` without one (or with an empty one)."""
+    match = _TICKET.search(text or "")
+    body = match.group(3).strip() if match else ""
+    if len(body) < _MIN_REQUEST_CHARS:
+        return None
+    attributes = {name: value.strip().casefold() for name, value in _ATTRIBUTE.findall(match.group(2))}
+    project = match.group(1) == BLOCK_TICKET_PROJECT
+    return TicketProposal(
+        kind="project" if project else "nsv",
+        title=_title(body),
+        description="\n".join(body.splitlines()[1:]).strip(),
+        work_kind=TICKET_WORK_KINDS.get(attributes.get("druh", "")) if project else None,
+        way=TICKET_WAYS.get(attributes.get("cesta", "")) if project else None,
+    )
 
 
 def _title(summary: str) -> str:

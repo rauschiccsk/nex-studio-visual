@@ -7,15 +7,11 @@ import { useEffect, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 
 import WorkKindChoice from "@/components/common/WorkKindChoice";
+import { TICKET_TYPES } from "@/lib/ticketTypes";
 import { createBacklogTicketApi, getBacklogTicketDraftApi } from "@/services/api/backlog";
 import { humanizeApiError } from "@/services/apiError";
 import type { WorkKind } from "@/lib/workKind";
 import type { BacklogItemRead, BacklogTicketDraft, TicketType } from "@/types/backlog";
-
-const TICKET_TYPES: { value: TicketType; label: string }[] = [
-  { value: "Task", label: "Úloha (Task)" },
-  { value: "Bug", label: "Chyba (Bug)" },
-];
 
 const FIELD =
   "w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500";

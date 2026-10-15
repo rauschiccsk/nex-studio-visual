@@ -1201,7 +1201,45 @@ export function registerFixtures(): void {
           { card: null, label: "Áno, súhlasím", status: "answer", question: null },
         ],
       },
+      // DEV-119: an answer proposing a ticket of the cockpit — the layout check opens its preview.
+      {
+        id: "99999999-9999-4999-8999-999999999994",
+        author: "poradca",
+        content:
+          "Toto je chyba kokpitu.\n<tiket-nsv>\nTlačidlo Nasadiť pri UAT nič nerobí\n\nPo kliknutí sa neobjaví hláška.\n</tiket-nsv>",
+        status: "done",
+        duration_seconds: 12,
+        created_at: T2,
+        finished_at: T2,
+        ticket_proposal: { kind: "nsv", title: "Tlačidlo Nasadiť pri UAT nič nerobí" },
+      },
     ],
+  });
+  answer("get", "/api/v1/poradca/messages/{message_id}/plane-ticket", {
+    kind: "nsv",
+    title: "Tlačidlo Nasadiť pri UAT nič nerobí",
+    description: "Po kliknutí sa neobjaví hláška.",
+    ticket_type: "Bug",
+    work_kind: null,
+    way: null,
+    responsible_options: ["Andros Dedo"],
+    responsible: "Andros Dedo",
+    context: [
+      `Projekt: ${PROJECT.name}`,
+      "Verzia: v1.9.0",
+      "Stavba: fáza vizual, stav awaiting_manazer",
+      "Rozhovor Poradcu: https://studio.int.isnex.eu/poradca?c=99999999-9999-4999-8999-999999999991",
+    ],
+    similar: [
+      {
+        identifier: "DEV-40",
+        title: "Tlačidlo Nasadiť pri UAT zašedne bez dôvodu, keď verzia ešte nie je overená",
+        state: "Todo",
+        url: "http://plane.test/icc/projects/p1/issues/i40",
+      },
+    ],
+    plane_identifier: null,
+    plane_url: null,
   });
   answer("get", "/api/v1/release-notes", [
     {

@@ -123,6 +123,14 @@ Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
   do zásobníku.“). Do v4.43.6 sa tlačidlo volalo „Založiť novú verziu z tejto požiadavky“ a zakladalo aj ďalšiu
   verziu so zadaním z požiadavky; z odpovedí Poradcu tak nevznikla ani jedna. Blok v odpovedi je
   `<poziadavka-do-zasobnika>`; staršie odpovede s `<poziadavka-na-novu-verziu>` sa ukladajú rovnako.
+- **„Založiť tiket"** (v4.51.0, DEV-119) — Poradca navrhne tiket v Plane a človek ho po náhľade založí sám.
+  Director 14.10.2026: „Chcel by som aby poradca vedel zakladať do plane tiket na dve veci, buď nejaký problém
+  s NSV, ten tiket potom budeš riešiť ty, alebo pre konkrétny projekt…“ Blok `<tiket-nsv>` je problém kokpitu:
+  tiket ide do modulu NEX Studio Visual evidencie DEV, robí ho a zodpovedá zaň Andros Dedo a kokpit k nemu sám
+  doplní projekt, verziu, stav stavby a odkaz na rozhovor. Blok `<tiket-projektu druh="…" cesta="…">` je práca
+  na projekte: modul projektu, druh práce, zodpovedný a návrh „do ďalšej verzie“ alebo „do rýchlej opravy“ —
+  len návrh, verziu tiket nezakladá ani nespúšťa (DEV-29). Náhľad ukáže podobné otvorené tikety modulu; druhé
+  kliknutie vráti založený tiket, pod odpoveďou potom stojí „Tiket DEV-N je založený.“ s odkazom do Plane.
 
 ### Počas stavby
 Beží **vedľa** stavby: neprepína jej stav, nečaká na ňu, nezastaví ju. Agent stavby o rozhovore nevie.

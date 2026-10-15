@@ -7,6 +7,9 @@ import type {
   PoradcaBacklogSaved,
   PoradcaProjectContext,
   PoradcaStatus,
+  PoradcaTicketCreate,
+  PoradcaTicketDraft,
+  PoradcaTicketFounded,
 } from "../../types/poradca";
 
 export function getPoradcaStatusApi(): Promise<PoradcaStatus> {
@@ -74,6 +77,16 @@ export function stopPoradcaApi(messageId: string): Promise<{ stopping: boolean }
 /** DEV-29: the request in Poradca's answer goes to the project's Zásobník — no version comes of it. */
 export function saveRequestToBacklogApi(messageId: string): Promise<PoradcaBacklogSaved> {
   return api.post<PoradcaBacklogSaved>(`/poradca/messages/${messageId}/backlog`);
+}
+
+/** DEV-119 — the preview of the ticket Poradca proposes: what the cockpit adds and similar open tickets. */
+export function getPoradcaTicketDraftApi(messageId: string): Promise<PoradcaTicketDraft> {
+  return api.get<PoradcaTicketDraft>(`/poradca/messages/${messageId}/plane-ticket`);
+}
+
+/** DEV-119 — the edited proposal becomes a ticket in Plane, once; a second click returns the same ticket. */
+export function foundPoradcaTicketApi(messageId: string, body: PoradcaTicketCreate): Promise<PoradcaTicketFounded> {
+  return api.post<PoradcaTicketFounded>(`/poradca/messages/${messageId}/plane-ticket`, body);
 }
 
 export function buildPoradcaWsUrl(conversationId: string, token: string): string {

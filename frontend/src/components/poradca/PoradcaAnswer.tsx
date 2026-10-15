@@ -3,11 +3,11 @@
 // The buttons appear only when the answer carries the relevant block (Poradca charter, part 4) — and „Vložiť do
 // Riadiaceho centra" is grey with a reason when the build field rejects an instruction. Nothing is sent by itself:
 // pokyn odošle človek v Riadiacom centre; požiadavka ide len do Zásobníka — verzia z nej nevzniká, o verziách
-// rozhoduje Director (DEV-29).
+// rozhoduje Director (DEV-29). DEV-119: a proposed ticket opens a preview; the person founds it in Plane.
 
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, Loader2, Send, Square } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Loader2, Send, Square, Ticket } from "lucide-react";
 
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -18,6 +18,7 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
 import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
 import { ChoiceSummary, InlineChoice } from "@/components/poradca/ChoiceBadge";
+import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
@@ -36,6 +37,11 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   // DEV-29: the REQ-N the request was saved as — from the answer itself, or from the click just now.
   const [savedNumber, setSavedNumber] = useState<number | null>(message.captured_backlog_number ?? null);
   const [showSteps, setShowSteps] = useState(false);
+  // DEV-119: the ticket founded from this answer — from the answer itself, or from the click just now.
+  const [ticket, setTicket] = useState<{ identifier: string; url: string } | null>(
+    message.plane_identifier ? { identifier: message.plane_identifier, url: message.plane_url ?? "" } : null,
+  );
+  const [ticketOpen, setTicketOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   const inFlight = useRef(false);
@@ -141,7 +147,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       )}
       {message.status === "stopped" && <p className="text-xs text-[var(--color-text-muted)]">Zastavené.</p>}
 
-      {!running && (message.instruction || message.backlog_request) && (
+      {!running && (message.instruction || message.backlog_request || message.ticket_proposal) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {message.instruction && (
             <button
@@ -180,7 +186,41 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
               )}
             </span>
           )}
+          {message.ticket_proposal && !ticket && (
+            <button
+              type="button"
+              aria-expanded={ticketOpen}
+              onClick={() => setTicketOpen((v) => !v)}
+              title={
+                message.ticket_proposal.kind === "nsv"
+                  ? "Tiket pre problém kokpitu — rieši ho Andros Dedo. Najprv uvidíš náhľad."
+                  : "Tiket projektu v Plane — návrh, verziu nezakladá. Najprv uvidíš náhľad."
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
+            >
+              <Ticket className="h-3.5 w-3.5" /> Založiť tiket
+            </button>
+          )}
+          {ticket && (
+            <span className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+              Tiket{" "}
+              <a href={ticket.url} target="_blank" rel="noreferrer" className="font-mono underline">
+                {ticket.identifier}
+              </a>{" "}
+              je založený.
+            </span>
+          )}
         </div>
+      )}
+      {ticketOpen && !ticket && (
+        <PoradcaTicketPanel
+          messageId={message.id}
+          onFounded={(t) => {
+            setTicket(t);
+            setTicketOpen(false);
+          }}
+          onClose={() => setTicketOpen(false)}
+        />
       )}
       {instructionBlocked && message.instruction && !running && (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{instructionBlocked}</p>

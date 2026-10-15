@@ -8,6 +8,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.schemas.backlog import TicketType
+from backend.schemas.delivery_statement import WorkKind
+
 #: Longest question — longer text is more likely a pasted log; Poradca reads that itself with a tool.
 MAX_QUESTION_CHARS = 20_000
 #: Longest conversation title — width of the ``poradca_conversations.title`` column.
@@ -86,6 +89,10 @@ class PoradcaMessageRead(BaseModel):
     captured_backlog_number: Optional[int] = None
     #: DEV-83 — the choices the answer marks (``<volba>``), in its order; empty for a question or unfinished answer.
     choices: list[PoradcaChoiceRead] = Field(default_factory=list)
+    #: DEV-119 — the ticket the answer proposes (``<tiket-nsv>`` / ``<tiket-projektu>``) and the one founded from it.
+    ticket_proposal: Optional[PoradcaTicketProposalRead] = None
+    plane_identifier: Optional[str] = None
+    plane_url: Optional[str] = None
 
 
 class PoradcaBacklogSaved(BaseModel):
@@ -196,3 +203,55 @@ class PoradcaStatus(BaseModel):
     attachment_types: list[str] = Field(default_factory=list)
     #: DEV-103 — how long a question may be, so a question composed from a decision card fits before it is sent.
     question_max_chars: int = MAX_QUESTION_CHARS
+
+
+# --- DEV-119: a ticket in Plane from a Poradca answer ------------------------------------------------------------
+
+TicketKind = Literal["nsv", "project"]
+TicketWay = Literal["version", "fast_fix"]
+
+
+class PoradcaTicketProposalRead(BaseModel):
+    kind: TicketKind = Field(description="nsv = a problem of the cockpit for Andros Dedo; project = project work.")
+    title: str
+
+
+class PoradcaSimilarTicketRead(BaseModel):
+    identifier: str
+    title: str
+    state: str
+    url: str
+
+
+class PoradcaTicketDraft(BaseModel):
+    """What „Založiť tiket" offers under a Poradca answer — or the ticket founded from it."""
+
+    kind: TicketKind
+    title: str
+    description: str
+    ticket_type: TicketType
+    work_kind: Optional[WorkKind] = None
+    way: Optional[TicketWay] = Field(default=None, description="Poradca's proposal: the next version or a fast fix.")
+    responsible_options: list[str]
+    responsible: Optional[str] = None
+    context: list[str] = Field(default_factory=list, description="What the cockpit adds to a ticket of the cockpit.")
+    similar: list[PoradcaSimilarTicketRead] = Field(default_factory=list)
+    plane_identifier: Optional[str] = None
+    plane_url: Optional[str] = None
+
+
+class PoradcaTicketCreate(BaseModel):
+    """The edited draft. A project ticket needs its work kind, the proposed way and who is responsible."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(default="", max_length=20000)
+    ticket_type: TicketType
+    work_kind: Optional[WorkKind] = None
+    way: Optional[TicketWay] = None
+    responsible: Optional[str] = Field(default=None, max_length=100)
+
+
+class PoradcaTicketFounded(BaseModel):
+    plane_identifier: str
+    plane_url: str
+    created: bool

@@ -14,6 +14,10 @@ export type PoradcaVersionInfo = S["PoradcaVersionInfo"];
 export type PoradcaBacklogSaved = S["PoradcaBacklogSaved"];
 /** DEV-83 — a choice Poradca marked in its answer, checked against the card it names. */
 export type PoradcaChoice = S["PoradcaChoiceRead"];
+/** DEV-119 — the ticket Poradca proposes and the preview „Založiť tiket" opens with. */
+export type PoradcaTicketDraft = S["PoradcaTicketDraft"];
+export type PoradcaTicketCreate = S["PoradcaTicketCreate"];
+export type PoradcaTicketFounded = S["PoradcaTicketFounded"];
 
 /** Live progress event — tool and target, never content. */
 export type PoradcaEvent =

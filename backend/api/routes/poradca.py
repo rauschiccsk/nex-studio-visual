@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
@@ -48,10 +49,15 @@ from backend.schemas.poradca import (
     PoradcaRename,
     PoradcaScopeUpdate,
     PoradcaStatus,
+    PoradcaTicketCreate,
+    PoradcaTicketDraft,
+    PoradcaTicketFounded,
+    PoradcaTicketProposalRead,
     PoradcaVersionInfo,
 )
-from backend.services import metrics
-from backend.services.poradca import attachments, choices, handoff, readiness, runner
+from backend.services import metrics, plane_tickets
+from backend.services.plane_gateway import PlaneError
+from backend.services.poradca import attachments, choices, handoff, readiness, runner, tickets
 
 router = APIRouter(tags=["Poradca"])
 
@@ -96,6 +102,11 @@ def _captured_backlog_number(db: Session, msg: PoradcaMessage) -> Optional[int]:
     return item.number if item is not None else None
 
 
+def _ticket_proposal(content: str) -> Optional[PoradcaTicketProposalRead]:
+    proposal = handoff.ticket_proposal(content)
+    return PoradcaTicketProposalRead(kind=proposal.kind, title=proposal.title) if proposal else None
+
+
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     usage = msg.usage or {}
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
@@ -119,6 +130,9 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if done_answer else None,
         backlog_request=handoff.backlog_request(msg.content) if done_answer else None,
         captured_backlog_number=_captured_backlog_number(db, msg),
+        ticket_proposal=_ticket_proposal(msg.content) if done_answer else None,
+        plane_identifier=msg.plane_identifier,
+        plane_url=msg.plane_url,
         choices=[
             PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
             for c in choices.choices(db, msg.content, msg.version_id)
@@ -408,6 +422,53 @@ def save_request_to_backlog(
         project_slug=result.project_slug,
         created=result.created,
     )
+
+
+def _answer_for(db: Session, user: User, message_id: uuid.UUID) -> PoradcaMessage:
+    msg = db.get(PoradcaMessage, message_id)
+    if msg is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Správa sa nenašla.")
+    _conversation_for(db, user, msg.conversation_id)
+    return msg
+
+
+@router.get("/messages/{message_id}/plane-ticket", response_model=PoradcaTicketDraft)
+def plane_ticket_draft(
+    message_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> PoradcaTicketDraft:
+    """DEV-119 — the preview „Založiť tiket" opens with: the proposal, similar open tickets, what the cockpit adds."""
+    msg = _answer_for(db, current_user, message_id)
+    try:
+        found = tickets.draft(db, plane_tickets.gateway(), msg, current_user)
+    except handoff.HandoffRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except PlaneError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return PoradcaTicketDraft(**asdict(found))
+
+
+@router.post("/messages/{message_id}/plane-ticket", response_model=PoradcaTicketFounded)
+def found_plane_ticket(
+    message_id: uuid.UUID,
+    payload: PoradcaTicketCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PoradcaTicketFounded:
+    """DEV-119 — „Založiť tiket": the edited proposal becomes a ticket in Plane, once; nothing else starts."""
+    _answer_for(db, current_user, message_id)
+    try:
+        msg, created = tickets.found(db, plane_tickets.gateway(), message_id, current_user, **payload.model_dump())
+        db.commit()
+    except handoff.HandoffRefused as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except PlaneError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return PoradcaTicketFounded(plane_identifier=msg.plane_identifier, plane_url=msg.plane_url, created=created)
 
 
 @router.websocket("/conversations/{conversation_id}/ws")

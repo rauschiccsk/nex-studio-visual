@@ -99,6 +99,10 @@ class PoradcaMessage(Base, UUIDMixin, TimestampMixin):
     captured_backlog_item_id = Column(
         UUID(as_uuid=True), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True
     )
+    #: DEV-119: the ticket in Plane a person founded from this answer's proposal — a second click returns it.
+    plane_issue_id = Column(String(64), nullable=True)
+    plane_identifier = Column(String(32), nullable=True)
+    plane_url = Column(String(500), nullable=True)
 
     __table_args__ = (
         CheckConstraint(f"author IN ({_in(MESSAGE_AUTHORS)})", name="ck_poradca_messages_author"),

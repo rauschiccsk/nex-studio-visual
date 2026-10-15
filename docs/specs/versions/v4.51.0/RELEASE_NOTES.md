@@ -13,3 +13,11 @@ opravná verzia ako doteraz. Tiket rýchlu opravu sleduje: pri spustení prejde 
 dostane komentár a po nasadení na PROD sa uzavrie (Done) s verziou, zákazníkom a dátumom. Jeden tiket ide jednou
 cestou — tiket v Zásobníku rýchlu opravu nespustí a z tiketu s rýchlou opravou nevznikne požiadavka. Keď Plane
 neodpovie, oprava aj požiadavka ostanú a kokpit povie vetou, čo sa do tiketu nezapísalo.
+
+**Poradca navrhne tiket v Plane.** Keď Poradca v rozhovore nájde problém samotného kokpitu, navrhne tiket pre
+Andros Deda; keď ide o prácu na projekte, navrhne tiket projektu s druhom práce a návrhom, či patrí do ďalšej verzie
+alebo do rýchlej opravy. Pod odpoveďou sa objaví tlačidlo „Založiť tiket“. Otvorí náhľad, v ktorom môžeš upraviť
+názov, popis a typ. Pri tikete projektu volíš aj druh práce, návrh a zodpovedného. Náhľad ukáže aj podobné otvorené
+tikety, aby nevznikali dvojníky. Tiket kokpitu dostane sám aj projekt, verziu, stav stavby a odkaz na rozhovor.
+Tiket vznikne až tvojím kliknutím a druhé kliknutie nezaloží ďalší. Tiket projektu je len návrh — verziu nezakladá
+ani nespúšťa.

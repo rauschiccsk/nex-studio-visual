@@ -8,6 +8,9 @@ const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "poziadavka-do-zasobnika", heading: "Požiadavka do Zásobníka" },
   // DEV-29: answers from before the change carry the old block — it, too, only ever goes to the Zásobník.
   { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka do Zásobníka" },
+  // DEV-119: a proposed ticket in Plane — the project's one carries its work kind and way as attributes.
+  { tag: "tiket-nsv", heading: "Návrh tiketu pre kokpit (NEX Studio Visual)" },
+  { tag: "tiket-projektu", heading: "Návrh tiketu projektu" },
 ];
 
 /** DEV-83 — the link a marked choice becomes in the rendered answer; `#volba-3` names card 3, `#volba` no card. */
@@ -32,7 +35,7 @@ function plainChoice(text: string): string {
 export function answerForDisplay(content: string): string {
   let out = content;
   for (const { tag, heading } of BLOCKS) {
-    const re = new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, "g");
+    const re = new RegExp(`<${tag}(?:\\s[^>]*)?>\\s*([\\s\\S]*?)\\s*</${tag}>`, "g");
     out = out.replace(re, (_m, body: string) => {
       const quoted = body
         .trim()

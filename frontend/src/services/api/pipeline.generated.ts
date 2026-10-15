@@ -1659,6 +1659,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/messages/{message_id}/plane-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plane Ticket Draft
+         * @description DEV-119 — the preview „Založiť tiket" opens with: the proposal, similar open tickets, what the cockpit adds.
+         */
+        get: operations["plane_ticket_draft_api_v1_poradca_messages__message_id__plane_ticket_get"];
+        put?: never;
+        /**
+         * Found Plane Ticket
+         * @description DEV-119 — „Založiť tiket": the edited proposal becomes a ticket in Plane, once; nothing else starts.
+         */
+        post: operations["found_plane_ticket_api_v1_poradca_messages__message_id__plane_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/stop": {
         parameters: {
             query?: never;
@@ -6952,6 +6976,10 @@ export interface components {
             model?: string | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
             /**
              * Status
              * @enum {string}
@@ -6959,6 +6987,7 @@ export interface components {
             status: "running" | "done" | "failed" | "stopped";
             /** Steps */
             steps?: components["schemas"]["PoradcaStep"][];
+            ticket_proposal?: components["schemas"]["PoradcaTicketProposalRead"] | null;
         };
         /** PoradcaProjectContext */
         PoradcaProjectContext: {
@@ -6990,6 +7019,17 @@ export interface components {
         PoradcaScopeUpdate: {
             /** Version Id */
             version_id: string | null;
+        };
+        /** PoradcaSimilarTicketRead */
+        PoradcaSimilarTicketRead: {
+            /** Identifier */
+            identifier: string;
+            /** State */
+            state: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
         };
         /**
          * PoradcaStatus
@@ -7039,6 +7079,92 @@ export interface components {
             target: string;
             /** Tool */
             tool: string;
+        };
+        /**
+         * PoradcaTicketCreate
+         * @description The edited draft. A project ticket needs its work kind, the proposed way and who is responsible.
+         */
+        PoradcaTicketCreate: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Responsible */
+            responsible?: string | null;
+            /**
+             * Ticket Type
+             * @enum {string}
+             */
+            ticket_type: "Bug" | "Task";
+            /** Title */
+            title: string;
+            /** Way */
+            way?: ("version" | "fast_fix") | null;
+            /** Work Kind */
+            work_kind?: ("fix" | "change" | "gift") | null;
+        };
+        /**
+         * PoradcaTicketDraft
+         * @description What „Založiť tiket" offers under a Poradca answer — or the ticket founded from it.
+         */
+        PoradcaTicketDraft: {
+            /**
+             * Context
+             * @description What the cockpit adds to a ticket of the cockpit.
+             */
+            context?: string[];
+            /** Description */
+            description: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "nsv" | "project";
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /** Responsible */
+            responsible?: string | null;
+            /** Responsible Options */
+            responsible_options: string[];
+            /** Similar */
+            similar?: components["schemas"]["PoradcaSimilarTicketRead"][];
+            /**
+             * Ticket Type
+             * @enum {string}
+             */
+            ticket_type: "Bug" | "Task";
+            /** Title */
+            title: string;
+            /**
+             * Way
+             * @description Poradca's proposal: the next version or a fast fix.
+             */
+            way?: ("version" | "fast_fix") | null;
+            /** Work Kind */
+            work_kind?: ("fix" | "change" | "gift") | null;
+        };
+        /** PoradcaTicketFounded */
+        PoradcaTicketFounded: {
+            /** Created */
+            created: boolean;
+            /** Plane Identifier */
+            plane_identifier: string;
+            /** Plane Url */
+            plane_url: string;
+        };
+        /** PoradcaTicketProposalRead */
+        PoradcaTicketProposalRead: {
+            /**
+             * Kind
+             * @description nsv = a problem of the cockpit for Andros Dedo; project = project work.
+             * @enum {string}
+             */
+            kind: "nsv" | "project";
+            /** Title */
+            title: string;
         };
         /**
          * PoradcaVersionInfo
@@ -12288,6 +12414,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaBacklogSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plane_ticket_draft_api_v1_poradca_messages__message_id__plane_ticket_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaTicketDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    found_plane_ticket_api_v1_poradca_messages__message_id__plane_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoradcaTicketCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaTicketFounded"];
                 };
             };
             /** @description Validation Error */
