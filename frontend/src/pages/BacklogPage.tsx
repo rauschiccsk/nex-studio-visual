@@ -485,7 +485,7 @@ export default function BacklogPage() {
                               target="_blank"
                               rel="noreferrer"
                               title="Tiket v Plane"
-                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] underline"
+                              className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                             >
                               {it.plane_identifier}
                             </a>
