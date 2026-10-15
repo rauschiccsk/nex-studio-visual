@@ -76,10 +76,20 @@ const BUILDING: DeployProgress = {
 const IDLE: DeployProgress = { bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 };
 const RUNNING_REASON = "Na tejto inštalácii práve beží nasadenie — počkaj, kým skončí.";
 
+/** What the server says about the deploy right now. The test switches it — never the order of answers: with
+ * ``shouldAdvanceTime`` real time runs the 2 s polls too, and on a slow machine a ``…Once`` answer was used up before
+ * the page was looked at (CI 15.10.2026, locally 2 of 20 runs). */
+let progress: DeployProgress;
+let current: DeployMatrix;
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.mocked(getDeployMatrix).mockReset();
   vi.mocked(getDeployProgress).mockReset();
+  progress = IDLE;
+  current = matrix("1.7.1", false);
+  vi.mocked(getDeployMatrix).mockImplementation(async () => current);
+  vi.mocked(getDeployProgress).mockImplementation(async () => progress);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -87,8 +97,8 @@ afterEach(() => {
 
 describe("Bežiace nasadenie je vidieť v riadku", () => {
   it("⚠️ stránka otvorená počas nasadenia ukáže krok a čas a nič sa nedá spustiť znova", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix("1.5.6", true));
-    vi.mocked(getDeployProgress).mockResolvedValue(BUILDING);
+    current = matrix("1.5.6", true);
+    progress = BUILDING;
 
     render(<DeployMatrixPage environment="prod" />);
 
@@ -107,8 +117,6 @@ describe("Bežiace nasadenie je vidieť v riadku", () => {
   });
 
   it("po vlastnom kliku stojí odhad len dovtedy, kým server nepovie krok a čas", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix("1.7.1", false));
-    vi.mocked(getDeployProgress).mockResolvedValueOnce(IDLE).mockResolvedValue(BUILDING);
     vi.mocked(deployCustomer).mockReturnValue(new Promise(() => {}));
 
     render(<DeployMatrixPage environment="prod" />);
@@ -117,6 +125,7 @@ describe("Bežiace nasadenie je vidieť v riadku", () => {
     expect(screen.getByText(/Nasadzujem…/)).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
+    progress = BUILDING;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2100);
     });
@@ -126,31 +135,31 @@ describe("Bežiace nasadenie je vidieť v riadku", () => {
   });
 
   it("keď nasadenie skončí, riadok sa sám obnoví na výsledok", async () => {
-    vi.mocked(getDeployMatrix)
-      .mockResolvedValueOnce(matrix("1.5.6", true))
-      .mockResolvedValue(matrix("1.8.0", false));
-    vi.mocked(getDeployProgress).mockResolvedValueOnce(BUILDING).mockResolvedValue(IDLE);
+    current = matrix("1.5.6", true);
+    progress = BUILDING;
 
     render(<DeployMatrixPage environment="prod" />);
     expect(await screen.findByRole("status")).toBeInTheDocument();
+    const loaded = vi.mocked(getDeployMatrix).mock.calls.length;
 
+    current = matrix("1.8.0", false);
+    progress = IDLE;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2100);
     });
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(getDeployMatrix).toHaveBeenCalledTimes(2);
+    expect(getDeployMatrix).toHaveBeenCalledTimes(loaded + 1);
     expect(await screen.findByText("Nasadiť znova")).toBeInTheDocument();
     expect(screen.queryByText("Posledný pokus zlyhal")).not.toBeInTheDocument();
   });
 
   it("nasadenie spustené inde sa ukáže aj na stránke, ktorá je už otvorená", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix("1.7.1", false));
-    vi.mocked(getDeployProgress).mockResolvedValueOnce(IDLE).mockResolvedValue(BUILDING);
-
     render(<DeployMatrixPage environment="prod" />);
     expect(await screen.findByRole("button", { name: /Nasadiť/ })).toBeEnabled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    progress = BUILDING;
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15100);
@@ -161,7 +170,6 @@ describe("Bežiace nasadenie je vidieť v riadku", () => {
   });
 
   it("výpadok otázky na priebeh stránku nezhodí", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix("1.7.1", false));
     vi.mocked(getDeployProgress).mockRejectedValue(new Error("network"));
 
     render(<DeployMatrixPage environment="prod" />);
