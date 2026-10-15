@@ -1236,3 +1236,32 @@ describe("PlanUlohRail — done nodes survive a remount, not re-collapsed (obs #
   });
 
 });
+
+// DEV-128 — Director 15.10.2026: „Nevidím plán úloh.“ NEX Manager 1.3.0 stood in the Vizuál with no plan, which is
+// how a phase build works (the plan comes at the start of Programovanie), but the rail said it would appear once the
+// specification is agreed — long agreed there. The sentence follows how the build makes its plan.
+describe("PlanUlohRail — the empty plan says when this build makes its plan (DEV-128)", () => {
+  it.each([
+    [
+      "a phase build of a new version",
+      { flow_type: "new_version", current_stage: "vizual", mode: null },
+      "Plán úloh vznikne na začiatku Programovania — zo schváleného Návrhu a zmien vo Vizuáli.",
+    ],
+    [
+      "a conversation build",
+      { flow_type: "new_version", current_stage: "priprava", mode: "conversation" },
+      "Plán sa objaví, keď sa dohodneme na špecifikácii.",
+    ],
+    [
+      "a fast fix",
+      { flow_type: "fast_fix", current_stage: "programovanie", mode: null },
+      "Úloha rýchlej opravy vznikne, keď sa oprava začne stavať.",
+    ],
+  ])("%s", async (_name, state, sentence) => {
+    vi.mocked(getTaskPlan).mockResolvedValue(EMPTY_PLAN);
+    render(
+      <PlanUlohRail versionId="v1" messages={[]} board={mkBoard({ state: mkState(state as Partial<PipelineState>) })} onBoard={() => {}} />,
+    );
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+  });
+});

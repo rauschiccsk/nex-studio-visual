@@ -65,6 +65,7 @@ import {
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import { humanizeApiError, type HumanError } from "../../services/apiError";
 import ErrorNote from "../common/ErrorNote";
+import { emptyPlanSentence } from "./emptyPlan";
 
 interface Props {
   versionId: string | null;
@@ -880,9 +881,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTas
             <Loader2 className="h-3 w-3 animate-spin" /> Načítavam plán…
           </p>
         ) : plan.plan.length === 0 ? (
-          <p className="px-1 text-[11px] text-[var(--color-text-muted)]">
-            Plán sa objaví, keď sa dohodneme na špecifikácii.
-          </p>
+          <p className="px-1 text-[11px] text-[var(--color-text-muted)]">{emptyPlanSentence(board?.state)}</p>
         ) : (
           plan.plan.map((epic: TaskPlanEpicNode) => (
             // Epic has no technical description column — plain_description is its ONLY prose (no L2 toggle). Its
