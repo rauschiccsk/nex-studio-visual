@@ -28,3 +28,9 @@ projektu, si na našom bežci v ANDROSe sťahovala pri každom commite zásobu b
 firmy. Bežec má balíky uložené na vlastnom disku, takže ich už nesťahuje, a novší commit zastaví starší beh tej istej
 vetvy. Kokpit sa pýta na výsledok skúšok len pri najnovšom commite, takže zastavený starší beh nič neblokuje.
 NEX Manager a NEX Websites dostali rovnakú úpravu priamo; NEX Inbox skúša na serveroch GitHubu a linku nezaťažuje.
+
+**Jednorazové kroky inštalácie už po skončení nehlásia „unhealthy“.** Kroky, ktoré pri nasadení len prebehnú a
+skončia (napríklad migrácia databázy), bežia z obrazu backendu a dedili jeho kontrolu zdravia. Keďže nič
+neobsluhujú, po úspešnom skončení ostali označené ako choré a strážca by z toho hlásil falošný poplach. Kokpit im
+teraz zdedenú kontrolu vypne; kontrolu, ktorú si krok určil sám, a kontroly bežiacich služieb nechá tak. Inštalácie
+to dostanú pri najbližšom nasadení.

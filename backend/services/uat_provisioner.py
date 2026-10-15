@@ -2229,6 +2229,11 @@ def build_uat_compose(
         # customers for acceptance for months and hold no host port; with ``"no"`` they stayed down after ANDROS
         # moved (06.10.2026). The Director decided on 15.07.2026: fix the generator now.
         svc["restart"] = "no" if _runs_once(name, svc, src_services, roles) else "unless-stopped"
+        # DEV-123: a step that runs once inherits the image's HEALTHCHECK (the backend's curl on /api/v1/health) and,
+        # never serving, ends "unhealthy" after exiting 0 — a guard on ``health=unhealthy`` would cry wolf (14.10.2026,
+        # NEX Inbox 1.8.0 on MAGER). Its inherited check is off unless the source compose gave the step one of its own.
+        if svc["restart"] == "no" and "healthcheck" not in svc:
+            svc["healthcheck"] = {"disable": True}
 
         # Built services → tag + absolutize context; image-only services pass through.
         build = svc.get("build")
