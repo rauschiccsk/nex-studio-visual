@@ -21,3 +21,10 @@ názov, popis a typ. Pri tikete projektu volíš aj druh práce, návrh a zodpov
 tikety, aby nevznikali dvojníky. Tiket kokpitu dostane sám aj projekt, verziu, stav stavby a odkaz na rozhovor.
 Tiket vznikne až tvojím kliknutím a druhé kliknutie nezaloží ďalší. Tiket projektu je len návrh — verziu nezakladá
 ani nespúšťa.
+
+**Skúšky nových projektov už nezahlcujú internet v ANDROSe.** Šablóna skúšok (CI), ktorú kokpit dáva každému novému
+projektu, si na našom bežci v ANDROSe sťahovala pri každom commite zásobu balíkov z GitHubu — pri NEX Manageri asi
+1 GB — a novší commit nezastavil starší beh. Pri stavbe sa behy hromadili a 15.10.2026 na hodiny zaplnili linku
+firmy. Bežec má balíky uložené na vlastnom disku, takže ich už nesťahuje, a novší commit zastaví starší beh tej istej
+vetvy. Kokpit sa pýta na výsledok skúšok len pri najnovšom commite, takže zastavený starší beh nič neblokuje.
+NEX Manager a NEX Websites dostali rovnakú úpravu priamo; NEX Inbox skúša na serveroch GitHubu a linku nezaťažuje.

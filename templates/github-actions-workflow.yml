@@ -19,6 +19,13 @@ on:
     branches: [main]
   workflow_dispatch:    # CR-030: manual dispatch pre stuck-run recovery
 
+# DEV-130: a newer commit stops the older run of the same branch. A build pushes a commit every few minutes; without
+# this the runs queued behind each other and filled ANDROS's internet line for hours (15.10.2026). The cockpit asks CI
+# only about the newest commit (HEAD), whose run is never stopped, and reads a stopped run as no answer, not as red.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # DEV-71: the runners stand on the server that also runs the customers' installations, on the same Docker. Every
 # `docker compose` call of this run therefore works under the run's OWN project name — never the repository's (a live
 # installation could carry it, and `down -v` would delete its database), never another run's (two runs at once would
@@ -43,11 +50,11 @@ jobs:
         run: |
           cd backend
           if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
-            python -m pip install --no-cache-dir poetry==1.8.5
+            python -m pip install poetry==1.8.5
             poetry install --no-interaction --no-root
             echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
           else
-            python -m pip install --no-cache-dir ruff
+            python -m pip install ruff
             echo "BACKEND_RUN=python -m" >> "$GITHUB_ENV"
           fi
 
@@ -64,12 +71,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # DEV-130: no `cache: npm` — on our own runner npm's cache lives on its disk; GitHub's copy (348 MiB for
+          # NEX Manager) was pulled over ANDROS's line in every job and pushed back whenever the lockfile changed.
 
       - name: Install frontend deps
         if: ${{ hashFiles('frontend/package.json') != '' }}
-        run: cd frontend && npm ci
+        run: cd frontend && npm ci --prefer-offline --no-audit --no-fund
 
       - name: Frontend type-check + lint
         if: ${{ hashFiles('frontend/package.json') != '' }}
@@ -95,11 +102,11 @@ jobs:
         run: |
           cd backend
           if grep -qE '^\[tool\.poetry\]' pyproject.toml; then
-            python -m pip install --no-cache-dir poetry==1.8.5
+            python -m pip install poetry==1.8.5
             poetry install --no-interaction --no-root
             echo "BACKEND_RUN=poetry run" >> "$GITHUB_ENV"
           else
-            python -m pip install --no-cache-dir -e ".[dev]"
+            python -m pip install -e ".[dev]"
             echo "BACKEND_RUN=python -m" >> "$GITHUB_ENV"
           fi
 
@@ -134,12 +141,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # DEV-130: no `cache: npm` — on our own runner npm's cache lives on its disk; GitHub's copy (348 MiB for
+          # NEX Manager) was pulled over ANDROS's line in every job and pushed back whenever the lockfile changed.
 
       - name: Install frontend deps
         if: ${{ hashFiles('frontend/package.json') != '' }}
-        run: cd frontend && npm ci
+        run: cd frontend && npm ci --prefer-offline --no-audit --no-fund
 
       - name: Frontend vitest
         if: ${{ hashFiles('frontend/package.json') != '' }}
