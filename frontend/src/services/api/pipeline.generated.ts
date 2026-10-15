@@ -1512,6 +1512,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/vizual-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vizual Preview
+         * @description DEV-127: is the live preview of the Vizuál step running — and when not, why.
+         */
+        get: operations["get_vizual_preview_api_v1_pipeline__version_id__vizual_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/vizual-preview/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart Vizual Preview
+         * @description DEV-127: „Spustiť náhľad znova" — start the live preview again without an agent turn.
+         */
+        post: operations["restart_vizual_preview_api_v1_pipeline__version_id__vizual_preview_restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -8895,6 +8935,29 @@ export interface components {
             /** Seq */
             seq: number;
         };
+        /**
+         * VizualPreviewRead
+         * @description DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed.
+         */
+        VizualPreviewRead: {
+            /**
+             * Needed
+             * @description False outside the Vizuál step and when the AI's mockup is the preview.
+             */
+            needed: boolean;
+            /**
+             * Reason
+             * @description The last error line a stopped preview left.
+             */
+            reason?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "stopped" | "missing" | "not_needed";
+            /** Url */
+            url?: string | null;
+        };
         /** WorkKindRead */
         WorkKindRead: {
             /** Work Kind */
@@ -11880,6 +11943,68 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vizual_preview_api_v1_pipeline__version_id__vizual_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VizualPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restart_vizual_preview_api_v1_pipeline__version_id__vizual_preview_restart_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VizualPreviewRead"];
                 };
             };
             /** @description Validation Error */

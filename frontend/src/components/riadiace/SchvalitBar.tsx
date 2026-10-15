@@ -30,9 +30,15 @@ interface Props {
   versionId: string;
   /** Replace the live board with the fresh one the action returns (setBoard from usePipelineWs). */
   onBoard: (board: PipelineBoard) => void;
+  /** DEV-127: the live preview of the Vizuál step is not running — a vizuál is approved by looking at it. */
+  previewDown?: boolean;
 }
 
-export default function SchvalitBar({ board, versionId, onBoard }: Props) {
+/** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run. */
+export const VIZUAL_PREVIEW_DOWN =
+  "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ.";
+
+export default function SchvalitBar({ board, versionId, onBoard, previewDown = false }: Props) {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -132,6 +138,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         </div>
       )}
       {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}
+      {isVizual && previewDown && <p className="text-xs text-[var(--color-text-muted)]">{VIZUAL_PREVIEW_DOWN}</p>}
 
       <div className="flex items-center gap-2">
         {checkKeys.length > 0 && (
@@ -165,7 +172,7 @@ export default function SchvalitBar({ board, versionId, onBoard }: Props) {
         <button
           type="button"
           onClick={() => submit("schvalit", "Schválenie zlyhalo")}
-          disabled={submitting || !mayApprove}
+          disabled={submitting || !mayApprove || (isVizual && previewDown)}
           className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
             isVizual && checkKeys.length === 0 ? "ml-auto" : ""
           }`}

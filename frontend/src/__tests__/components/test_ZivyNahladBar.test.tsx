@@ -4,11 +4,11 @@
  * Director 15.10.2026: „Radšej odstráňme záložku "Vizuál". … Preto vizuál ja púšťam v Chrome a tak viem s tým pracovať.“
  */
 
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import ZivyNahladBar from "@/components/riadiace/ZivyNahladBar";
-import type { PipelineBoard } from "@/services/api/pipeline";
+import type { PipelineBoard, VizualPreview } from "@/services/api/pipeline";
 
 function board(stage: string, url: string | null): PipelineBoard {
   return { state: { current_stage: stage }, vizual_url: url } as unknown as PipelineBoard;
@@ -36,5 +36,41 @@ describe("ZivyNahladBar (DEV-120)", () => {
   it("shows nothing before the board arrives", () => {
     const { container } = render(<ZivyNahladBar board={null} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("DEV-127: a dead preview says why and starts again with one click", () => {
+    const onRestart = vi.fn();
+    const dead: VizualPreview = {
+      needed: true,
+      state: "stopped",
+      url: null,
+      reason: "Error: Živý náhľad potrebuje texty vydaní",
+    };
+    render(<ZivyNahladBar board={board("vizual", "https://vizual-nex-manager.isnex.eu")} preview={dead} onRestart={onRestart} />);
+    expect(screen.getByText("Živý náhľad nebeží — Error: Živý náhľad potrebuje texty vydaní")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Otvoriť živý náhľad" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spustiť náhľad znova" }));
+    expect(onRestart).toHaveBeenCalledOnce();
+  });
+
+  it("DEV-127: while it starts again the button waits and a failure is said", () => {
+    const dead: VizualPreview = { needed: true, state: "missing", url: null, reason: null };
+    render(
+      <ZivyNahladBar
+        board={board("vizual", null)}
+        preview={dead}
+        restarting
+        error="Spustenie náhľadu zlyhalo — Živý náhľad sa nepodarilo spustiť."
+        onRestart={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Spúšťam náhľad…" })).toBeDisabled();
+    expect(screen.getByText("Spustenie náhľadu zlyhalo — Živý náhľad sa nepodarilo spustiť.")).toBeInTheDocument();
+  });
+
+  it("DEV-127: a running preview opens at the address the cockpit measured", () => {
+    const live: VizualPreview = { needed: true, state: "running", url: "https://vizual-nex-manager.isnex.eu", reason: null };
+    render(<ZivyNahladBar board={board("vizual", null)} preview={live} />);
+    expect(screen.getByRole("link", { name: "Otvoriť živý náhľad" })).toHaveAttribute("href", "https://vizual-nex-manager.isnex.eu");
   });
 });

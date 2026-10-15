@@ -151,6 +151,20 @@ describe("SchvalitBar — the Návrh/plan-approval gate button", () => {
     );
   });
 
+  it("DEV-127: at the Vizuál gate with the live preview down, approving waits until the preview runs", () => {
+    render(
+      <SchvalitBar board={boardWith(["schvalit", "uprav"], "vizual")} versionId="v-1" onBoard={vi.fn()} previewDown />,
+    );
+    expect(screen.getByRole("button", { name: /Schváliť vizuál/ })).toBeDisabled();
+    expect(screen.getByText(/Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“/)).toBeInTheDocument();
+  });
+
+  it("DEV-127: a preview down outside the Vizuál gate blocks nothing", () => {
+    render(<SchvalitBar board={boardWith(["schvalit", "uprav"], "navrh")} versionId="v-1" onBoard={vi.fn()} previewDown />);
+    expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeEnabled();
+    expect(screen.queryByText(/Živý náhľad nebeží/)).toBeNull();
+  });
+
   it("defaults to the PLAN copy when state is null (legacy board)", () => {
     render(<SchvalitBar board={boardWith(["schvalit", "uprav"])} versionId="v-1" onBoard={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeInTheDocument();

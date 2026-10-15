@@ -27,6 +27,18 @@ from backend.db.models.versions import Version
 from backend.services import orchestrator
 
 
+@pytest.fixture(autouse=True)
+def _the_preview_runs(monkeypatch):
+    """DEV-127: „Schváliť vizuál" is accepted only while the live preview runs — here it does."""
+    from backend.services import vizual_sandbox
+
+    monkeypatch.setattr(
+        vizual_sandbox,
+        "preview_state",
+        lambda slug, *, private=False: {"state": "running", "url": f"https://vizual-{slug}.isnex.eu", "reason": None},
+    )
+
+
 def _seed(db) -> tuple[Version, PipelineState]:
     suffix = _uuid.uuid4().hex[:8]
     user = User(username=f"m_{suffix}", email=f"m_{suffix}@t.local", password_hash="x", role="ri")  # noqa: S106

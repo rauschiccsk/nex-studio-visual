@@ -225,6 +225,15 @@ class DatabaseSchemaRead(BaseModel):
     approver_role: str
 
 
+class VizualPreviewRead(BaseModel):
+    """DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed."""
+
+    needed: bool = Field(description="False outside the Vizuál step and when the AI's mockup is the preview.")
+    state: Literal["running", "stopped", "missing", "not_needed"]
+    url: Optional[str] = None
+    reason: Optional[str] = Field(default=None, description="The last error line a stopped preview left.")
+
+
 class PipelineBoardRead(BaseModel):
     """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 

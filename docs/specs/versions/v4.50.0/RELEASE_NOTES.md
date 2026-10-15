@@ -18,3 +18,7 @@ zmenil a odkaz do Plane. Tiket, ktorý vznikol zo Zásobníka, ukáže svoju po�
 **Živý náhľad vidí poznámky k vydaniam.** Aplikácia, ktorá v záložke „Aktualizácie“ ukazuje poznámky k vydaniam,
 sa v živom náhľade pri štarte zastavila, lebo náhľad dostal len priečinok obrazovky. Teraz dostane aj poznámky k
 vydaniam, len na čítanie — náhľad NEX Managera 1.3.0 sa tak spustí.
+
+**Kokpit vidí, keď živý náhľad nebeží.** V kroku Vizuál lišta hore v Riadiacom centre povie, či náhľad beží. Keď
+nebeží, povie prečo a ponúkne tlačidlo „Spustiť náhľad znova“. Kým náhľad nebeží, „Schváliť vizuál“ je zašednuté
+— vizuál sa schvaľuje tým, že si ho pozrieš.

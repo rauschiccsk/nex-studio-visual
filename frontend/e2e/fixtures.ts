@@ -246,6 +246,14 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
     // DEV-120: the Vizuál page is gone — the live preview opens from the Riadiace centrum (ZivyNahladBar).
     pages: ["/riadiace-centrum"],
     overrides: [
+      // DEV-127: the preview of the visual stage is measured dead — the longest form of the strip (reason + button).
+      override("get", "/api/v1/pipeline/{version_id}/vizual-preview", {
+        needed: true,
+        state: "stopped",
+        url: null,
+        reason:
+          "Error: Živý náhľad potrebuje texty vydaní, ale priečinok /docs/specs/versions neexistuje. Náhľad sa stavia z koreňa projektu.",
+      }),
       override("get", "/api/v1/pipeline/{version_id}", {
         ...PIPELINE,
         state: {

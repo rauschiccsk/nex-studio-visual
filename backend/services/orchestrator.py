@@ -12606,6 +12606,66 @@ def read_vizual_mockup(db: Session, version_id: uuid.UUID) -> Optional[str]:
         return None
 
 
+#: DEV-127: reading a preview's state is two short docker calls (inspect, and logs when it stopped).
+VIZUAL_PREVIEW_STATE_CAP = 30.0
+#: DEV-127: why „Schváliť vizuál" is refused while the preview does not run — the same words the button gives.
+VIZUAL_PREVIEW_DOWN = (
+    "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ."
+)
+
+
+async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
+    """DEV-127: the live preview a Manažér walks in the Vizuál step, as it really is.
+
+    ``{"needed": bool, "state": "running" | "stopped" | "missing" | "not_needed", "url", "reason"}``. Not needed
+    outside the Vizuál step and when the AI's self-contained mockup is the preview (served by the cockpit itself).
+    Docker is asked off the event loop (ICCINT-74).
+    """
+    state = _get_state(db, version_id)
+    if state is None or state.current_stage != "vizual" or has_vizual_mockup(db, version_id):
+        return {"needed": False, "state": "not_needed", "url": None, "reason": None}
+    from backend.services import vizual_sandbox
+
+    found = await run_blocking(
+        vizual_sandbox.preview_state,
+        _project_slug_for_version(db, version_id),
+        private=_project_private_network(db, version_id),
+        cap=VIZUAL_PREVIEW_STATE_CAP,
+    )
+    return {"needed": True, **found}
+
+
+async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
+    """DEV-127: start the live preview again without an agent turn — one click of the Manažér.
+
+    Only in the Vizuál step and only for a live preview (a mockup needs no container). ``spin_up`` removes a
+    stopped leftover and creates the preview anew; it runs off the event loop like every spin-up (ICCINT-74).
+    Raises :class:`OrchestratorError` with a sentence for the Manažér when it cannot start.
+    """
+    now = await vizual_preview(db, version_id)
+    if not now["needed"]:
+        raise OrchestratorError("Živý náhľad sa spúšťa len v kroku Vizuál, a len keď náhľadom nie je hotový návrh.")
+    if now["state"] == "running":
+        return now
+    from backend.services import vizual_sandbox
+
+    slug = _project_slug_for_version(db, version_id)
+    try:
+        await run_blocking(
+            vizual_sandbox.spin_up, slug, private=_project_private_network(db, version_id), cap=VIZUAL_SPINUP_CAP
+        )
+    except BlockingWorkTimedOut:
+        return {**await vizual_preview(db, version_id), "reason": "Náhľad sa ešte spúšťa — skús to o chvíľu znova."}
+    except Exception as exc:  # noqa: BLE001 — said to the Manažér as a sentence, never a crash
+        logger.exception("vizual preview restart failed for %s", slug)
+        after = await vizual_preview(db, version_id)
+        raise OrchestratorError(
+            "Živý náhľad sa nepodarilo spustiť"
+            + (f": {after['reason']}" if after.get("reason") else f" ({type(exc).__name__}).")
+        ) from exc
+    return await vizual_preview(db, version_id)
+
+
 def has_vizual_mockup(db: Session, version_id: uuid.UUID) -> bool:
     """True iff a Vizuál mockup HTML exists for this version (lightweight — dir stat, no file read). The board
     prefers the mockup preview route over any recorded live-sandbox URL when this is True (Director
@@ -13883,6 +13943,12 @@ async def apply_action(
             raise OrchestratorError(
                 "Schváliť je platné len na schvaľovacom bode (Návrh / Vizuál / Programovanie / Verifikácia)"
             )
+        # DEV-127: a vizuál is approved by looking at it. NEX Manager 1.3.0 offered „Schváliť vizuál" for seventeen
+        # days at a preview that had died seven minutes after „Vizuál je pripravený" (28.09.2026).
+        if state.current_stage == "vizual":
+            preview = await vizual_preview(db, state.version_id)
+            if preview["needed"] and preview["state"] != "running":
+                raise OrchestratorError(VIZUAL_PREVIEW_DOWN)
         # NOTE (nex-studio-visual, Director 2026-07-13): the old "never advance out of Návrh with an EMPTY plan"
         # gate is GONE — the task plan is no longer built in Návrh (it is built at Programovanie start, from the
         # final design + Vizuál changes; see :func:`_run_build_round`). So approving Návrh with no plan is now

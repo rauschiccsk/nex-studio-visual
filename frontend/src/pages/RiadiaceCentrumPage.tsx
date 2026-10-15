@@ -50,6 +50,7 @@ import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
 import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import ZivyNahladBar from "@/components/riadiace/ZivyNahladBar";
+import { useVizualPreview } from "@/hooks/useVizualPreview";
 import StavZostavenia from "@/components/riadiace/StavZostavenia";
 import { useStavZostavenia } from "@/components/riadiace/useStavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
@@ -75,6 +76,8 @@ export default function RiadiaceCentrumPage() {
   } = usePipelineWs(versionId);
   // DEV-51: the build's CI, read ONCE — the phase-bar line, the status strip and the rail all show the same answer.
   const ci = useStavZostavenia(versionId);
+  // DEV-127: the live preview of the Vizuál step as it really is — the strip and „Schváliť vizuál“ read the same answer.
+  const vizualPreview = useVizualPreview(versionId, board?.state?.current_stage);
   // DEV-62: a phone has room for one column — the conversation or the task plan, switched by the tabs on top.
   // From the tablet up both stand side by side and the tabs are not there.
   const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
@@ -267,7 +270,13 @@ export default function RiadiaceCentrumPage() {
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
         <StavZostavenia stav={ci} />
         {/* DEV-120: the live preview in its own window, during the Vizuál step — the Vizuál tab is gone. */}
-        <ZivyNahladBar board={board ?? null} />
+        <ZivyNahladBar
+          board={board ?? null}
+          preview={vizualPreview.preview}
+          restarting={vizualPreview.restarting}
+          error={vizualPreview.error}
+          onRestart={vizualPreview.restart}
+        />
       </div>
 
       {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}
@@ -346,7 +355,15 @@ export default function RiadiaceCentrumPage() {
           versionId={versionId}
           onBoard={setBoard}
         />
-        <SchvalitBar board={board} versionId={versionId} onBoard={setBoard} />
+        <SchvalitBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+          previewDown={
+            !!vizualPreview.preview?.needed &&
+            (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
+          }
+        />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* ICCINT-139: rýchla oprava, ktorá tam nepatrí, sa dá preniesť do riadnej verzie. */}
         <PrenosDoRiadnejVerzieBar board={board} versionId={versionId} onBoard={setBoard} />

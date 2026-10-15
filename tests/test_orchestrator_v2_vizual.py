@@ -140,6 +140,12 @@ def _patch_spin_up(monkeypatch, calls=None):
         return f"https://vizual-{slug}.{'int.' if private else ''}isnex.eu"
 
     monkeypatch.setattr(vizual_sandbox, "spin_up", _fake)
+    # DEV-127: a preview this fake started is running — „Schváliť vizuál" is accepted only while it runs.
+    monkeypatch.setattr(
+        vizual_sandbox,
+        "preview_state",
+        lambda slug, *, private=False: {"state": "running", "url": _fake(slug, private=private), "reason": None},
+    )
 
 
 def _seed_drawn(db_session, version_id):

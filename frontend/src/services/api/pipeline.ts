@@ -421,3 +421,16 @@ export interface CiStatus {
 export function getCiStatusApi(versionId: string): Promise<CiStatus> {
   return api.get<CiStatus>(`/pipeline/${versionId}/ci`);
 }
+
+/** DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed. */
+export type VizualPreview = components["schemas"]["VizualPreviewRead"];
+
+/** DEV-127: is the live preview of the Vizuál step running — and when not, why. */
+export function getVizualPreviewApi(versionId: string): Promise<VizualPreview> {
+  return api.get<VizualPreview>(`/pipeline/${versionId}/vizual-preview`);
+}
+
+/** DEV-127: „Spustiť náhľad znova" — start the live preview again without an agent turn. */
+export function restartVizualPreviewApi(versionId: string): Promise<VizualPreview> {
+  return api.post<VizualPreview>(`/pipeline/${versionId}/vizual-preview/restart`);
+}

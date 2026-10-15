@@ -51,6 +51,7 @@ from backend.schemas.pipeline import (
     PipelineRelayRequest,
     PipelineRelayResponse,
     PipelineStateRead,
+    VizualPreviewRead,
 )
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner
@@ -456,6 +457,31 @@ def get_board(
     """Return the board snapshot. ``state`` is ``None`` until the pipeline starts."""
     authz.assert_version_access(db, current_user, version_id)
     return _board(db, version_id, limit)
+
+
+@router.get("/{version_id}/vizual-preview", response_model=VizualPreviewRead)
+async def get_vizual_preview(
+    version_id: uuid.UUID,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> VizualPreviewRead:
+    """DEV-127: is the live preview of the Vizuál step running — and when not, why."""
+    authz.assert_version_access(db, current_user, version_id)
+    return VizualPreviewRead(**await orchestrator.vizual_preview(db, version_id))
+
+
+@router.post("/{version_id}/vizual-preview/restart", response_model=VizualPreviewRead)
+async def restart_vizual_preview(
+    version_id: uuid.UUID,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> VizualPreviewRead:
+    """DEV-127: „Spustiť náhľad znova" — start the live preview again without an agent turn."""
+    authz.assert_version_access(db, current_user, version_id)
+    try:
+        return VizualPreviewRead(**await orchestrator.restart_vizual_preview(db, version_id))
+    except OrchestratorError as exc:
+        raise _map_orch_error(exc) from exc
 
 
 @router.get("/{version_id}/vizual-mockup", response_class=HTMLResponse)

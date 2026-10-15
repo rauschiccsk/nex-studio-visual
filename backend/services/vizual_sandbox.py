@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -374,8 +375,9 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
         # A writable HOME for numeric --user (node user's /home/node is 1000-owned, but be explicit).
         "-e",
         "HOME=/tmp",
-        # The ONE bind — HMR must see host edits crossing the mount. The override config already lives
-        # inside it at /app/<_OVERRIDE_CONTAINER_NAME> (a real file, not a second mount).
+        # The ONE writable bind — HMR must see host edits crossing the mount. The override config already lives
+        # inside it at /app/<_OVERRIDE_CONTAINER_NAME> (a real file, not a second mount). The release notes
+        # follow read-only (DEV-126).
         "-v",
         f"{frontend_host_path}:/app",
         *_release_notes_mount(frontend_host_path),
@@ -540,6 +542,45 @@ def teardown(slug: str, frontend_path: Optional[str] = None) -> None:
         (fe / _OVERRIDE_CONTAINER_NAME).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+#: DEV-127: the words a stopped preview left — the last line of its record that names an error, for the Manažér.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_ERROR_LINE = re.compile(r"(?i)\b(error|failed|cannot|neexistuje|nenašiel)\b")
+_REASON_MAX = 300
+
+
+def _stopped_reason(name: str) -> Optional[str]:
+    """The last error line of a stopped preview's record (never raises; ``None`` when nothing names an error)."""
+    try:
+        proc = subprocess.run(
+            ["docker", "logs", "--tail", "80", name],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_CALL_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = [_ANSI.sub("", line).strip() for line in (proc.stdout + "\n" + proc.stderr).splitlines()]
+    errors = [line for line in lines if line and _ERROR_LINE.search(line) and not line.startswith("at ")]
+    return errors[-1][:_REASON_MAX] if errors else None
+
+
+def preview_state(slug: str, *, private: bool = False) -> dict:
+    """DEV-127: ``{"state": "running" | "stopped" | "missing", "url": str | None, "reason": str | None}``.
+
+    ``stopped`` carries the last error line the preview left, so the cockpit can say WHY it is not running —
+    on 28.09.2026 the preview of NEX Manager 1.3.0 died seven minutes after „Vizuál je pripravený" and the
+    cockpit kept offering „Schváliť vizuál" for seventeen days.
+    """
+    _validate_project_slug(slug)
+    name = container_name(slug)
+    seen = _inspect_state(name)
+    if seen["running"]:
+        return {"state": "running", "url": public_url(slug, private=private), "reason": None}
+    if seen["exists"]:
+        return {"state": "stopped", "url": None, "reason": _stopped_reason(name)}
+    return {"state": "missing", "url": None, "reason": None}
 
 
 def status(slug: str, *, private: bool = False) -> dict:
