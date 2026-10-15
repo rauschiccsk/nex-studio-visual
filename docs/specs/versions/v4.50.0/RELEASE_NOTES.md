@@ -14,3 +14,7 @@ zmenil a odkaz do Plane. Tiket, ktorý vznikol zo Zásobníka, ukáže svoju po�
 
 **Vizuál už nie je v bočnej ponuke.** Živý náhľad aplikácie počas kroku Vizuál otvoríš v Riadiacom centre tlačidlom
 „Otvoriť živý náhľad“ — v samostatnom okne vedľa rozhovoru, v ktorom vidíš, čo treba vyskúšať.
+
+**Živý náhľad vidí poznámky k vydaniam.** Aplikácia, ktorá v záložke „Aktualizácie“ ukazuje poznámky k vydaniam,
+sa v živom náhľade pri štarte zastavila, lebo náhľad dostal len priečinok obrazovky. Teraz dostane aj poznámky k
+vydaniam, len na čítanie — náhľad NEX Managera 1.3.0 sa tak spustí.

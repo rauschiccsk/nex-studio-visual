@@ -290,11 +290,35 @@ def _write_override_config(frontend_host_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+#: DEV-126: an app's „Aktualizácie" read the release notes from ``docs/specs/versions`` beside ``frontend/`` —
+#: ``../docs/specs/versions`` seen from ``/app`` — the cockpit's own standard for every app. Without them the
+#: preview of NEX Manager 1.3.0 stopped seven minutes after „Vizuál je pripravený" (28.09.2026) and stayed dead.
+RELEASE_NOTES_DIR = Path("docs") / "specs" / "versions"
+RELEASE_NOTES_IN_SANDBOX = "/docs/specs/versions"
+
+
+def _release_notes_mount(frontend_host_path: Path) -> list[str]:
+    """The project's release notes for the preview — read-only, only when they are a real folder in the project.
+
+    ``--mount``, never ``-v``: a missing source is refused instead of being created as an empty root-owned folder.
+    A link leading out of the project never reaches the sandbox, which serves a public address.
+    """
+    project = frontend_host_path.parent
+    notes = project / RELEASE_NOTES_DIR
+    if not notes.is_dir():
+        return []
+    resolved = notes.resolve()
+    if not resolved.is_relative_to(project.resolve()):
+        return []
+    return ["--mount", f"type=bind,source={resolved},target={RELEASE_NOTES_IN_SANDBOX},readonly"]
+
+
 def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False) -> list[str]:
     """Compose the EXACT ``docker run`` argv for the sandbox (every option is load-bearing).
 
-    The ONLY bind mount is the project ``frontend/`` (rw — HMR must see host edits); the override config
-    lives INSIDE it as a real file (see :data:`_OVERRIDE_CONTAINER_NAME`), so there is no second mount.
+    The bind mounts are the project ``frontend/`` (rw — HMR must see host edits) and, read-only, its release
+    notes (:func:`_release_notes_mount`, DEV-126); the override config lives INSIDE ``frontend/`` as a real file
+    (see :data:`_OVERRIDE_CONTAINER_NAME`), so it needs no mount of its own.
     Deliberately ABSENT (the negative half of the isolation guarantee — asserted by the tests): NO
     ``/var/run/docker.sock``, NO ``/opt/customers``, NO ``/opt/uat``, NO ``/opt/infra``, NO credentials
     store, NO knowledge mount, NO extra network. The sandbox can reach only ``nex-proxy-net``.
@@ -354,6 +378,7 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
         # inside it at /app/<_OVERRIDE_CONTAINER_NAME> (a real file, not a second mount).
         "-v",
         f"{frontend_host_path}:/app",
+        *_release_notes_mount(frontend_host_path),
         "-w",
         "/app",
         NODE_IMAGE,
