@@ -846,6 +846,9 @@ export function registerFixtures(): void {
         priority: "medium",
         status: "open",
         realized_at: null,
+        rejection_reason: null,
+        plane_identifier: null,
+        plane_url: null,
         created_at: T0,
         updated_at: T1,
       },
@@ -853,6 +856,16 @@ export function registerFixtures(): void {
     total: 1,
     skip: 0,
     limit: 50,
+  });
+  // DEV-121: the draft „Založiť tiket" opens with — the layout check opens the panel too.
+  answer("get", "/api/v1/backlog/{item_id}/plane-ticket", {
+    title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
+    description: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
+    ticket_type: "Task",
+    responsible_options: ["Andros Dedo", "Zoltán"],
+    responsible: "Zoltán",
+    plane_identifier: null,
+    plane_url: null,
   });
   answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER, NEW_CUSTOMER]);
   answer("get", "/api/v1/projects/{slug}/customer-settings", {
