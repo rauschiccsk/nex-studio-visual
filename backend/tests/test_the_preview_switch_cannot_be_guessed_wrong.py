@@ -47,7 +47,7 @@ FRONTENDS = pathlib.Path("/opt/projects")
 #: NEX Manager z tohto zoznamu vypadol 10.09.2026 — pri stavbe 1.2.0 rozhodovanie vytiahol do
 #: pomocníka so zoznamom hodnôt (ICCINT-107). Západka to ohlásila sama: kým sa zoznam neskrátil,
 #: stráž bola červená. Presne na to je.
-APPS_STILL_ON_TRUTHINESS = ("nex-productcatalogs", "nex-shopify", "nex-websites")
+APPS_STILL_ON_TRUTHINESS = ("nex-productcatalogs", "nex-shopify")
 
 
 def _flag_value() -> str:
