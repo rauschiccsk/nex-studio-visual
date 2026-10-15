@@ -35,7 +35,7 @@ interface Props {
 }
 
 /** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run. */
-export const VIZUAL_PREVIEW_DOWN =
+const VIZUAL_PREVIEW_DOWN =
   "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ.";
 
 export default function SchvalitBar({ board, versionId, onBoard, previewDown = false }: Props) {
