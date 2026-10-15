@@ -131,9 +131,11 @@ def test_assign_to_version_and_reject(db_session):
     assert r.json()["status"] == "included"
     assert r.json()["version_id"] == str(version.id)
 
-    # reject (a different item)
+    # reject (a different item) — DEV-121: a rejection carries its reason
     other = client.post("/api/v1/backlog", json={"project_id": str(project.id), "title": "x"}).json()["id"]
-    assert client.patch(f"/api/v1/backlog/{other}", json={"status": "rejected"}).json()["status"] == "rejected"
+    rejected = client.patch(f"/api/v1/backlog/{other}", json={"status": "rejected", "rejection_reason": "duplicita"})
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejection_reason"] == "duplicita"
 
 
 def test_assign_cross_project_rejected(db_session):

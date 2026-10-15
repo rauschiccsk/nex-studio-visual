@@ -41,6 +41,9 @@ function item(number: number, status: BacklogItemRead["status"], title: string):
     status,
     version_id: status === "included" ? "v1" : null,
     realized_at: null,
+    rejection_reason: null,
+    plane_identifier: null,
+    plane_url: null,
     created_at: "2026-10-13T08:07:03Z",
     updated_at: "2026-10-13T08:07:18Z",
   };

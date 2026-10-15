@@ -49,6 +49,13 @@ class BacklogItem(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
     realized_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # DEV-121: the requirement's ticket in Plane's DEV register — id for the API, identifier (DEV-n) and address
+    # for people. Set once by the first „Založiť tiket"; a second click returns this ticket.
+    plane_issue_id = Column(String(64), nullable=True)
+    plane_identifier = Column(String(32), nullable=True)
+    plane_url = Column(String(500), nullable=True)
+    # DEV-121: why the requirement was rejected — written to its ticket when it is cancelled.
+    rejection_reason = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("project_id", "number", name="uq_backlog_items_project_id_number"),

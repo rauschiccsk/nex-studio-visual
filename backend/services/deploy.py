@@ -1360,11 +1360,38 @@ async def deploy(
     db.add(event)
     db.flush()
 
+    # DEV-121: the tickets of the requirements this version carries are done once it runs on PROD. Plane is asked
+    # off the event loop, after the deploy itself is decided; a ticket that did not follow is a warning, never a
+    # failed deploy.
+    if ok and environment == "prod":
+        warnings.extend(await _close_requirement_tickets(db, version, deployed_version, customer))
+
     # A failed deploy did not graduate the project — drop the bump signal.
     if not ok:
         bumped_to = None
 
     return DeployOutcome(event, (url if ok else None), bumped_to, warnings)
+
+
+async def _close_requirement_tickets(db: Session, version, deployed_version: str, customer: Customer) -> list[str]:
+    """Done for the tickets of the version's requirements (DEV-121); the sentences of those that did not follow."""
+    from backend.core.offload import BlockingWorkTimedOut, run_blocking
+    from backend.services import backlog_tickets
+
+    tickets = backlog_tickets.deployed_tickets(db, version.id)
+    if not tickets:
+        return []
+    try:
+        return await run_blocking(
+            backlog_tickets.close_deployed,
+            backlog_tickets.gateway,
+            tickets,
+            version=f"v{deployed_version}",
+            customer=customer.name,
+            cap=120,
+        )
+    except BlockingWorkTimedOut:
+        return [f"Tikety požiadaviek verzie v{deployed_version} sa do 2 minút neuzavreli — Plane neodpovedal."]
 
 
 def _customer_dir_slug(customer: Customer) -> str:

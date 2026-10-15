@@ -98,7 +98,8 @@ def create(db: Session, data: BacklogItemCreate) -> BacklogItem:
 
 
 def update(db: Session, item_id: UUID, data: BacklogItemUpdate) -> BacklogItem:
-    """Edit an item's ``title`` / ``description`` / ``priority`` / ``status`` (reject = status='rejected').
+    """Edit an item's ``title`` / ``description`` / ``priority`` / ``status`` (reject = status='rejected' with
+    ``rejection_reason``, DEV-121).
 
     Version assignment goes through :func:`assign_to_version`, not here — ``version_id`` is intentionally
     NOT in the allow-list. Fields omitted from the payload are left unchanged (PATCH semantics).
@@ -109,6 +110,15 @@ def update(db: Session, item_id: UUID, data: BacklogItemUpdate) -> BacklogItem:
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
             setattr(item, field, value)
+    # DEV-121: a rejection carries its reason (it is written to the requirement's ticket); a requirement returned
+    # to the Zásobník sheds it.
+    if update_data.get("status") == "rejected":
+        reason = (update_data.get("rejection_reason") or "").strip()
+        if not reason:
+            raise ValueError("Pri zamietnutí napíš dôvod — zapíše sa aj do tiketu požiadavky.")
+        item.rejection_reason = reason
+    elif update_data.get("status") == "open":
+        item.rejection_reason = None
     db.flush()
     return item
 

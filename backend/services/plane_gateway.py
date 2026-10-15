@@ -53,7 +53,8 @@ class _Cache:
     extra: dict = field(default_factory=dict)
 
 
-def _key(name: str) -> str:
+def name_key(name: str) -> str:
+    """A name as Plane compares it — case and spacing do not matter."""
     return " ".join((name or "").split()).casefold()
 
 
@@ -153,12 +154,12 @@ class PlaneGateway:
     def states(self) -> dict[str, str]:
         if self._cache.states is None:
             self._cache.states = {
-                _key(s["name"]): s["id"] for s in self._results(self._request("GET", self._project_path("states/")))
+                name_key(s["name"]): s["id"] for s in self._results(self._request("GET", self._project_path("states/")))
             }
         return self._cache.states
 
     def state_id(self, name: str) -> str:
-        found = self.states().get(_key(name))
+        found = self.states().get(name_key(name))
         if not found:
             raise PlaneError(f"Evidencia {self.project_identifier} nemá stĺpec „{name}“.")
         return found
@@ -169,7 +170,7 @@ class PlaneGateway:
         return self._cache.labels
 
     def label_id(self, name: str) -> str:
-        found = [lab["id"] for lab in self.labels() if _key(lab.get("name", "")) == _key(name)]
+        found = [lab["id"] for lab in self.labels() if name_key(lab.get("name", "")) == name_key(name)]
         if not found:
             raise PlaneError(f"Evidencia {self.project_identifier} nemá štítok „{name}“.")
         return found[0]
@@ -184,13 +185,13 @@ class PlaneGateway:
 
     def ensure_module(self, name: str) -> dict:
         """The module of an application — found by its name, created when it is missing, read back either way."""
-        same = [m for m in self.modules() if _key(m.get("name", "")) == _key(name)]
+        same = [m for m in self.modules() if name_key(m.get("name", "")) == name_key(name)]
         if len(same) > 1:
             raise PlaneError(f"V evidencii {self.project_identifier} sú dva moduly „{name}“ — treba ich zlúčiť.")
         if same:
             return same[0]
         self._request("POST", self._project_path("modules/"), {"name": name})
-        created = [m for m in self.modules() if _key(m.get("name", "")) == _key(name)]
+        created = [m for m in self.modules() if name_key(m.get("name", "")) == name_key(name)]
         if len(created) != 1:
             raise PlaneMismatch(f"Modul „{name}“ sa v evidencii {self.project_identifier} po založení nenašiel.")
         return created[0]

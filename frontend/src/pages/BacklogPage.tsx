@@ -11,6 +11,7 @@ import {
   deleteBacklogApi,
 } from "@/services/api/backlog";
 import { draftKey, useDraft } from "@/hooks/useDraft";
+import BacklogTicketPanel from "@/components/backlog/BacklogTicketPanel";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import type {
@@ -101,6 +102,21 @@ export default function BacklogPage() {
   const [assignVersionId, setAssignVersionId] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
+  // DEV-121: the requirement's ticket — founding it, the reason of a rejection (written to the ticket too), and the
+  // sentence when a saved change did not move the ticket in Plane.
+  const [ticketingId, setTicketingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rowNotice, setRowNotice] = useState<Record<string, string>>({});
+
+  function noteTicket(id: string, saved: BacklogItemRead) {
+    setRowNotice((p) => {
+      const next = { ...p };
+      if (saved.plane_warning) next[id] = saved.plane_warning;
+      else delete next[id];
+      return next;
+    });
+  }
 
   function reloadBacklog(projectId: string) {
     return listBacklogApi({ project_id: projectId, limit: 200 }).then((res) =>
@@ -227,7 +243,7 @@ export default function BacklogPage() {
     if (!project || !assignVersionId) return;
     setBusyId(id);
     try {
-      await updateBacklogApi(id, { version_id: assignVersionId });
+      noteTicket(id, await updateBacklogApi(id, { version_id: assignVersionId }));
       await reloadBacklog(project.id);
       setAssigningId(null);
       setAssignVersionId("");
@@ -243,7 +259,7 @@ export default function BacklogPage() {
     if (!project) return;
     setBusyId(id);
     try {
-      await updateBacklogApi(id, { status: "open" });
+      noteTicket(id, await updateBacklogApi(id, { status: "open" }));
       await reloadBacklog(project.id);
     } catch {
       setRowError((p) => ({ ...p, [id]: "Vrátenie zlyhalo." }));
@@ -252,12 +268,15 @@ export default function BacklogPage() {
     }
   }
 
+  /** DEV-121: a rejection carries its reason — the requirement keeps it and its ticket is cancelled with it. */
   async function handleReject(id: string) {
-    if (!project) return;
+    if (!project || !rejectReason.trim()) return;
     setBusyId(id);
     try {
-      await updateBacklogApi(id, { status: "rejected" });
+      noteTicket(id, await updateBacklogApi(id, { status: "rejected", rejection_reason: rejectReason.trim() }));
       await reloadBacklog(project.id);
+      setRejectingId(null);
+      setRejectReason("");
     } catch {
       setRowError((p) => ({ ...p, [id]: "Zamietnutie zlyhalo." }));
     } finally {
@@ -460,13 +479,42 @@ export default function BacklogPage() {
                               ? ` · ${versionNumber[it.version_id]}`
                               : ""}
                           </span>
+                          {it.plane_identifier && (
+                            <a
+                              href={it.plane_url ?? undefined}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Tiket v Plane"
+                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] underline"
+                            >
+                              {it.plane_identifier}
+                            </a>
+                          )}
                         </div>
                         <div className="text-sm text-[var(--color-text-primary)] mt-1">{it.title}</div>
                         {it.description && (
                           <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{it.description}</div>
                         )}
+                        {it.status === "rejected" && it.rejection_reason && (
+                          <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Dôvod zamietnutia: {it.rejection_reason}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {!it.plane_identifier && (it.status === "open" || it.status === "included") && (
+                          <button
+                            onClick={() => {
+                              setTicketingId(ticketingId === it.id ? null : it.id);
+                              setAssigningId(null);
+                              setRejectingId(null);
+                            }}
+                            aria-expanded={ticketingId === it.id}
+                            className="px-2 py-1 text-[11px] text-[var(--color-text-secondary)] bg-[var(--color-surface-hover)] hover:bg-[var(--color-surface-active)] rounded"
+                          >
+                            Založiť tiket
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setAssigningId(assigningId === it.id ? null : it.id);
@@ -495,8 +543,14 @@ export default function BacklogPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleReject(it.id)}
+                            onClick={() => {
+                              setRejectingId(rejectingId === it.id ? null : it.id);
+                              setRejectReason("");
+                              setTicketingId(null);
+                              setAssigningId(null);
+                            }}
                             disabled={busyId === it.id}
+                            aria-expanded={rejectingId === it.id}
                             title="Zamietnuť"
                             className="px-2 py-1 text-[11px] text-[var(--color-state-error-fg)] bg-[var(--color-state-error-bg)] hover:bg-[var(--color-state-error-bg)] disabled:opacity-40 rounded"
                           >
@@ -536,6 +590,52 @@ export default function BacklogPage() {
                         >
                           <Check size={13} /> Priradiť
                         </button>
+                      </div>
+                    )}
+                    {rejectingId === it.id && (
+                      <div className="flex flex-col gap-2 mt-2 sm:flex-row sm:items-center">
+                        <input
+                          lang="sk"
+                          spellCheck={true}
+                          aria-label="Dôvod zamietnutia"
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder={
+                            it.plane_identifier
+                              ? `Prečo sa požiadavka zamieta — zapíše sa aj do tiketu ${it.plane_identifier}`
+                              : "Prečo sa požiadavka zamieta"
+                          }
+                          className="flex-1 bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
+                        />
+                        <button
+                          onClick={() => handleReject(it.id)}
+                          disabled={busyId === it.id || !rejectReason.trim()}
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-[var(--color-state-error-fg)] bg-[var(--color-state-error-bg)] disabled:opacity-40 rounded"
+                        >
+                          <Check size={13} /> Zamietnuť
+                        </button>
+                        <button
+                          onClick={() => setRejectingId(null)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] bg-[var(--color-surface-active)] hover:bg-[var(--color-surface-hover)] rounded"
+                        >
+                          <X size={13} /> Zrušiť
+                        </button>
+                      </div>
+                    )}
+                    {ticketingId === it.id && (
+                      <BacklogTicketPanel
+                        item={it}
+                        onFounded={(saved) => {
+                          setTicketingId(null);
+                          noteTicket(it.id, saved);
+                          void reloadBacklog(project.id);
+                        }}
+                        onClose={() => setTicketingId(null)}
+                      />
+                    )}
+                    {rowNotice[it.id] && (
+                      <div role="status" className="text-xs text-[var(--color-state-warning-fg)] mt-1">
+                        {rowNotice[it.id]}
                       </div>
                     )}
                     {rowError[it.id] && <div className="text-xs text-[var(--color-status-error)] mt-1">{rowError[it.id]}</div>}

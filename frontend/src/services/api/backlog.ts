@@ -4,6 +4,8 @@ import type {
   BacklogItemCreate,
   BacklogItemRead,
   BacklogItemUpdate,
+  BacklogTicketCreate,
+  BacklogTicketDraft,
 } from "../../types/backlog";
 
 export interface ListBacklogParams {
@@ -34,4 +36,17 @@ export function updateBacklogApi(
 
 export function deleteBacklogApi(id: string): Promise<void> {
   return api.delete<void>(`/backlog/${id}`);
+}
+
+/** DEV-121: what „Založiť tiket" offers — or the requirement's ticket, when it exists. */
+export function getBacklogTicketDraftApi(id: string): Promise<BacklogTicketDraft> {
+  return api.get<BacklogTicketDraft>(`/backlog/${id}/plane-ticket`);
+}
+
+/** DEV-121: found the requirement's ticket in Plane — once; a second call returns the same ticket. */
+export function createBacklogTicketApi(
+  id: string,
+  data: BacklogTicketCreate,
+): Promise<BacklogItemRead> {
+  return api.post<BacklogItemRead>(`/backlog/${id}/plane-ticket`, data);
 }

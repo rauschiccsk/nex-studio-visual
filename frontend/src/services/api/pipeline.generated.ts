@@ -301,6 +301,30 @@ export interface paths {
         patch: operations["update_backlog_item_api_v1_backlog__item_id__patch"];
         trace?: never;
     };
+    "/api/v1/backlog/{item_id}/plane-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plane Ticket Draft
+         * @description What „Založiť tiket" offers to edit — or the requirement's ticket, when it exists (DEV-121).
+         */
+        get: operations["plane_ticket_draft_api_v1_backlog__item_id__plane_ticket_get"];
+        put?: never;
+        /**
+         * Found Plane Ticket
+         * @description Found the requirement's ticket in its project's module of the DEV register — once (DEV-121).
+         */
+        post: operations["found_plane_ticket_api_v1_backlog__item_id__plane_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bugs": {
         parameters: {
             query?: never;
@@ -3813,6 +3837,15 @@ export interface components {
             id: string;
             /** Number */
             number: number;
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /**
+             * Plane Warning
+             * @description DEV-121: the change is saved, but its ticket in Plane did not follow — said to the person.
+             */
+            plane_warning?: string | null;
             /**
              * Priority
              * @enum {string}
@@ -3825,6 +3858,8 @@ export interface components {
             project_id: string;
             /** Realized At */
             realized_at?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
             /**
              * Status
              * @enum {string}
@@ -3851,6 +3886,11 @@ export interface components {
             description?: string | null;
             /** Priority */
             priority?: ("low" | "medium" | "high" | "critical") | null;
+            /**
+             * Rejection Reason
+             * @description Why the requirement is rejected — required with status='rejected' (DEV-121).
+             */
+            rejection_reason?: string | null;
             /** Status */
             status?: ("open" | "included" | "realized" | "rejected") | null;
             /** Title */
@@ -3860,6 +3900,63 @@ export interface components {
              * @description Assign the requirement to this version (the service sets status=included).
              */
             version_id?: string | null;
+        };
+        /**
+         * BacklogTicketCreate
+         * @description The edited draft — founds the requirement's ticket in its project's module of the DEV register.
+         */
+        BacklogTicketCreate: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Responsible */
+            responsible: string;
+            /**
+             * Ticket Type
+             * @enum {string}
+             */
+            ticket_type: "Bug" | "Task";
+            /** Title */
+            title: string;
+            /**
+             * Work Kind
+             * @enum {string}
+             */
+            work_kind: "fix" | "change" | "gift";
+        };
+        /**
+         * BacklogTicketDraft
+         * @description What „Založiť tiket" offers to edit before anything is written to Plane (DEV-121).
+         */
+        BacklogTicketDraft: {
+            /** Description */
+            description: string;
+            /**
+             * Plane Identifier
+             * @description The ticket, when it already exists.
+             */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /**
+             * Responsible
+             * @description The person who clicked, when Plane knows them.
+             */
+            responsible?: string | null;
+            /**
+             * Responsible Options
+             * @description People of the „Zodpovedný“ group in the DEV register.
+             */
+            responsible_options: string[];
+            /**
+             * Ticket Type
+             * @enum {string}
+             */
+            ticket_type: "Bug" | "Task";
+            /** Title */
+            title: string;
         };
         /**
          * BillingOverviewRead
@@ -9430,6 +9527,72 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BacklogItemUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacklogItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plane_ticket_draft_api_v1_backlog__item_id__plane_ticket_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacklogTicketDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    found_plane_ticket_api_v1_backlog__item_id__plane_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacklogTicketCreate"];
             };
         };
         responses: {
