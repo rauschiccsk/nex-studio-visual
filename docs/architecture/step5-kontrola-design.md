@@ -8,10 +8,10 @@
 ## Po ľudsky (pre Manažéra projektu)
 
 Keď Programovanie dobehne, objaví sa tlačidlo „Skontrolovať". Partner (ten istý AI Agent, čo písal kód)
-NAOZAJ spustí appku v jednorazovom kontajneri (bez akéhokoľvek nasadenia) + prebehne akceptačné skúšky,
+NAOZAJ spustí aplikáciu v jednorazovom kontajneri (bez akéhokoľvek nasadenia) + prebehne akceptačné skúšky,
 prečíta schválenú specification.md a napíše PO ĽUDSKY, čo je PEVNÉ a čo VRATKÉ — ako obyčajná správa
 v rozhovore (kind='gate_report'), žiadna verdiktová karta. KĽÚČOVÉ: engine spustí dôkaz PRVÝ (nesfalšovateľné),
-a keď je červené (appka nenaštartuje / neprejde), správa to čestne ukáže — partner nemôže tvrdiť „PASS", keď
+a keď je červené (aplikácia nenaštartuje / neprejde), správa to čestne ukáže — partner nemôže tvrdiť „PASS", keď
 stroj vidí, že je to rozbité. Kontrola NIČ nepodpisuje ani nenasadzuje — vždy vráti kormidlo Manažérovi.
 Zostáva na stage='priprava' (neviditeľná pre release/deploy — verdikt na stage='verifikacia' by deploy čítal
 ako PASS, čomu sa vyhýbame). Lišta fáz pre rozhovorovú stavbu ukazuje Špecifikácia → Plán → Programovanie →
@@ -19,7 +19,7 @@ Kontrola (odvodené z board signálov). Všetko aditívne; staré (legacy) build
 
 ## Rozhodnutia (Manažér projektu 2026-07-05)
 
-- **K-1 = (A) kontrola appku NAOZAJ spustí** — engine ju v izolovanom kontajneri naštartuje + otestuje (deploy-free _run_release_smoke), partnerovi dá reálny výsledok. NIE len „čítať a uvažovať". (Reálny beh = skutočnosť; oprava starej choroby DONE=pečiatka.)
+- **K-1 = (A) kontrola aplikáciu NAOZAJ spustí** — engine ju v izolovanom kontajneri naštartuje + otestuje (deploy-free _run_release_smoke), partnerovi dá reálny výsledok. NIE len „čítať a uvažovať". (Reálny beh = skutočnosť; oprava starej choroby DONE=pečiatka.)
 - **K-2 = (A) dva štítky „Pevné/Vratké"** nad plnou správou (zelený/amber), plná ľudská správa ostáva pod nimi.
 - **K-3 = (A) pri červenom ZASTAVIŤ a vrátiť Manažérovi** — kontrola nikdy sama nepodpíše Hotovo; opravu vedie Manažér (žiadna auto-slučka).
 - **K-4 = (A) jedna kontrola na dokončenú stavbu** (nová stavba/oprava ju znovu otvorí) — honest-by-construction.

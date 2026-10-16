@@ -68,17 +68,17 @@ Trojhodnotový variant `{nex_manager, nex_module, standalone}` je **legitímna a
 
 `standalone` je striktne bezpečnejší **scaffold** default: projekt, ktorý by omylom dostal `nex_module`, by sa scaffoldol BEZ auth a BEZ registra (nespustiteľný izolovane); opačná chyba len pridá login, ktorý operátor ignoruje.
 
-**ALE pozor na backfill napätie** (review #12): `server_default='standalone'` by ticho mis-klasifikoval **nex-inbox**, ktorý je nesporne type-A. `standalone` nex-inbox by Auditor FAILol (nemá `/auth/login`, nemá users tabuľku). Riešenie: **migrácia 069 má data step, ktorý explicitne nastaví `archetype='nex_module'` pre nex-inbox** (jediná známa type-A appka), zvyšok ostáva `standalone`. Tým je default bezpečný pre budúce projekty a backfill správny pre realitu. nex-ledger/nex-asistent ostávajú `standalone` až do explicitnej konverzie (Rozhodnutie 2) — Auditor archetype-checky sa na ne nespúšťajú, kým nie sú konvertované.
+**ALE pozor na backfill napätie** (review #12): `server_default='standalone'` by ticho mis-klasifikoval **nex-inbox**, ktorý je nesporne type-A. `standalone` nex-inbox by Auditor FAILol (nemá `/auth/login`, nemá users tabuľku). Riešenie: **migrácia 069 má data step, ktorý explicitne nastaví `archetype='nex_module'` pre nex-inbox** (jediná známa type-A aplikácia), zvyšok ostáva `standalone`. Tým je default bezpečný pre budúce projekty a backfill správny pre realitu. nex-ledger/nex-asistent ostávajú `standalone` až do explicitnej konverzie (Rozhodnutie 2) — Auditor archetype-checky sa na ne nespúšťajú, kým nie sú konvertované.
 
 ---
 
-## 3. NEX Manager (nex-manager) — appka
+## 3. NEX Manager (nex-manager) — aplikácia
 
 Centrálny auth + register používateľov + register modulov + issuer tokenov pre jeden ICC **Deploy**. Postavený ako `standalone` projekt (je tá jediná aplikácia, ktorá sa prihlasuje menom+heslom a kotví Deploy). Postaví ho NEX Studio ako normálny projekt.
 
 ### 3.1 Strategické umiestnenie
 
-- NEX Manager = manager appka Deployu. JEDEN na Deploy. Vlastní jediný register používateľov. Mintuje launch tokeny. Riadi ktoré moduly smú spúšťať a ktorí používatelia smú spustiť ktorý modul.
+- NEX Manager = manager aplikácia Deployu. JEDEN na Deploy. Vlastní jediný register používateľov. Mintuje launch tokeny. Riadi ktoré moduly smú spúšťať a ktorí používatelia smú spustiť ktorý modul.
 - Modul (archetype A) NEMÁ login page, NEMÁ user tabuľku, NEMÁ heslo. Vystavuje len `GET /launch?lt=` a plnú identitu rieši z Managera.
 - NEX Manager **stelesňuje šev medzi dvoma login metódami:** konzumuje metódu 1 (meno+heslo) pre ľudí a mintuje metódu 2 (token-launch) pre moduly. Žiadna tretia metóda, nikdy email-as-login.
 
@@ -385,14 +385,14 @@ Nemôžeš scaffoldnúť modul pred tým, na čo ukazuje; nemôžeš dôverovať
 | **P2** | **`archetype` data model + schema + FE switch** (migr 069 vrátane nex-inbox backfill, `deploys`/`deploy_members`, NewProjectPage toggle) | Branch point. Pred scaffoldingom, aby create-project vedel čítať pole. |
 | **P3** | **Per-archetype scaffolding** (token-launch FE skeleton variant + archetype charters + self-seed convention) | Potrebuje P2 (pole) + P1 (na čo modul ukazuje pri token-verify). |
 | **P4** | **Provisioner two-mode + Deploy concept** (`provision_deploy`, merge-N-compose, single registry, per-Deploy Traefik, isolation fix, port allocation §5.7) | Najťažšia fáza. Potrebuje P1+P3+P0. **Vyžaduje Rozhodnutie 2 ako prerekvizitu** (review #8) — bez ≥2 modulov sa N-module collision logika neoverí. |
-| **P5** | **Migrácia existujúcich appiek** (nex-inbox prvý → ledger/asistent per Rozhodnutie 2) | Posledné — potrebuje celý stroj funkčný. |
+| **P5** | **Migrácia existujúcich aplikácií** (nex-inbox prvý → ledger/asistent per Rozhodnutie 2) | Posledné — potrebuje celý stroj funkčný. |
 | (separátne) | metrics, orchestration-message-format | Mimo core architektúry; sekvenuj po P4 nezávisle. |
 
 **Kritická cesta: P0 → P1 → P2 → P3 → P4 → P5.** P0 sa dá paralelizovať s P1/P2.
 
 ---
 
-## 7. Migrácia existujúcich appiek (nex-inbox / ledger / asistent)
+## 7. Migrácia existujúcich aplikácií (nex-inbox / ledger / asistent)
 
 | App | Dnes | Cieľ | Cesta |
 |---|---|---|---|
@@ -414,9 +414,9 @@ Rovnocenná alternatíva (nie len horšia): **trojhodnotový `{nex_manager, nex_
 
 ### Rozhodnutie 2 — Osud nex-ledger a nex-asistent (archetype voľba per app) — PREREKVIZITA P4
 
-`nex-inbox` je jednoznačne `nex_module`. Ale `nex-ledger` a `nex-asistent` sú dnes type-B. **Otázka:** majú sa stať launched modulmi pod NEX Managerom (`nex_module`, ťažký auth rip-out), alebo ostať samostatné appky na zákazku (`standalone`, len bug fixy)? Business/produktové rozhodnutie.
+`nex-inbox` je jednoznačne `nex_module`. Ale `nex-ledger` a `nex-asistent` sú dnes type-B. **Otázka:** majú sa stať launched modulmi pod NEX Managerom (`nex_module`, ťažký auth rip-out), alebo ostať samostatné aplikácie na zákazku (`standalone`, len bug fixy)? Business/produktové rozhodnutie.
 
-**Toto NIE JE paralelná open item — je to prerekvizita P4 (review #8).** Dôvod: ak ledger aj asistent ostanú `standalone`, jediné čo exerсuje `provision_deploy` e2e je nex-inbox + Manager = **1-module Deploy**. N-module collision logika (`<member>-<svc>` naming, path-prefix routing, §5.4) by ostala **neoverená reálnymi appkami**. Buď konvertuj aj ledger, alebo postav throwaway 2. modul ako Deploy crash-test (mirror retired NEX Test princípu). Inak "dva moduly kolidujú na `backend`" je design claim, ktorý žiadna appka nedokáže.
+**Toto NIE JE paralelná open item — je to prerekvizita P4 (review #8).** Dôvod: ak ledger aj asistent ostanú `standalone`, jediné čo exerсuje `provision_deploy` e2e je nex-inbox + Manager = **1-module Deploy**. N-module collision logika (`<member>-<svc>` naming, path-prefix routing, §5.4) by ostala **neoverená reálnymi aplikáciami**. Buď konvertuj aj ledger, alebo postav throwaway 2. modul ako Deploy crash-test (mirror retired NEX Test princípu). Inak "dva moduly kolidujú na `backend`" je design claim, ktorý žiadna aplikácia nedokáže.
 
 **Pod-rozhodnutie 2a — RBAC reconcile pri konverzii ledger (review #10):** Manager rola je `admin|user`, ale ledger má dnes vlastnú 2-tier RBAC/compliance controls (verified-intentional diff). Pri konverzii ledger na modul treba rozhodnúť: (i) Manager rola je jediná a modul ju mapuje na lokálne capabilities (stateless, fine) — odporúčam; ALEBO (ii) modul drží per-(login) authz tabuľku keyed na Manager login (povolené — je to authz, nie register, žiadne heslá). Zvolený variant ide do "intentional diffs", aby ho Auditor neflagol. Relevantné len ak ledger ide cestou `nex_module`.
 

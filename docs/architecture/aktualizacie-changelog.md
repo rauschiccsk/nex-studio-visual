@@ -167,7 +167,7 @@ Súbory v `/home/icc/knowledge/templates/claude-project/`:
 - Sprievodné charter zmeny (podporné, nie jediná záruka): designer `CLAUDE.md.tmpl` doc-tree + produkčné body + immutability; coordinator-charter fold review do `uat_accept`.
 
 ### Fáza 3 — honesty enforcement (mandatory, nie odporúčaný)
-auditor `CLAUDE.md.tmpl` Activity-1 spec-compliance check, **MANDATORY**: každý `RELEASE_NOTES.md` bullet musí trace-ovať na dodaný EPIC/BUG/CR vo `CHANGES.md` tej verzie. Konkrétne executable: Auditor cross-referencuje RELEASE_NOTES claims proti (1) `CHANGES.md` scope a (2) reálne merged EPIC/BUG riadkom verzie; bullet bez pokrytia = FAIL „fabricated changelog claim". Pre autonómne behy Tibor/Nazar appiek je soft charter veta nedostatočná — preto mandatory, definovaný, vykonateľný.
+auditor `CLAUDE.md.tmpl` Activity-1 spec-compliance check, **MANDATORY**: každý `RELEASE_NOTES.md` bullet musí trace-ovať na dodaný EPIC/BUG/CR vo `CHANGES.md` tej verzie. Konkrétne executable: Auditor cross-referencuje RELEASE_NOTES claims proti (1) `CHANGES.md` scope a (2) reálne merged EPIC/BUG riadkom verzie; bullet bez pokrytia = FAIL „fabricated changelog claim". Pre autonómne behy Tibor/Nazar aplikácií je soft charter veta nedostatočná — preto mandatory, definovaný, vykonateľný.
 
 ### Fáza 4 (paralelná, neblokujúca) — nex-shared renderer DRY
 Promote `<Markdown>` + `CodeBlock` do `nex-shared` (cross-repo tag bump z 0.9.1, sekcia 5d), skonsoliduj všetkých 6+ NEX Studio call-sites. **Nezdržuje Fázy 1-3.**

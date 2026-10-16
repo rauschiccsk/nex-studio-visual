@@ -42,7 +42,7 @@
 ### 4. Directive
 - In `directive_for_action` (`~:614`) add a case for `"rerun_release_audit"` returning an explicit Slovak
   brief that ends with the status block, e.g.: *"Audítor, spusti ZNOVA kompletný release audit verzie podľa
-  charteru §6 — behaviorálny acceptance suite (appka reálne beží + `-m acceptance` proti bežiacej app) +
+  charteru §6 — behaviorálny acceptance suite (aplikácia reálne beží + `-m acceptance` proti bežiacej app) +
   spec-drift. Toto je čerstvé prebehnutie release auditu, nie odpoveď na otázku."*
 - When the re-dispatched Auditor produces its `gate_g` `gate_report`, the existing dispatch path runs
   `verify_done` (`:1887`) → `_run_acceptance_smoke` (`:1920`) fires automatically. **No smoke code changes.**
@@ -50,7 +50,7 @@
 ### 5. FE
 - `frontend/src/components/cockpit/PipelineActionBar.tsx`: add a **"Znova spustiť release audit"** button,
   rendered ONLY when the offered actions include `rerun_release_audit` (i.e. settled gate_g). SK label + a hint
-  like *"Auditor spustí release audit znova — appka sa reálne nabootuje a prebehnú acceptance skúšky; pipeline
+  like *"Auditor spustí release audit znova — aplikácia sa reálne nabootuje a prebehnú acceptance skúšky; pipeline
   počká na čerstvý verdikt."* Place it near the verdict controls; it posts `action: "rerun_release_audit"`.
 
 ### 6. Fast-fix safety

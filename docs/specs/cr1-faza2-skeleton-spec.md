@@ -15,7 +15,7 @@ Medzi **Špecifikáciu (Fáza 1)** a **Programovanie** vložiť novú fázu **Vi
 - **AI edituje projekt in-place** cez full-auto `claude -p` v `/opt/projects/<slug>` (`claude_agent.py`); `_run_build_round` je predloha pre `_run_vizual_round`.
 - **Sandbox dnes** = read-only consult sidecar (`consult_sandbox.py`, `docker run --rm`, `:ro`, žiadny served port) + prod Traefik deploy. **Žiadny Vite HMR / preview** — net-new.
 - **Cockpit** = `RiadiaceCentrumPage.tsx` (grid chat + plán rail); **žiadny iframe/preview** komponent — net-new.
-- **Servovanie appky** = ťažký per-customer Traefik deploy; **nič neexponuje rozrobenú verziu mid-pipeline** — to je práve medzera, ktorú Fáza 2 rieši.
+- **Servovanie aplikácie** = ťažký per-customer Traefik deploy; **nič neexponuje rozrobenú verziu mid-pipeline** — to je práve medzera, ktorú Fáza 2 rieši.
 
 ## 3. Dizajn
 

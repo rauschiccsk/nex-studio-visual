@@ -13,7 +13,7 @@
 Vývoj tab je **dashboard, nie rozhovor**: fázová lišta, plán úloh, buttony (Pokračovať/Uprav). Keď je
 Manažérovi niečo nejasné, **nemá kde sa agenta opýtať** — beží za Dedom, ktorý pozrie cez zadné dvierka
 **mimo projektu**. Pritom AI Agent je **ten istý model ako Dedo** (Opus MAX) — problém **nie je inteligencia,
-je to rozhranie.** Appka amputovala rozhovor (agent len „vydaj verdikt / spracuj klik").
+je to rozhranie.** Aplikácia amputovala rozhovor (agent len „vydaj verdikt / spracuj klik").
 
 **Cieľ = „Dedo na obrazovke".** Tri vlastnosti, alebo nič:
 1. **Rozhovor** — obojsmerný kanál, píš hocikedy.

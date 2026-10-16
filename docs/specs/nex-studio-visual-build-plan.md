@@ -8,13 +8,13 @@
 
 ## 0. Zhrnutie na jednu obrazovku
 
-NEX Studio Visual (v4) je **samostatný pomenovaný projekt** odštiepený z NEX Studio v3 (`/opt/projects/nex-studio-visual`, vlastné repo/porty/nasadenie, koexistuje s v3 ako UAT aj PROD). Pridáva medzi **Špecifikáciu (Fáza 1)** a **Programovanie** novú **Fázu 2 — Vizuálnu konzultáciu**: na 2 monitoroch (chat s AI + živý sandbox) sa interaktívne stavajú a ladia **vizuály** projektu, kým nie sú vizuálne overené — čím sa **zabíja dorábka** po builde. „Vizuál" je prvotriedna **typovaná jednotka (FE = frontend appky, WE = webend/web pre kanál)**, projekt má 1..N vizuálov rôznych typov, každý je vlastný nasaditeľný frontend, ale **všetky zdieľajú JEDEN backend a JEDEN dátový model**. Po Fáze 2 sú schválené vizuály + dátový kontrakt + doplnená špecifikácia **záväzným vstupom buildu** (build ich rozšíri o logiku, nikdy neprekreslí). Stavia sa v 9 CR balíkoch: CR-0 fork projektu, CR-1 chodiaca kostra Fázy 2, CR-2 multi-vizuál + typy, CR-3..7 päť dohodnutých vylepšení, CR-8 perzistencia + dolad.
+NEX Studio Visual (v4) je **samostatný pomenovaný projekt** odštiepený z NEX Studio v3 (`/opt/projects/nex-studio-visual`, vlastné repo/porty/nasadenie, koexistuje s v3 ako UAT aj PROD). Pridáva medzi **Špecifikáciu (Fáza 1)** a **Programovanie** novú **Fázu 2 — Vizuálnu konzultáciu**: na 2 monitoroch (chat s AI + živý sandbox) sa interaktívne stavajú a ladia **vizuály** projektu, kým nie sú vizuálne overené — čím sa **zabíja dorábka** po builde. „Vizuál" je prvotriedna **typovaná jednotka (FE = frontend aplikácie, WE = webend/web pre kanál)**, projekt má 1..N vizuálov rôznych typov, každý je vlastný nasaditeľný frontend, ale **všetky zdieľajú JEDEN backend a JEDEN dátový model**. Po Fáze 2 sú schválené vizuály + dátový kontrakt + doplnená špecifikácia **záväzným vstupom buildu** (build ich rozšíri o logiku, nikdy neprekreslí). Stavia sa v 9 CR balíkoch: CR-0 fork projektu, CR-1 chodiaca kostra Fázy 2, CR-2 multi-vizuál + typy, CR-3..7 päť dohodnutých vylepšení, CR-8 perzistencia + dolad.
 
 ---
 
 ## 1. Kontext a cieľ
 
-**Prečo:** 30 rokov Delphi = visual-first — hneď vidíš, čo vidí zákazník. NEX Studio v3 to stratilo: vývoj naslepo, živá appka až na konci → nesúlad s predstavou → **dorábky**. Fáza 2 validuje dizajn **vizuálne pred prvým riadkom logiky**, čím priamo posilňuje waterfall.
+**Prečo:** 30 rokov Delphi = visual-first — hneď vidíš, čo vidí zákazník. NEX Studio v3 to stratilo: vývoj naslepo, živá aplikácia až na konci → nesúlad s predstavou → **dorábky**. Fáza 2 validuje dizajn **vizuálne pred prvým riadkom logiky**, čím priamo posilňuje waterfall.
 
 **Named-version model** (memory `project_nex_studio_named_version_projects`): každá veľká verzia = samostatný pomenovaný projekt (Studio v3 · Visual v4 · Titan v5 · King v6), koexistuje ako UAT+PROD, nič sa nemieša. v4 vzniká **forkom v3** presne podľa overeného DELPHI Studio playbooku. **v3 sa nedotkne.**
 
@@ -27,9 +27,9 @@ NEX Studio Visual (v4) je **samostatný pomenovaný projekt** odštiepený z NEX
 | Fáza | Stav vo v4 |
 |---|---|
 | **1 — Špecifikácia** (Príprava/Návrh: rozhovor → zadanie → špecifikácia + DB schéma v návrhu) | **Nezmenená** oproti v3. |
-| **2 — Vizuálna konzultácia** (NOVÁ) | Monitor 1 = Riadiace centrum (chat s AI). Monitor 2 = **živý sandbox** aktuálneho vizuálu. Director prechádza appku, hovorí čo zmeniť/pridať/opraviť; AI to **hneď aplikuje do sandboxu**; Director **vizuálne overí**. Iteruje cez **všetky vizuály** (FE/WE) projektu, kým nie sú vyladené a schválené. |
+| **2 — Vizuálna konzultácia** (NOVÁ) | Monitor 1 = Riadiace centrum (chat s AI). Monitor 2 = **živý sandbox** aktuálneho vizuálu. Director prechádza aplikáciu, hovorí čo zmeniť/pridať/opraviť; AI to **hneď aplikuje do sandboxu**; Director **vizuálne overí**. Iteruje cez **všetky vizuály** (FE/WE) projektu, kým nie sú vyladené a schválené. |
 | **3 — Programovanie** | **Nezmenené v jadre**, ale štartuje zo **schválených vizuálov ako záväzného vstupu**: pridáva logiku + wiring **za** presné schválené obrazovky, nemení layout/navigáciu/flow (lock-with-escalation, §3.7). |
-| **4 — Verifikácia · 5 — Nasadenie** | Nezmenené; koncová poistka navyše overí, že appka sedí so schváleným vizuálom. |
+| **4 — Verifikácia · 5 — Nasadenie** | Nezmenené; koncová poistka navyše overí, že aplikácia sedí so schváleným vizuálom. |
 
 **Čo vo Vizuáli skontrolovať (v4.43.12, DEV-36).** Director 09.10.2026: „Po vyhotovení vizuálu pred tým linkom na
 samotný vizual pomohlo by mi krátky popis čo všetko treba prekontrolovať vo vizuáli.“ Každý ťah agenta vo Vizuáli
@@ -98,9 +98,9 @@ z neho zoznam (`GET`, `PrivateFilesPanel`) číta, kto súbor nahral. Poradca m�
 prázdnym súborom (vidí mená, nie obsah). Charta AI Agenta aj Poradcu posiela na tlačidlo, nikdy na `scp`.
 
 **Vizuál — prvotriedna jednotka:**
-- **Typovaný:** `FE` (frontend appky — má každý projekt) · `WE` (webend — webshop, web pre mobilnú appku…). Systém typov **rozšíriteľný** pre budúce druhy.
+- **Typovaný:** `FE` (frontend aplikácie — má každý projekt) · `WE` (webend — webshop, web pre mobilnú aplikáciu…). Systém typov **rozšíriteľný** pre budúce druhy.
 - **1..N na projekt**, rôznych typov. Každý vizuál = vlastný nasaditeľný frontend s vlastným publikom/URL.
-- **Zdieľaný backend + JEDEN dátový model** naprieč všetkými vizuálmi → jeden súdržný systém s viacerými tvárami, nie roztrúsené appky.
+- **Zdieľaný backend + JEDEN dátový model** naprieč všetkými vizuálmi → jeden súdržný systém s viacerými tvárami, nie roztrúsené aplikácie.
 
 ---
 
@@ -110,7 +110,7 @@ prázdnym súborom (vidí mená, nie obsah). Charta AI Agenta aj Poradcu posiela
 
 **3.2 Pipeline zmena — vloženie Fázy 2.** Nový stage medzi `navrh` a `programovanie` (pracovný názov `vizual`). Nedotkne sa release/deploy cesty (podobne ako kontrola/konzultácia sú „neviditeľné" pre release oracle). Vstup do Fázy 2 = schválená Špecifikácia; výstup = schválené vizuály + dátový kontrakt + doplnená špecifikácia.
 
-**3.3 Sandbox → živý dev-server (kľúčová technická zmena, #4).** Fáza 2 beží **Vite dev-server (HMR)**, NIE prod nginx build — aby sa zmena premietla za <1 s (oneskorenie = AI rozmýšľa, nie rebuild). Základ existuje: `docker-compose.sandbox.yml` (beží reálnu appku živo+izolovane) + `consult_sandbox.py`. Visual ich sprodukční na **per-vizuál dev-server** + **monitor-2 kontext** (sandbox hlási, ktorý vizuál/obrazovku Director práve pozerá → „zväčši súčet" sa vyrieši ako pri otvorenej Delphi forme).
+**3.3 Sandbox → živý dev-server (kľúčová technická zmena, #4).** Fáza 2 beží **Vite dev-server (HMR)**, NIE prod nginx build — aby sa zmena premietla za <1 s (oneskorenie = AI rozmýšľa, nie rebuild). Základ existuje: `docker-compose.sandbox.yml` (beží reálnu aplikáciu živo+izolovane) + `consult_sandbox.py`. Visual ich sprodukční na **per-vizuál dev-server** + **monitor-2 kontext** (sandbox hlási, ktorý vizuál/obrazovku Director práve pozerá → „zväčši súčet" sa vyrieši ako pri otvorenej Delphi forme).
 
 **3.4 Vizuál model.** Každý vizuál nesie: `typ (FE/WE)`, `názov`, `publikum`, `obrazovky` (screens), `stavy` (screen states, #1), `dátové väzby` (číta/zapisuje → #2), `sandbox náhľad`, `zamknutý kontrakt` (#5). Backend a dátový model sú **spoločné pre projekt**, nie per-vizuál.
 
@@ -118,7 +118,7 @@ prázdnym súborom (vidí mená, nie obsah). Charta AI Agenta aj Poradcu posiela
 
 **3.6 Auto-fill špecifikácie (#3).** Vizuálna konzultácia premieňa ROZHOVOR na SPEC: každá schválená zmena → čistá požiadavka (nie surový chat), organizovaná po obrazovkách, odrážajúca FINÁLNY dohodnutý stav, čitateľná slovenčina, zaznamenáva aj schválenia („dobré, ďalej" = schválené-ako-je). Režim: **tichý background capture + čítanie na konci** (neodvádza pozornosť od vizuálu). Výsledok = kompletná, vizuálne validovaná špecifikácia = záväzný vstup buildu (kŕmi #5).
 
-**3.7 Zamknutý vizuál = záväzný build input (#5), lock-with-escalation.** Po Fáze 2 sú schválený frontend + dátový kontrakt + spec ZÁVÄZNÝM vstupom: builder dostane schválený frontend ako **východiskový bod** (rozširuje/wiruje, NIKDY neprekresľuje/nereštyluje), pridáva len logiku+wiring **za** presné obrazovky, nesmie meniť layout/nav/flow. Ak realita naozaj vynúti vizuálnu zmenu → build **STOP + spýta sa Directora** (nikdy tichý drift, nikdy zaseknutie). Koncová poistka overí, že finálna appka sedí so schváleným vizuálom. Drží štrukturálne (frontend už existuje → drift by vyžadoval aktívne prepísanie = chytené) + ladí s pravidlom Implementer = deterministický vykonávateľ (`feedback_implementer_no_autonomy`).
+**3.7 Zamknutý vizuál = záväzný build input (#5), lock-with-escalation.** Po Fáze 2 sú schválený frontend + dátový kontrakt + spec ZÁVÄZNÝM vstupom: builder dostane schválený frontend ako **východiskový bod** (rozširuje/wiruje, NIKDY neprekresľuje/nereštyluje), pridáva len logiku+wiring **za** presné obrazovky, nesmie meniť layout/nav/flow. Ak realita naozaj vynúti vizuálnu zmenu → build **STOP + spýta sa Directora** (nikdy tichý drift, nikdy zaseknutie). Koncová poistka overí, že finálna aplikácia sedí so schváleným vizuálom. Drží štrukturálne (frontend už existuje → drift by vyžadoval aktívne prepísanie = chytené) + ladí s pravidlom Implementer = deterministický vykonávateľ (`feedback_implementer_no_autonomy`).
 
 **3.8 Perzistencia vizuálov.** Vizuál NEZmizne po vývoji — ostáva súčasťou projektu (ako Delphi formy), aby ho neskoršia **Konzultácia** mala k dispozícii (viaže sa na `project_nex_studio_konzultacia_sidecar`).
 
@@ -151,8 +151,8 @@ Každý CR: samostatný, končí funkčným prírastkom, vlastný dev-spec pri �
 - **CR-3 — #1 Reálne dáta + stavy obrazoviek.** Hybrid dáta (AI seed + Director vloží reálne anonymizované vzorky) + povinný checklist A–F (stavy/edge-cases/tabuľky/formuláre/financie/zariadenie) + state-switcher vo vizuáli. *Done:* každú obrazovku preklikám cez jej stavy (plná/prázdna/loading/error/…).
 - **CR-4 — #2 Dátový kontrakt.** Auto-capture čo každý vizuál číta+zapisuje → zosúladené entity naprieč vizuálmi + externé zdroje; ľahký odklep entít na konci Fázy 2. *Done:* na konci Fázy 2 vidím entity/polia = blueprint pre DB+backend.
 - **CR-5 — #3 Auto-fill špecifikácie.** Tichý background capture zmien+schválení → kompletná čitateľná spec organizovaná po obrazovkách, finálny dohodnutý stav; čítanie na konci. *Done:* po Fáze 2 mám kompletnú vizuálne-validovanú špecifikáciu bez písania.
-- **CR-6 — #4 Klikateľný/walkable + kontext.** Reálna navigácia (prejdem celú appku ako user; flow problémy: veľa klikov, slepé uličky, chýbajúci späť) + monitor-2 screen-level pointing. *Done:* appku prejdem ako používateľ; „urob súčet väčší" sa vyrieši na aktuálnej obrazovke.
-- **CR-7 — #5 Zamknutý vizuál = záväzný build input.** Build štartuje zo schváleného frontendu (rozširuje, neprekresľuje); lock-with-escalation (STOP+spýtaj sa pri vynútenej vizuálnej zmene); koncová poistka (finálna appka vs schválený vizuál). *Done:* build za schválenými obrazovkami; pokus o drift zastaví a eskaluje.
+- **CR-6 — #4 Klikateľný/walkable + kontext.** Reálna navigácia (prejdem celú aplikáciu ako user; flow problémy: veľa klikov, slepé uličky, chýbajúci späť) + monitor-2 screen-level pointing. *Done:* aplikáciu prejdem ako používateľ; „urob súčet väčší" sa vyrieši na aktuálnej obrazovke.
+- **CR-7 — #5 Zamknutý vizuál = záväzný build input.** Build štartuje zo schváleného frontendu (rozširuje, neprekresľuje); lock-with-escalation (STOP+spýtaj sa pri vynútenej vizuálnej zmene); koncová poistka (finálna aplikácia vs schválený vizuál). *Done:* build za schválenými obrazovkami; pokus o drift zastaví a eskaluje.
 - **CR-8 — Perzistencia + dolad.** Vizuály ostávajú súčasťou projektu pre neskoršiu Konzultáciu; desktop+mobil náhľad; skladanie z nex-shared (auto-konzistencia); leštenie. *Done:* Konzultácia nad hotovou verziou má vizuál k dispozícii.
 
 **Poradie závislostí:** CR-0 → CR-1 → CR-2 sú základ (bez nich nič); CR-3..7 sa navrstvujú na kostru (dajú sa čiastočne preusporiadať podľa priorít); CR-8 na koniec.

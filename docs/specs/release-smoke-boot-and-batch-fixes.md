@@ -36,7 +36,7 @@ boot.** A boot-FAIL is a decisive product FAIL and must NOT depend on the Audito
 
 **Fix:** when the release-acceptance/boot leg returns a boot-FAIL (`(False, "up exit …")`), settle a clean
 **Verifikácia FAIL verdict carrying the boot reason** — deterministically, independent of the Auditor's
-verdict parseability. The manager (and the fix↔re-verify loop) must see *"Appka sa nespustila: <reason>"*,
+verdict parseability. The manager (and the fix↔re-verify loop) must see *"Aplikácia sa nespustila: <reason>"*,
 not "verdikt sa nepodarilo spracovať". Trace `_run_verifikacia_round` → `_settle_verifikacia_verdict`
 (orchestrator.py ~6041) and the boot-FAIL path (~4458 "the caller settles on the boot FAIL" — verify it
 actually fires ahead of the Auditor-verdict-parse block). Test: a boot-FAIL result → a recorded

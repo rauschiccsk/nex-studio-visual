@@ -16,7 +16,7 @@
 
   /* 13 px a 15 px namiesto 12 a 14 (Riaditeľ 2026-07-27).
    *
-   * Appka je postavená prakticky celá z týchto dvoch veľkostí — 245 + 172 miest v nej a ďalších
+   * Aplikácia je postavená prakticky celá z týchto dvoch veľkostí — 245 + 172 miest v nej a ďalších
    * ~100 v komponentoch zo zdieľanej knižnice. Dvanásťbodový text sa nečíta pohodlne bez ohľadu na
    * to, aké písmo a aké vyhladzovanie sa použije; predošlé tri opravy (dodanie Interu, vypnutie
    * vyhladzovania, hrúbka 450) boli všetky správne, ale hlavná príčina bola veľkosť.

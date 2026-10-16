@@ -16,7 +16,7 @@ Krok 8 „Migrácia" je bezpečnostný kopírovací nástroj, ktorý prenesie os
 ## Rozhodnutia (Manažér projektu 2026-07-05)
 
 - **M1 = starú históriu buildov NEkopírovať do novej DB** — ostáva čitateľná na disku (git log, .nex-*-state.md, PTY logy). Nová DB staré enum hodnoty aj tak odmieta (069). = pôvodné rozhodnutie OQ-6.
-- **M2 = (A) samostatný príkazový nástroj** `scripts/migrate_v1_to_v2.py` s dry-run náhľadom (spustí sa raz pri vydaní, ukáže presne čo spraví). NIE tlačidlo v appke — najvyššie stávky, ostré dáta.
+- **M2 = (A) samostatný príkazový nástroj** `scripts/migrate_v1_to_v2.py` s dry-run náhľadom (spustí sa raz pri vydaní, ukáže presne čo spraví). NIE tlačidlo v aplikácii — najvyššie stávky, ostré dáta.
 - **M3 = (A) preniesť CELÚ históriu verzií** (všetky verzie + ich stromy epik/funkcií/úloh/chýb). Nová DB ju udrží, nič navyše.
 - **M4 = projekt-po-projekte** (ak jeden zlyhá, ostatné prejdú; oprav a spusti len ten jeden). Nie all-or-nothing.
 - **M5 = konflikt slug → preskočiť a nahlásiť** (Manažér rozhodne — nex-agents môže kolidovať s existujúcim v2 projektom). Žiadny auto-rename/merge.

@@ -104,7 +104,7 @@ echo "==> nasadzujem: ${TARGET}"
 # Checked BEFORE the --dry-run exit on purpose — a dry-run that passes where the real deploy refuses is a
 # trap, and the whole point is to find out now rather than after the images are built.
 NOTE="${REPO_ROOT}/docs/specs/versions/v${VERSION}/RELEASE_NOTES.md"
-[[ -s "$NOTE" ]] || die "v${VERSION} nemá poznámku k vydaniu. Napíš ju do ${NOTE} — jednou-dvoma vetami po slovensky, čo z toho má ten, kto appku používa (nie čo sa zmenilo v kóde). Bez nej sa v Aktualizáciách toto vydanie nikdy neobjaví."
+[[ -s "$NOTE" ]] || die "v${VERSION} nemá poznámku k vydaniu. Napíš ju do ${NOTE} — jednou-dvoma vetami po slovensky, čo z toho má ten, kto aplikáciu používa (nie čo sa zmenilo v kóde). Bez nej sa v Aktualizáciách toto vydanie nikdy neobjaví."
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> --dry-run: nič sa nestavia ani nemení."
