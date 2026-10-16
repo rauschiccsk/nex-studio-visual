@@ -40,11 +40,10 @@ Design notes (per ``docs/architect/live-docs-port.md``):
 from __future__ import annotations
 
 import logging
-import os
 import re
 from pathlib import Path
 
-from backend.services import kb_git
+from backend.services import kb_git, kb_owner
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +80,7 @@ class KnowledgeBaseWriter:
         demand. Returns the absolute path written.
         """
         target = self._resolve(project_slug, filename)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        self._atomic_write(target, content)
+        kb_owner.write_text(self._base_path, target, content)
         return target
 
     def read(self, project_slug: str, filename: str) -> str:
@@ -114,7 +112,6 @@ class KnowledgeBaseWriter:
         of the same task completion idempotent.
         """
         target = self._resolve(project_slug, filename)
-        target.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             existing = target.read_text(encoding="utf-8")
@@ -130,7 +127,7 @@ class KnowledgeBaseWriter:
         if not new_content.endswith("\n"):
             new_content += "\n"
 
-        self._atomic_write(target, new_content)
+        kb_owner.write_text(self._base_path, target, new_content)
         return target
 
     def exists(self, project_slug: str, filename: str) -> bool:
@@ -215,18 +212,6 @@ class KnowledgeBaseWriter:
             raise ValueError(f"Resolved path escapes Knowledge Base projects root: {target}") from exc
 
         return target
-
-    @staticmethod
-    def _atomic_write(target: Path, content: str) -> None:
-        """Write ``content`` to ``target`` via tmp-file + ``os.replace``."""
-        tmp = target.with_name(target.name + ".tmp")
-        try:
-            tmp.write_text(content, encoding="utf-8")
-            os.replace(tmp, target)
-        finally:
-            # If os.replace succeeded, tmp is gone; if it failed, clean up.
-            if tmp.exists():
-                tmp.unlink()
 
 
 def _first_nonempty_line(text: str) -> str:

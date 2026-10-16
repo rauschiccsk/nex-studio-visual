@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.config.settings import settings
+from backend.services import kb_owner
 
 #: Local git work (read, hash, commit) — never the network.
 _LOCAL_TIMEOUT_SECONDS = 30
@@ -66,15 +67,10 @@ def repo_of(path: Path) -> Optional[Path]:
     return None
 
 
-def _owner(root: Path) -> tuple[int, int]:
-    st = Path(root).stat()
-    return st.st_uid, st.st_gid
-
-
 def _run(
     root: Path, args: list[str], *, stdin: Optional[str] = None, env: Optional[dict[str, str]] = None, timeout: int
 ) -> subprocess.CompletedProcess[str]:
-    uid, gid = _owner(root)
+    uid, gid = kb_owner.owner(root)
     as_owner = os.geteuid() == 0 and uid != 0
     run_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -152,7 +148,7 @@ def commit_files(root: Path, files: Mapping[str, Optional[str]], message: str) -
     with tempfile.TemporaryDirectory() as tmp:
         private = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
         if os.geteuid() == 0:
-            uid, gid = _owner(root)
+            uid, gid = kb_owner.owner(root)
             os.chown(tmp, uid, gid)
         git(root, "read-tree", "HEAD", env=private)
         _apply(private)

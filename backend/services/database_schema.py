@@ -20,7 +20,6 @@ The flow this module serves:
 from __future__ import annotations
 
 import difflib
-import os
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -29,7 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.config.settings import settings
-from backend.services import kb_git
+from backend.services import kb_git, kb_owner
 
 #: The schema document's name — in the version's spec folder and in the Knowledge Base alike.
 SCHEMA_FILENAME = "DATABASE_SCHEMAS.md"
@@ -281,12 +280,4 @@ class KnowledgeBaseSchemaPublisher:
             return kb_git.committed(self._root, rel)
 
     def _write(self, rel: str, text: str) -> None:
-        target = self._root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, target)
-        if os.geteuid() == 0:
-            st = self._root.stat()
-            os.chown(target, st.st_uid, st.st_gid)
-            os.chown(target.parent, st.st_uid, st.st_gid)
+        kb_owner.write_text(self._root, self._root / rel, text)

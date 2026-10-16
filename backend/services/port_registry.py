@@ -59,8 +59,9 @@ import yaml
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.db.models.projects import Project
-from backend.services import kb_git
+from backend.services import kb_git, kb_owner
 from backend.services import system_setting as system_setting_service
 
 logger = logging.getLogger(__name__)
@@ -1036,11 +1037,9 @@ def record_allocation(
         )
     if updated != text:  # an entry already there is not written twice
         try:
-            # Write via a sibling temp file + rename: a half-written registry would read as
-            # "no reservations" on the next allocation, which is the failure we are removing.
-            tmp = PORT_REGISTRY_FILE.with_suffix(".yaml.tmp")
-            tmp.write_text(updated, encoding="utf-8")
-            tmp.replace(PORT_REGISTRY_FILE)
+            # Through a sibling temp file: a half-written registry would read as "no reservations" on the next
+            # allocation. DEV-111: the rewritten registry stays the owner's of the Znalostná báza, not root's.
+            kb_owner.write_text(Path(settings.knowledge_base_path), PORT_REGISTRY_FILE, updated)
         except OSError as exc:
             return (
                 f"Blok {base}-{end} sa nepodarilo zapísať do evidencie portov "

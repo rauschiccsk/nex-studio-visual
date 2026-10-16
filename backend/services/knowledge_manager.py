@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.config.settings import settings
+from backend.services import kb_owner
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,9 @@ class KnowledgeManager:
         self._validate_category(category, allow_create=True)
         self._validate_filename(filename)
 
-        dir_path = self.base_path / category
-        dir_path.mkdir(parents=True, exist_ok=True)
-
-        file_path = dir_path / filename
-        file_path.write_text(content, encoding="utf-8")
+        file_path = self.base_path / category / filename
+        # DEV-111: the new document and every new folder belong to the owner of the Znalostná báza, not to root.
+        kb_owner.write_text(self.base_path, file_path, content)
 
         relative = f"{category}/{filename}"
         logger.info(f"Saved knowledge document: {relative}")
@@ -150,7 +149,7 @@ class KnowledgeManager:
         if not resolved.exists():
             raise FileNotFoundError(f"Document not found: {relative_path}")
 
-        resolved.write_text(content, encoding="utf-8")
+        kb_owner.write_text(self.base_path, resolved, content)
         logger.info(f"Updated knowledge document: {relative_path}")
         return relative_path
 

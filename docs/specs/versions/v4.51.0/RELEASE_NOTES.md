@@ -40,3 +40,8 @@ beží (MAGER aj ANDROS), ponechá z jej obrazov nasadenú verziu, každú novš
 späť; staršie zmaže. Nikdy nezmaže obraz, ktorý používa akýkoľvek kontajner na stroji — aj zastavený alebo inej
 inštalácie či zákazníka. Čo zmazal a približne koľko miesta uvoľnil, povie v zázname nasadenia. Doteraz ostávala
 každá verzia: na ANDROSe mal NEX Inbox deväť verzií po 2 GB.
+
+**Súbory, ktoré kokpit zapíše do Znalostnej bázy, patria jej vlastníkovi.** Kokpit beží ako správca systému a nový
+dokument zo stránky Znalostnej bázy, živé dokumenty projektu (STATUS, HISTORY), evidencia portov aj ich nové
+priečinky po zápise patrili správcovi — vlastník ich potom nevedel v termináli zmeniť. Každý zápis kokpitu do
+Znalostnej bázy teraz ide cez jedno miesto, ktoré súbor aj nové priečinky odovzdá jej vlastníkovi.
