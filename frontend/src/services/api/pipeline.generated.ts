@@ -1741,6 +1741,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/projects/{slug}/review-conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Conversation
+         * @description DEV-138 — where the „Overiť s Poradcom“ button sends a card: the person's own conversation for the cards of
+         *     this version in its current phase, or ``None`` when the card is to found it.
+         */
+        get: operations["review_conversation_api_v1_poradca_projects__slug__review_conversation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/status": {
         parameters: {
             query?: never;
@@ -6858,6 +6879,11 @@ export interface components {
             attachments?: components["schemas"]["PoradcaAttachmentUpload"][];
             /** Question */
             question: string;
+            /**
+             * Review
+             * @default false
+             */
+            review: boolean;
             /** Version Id */
             version_id?: string | null;
         };
@@ -7022,6 +7048,14 @@ export interface components {
         PoradcaRename: {
             /** Title */
             title: string;
+        };
+        /**
+         * PoradcaReviewConversation
+         * @description DEV-138 — the person's conversation for the cards of a version in its current phase; ``None`` = found one.
+         */
+        PoradcaReviewConversation: {
+            /** Conversation Id */
+            conversation_id?: string | null;
         };
         /**
          * PoradcaScopeUpdate
@@ -12622,6 +12656,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_conversation_api_v1_poradca_projects__slug__review_conversation_get: {
+        parameters: {
+            query: {
+                version_id: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaReviewConversation"];
                 };
             };
             /** @description Validation Error */

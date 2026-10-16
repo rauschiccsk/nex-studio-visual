@@ -29,6 +29,7 @@ import {
   createPoradcaConversationApi,
   deletePoradcaConversationApi,
   getPoradcaContextApi,
+  getPoradcaReviewConversationApi,
   getPoradcaStatusApi,
   listPoradcaConversationsApi,
   renamePoradcaConversationApi,
@@ -189,6 +190,17 @@ export default function PoradcaPage() {
   // (a reload or the way back sends nothing again) and the composer sends the question like one he typed. A card of
   // a version this project does not have is not sent under another scope: it waits in the box, with why.
   const [incoming, setIncoming] = useState<IncomingQuestion | null>(null);
+  // DEV-138: the cards of one version and phase share one conversation. `reviewCard` — the card on its way: `into` the
+  // phase's conversation (its id) or into a new one (`null`); `reviewNew` — the card founds the phase's conversation.
+  const [reviewCard, setReviewCard] = useState<{ question: string; into: string | null } | null>(null);
+  const [reviewNew, setReviewNew] = useState(false);
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
   const reviewRequested = params.has(REVIEW_PARAM);
   useEffect(() => {
     const versionId = params.get("verzia");
@@ -199,11 +211,50 @@ export default function PoradcaPage() {
     const card = versionId ? takeReview(versionId) : null;
     if (!card) return;
     const known = context.versions?.some((v) => v.id === versionId) ?? false;
-    setIncoming({
-      question: reviewQuestion(card, status?.question_max_chars ?? Number.POSITIVE_INFINITY),
-      held: known ? null : CARD_NOT_IN_PROJECT,
-    });
-  }, [reviewRequested, conversationId, context, statusSettled, status, params, setParams]);
+    const question = reviewQuestion(card, status?.question_max_chars ?? Number.POSITIVE_INFINITY);
+    if (!known || !slug || !versionId) {
+      setIncoming({ question, held: known ? null : CARD_NOT_IN_PROJECT });
+      return;
+    }
+    void getPoradcaReviewConversationApi(slug, versionId)
+      .then((found) => found.conversation_id ?? null)
+      // The server could not say where the card goes — it founds the phase's conversation rather than wait.
+      .catch(() => null)
+      .then((id) => {
+        if (!mounted.current) return;
+        if (id) {
+          next.set("c", id);
+          rememberOpen(slug, id);
+          setParams(next);
+        } else {
+          setReviewNew(true);
+        }
+        setReviewCard({ question, into: id });
+      });
+  }, [reviewRequested, conversationId, context, statusSettled, status, params, setParams, slug]);
+
+  // DEV-138: the card reaches the composer only once the page stands where the card goes — the composer sends into the
+  // conversation the address names. Into the phase's conversation once it has loaded (whether Poradca still answers
+  // the previous card decides between sending and leaving it in the box); into a new one once no conversation is
+  // open. A phase's conversation that cannot be opened (deleted meanwhile) does not swallow the card: it founds one.
+  useEffect(() => {
+    if (!reviewCard) return;
+    if (reviewCard.into === null) {
+      if (conversationId) return;
+      setIncoming({ question: reviewCard.question, held: null });
+      setReviewCard(null);
+    } else if (conversationId === reviewCard.into && detail?.id === reviewCard.into) {
+      setIncoming({ question: reviewCard.question, held: null });
+      setReviewCard(null);
+    } else if (conversationId === reviewCard.into && convError) {
+      const next = new URLSearchParams(params);
+      next.delete("c");
+      if (slug) rememberOpen(slug, null);
+      setParams(next, { replace: true });
+      setReviewNew(true);
+      setReviewCard({ question: reviewCard.question, into: null });
+    }
+  }, [reviewCard, conversationId, detail, convError, params, setParams, slug]);
 
   const scopeId = conversationId ? (detail?.version_id ?? WHOLE_PROJECT) : newScope;
   const scopeVersion = context?.versions?.find((v) => v.id === scopeId) ?? null;
@@ -246,6 +297,7 @@ export default function PoradcaPage() {
     // visit came with, and a mark left in it would send a later card again on the way back.
     next.delete(REVIEW_PARAM);
     if (slug) rememberOpen(slug, id);
+    setReviewNew(false); // DEV-138: another conversation — what he writes next is not the card's
     setParams(next);
   }
 
@@ -450,6 +502,7 @@ export default function PoradcaPage() {
                 question,
                 newScope || null,
                 uploads,
+                reviewNew,
               );
               setDetail(created);
               select(created.id);

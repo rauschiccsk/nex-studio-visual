@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   getPoradcaContextApi: vi.fn(),
   listPoradcaConversationsApi: vi.fn(),
   createPoradcaConversationApi: vi.fn(),
+  getPoradcaReviewConversationApi: vi.fn(),
   getPoradcaConversationApi: vi.fn(),
   askPoradcaApi: vi.fn(),
   setPoradcaScopeApi: vi.fn(),
@@ -198,6 +199,7 @@ beforeEach(() => {
     conversation(question),
   );
   api.getPoradcaConversationApi.mockImplementation(async () => conversation("…"));
+  api.getPoradcaReviewConversationApi.mockResolvedValue({ conversation_id: null });
   window.localStorage.clear();
 });
 
@@ -326,5 +328,101 @@ describe("DEV-103 — the review-with-Poradca button on the verification card", 
     const question: string = api.createPoradcaConversationApi.mock.lastCall?.[1] ?? "";
     expect(question.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}\nKolo konzultácie 4 z 5.\n${ORIGIN}`)).toBe(true);
     expect(question.endsWith(`\n\n${request}`)).toBe(true);
+  });
+});
+
+// DEV-138 — Director 16.10.2026, NEX Inbox 1.9.0 waiting in Návrh on 9 cards: „ak kliknem v karte agenta na tlačidlo
+// "Overiť s Poradcom" každý krát otvorí nový rozhovor. Takou rýchlosťou o chvíľku budem mať zahlcený celý zoznam
+// rozhovorov.“ The cards of one version and phase go into ONE conversation — the one the first card founded.
+describe("DEV-138 — the cards of one version and phase share one conversation", () => {
+  const PHASE_CONVERSATION = "c-navrh";
+
+  function phaseConversation(running: boolean) {
+    return {
+      ...conversation("Rozhodnutie 1 z 9 — prvá karta"),
+      id: PHASE_CONVERSATION,
+      title: "1.8.0 — rozhodnutia vo Verifikácii",
+      running,
+      messages: [
+        { id: "q1", author: "human", content: "Rozhodnutie 1 z 9 — prvá karta", steps: [], status: "done", attachments: [] },
+        {
+          id: "a1",
+          author: "poradca",
+          content: "Odporúčam možnosť A.",
+          steps: [],
+          status: running ? "running" : "done",
+          attachments: [],
+        },
+      ],
+    };
+  }
+
+  it("a card of a phase that already has its conversation goes into it — no new conversation", async () => {
+    api.getPoradcaReviewConversationApi.mockResolvedValue({ conversation_id: PHASE_CONVERSATION });
+    api.getPoradcaConversationApi.mockImplementation(async () => phaseConversation(false));
+    api.askPoradcaApi.mockImplementation(async () => phaseConversation(true));
+    tree(card("verifikacia_fix"));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => expect(api.askPoradcaApi).toHaveBeenCalledTimes(1));
+    const [id, question] = api.askPoradcaApi.mock.lastCall ?? [];
+    expect(id).toBe(PHASE_CONVERSATION);
+    expect(question.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}`)).toBe(true);
+    expect(question.endsWith(`\n\n${REQUEST}`)).toBe(true);
+    expect(api.getPoradcaReviewConversationApi).toHaveBeenCalledWith("nex-inbox", VERSION);
+    expect(api.createPoradcaConversationApi).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByTestId("address").textContent).toBe(`?verzia=${VERSION}&c=${PHASE_CONVERSATION}`),
+    );
+  });
+
+  it("the first card of a phase founds the phase's conversation", async () => {
+    tree(card("verifikacia_fix"));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1));
+    const [slug, , versionId, images, review] = api.createPoradcaConversationApi.mock.lastCall ?? [];
+    expect([slug, versionId, images, review]).toEqual(["nex-inbox", VERSION, [], true]);
+    expect(api.askPoradcaApi).not.toHaveBeenCalled();
+  });
+
+  it("Poradca still answers the previous card: this card waits in the box of that conversation, nothing new", async () => {
+    api.getPoradcaReviewConversationApi.mockResolvedValue({ conversation_id: PHASE_CONVERSATION });
+    // The conversation arrives after the address changed — the order a slow server gives; the card must wait for it.
+    api.getPoradcaConversationApi.mockImplementation(
+      () => new Promise((r) => setTimeout(() => r(phaseConversation(true)), 40)),
+    );
+    tree(card("verifikacia_fix"));
+    fireEvent.click(reviewButton());
+
+    expect(await screen.findByText(/Poradca odpovedá — ďalšiu otázku pošleš, keď dokončí/)).toBeInTheDocument();
+    const box = await composer();
+    await waitFor(() => expect(box.value.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}`)).toBe(true));
+    expect(box.value.endsWith(REQUEST)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.askPoradcaApi).not.toHaveBeenCalled();
+    expect(api.createPoradcaConversationApi).not.toHaveBeenCalled();
+  });
+
+  it("the phase's conversation cannot be opened: the card founds a new one instead of getting lost", async () => {
+    api.getPoradcaReviewConversationApi.mockResolvedValue({ conversation_id: PHASE_CONVERSATION });
+    api.getPoradcaConversationApi.mockRejectedValue(new Error("Rozhovor sa nenašiel."));
+    tree(card("verifikacia_fix"));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1));
+    const [, question, , , review] = api.createPoradcaConversationApi.mock.lastCall ?? [];
+    expect(question.startsWith(`Rozhodnutie 1 z 1 — ${QUESTION}`)).toBe(true);
+    expect(review).toBe(true);
+    expect(api.askPoradcaApi).not.toHaveBeenCalled();
+  });
+
+  it("the server cannot say where the card goes: it founds the phase's conversation rather than waiting", async () => {
+    api.getPoradcaReviewConversationApi.mockRejectedValue(new Error("Server neodpovedá"));
+    tree(card("verifikacia_fix"));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1));
+    expect(api.createPoradcaConversationApi.mock.lastCall?.[4]).toBe(true);
   });
 });

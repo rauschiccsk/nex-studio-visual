@@ -190,7 +190,10 @@ describe("PoradcaPage", () => {
     await waitFor(() => expect(select.value).toBe("v13"));
     fireEvent.change(screen.getByPlaceholderText(/Opýtaj sa Poradcu/), { target: { value: "Čo je v UAT?" } });
     fireEvent.click(screen.getByRole("button", { name: /Opýtať sa/ }));
-    await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledWith("demo", "Čo je v UAT?", "v13", []));
+    // DEV-138: a question he typed himself never founds the conversation for the cards of a phase.
+    await waitFor(() =>
+      expect(api.createPoradcaConversationApi).toHaveBeenCalledWith("demo", "Čo je v UAT?", "v13", [], false),
+    );
   });
 
   it("says why it cannot run instead of accepting a question", async () => {

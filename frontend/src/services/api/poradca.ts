@@ -6,6 +6,7 @@ import type {
   PoradcaConversationDetail,
   PoradcaBacklogSaved,
   PoradcaProjectContext,
+  PoradcaReviewConversation,
   PoradcaStatus,
   PoradcaTicketCreate,
   PoradcaTicketDraft,
@@ -30,17 +31,27 @@ export interface PoradcaImageUpload {
   data: string;
 }
 
+/** `review` (DEV-138): a card from „Overiť s Poradcom“ founds the conversation for the cards of its version and phase. */
 export function createPoradcaConversationApi(
   slug: string,
   question: string,
   versionId: string | null,
   attachments: PoradcaImageUpload[] = [],
+  review = false,
 ): Promise<PoradcaConversationDetail> {
   return api.post<PoradcaConversationDetail>(`/poradca/projects/${slug}/conversations`, {
     question,
     version_id: versionId,
     attachments,
+    review,
   });
+}
+
+/** DEV-138 — where a card from „Overiť s Poradcom“ goes: his conversation for the cards of this version and phase. */
+export function getPoradcaReviewConversationApi(slug: string, versionId: string): Promise<PoradcaReviewConversation> {
+  return api.get<PoradcaReviewConversation>(
+    `/poradca/projects/${slug}/review-conversation?${new URLSearchParams({ version_id: versionId }).toString()}`,
+  );
 }
 
 export function getPoradcaConversationApi(id: string): Promise<PoradcaConversationDetail> {

@@ -12,6 +12,8 @@ export type PoradcaStatus = S["PoradcaStatus"];
 export type PoradcaProjectContext = S["PoradcaProjectContext"];
 export type PoradcaVersionInfo = S["PoradcaVersionInfo"];
 export type PoradcaBacklogSaved = S["PoradcaBacklogSaved"];
+/** DEV-138 — the conversation for the cards of a version in its current phase; `null` = the card founds one. */
+export type PoradcaReviewConversation = S["PoradcaReviewConversation"];
 /** DEV-83 — a choice Poradca marked in its answer, checked against the card it names. */
 export type PoradcaChoice = S["PoradcaChoiceRead"];
 /** DEV-119 — the ticket Poradca proposes and the preview „Založiť tiket" opens with. */

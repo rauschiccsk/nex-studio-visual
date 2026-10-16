@@ -14,6 +14,7 @@ from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Float, For
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
+from backend.db.models.pipeline import STAGE_VALUES
 
 #: Who speaks in the conversation: the human (the author of the conversation) or Poradca.
 AUTHOR_HUMAN = "human"
@@ -59,8 +60,18 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
     #: When the author (or admin) deleted it. The row stays only for Náklady: text, steps and title are gone,
     #: of the messages only usage and time remain. For the interface such a conversation does not exist (404).
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+    #: DEV-138: the phase whose decision cards this conversation reviews — set when the „Overiť s Poradcom“ button
+    #: founds it, so the next card of the same version and phase goes into it instead of a new conversation
+    #: (``backend.services.poradca.review``). Empty for a conversation the person started by hand.
+    review_stage = Column(String(16), nullable=True)
 
-    __table_args__ = (Index("ix_poradca_conversations_project_author", "project_id", "author_id"),)
+    __table_args__ = (
+        Index("ix_poradca_conversations_project_author", "project_id", "author_id"),
+        CheckConstraint(
+            f"review_stage IS NULL OR review_stage IN ({_in(STAGE_VALUES)})",
+            name="ck_poradca_conversations_review_stage",
+        ),
+    )
 
 
 class PoradcaMessage(Base, UUIDMixin, TimestampMixin):

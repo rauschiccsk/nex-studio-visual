@@ -35,6 +35,14 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
 - Nad poľom **o čom sa rozprávame**: projekt a verzia (predvolene vybraná verzia) s fázou a stavom;
   dá sa zmeniť, alebo zvoliť „celý projekt".
 - Rozhovor pokračuje, kde som skončil, aj na druhý deň.
+- **Karty rozhodnutí jednej fázy idú do jedného rozhovoru** (v4.52.0, DEV-138, Director 16.10.2026: „ak kliknem
+  v karte agenta na tlačidlo "Overiť s Poradcom" každý krát otvorí nový rozhovor. Takou rýchlosťou o chvíľku budem
+  mať zahlcený celý zoznam rozhovorov.“). Tlačidlo **Overiť s Poradcom** na karte (DEV-103, DEV-106) pošle prvú
+  kartu fázy ako nový rozhovor s názvom „<verzia> — rozhodnutia v <fáze>“ (napr. „1.9.0 — rozhodnutia v Návrhu“);
+  každú ďalšiu kartu tej istej verzie a fázy položí do neho ako ďalšiu otázku. Keď Poradca ešte odpovedá na
+  predchádzajúcu kartu, otázka počká v poli. Rozhovor si fázu pamätá na serveri (`review_stage`); ručne napísaný,
+  zmazaný, cudzí rozhovor ani rozhovor inej verzie či fázy sa nepoužije. Poradca vidí v každom rozhovore o verzii
+  všetky jej karty, takže nový rozhovor na kartu nepotrebuje.
 - **Rozpísaná otázka sa nestratí** (v4.43.4, DEV-24, Director 08.10.2026: „ak začnem písať do promptu pre
   Poradcu a potom prekliknem na Centrum riadenia … keď sa vrátim môj napísaný prompt už tam nie je"). Pole si
   otázku pamätá pre každý rozhovor zvlášť a pre nový rozhovor projektu, kým ju neodošlem (`useDraft`, ako pole

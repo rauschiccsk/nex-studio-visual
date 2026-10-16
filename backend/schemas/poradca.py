@@ -128,11 +128,20 @@ class PoradcaConversationCreate(BaseModel):
     version_id: Optional[UUID] = None
     #: DEV-52 — snímky obrazovky k prvej otázke (počet a veľkosť stráži ``poradca.attachments.accept``).
     attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
+    #: DEV-138 — founded by the „Overiť s Poradcom“ button: the conversation is the one for the cards of this version
+    #: in its current phase, titled „<verzia> — rozhodnutia v <fáze>“ (``backend.services.poradca.review``).
+    review: bool = False
 
     @field_validator("question")
     @classmethod
     def _no_nul(cls, value: str) -> str:
         return _refuse_nul(value)
+
+
+class PoradcaReviewConversation(BaseModel):
+    """DEV-138 — the person's conversation for the cards of a version in its current phase; ``None`` = found one."""
+
+    conversation_id: Optional[UUID] = None
 
 
 class PoradcaAsk(BaseModel):

@@ -47,6 +47,7 @@ from backend.schemas.poradca import (
     PoradcaMessageRead,
     PoradcaProjectContext,
     PoradcaRename,
+    PoradcaReviewConversation,
     PoradcaScopeUpdate,
     PoradcaStatus,
     PoradcaTicketCreate,
@@ -57,7 +58,7 @@ from backend.schemas.poradca import (
 )
 from backend.services import metrics, plane_tickets
 from backend.services.plane_gateway import PlaneError
-from backend.services.poradca import attachments, choices, handoff, readiness, runner, tickets
+from backend.services.poradca import attachments, choices, handoff, readiness, review, runner, tickets
 
 router = APIRouter(tags=["Poradca"])
 
@@ -290,12 +291,36 @@ async def create_conversation(
     project = authz.assert_project_slug_access(db, current_user, slug)
     _check_version(db, project, payload.version_id)
     images = _accept_images(payload.attachments)
-    conversation = runner.new_conversation(
-        db, project=project, author=current_user, version_id=payload.version_id, title=_title(payload.question)
+    # DEV-138: a card from the „Overiť s Poradcom“ button founds the conversation for the cards of this version in
+    # its current phase — the next card finds it through ``review-conversation``. A version never built has no phase:
+    # its card founds an ordinary conversation.
+    stage = review.stage_of(db, payload.version_id) if payload.review and payload.version_id else None
+    title = (
+        review.title(db.get(Version, payload.version_id).version_number, stage) if stage else _title(payload.question)
     )
+    conversation = runner.new_conversation(
+        db, project=project, author=current_user, version_id=payload.version_id, title=title
+    )
+    conversation.review_stage = stage
     db.commit()
     _ask(db, conversation, payload.question, current_user, images)
     return _detail(db, conversation)
+
+
+@router.get("/projects/{slug}/review-conversation", response_model=PoradcaReviewConversation)
+def review_conversation(
+    slug: str,
+    version_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PoradcaReviewConversation:
+    """DEV-138 — where the „Overiť s Poradcom“ button sends a card: the person's own conversation for the cards of
+    this version in its current phase, or ``None`` when the card is to found it."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    _check_version(db, project, version_id)
+    return PoradcaReviewConversation(
+        conversation_id=review.find(db, project_id=project.id, author_id=current_user.id, version_id=version_id)
+    )
 
 
 @router.get("/conversations/{conversation_id}", response_model=PoradcaConversationDetail)
