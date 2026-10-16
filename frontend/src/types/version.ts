@@ -4,17 +4,18 @@
  * Mirrors ``backend.schemas.version`` — field names, nullability and
  * aggregate counts match the Pydantic schemas exactly.
  *
- * Status values correspond to the ``ck_versions_status`` CHECK constraint
- * on the ``versions`` table (``planned | active | released``).
+ * Status values come from the backend schema (``VersionRead.status``, the ``ck_versions_status`` CHECK constraint).
  */
 
 import type { WorkKind } from "@/lib/workKind";
+import type { components } from "@/services/api/pipeline.generated";
 
 /**
- * Mirrors ``status IN ('planned', 'active', 'released')`` on the
- * ``versions`` table.
+ * The status of a version as the backend sends it — taken from the generated schema, never copied. DEV-134: the
+ * copy said ``planned | active | released`` while the backend also sends ``done`` (26 versions on 16.10.2026), so
+ * the Zásobník offered finished versions and called each one „Neznámy stav“.
  */
-export type VersionStatus = "planned" | "active" | "released";
+export type VersionStatus = components["schemas"]["VersionRead"]["status"];
 
 /** Serialised representation of a version row. */
 export interface Version {

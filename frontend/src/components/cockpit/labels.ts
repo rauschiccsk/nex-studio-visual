@@ -6,6 +6,7 @@
 // literals). Director feedback: internal codes + English roles aren't
 // understandable, especially for Directors who don't know the ICC methodology.
 
+import type { VersionStatus } from "@/types/version";
 import type {
   BlockReason,
   PipelineParticipant,
@@ -302,7 +303,9 @@ export function verificationDrifted(
 // ``done`` pribudlo preto, že postavená a schválená verzia niesla ``planned`` a na obrazovke
 // sa nedala odlíšiť od nezačatej. Ponechať ju ``active`` až do nasadenia by ju zase nedalo
 // odlíšiť od tej, ktorá sa práve stavia.
-const VERSION_STATUS_LABELS: Record<string, string> = {
+// DEV-134: typed by the status the backend sends — a new status fails the type check here, and the Zásobník reads
+// its labels from this one place instead of keeping its own copy (its copy missed „done“ → „Neznámy stav“).
+const VERSION_STATUS_LABELS: Record<VersionStatus, string> = {
   planned: "Plánované",
   active: "Prebieha",
   done: "Hotové",
@@ -312,7 +315,7 @@ const VERSION_STATUS_LABELS: Record<string, string> = {
 /** Popis stavu verzie. Neznámy stav sa NEVYDÁVA za „Plánované" — vypíše sa, ako prišiel.
  *  Prepadové „Plánované" je presne ten druh tichej lži, kvôli ktorej vznikol ICCINT-50. */
 export function versionStatusLabel(status: string): string {
-  return VERSION_STATUS_LABELS[status] ?? status;
+  return VERSION_STATUS_LABELS[status as VersionStatus] ?? status;
 }
 
 /** Farebné ladenie štítku. ``done`` má vlastný odtieň — hotové a vydané sú dva rôzne stavy

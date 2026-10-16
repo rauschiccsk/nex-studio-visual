@@ -13,7 +13,8 @@ import {
 import { draftKey, useDraft } from "@/hooks/useDraft";
 import BacklogTicketPanel from "@/components/backlog/BacklogTicketPanel";
 import type { ProjectRead } from "@/types";
-import type { Version } from "@/types/version";
+import type { Version, VersionStatus } from "@/types/version";
+import { versionStatusLabel } from "@/components/cockpit/labels";
 import type {
   BacklogItemRead,
   BacklogPriority,
@@ -45,18 +46,9 @@ const STATUS_LABEL: Record<BacklogStatus, string> = {
   rejected: "Zamietnuté",
 };
 
-// Version status shown in the "Priradiť k verzii" dropdown — render a Slovak label, never the raw
-// English enum. The DB enforces planned|active|released; the extra keys defend against any richer
-// runtime status so a raw enum never leaks to the manager. Unknown → neutral "Neznámy stav".
-const VERSION_STATUS_LABEL: Record<string, string> = {
-  planned: "plánovaná",
-  active: "aktívna",
-  released: "vydaná",
-  building: "prebieha",
-  draft: "rozpracovaná",
-  verified: "overená",
-  failed: "zlyhala",
-};
+// DEV-134: a requirement can be assigned only to a version that has not been built yet — a finished („done“) or
+// released version never builds again, so a requirement assigned to it would be stranded.
+const ASSIGNABLE_STATUSES: readonly VersionStatus[] = ["planned", "active"];
 
 // Audit Theme 6: priority rendered raw English ("low"/"high"); localise it like STATUS_LABEL.
 const PRIORITY_LABEL: Record<BacklogPriority, string> = {
@@ -163,9 +155,9 @@ export default function BacklogPage() {
     return m;
   }, [versions]);
 
-  // Assignable = unreleased versions (a released version already shipped; realize fires AT release).
+  // Assignable = versions not built yet (DEV-134) — realize fires AT release.
   const assignableVersions = useMemo(
-    () => versions.filter((v) => v.status !== "released"),
+    () => versions.filter((v) => ASSIGNABLE_STATUSES.includes(v.status)),
     [versions],
   );
 
@@ -579,7 +571,7 @@ export default function BacklogPage() {
                           <option value="">— vyber verziu —</option>
                           {assignableVersions.map((v) => (
                             <option key={v.id} value={v.id}>
-                              {v.version_number} ({VERSION_STATUS_LABEL[v.status] ?? "Neznámy stav"})
+                              {v.version_number} ({versionStatusLabel(v.status)})
                             </option>
                           ))}
                         </select>

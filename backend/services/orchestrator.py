@@ -1634,6 +1634,7 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
         "Schválenie Špecifikácie Manažérom (`Schváliť špecifikáciu`) je VŽDY povinné a nezávislé od Miery "
         "autonómie — Návrh sa nezačne, kým ju Manažér neschváli.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
+        + _backlog_scope_block(db, version_id)
         # ICCINT-125: povinné celoICC štandardy vstupujú do stavby ZADANÍM, nie padnutou bránou. Bez
         # tohto odseku ich Príprava nezahrnie, Vizuál nemá odkiaľ vziať obrazovku, Návrh napíše opak
         # a brána vydania ich vymáha vo fáze, kde sa už nestavia — presne ako 14.09.2026 na NEX
@@ -2958,16 +2959,18 @@ def _review_notes_gap(skeleton: TaskPlanSkeleton, note_count: int) -> Optional[s
 # required — the v1 helper is gone, but its job is not.)
 
 
-def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, prompt: str) -> str:
-    """Prepend the version's ``included`` backlog items to the Designer's **gate_a** brief (E2, CR-NS-042).
+#: DEV-134 — the heading under which the version's assigned Zásobník requirements enter the agent's brief.
+BACKLOG_HEADING = "POŽIADAVKY ZO ZÁSOBNÍKA"
 
-    Orchestrator-side only — NO agent API call. gate_a is the Designer's FIRST dispatch (where it authors
-    the version's customer-requirements); injecting once here makes the Designer design the assigned backlog
-    items as the version's requirements. Once-only by design — gate_b/c/d read what gate_a wrote, so there is
-    no re-injection → no drift. A no-op for any other stage, or a version with no ``included`` items.
+
+def _backlog_scope_block(db: Session, version_id: uuid.UUID) -> str:
+    """The requirements the Manažér assigned to this version from the Zásobník, for the Príprava brief (DEV-134).
+
+    They were put in front of the agent only at the stage „gate_a“ of the retired v1 pipeline; today's Príprava never
+    read them, so a requirement assigned to a version was never built (16.10.2026, NEX Inbox 1.9.0). Empty when the
+    version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be assigned to it
+    before its Príprava — the block belongs to a new version only.
     """
-    if stage != "gate_a":
-        return prompt
     items = (
         db.execute(
             select(BacklogItem)
@@ -2978,19 +2981,21 @@ def _augment_brief_with_backlog(db: Session, version_id: uuid.UUID, stage: str, 
         .all()
     )
     if not items:
-        return prompt
+        return ""
     lines = [
-        "## Zákaznícke požiadavky (z backlogu)",
         "",
-        "Tieto požiadavky boli priradené k tejto verzii — navrhni ich ako jej zákaznícke požiadavky:",
         "",
+        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii; sú súčasťou zadania, "
+        "zapracuj ich rovnako ako Zadanie:",
     ]
     for it in items:
-        line = f"- **REQ-{it.number}: {it.title}**"
+        line = f"- REQ-{it.number}: {it.title}"
         if it.description:
             line += f" — {it.description}"
+        if it.plane_identifier:
+            line += f" (tiket {it.plane_identifier})"
         lines.append(line)
-    return "\n".join(lines) + "\n\n---\n\n" + prompt
+    return "\n".join(lines) + "\n"
 
 
 def _latest_schema_approval(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -8648,7 +8653,7 @@ async def run_dispatch(
         # Fast-fix (CR-V2-028) takes a lightweight directive-IS-the-brief variant (no spec dialogue).
         prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type)
     else:
-        prompt = _augment_brief_with_backlog(db, state.version_id, stage, _directive_for(stage, state.flow_type))
+        prompt = _directive_for(stage, state.flow_type)
     result = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
