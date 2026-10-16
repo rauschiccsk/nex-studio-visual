@@ -147,7 +147,7 @@ _SANDBOX_LABEL = "build sandbox"
 #: socket; the phase was excluded because the phase LOOKS like it runs containers.
 #:
 #: **Verifikácia** is deliberately still out, and that is a decision rather than an oversight. The independent
-#: Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej appke, nie oproti slovu AI Agenta"
+#: Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej aplikácii, nie oproti slovu AI Agenta"
 #: — being able to boot the thing it is judging is the entire point of the phase (§2.5 behavioural release
 #: verification). The engine's own smoke leg (:func:`orchestrator._run_release_smoke`) covers the scripted
 #: part, but taking the socket away would leave the last independent check unable to look for itself. It is

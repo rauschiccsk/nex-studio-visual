@@ -32,7 +32,7 @@ from tests.test_orchestrator_v2_programovanie import (
     _stub_turns,
 )
 
-NOTE_RESTART = "Uzatvorenie hlásenia treba naprogramovať podľa pravidla, nie podľa náčrtu — po reštarte appky."
+NOTE_RESTART = "Uzatvorenie hlásenia treba naprogramovať podľa pravidla, nie podľa náčrtu — po reštarte aplikácie."
 NOTE_ONE_OUTAGE = "Výpadok má ostať jeden aj vtedy, keď sa počas neho zmení jeho povaha."
 NOTE_TABLE = "Treba opraviť riadok v tabuľke hraničných prípadov, ktorý pre plný disk sľubuje jeden e-mail."
 FAILED_FINDING = "Jedna problémová faktúra môže natrvalo zastaviť doručovanie všetkých ostatných."

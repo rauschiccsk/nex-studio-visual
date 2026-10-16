@@ -278,7 +278,7 @@ def test_a_route_that_fails_after_the_start_is_a_failure_of_a_started_version(tm
     assert result[0] is False
     route, _, backup = result[1].partition(" Záloha databázy pred nasadením: ")
     assert route == (
-        "appka beží, ale verejná adresa https://magerstav-inbox.icc.sk/ nie je dostupná — smerovanie zlyhalo: "
+        "aplikácia beží, ale verejná adresa https://magerstav-inbox.icc.sk/ nie je dostupná — smerovanie zlyhalo: "
         "https://magerstav-inbox.icc.sk/ 404"
     )
     # DEV-116: a failure after the start is exactly when the backup is needed — the report says where it lies.

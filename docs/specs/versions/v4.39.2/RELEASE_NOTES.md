@@ -12,7 +12,7 @@ Nasadenie totiž sieť **premenúva** — volá ju tak, ako ju volá zdrojový p
 v bežiacej inštalácii. Adresu siete sme prenášali, meno nie. Vznikla teda požiadavka na novú sieť
 s adresou, ktorú už drží tá stará, a Docker ju odmietol.
 
-Appka pritom celý čas bežala ďalej — nasadenie spadlo skôr, než čokoľvek zhodilo.
+Aplikácia pritom celý čas bežala ďalej — nasadenie spadlo skôr, než čokoľvek zhodilo.
 
 ## Čo to znamená pre teba
 

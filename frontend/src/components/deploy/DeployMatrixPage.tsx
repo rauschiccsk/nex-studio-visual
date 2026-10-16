@@ -88,13 +88,13 @@ const DEPLOY_PROD_ROLE_REASON = "Nasadenie do PROD môže vykonať iba Manažér
 // leaving the manager to guess whether the click did anything.
 const REVERIFY_POLL_INTERVAL_MS = 15000;
 // DEV-116 — the sentence the backend (backend/services/predeploy_backup.py) puts into the deploy's report: where the
-// database backup taken before the deploy lies. It sits in the report's first part, which the row does not otherwise show.
+// database backup taken before the deploy lies. The row does not otherwise show the report.
 const BACKUP_SENTENCE = "Záloha databázy pred nasadením:";
 
 function backupNote(detail: string | null): string | null {
-  const head = (detail ?? "").split(" | ")[0] ?? "";
-  const at = head.indexOf(BACKUP_SENTENCE);
-  return at < 0 ? null : (head.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
+  const report = detail ?? "";
+  const at = report.indexOf(BACKUP_SENTENCE);
+  return at < 0 ? null : (report.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
 }
 
 // DEV-115 — how often a row asks whether a deploy runs on its installation: often while one runs (the step and the
@@ -270,7 +270,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           onClick={() => handleLaunch(customerId)}
           disabled={launching === customerId}
           className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline disabled:opacity-60"
-          title="Spustí appku prihlásenú (UAT test launch)"
+          title="Spustí aplikáciu prihlásenú (UAT test launch)"
         >
           {launching === customerId ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -525,12 +525,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                   environment === "uat" ? row.uat_last_deploy_at : row.prod_last_deploy_at;
                 const lastDeployDetail =
                   environment === "uat" ? row.uat_last_deploy_detail : row.prod_last_deploy_detail;
-                // Upozornenia sa do `detail` pripájajú za „ | “. Prvý diel je holé „OK“ — nie je čo čítať.
                 const lastDeployBackup = backupNote(lastDeployDetail);
-                const lastDeployWarnings = (lastDeployDetail ?? "")
-                  .split(" | ")
-                  .slice(1)
-                  .filter((w) => w.trim() !== "");
+                // DEV-129: upozornenia úspešného nasadenia hovorí len tento riadok — zo servera, každé raz.
+                const lastDeployWarnings =
+                  environment === "uat" ? row.uat_last_deploy_warnings : row.prod_last_deploy_warnings;
                 // Vybraná verzia je UŽ nasadená → nie je to ďalší krok, je to opakovanie. Neskrývame
                 // ani nevypíname (prestavba po zásahu je legitímna) — len to pomenujeme, aby obrazovka
                 // prestala vyzerať, že o nasadení nevie.
@@ -684,7 +682,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             </div>
                           )}
                           {result.ok && result.url && renderLaunchOrOpen(row.customer_id, result.url)}
-                          {result.warnings.map((w, i) => (
+                          {/* DEV-129: a successful deploy's warnings are said by the row above, read back from the
+                              server after the click — here they would be said twice. A failed deploy is not the
+                              row's last good one, so its warnings are said only here. */}
+                          {!result.ok && result.warnings.map((w, i) => (
                             <div key={i} className="text-amber-600 dark:text-amber-400">
                               ⚠ {w}
                             </div>

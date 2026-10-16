@@ -78,7 +78,7 @@ def release_failure_headline(raw: str) -> str:
     v4.0.47 (honest framing): the engine collapses two very different outcomes into ONE smoke-FAIL signal —
     a real BOOT failure (the app never came up) AND a behavioural acceptance failure where the app DID boot
     (the Aktualizácie changelog gate: ``/api/v1/release-notes`` did not serve the current version, or the FE
-    tab is missing). Telling the manager — and the AI-Agent fixer, whose brief carries this finding — "Appka
+    tab is missing). Telling the manager — and the AI-Agent fixer, whose brief carries this finding — "Aplikácia
     sa nespustila" for the SECOND case is false and sends everyone boot-debugging instead of at the failing
     check. This distinguishes them; the raw detail stays in ``technical_detail`` for the fixer either way."""
     r = (raw or "").strip()

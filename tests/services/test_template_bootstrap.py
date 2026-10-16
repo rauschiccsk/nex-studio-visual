@@ -707,7 +707,7 @@ def test_disabled_bootstrap_still_registers_an_existing_brownfield_workspace(db_
     assert result.init_script == ""
 
 
-# ─── Šablóna nesmie rodiť appky so starým zväzkom a bez značky (ICCINT-83) ────
+# ─── Šablóna nesmie rodiť aplikácie so starým zväzkom a bez značky (ICCINT-83) ────
 #
 # Rovnaký princíp ako pri stráži nad init.sh vyššie: číta sa SKUTOČNÁ šablóna na disku, nie kópia.
 # Kópia by odplávala presne tak, ako odplával predpoklad. Mimo ANDROSu sa preskočí s uvedeným dôvodom.
@@ -726,7 +726,7 @@ def test_the_template_never_lets_the_browser_keep_the_html_shell() -> None:
     """⚠️ Toto je rana, po ktorej sa po nasadení ukazuje stará verzia a pomáha až inkognito.
 
     Úvodná stránka je jediný súbor bez odtlačku obsahu v názve — a práve ona hovorí, ktorý zväzok sa
-    má načítať. Keď si ju prehliadač odloží, appka ďalej beží na starom zväzku a používateľ sa jej nemá
+    má načítať. Keď si ju prehliadač odloží, aplikácia ďalej beží na starom zväzku a používateľ sa jej nemá
     ako zbaviť. Zmerané 08.09.2026: NEX Studio tie hlavičky dávno má, šablóna nemala žiadne — a NEX
     Manager, ktorý z nej vzišiel, posielal iba ETag.
     """
@@ -739,7 +739,7 @@ def test_the_template_does_not_freeze_the_app_mark_for_a_year() -> None:
     """⚠️ Diera, ktorú som si sám vyrobil a chytilo ju až meranie.
 
     Ročné pravidlo pre statické súbory je správne pre zväzok, lebo ten má v názve odtlačok obsahu.
-    Manifest a ikona odtlačok NEMAJÚ — pravidlo ich pochytilo tiež a zmenená značka appky by sa
+    Manifest a ikona odtlačok NEMAJÚ — pravidlo ich pochytilo tiež a zmenená značka aplikácie by sa
     k ľuďom rok nedostala. Musia mať vlastné pravidlo, a to PRED tým ročným.
     """
     conf = _skeleton_file("nginx.conf")
@@ -754,7 +754,7 @@ def test_the_template_does_not_freeze_the_app_mark_for_a_year() -> None:
 
 
 def test_a_new_project_is_born_installable() -> None:
-    """Appka sa má dať pripnúť na plochu a otvárať vo vlastnom okne. Keby to šablóna nemala, dopĺňalo
+    """Aplikácia sa má dať pripnúť na plochu a otvárať vo vlastnom okne. Keby to šablóna nemala, dopĺňalo
     by sa to do každého nového projektu zvlášť — navždy."""
     html = _skeleton_file("index.html.tmpl")
     assert 'rel="manifest"' in html
@@ -763,7 +763,7 @@ def test_a_new_project_is_born_installable() -> None:
 
 
 def test_the_manifest_is_real_json_once_the_project_name_is_filled_in() -> None:
-    """Šablóna sa dosádza obyčajným nahradením textu, takže rozbitý manifest by sa ukázal až v appke —
+    """Šablóna sa dosádza obyčajným nahradením textu, takže rozbitý manifest by sa ukázal až v aplikácii —
     a tichým spôsobom: prehliadač ho zahodí a inštalácia sa jednoducho neponúkne."""
     import json as _json
 
@@ -775,14 +775,14 @@ def test_the_manifest_is_real_json_once_the_project_name_is_filled_in() -> None:
     )
     data = _json.loads(filled)  # spadne, keď šablóna prestane byť platný JSON
     assert data["name"] == "NEX Manager"
-    assert data["display"] == "standalone", "bez toho sa appka otvorí ako ďalšia záložka, nie vo vlastnom okne"
+    assert data["display"] == "standalone", "bez toho sa aplikácia otvorí ako ďalšia záložka, nie vo vlastnom okne"
     assert data["start_url"] == "/"
     assert data["icons"], "manifest bez ikony sa nedá nainštalovať"
     assert {i["purpose"] for i in data["icons"]} >= {"any", "maskable"}, "bez maskable si systémy ikonu orežú po svojom"
 
 
 def test_the_app_mark_carries_the_project_initials() -> None:
-    """Ikona na ploche má vyzerať ako appka, do ktorej vedie — tie isté iniciály, aké appka nosí
+    """Ikona na ploche má vyzerať ako aplikácia, do ktorej vedie — tie isté iniciály, aké aplikácia nosí
     v hlavičke. Zástupný obrázok, ktorý nikto nevymení, je horší než žiadny."""
     svg = _skeleton_file("public/icon.svg.tmpl")
     assert "{{PROJECT_INITIALS}}" in svg
@@ -808,7 +808,7 @@ def test_the_preview_starts_before_the_first_render() -> None:
     odídu na neexistujúci backend a náhľad skončí na prihlasovacej obrazovke (ICCINT-27)."""
     main = _skeleton_file("src/main.tsx")
     assert "startPreview().then(render)" in main, (
-        "náhľad sa nespúšťa PRED vykreslením — appka stihne poslať volania do prázdna"
+        "náhľad sa nespúšťa PRED vykreslením — aplikácia stihne poslať volania do prázdna"
     )
 
 

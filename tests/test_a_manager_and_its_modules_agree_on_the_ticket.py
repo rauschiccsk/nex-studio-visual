@@ -66,7 +66,7 @@ def test_the_customer_warning_names_only_modules_opened_from_the_manager():
 
     assert launch_pairing.customer_warning(MANAGER_1110, modules) == (
         "Z NEX Managera sa nedá otvoriť: nex-inbox: NEX Manager podpisuje menom inštalácie „local“, modul prijíma "
-        "len „uat-mager“. Appky bežia — pokazené je otvorenie z NEX Managera; nastavenia treba zladiť (urobí to "
+        "len „uat-mager“. Aplikácie bežia — pokazené je otvorenie z NEX Managera; nastavenia treba zladiť (urobí to "
         "technický tím)."
     )
     assert launch_pairing.customer_warning({**MANAGER_1110, "DEPLOY_SLUG": "uat-mager"}, modules) is None
@@ -129,7 +129,7 @@ def test_the_door_check_now_catches_the_pair_of_11_10(tmp_path, monkeypatch):
     opens, detail = uat_launch.uat_door_opens("mager", "nex-inbox", "https://uat-mager-inbox.test", subject="zoltan")
 
     assert opens is False, "the door check let through a ticket the module rejects"
-    assert detail == "appka vstupenku odmietla novým tvarom (v tele) (stav 401)"
+    assert detail == "aplikácia vstupenku odmietla novým tvarom (v tele) (stav 401)"
     claims = jwt.get_unverified_claims(door.tickets[0])
     assert (claims["deploy"], claims["aud"]) == ("local", "nex-inbox"), "the ticket was not signed as the Manager"
 
@@ -187,7 +187,8 @@ async def test_a_deploy_of_the_module_or_of_the_manager_says_it(db_session, tmp_
     )
 
     assert event.status == "ok", "a pairing problem never fails a deploy — the apps run"
-    assert "Z NEX Managera sa nedá otvoriť: nex-inbox: NEX Manager podpisuje menom inštalácie „local“" in event.detail
+    said = "Z NEX Managera sa nedá otvoriť: nex-inbox: NEX Manager podpisuje menom inštalácie „local“"
+    assert [w for w in event.warnings if said in w], "the audit row must keep the pairing warning"
 
 
 # --- a render from scratch keeps what the installation is ------------------------------------------------------------

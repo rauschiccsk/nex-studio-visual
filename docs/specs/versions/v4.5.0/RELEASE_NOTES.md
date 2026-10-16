@@ -1,7 +1,7 @@
 # v4.5.0 — čo sa dohodne na obrazovkách, dostane sa do dokumentov
 
 Vizuál je najlepšie miesto, kde sa dá dopovedať to, čo pri návrhu ušlo. Vidíš
-appku, klikáš po nej a hovoríš „toto zoraď inak, sem pridaj stĺpec". Agent to
+aplikáciu, klikáš po nej a hovoríš „toto zoraď inak, sem pridaj stĺpec". Agent to
 poslušne dorobí — a doteraz to zostalo **iba na tých obrazovkách**.
 
 Schválenie Vizuálu zlisovalo obrazovky do jedného commitu a do Špecifikácie ani

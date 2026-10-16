@@ -26,9 +26,9 @@ nálepku a nevideli, čo naozaj prišlo.
 
 **Kontrolujú sa všade, kde sa objavia.** Pravidlo, že práve jedna možnosť má
 byť odporúčaná, dovtedy platilo len pre správu s tou nálepkou. Rozhodnutia,
-ktoré appka použije, musia byť rozhodnutia, ktoré si preverila.
+ktoré aplikácia použije, musia byť rozhodnutia, ktoré si preverila.
 
 **O pomocníkovi sa už netvrdí nič navyše.** Keď rozhodnutia nepošle, aplikácia
 napíše, čo sa stalo — *odpovedal takto namiesto rozhodnutí* — a ukáže jeho
 odpoveď aj nálezy previerky vedľa seba. Čo si o tom myslel, nech si Manažér
-prečíta z jeho slov; appka mu do hlavy nevidí a nebude sa tak tváriť.
+prečíta z jeho slov; aplikácia mu do hlavy nevidí a nebude sa tak tváriť.

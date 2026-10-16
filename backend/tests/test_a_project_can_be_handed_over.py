@@ -139,7 +139,7 @@ def test_the_endpoints_are_mounted_where_the_cockpit_calls_them() -> None:
     """⚠️ Toto chýbalo a stálo to jedno nasadenie navyše.
 
     Trasy boli napísané ako ``/projects/{id}/reassign``, lenže router UŽ MÁ predponu ``/projects`` —
-    v appke tak vznikla cesta ``/api/v1/projects/projects/{id}/reassign``. Kokpit volal správnu adresu
+    v aplikácii tak vznikla cesta ``/api/v1/projects/projects/{id}/reassign``. Kokpit volal správnu adresu
     a dostával 404 s textom „Not Found“ od FastAPI, teda ani nie našu hlášku.
 
     Prečo to nechytila žiadna z piatich stráží: skúšali funkciu a jej zdrojový text, nie **pripojenú

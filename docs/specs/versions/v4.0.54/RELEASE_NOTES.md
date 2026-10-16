@@ -17,5 +17,5 @@ Tlačidlo **„Over znova"** sa zobrazí len vtedy, keď ho daný používateľ 
 ## Opravené mätúce hlásenia na obrazovke nasadenia
 
 - Zašednuté tlačidlo malo v bublinke text **„Nasadiť verziu X"** — teda tvrdilo pravý opak toho, čo robilo. Bublinka teraz sedí so skutočným stavom.
-- Keď sa nasadenie nepodarilo, appka hlásila **„akceptačná brána"** aj na UAT, kde žiadna akceptačná brána neexistuje. Teraz sa zobrazí skutočný dôvod.
+- Keď sa nasadenie nepodarilo, aplikácia hlásila **„akceptačná brána"** aj na UAT, kde žiadna akceptačná brána neexistuje. Teraz sa zobrazí skutočný dôvod.
 - Riadok s vysvetlením pod tlačidlom sa doteraz zobrazoval len na PROD. Teraz je na oboch obrazovkách.

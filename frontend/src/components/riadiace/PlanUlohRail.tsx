@@ -717,7 +717,7 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTas
                  · orchestrator.py:11731 pozastavil Manažér
                V dvoch prípadoch z troch teda obrazovka klamala. Director 03.09.2026 na to narazil
                naživo: poslal agentovi opravu, stavba čakala na jeho potvrdenie, a on ohlásil poruchu,
-               lebo mu appka povedala, že došli tokeny. Prázdny ``next_action`` NEDOPĹŇAME dôvodom —
+               lebo mu aplikácia povedala, že došli tokeny. Prázdny ``next_action`` NEDOPĹŇAME dôvodom —
                radšej povieme len to, čo vieme. */
             <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
               {board?.state?.next_action?.trim() || "Stavba je pozastavená — pokračuj tlačidlom nižšie."}

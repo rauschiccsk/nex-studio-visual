@@ -41,5 +41,5 @@ ticho. Preto ho každú minútu obnovuje samostatná služba. **Vyskúšané:** 
 sme zmazali, prihlásenie na stroj sa zo stavby otvorilo, a do minúty sa zavrelo
 späť.
 
-Appka pri štarte hovorí aj to, čo overiť **nevie** — z kontajnera do firewallu
+Aplikácia pri štarte hovorí aj to, čo overiť **nevie** — z kontajnera do firewallu
 hostiteľa nevidí. Radšej priznaná hranica než tichý predpoklad.

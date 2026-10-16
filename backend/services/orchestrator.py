@@ -1490,7 +1490,7 @@ class IccStandard(NamedTuple):
 
 
 def _check_aktualizacie_standard(proj_root: Path) -> Optional[str]:
-    """Karta *Aktualizácie* — len pre plnú web appku. Čistá služba bez obrazoviek nemá kam ju dať a
+    """Karta *Aktualizácie* — len pre plnú web aplikáciu. Čistá služba bez obrazoviek nemá kam ju dať a
     vymáhať ju od nej by bola tá istá chyba naopak: požiadavka, ktorú nemožno splniť."""
     if not (Path(proj_root) / "frontend" / "src").is_dir():
         return None
@@ -1508,7 +1508,7 @@ ICC_STANDARDS: tuple[IccStandard, ...] = (
         key="aktualizacie",
         name="Aktualizácie (zoznam noviniek)",
         scope_sentence=(
-            "Karta „Aktualizácie“ — celoICC štandard: každá appka má obrazovku so zoznamom noviniek "
+            "Karta „Aktualizácie“ — celoICC štandard: každá aplikácia má obrazovku so zoznamom noviniek "
             "(stránka + cesta /updates + položka v menu) a chrbticu, ktorá vydáva GET "
             "/api/v1/release-notes s práve vydávanou verziou. Tento projekt ju ešte nemá, takže je to "
             "RIADNA POLOŽKA tejto verzie: patrí do Špecifikácie, do Návrhu aj do Vizuálu ako každá iná "
@@ -1786,7 +1786,7 @@ def _vizual_directive(
         if manager_request is None:  # pragma: no cover — _run_vizual_round only drafts when there is no mockup
             raise ValueError("Vizuál mockup mode needs a Manažér request; a first draft has no mockup yet.")
         return (
-            "Fáza VIZUÁLNA KONZULTÁCIA — dolaďuješ ŽIVÝ náhľad appky spolu s Manažérom. Náhľad je "
+            "Fáza VIZUÁLNA KONZULTÁCIA — dolaďuješ ŽIVÝ náhľad aplikácie spolu s Manažérom. Náhľad je "
             f"**samostatný klikací mockup** `{mockup_rel}` (self-contained HTML, bez reálneho backendu a bez "
             "prihlásenia, reprezentatívne dáta).\n"
             f"1. Pre kontext si prečítaj Špecifikáciu `{spec_rel}` a Návrh `{design_rel}`.\n"
@@ -1812,13 +1812,13 @@ def _vizual_directive(
         else f"4. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
     )
     return (
-        "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál appky spolu s Manažérom. Pracuješ "
+        "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál aplikácie spolu s Manažérom. Pracuješ "
         "VÝHRADNE vo FRONTENDE (adresár `frontend/`): reálne obrazovky, rozloženie a navigácia, vizuál-first "
         "(ako Delphi — najprv formuláre/obrazovky). REÁLNY backend teraz NErobíš (to je fáza Programovanie).\n"
         f"1. Pre kontext si prečítaj schválenú Špecifikáciu `{spec_rel}` a Návrh `{design_rel}` — nech "
         "obrazovky sedia so zámerom projektu.\n"
         "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
-        "konzistentnému vzhľadu naprieč appkami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
+        "konzistentnému vzhľadu naprieč aplikáciami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
         + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
         + task_line
@@ -1942,7 +1942,7 @@ def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
         "  3. celý rozhovor fázy Vizuál (máš ho v tejto session) a živý stav `frontend/`\n\n"
         "ČO UROB:\n"
         "• Každú vec, na ktorej ste sa vo Vizuáli dohodli a v dokumentoch nie je, **doplň** — do Špecifikácie "
-        "to, čo appka má robiť, do Návrhu to, ako je to riešené. Píš rovnakým jazykom a štruktúrou ako zvyšok "
+        "to, čo aplikácia má robiť, do Návrhu to, ako je to riešené. Píš rovnakým jazykom a štruktúrou ako zvyšok "
         "dokumentu; nezakladaj vlastné kapitoly na konci.\n"
         "• Nepíš históriu rozhovoru ani zoznam zmien. Dokument má znieť tak, ako keby to tak bolo od začiatku "
         "— to je jeho účel: **z neho sa stavia a podľa neho sa overuje.**\n"
@@ -2487,7 +2487,7 @@ def _audit_docker_rule(browser: str) -> str:
     if browser == host_docker_guard.UNAVAILABLE:
         image = (
             "Obraz na skúšky v prehliadači teraz na serveri NIE JE pripravený — skúšky v prehliadači vynechaj a "
-            "povedz to v nálezoch ako neoverené (nie ako chybu appky).\n"
+            "povedz to v nálezoch ako neoverené (nie ako chybu aplikácie).\n"
         )
     else:
         image = (
@@ -2573,12 +2573,12 @@ def _verifikacia_directive(
         rychle_pokrytie = _release_coverage_brief(db, version_id)
         return (
             "VERIFIKÁCIA — RÝCHLA OPRAVA (nezávislý Auditor, ĽAHKÁ koncová kontrola; NIE plný release oracle).\n"
-            "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ appku, "
+            "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ aplikáciu, "
             "NIKDY neupravuj/necommituj. TY NÁJDEŠ — opravuje AI Agent.\n"
             + _audit_docker_rule(browser)
             + "2. ZAMERAJ sa na DVE veci (oprava je malá a jednoznačná, nerob plný adverzariálny audit):\n"
-            "   a) OPRAVA FUNGUJE — robí appka to, čo smernica (pokyn Manažéra) žiadala? Over to oproti "
-            "bežiacej appke / artefaktom, nie oproti slovu AI Agenta.\n"
+            "   a) OPRAVA FUNGUJE — robí aplikácia to, čo smernica (pokyn Manažéra) žiadala? Over to oproti "
+            "bežiacej aplikácii / artefaktom, nie oproti slovu AI Agenta.\n"
             "   b) ŽIADNA REGRESIA — nerozbila oprava nič susedné? Engine spustil release smoke (interné "
             "fixtúry) — výsledok je nižšie; zohľadni ho.\n"
             + smoke_block
@@ -2603,7 +2603,7 @@ def _verifikacia_directive(
     _vizual_sha = db.execute(select(Version.vizual_approved_sha).where(Version.id == version_id)).scalar_one_or_none()
     vizual_block = (
         (
-            "2b. VERNOSŤ VIZUÁLU (POVINNÉ — Manažér schválil vizuál appky): to, čo schválil vo Vizuáli, sa "
+            "2b. VERNOSŤ VIZUÁLU (POVINNÉ — Manažér schválil vizuál aplikácie): to, čo schválil vo Vizuáli, sa "
             f"MUSÍ aj dodať. Sprav `git diff {_vizual_sha} -- frontend/` a over, že žiadna schválená "
             "obrazovka nebola vizuálne PREROBENÁ — žiadny vypadnutý panel, zmenený layout / počet stĺpcov, "
             "iná paleta ani vymenené komponenty. Programovanie smie dorobiť dáta a logiku, NIE meniť "
@@ -2616,18 +2616,18 @@ def _verifikacia_directive(
     return (
         "VERIFIKÁCIA (nezávislý Auditor, koncová kontrola po Programovaní, pred Hotovo).\n"
         "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — over z VONKU (žiadny agent sa nevie auditovať sám). "
-        "SI READ + RUN-ONLY: smieš ČÍTAŤ a SPUSTIŤ appku na overenie, ale NIKDY neupravuj súbor, nepíš kód "
+        "SI READ + RUN-ONLY: smieš ČÍTAŤ a SPUSTIŤ aplikáciu na overenie, ale NIKDY neupravuj súbor, nepíš kód "
         "ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
         + _audit_docker_rule(browser)
-        + "2. RELEASE-ACCEPTANCE (behaviorálny pilier): over, že appka robí to, čo brief sľúbil. Engine už "
-        "spustil appku proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
+        + "2. RELEASE-ACCEPTANCE (behaviorálny pilier): over, že aplikácia robí to, čo brief sľúbil. Engine už "
+        "spustil aplikáciu proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
         "„Hotovo“ = overené, nie nasadené) — výsledok je nižšie. Zohľadni ho v synthéze.\n"
         + smoke_block
         + vizual_block
         + "3. REFUTUJ, NEPOTVRDZUJ (rovnaká PLNÁ hĺbka VŽDY — nezávisle od Miery autonómie): predpokladaj, že "
         "build je CHYBNÝ, kým sám nedokážeš opak. NEDÔVERUJ zeleným testom AI Agenta — over ich SÁM oproti "
-        "bežiacej appke. Aktívne LOV diery v RIZIKOVÝCH častiach (bezpečnosť, peniaze/výpočty, hlavný "
-        "kontrakt); verify-don't-trust oproti artefaktom a bežiacej appke, NIE oproti slovu AI Agenta.\n"
+        "bežiacej aplikácii. Aktívne LOV diery v RIZIKOVÝCH častiach (bezpečnosť, peniaze/výpočty, hlavný "
+        "kontrakt); verify-don't-trust oproti artefaktom a bežiacej aplikácii, NIE oproti slovu AI Agenta.\n"
         "4. NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE (POVINNÉ, bez ohľadu na dial): pre KAŽDÝ deklarovaný bezpečnostný "
         "invariant SÁM SPUSTI zakázanú operáciu a over, že je SKUTOČNE ODMIETNUTÁ (červený-keď-zneužitá test). "
         "Zelený „funguje to“ test bezpečnostný invariant NEDOKÁŽE — len negatívny. Nepokrytý invariant = FAIL. "
@@ -2660,7 +2660,7 @@ def _verifikacia_directive(
         "`summary`/`findings` môžu byť úplne bez žargónu. `proposed_fix` je zameraný rozsah pre AI Agenta (smie "
         "byť technický).\n"
         "   • PRÍKLAD — ZLE `summary`: „Verifikácia FAIL — MissingGreenlet v catalog_import.py:93…”. "
-        "DOBRE `summary`: „Appka je v poriadku, ale záverečná automatická skúška občas zlyhá a jeden test sa nedá "
+        "DOBRE `summary`: „Aplikácia je v poriadku, ale záverečná automatická skúška občas zlyhá a jeden test sa nedá "
         "spustiť dvakrát — treba ju spoľahlivo opakovateľnú.” (detaily → `technical_detail`).\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
@@ -2729,7 +2729,7 @@ _TASK_PLAN_ESTIMATE_NOTE = (
 # prefixes INTO epic/feat titles, so the cockpit showed a confusing double number ("8. EPIC 1 — …") on top of
 # the DB's own continuous numbering. FORBID it: the title is the NAME only — the system numbers epics/feats.
 _TASK_PLAN_TITLE_RULE = (
-    "`title` je IBA NÁZOV (napr. „Základ appky“) — NEPREfixuj ho číslom, poradím ani „EPIC N“/„FUNKCIA N“; "
+    "`title` je IBA NÁZOV (napr. „Základ aplikácie“) — NEPREfixuj ho číslom, poradím ani „EPIC N“/„FUNKCIA N“; "
     "epiky aj funkcie čísluje systém sám."
 )
 # TEXT/FENCE EXTRACTION (CR-1, live root-cause 2026-06-18): ``--json-schema`` does NOT yield a
@@ -2745,7 +2745,7 @@ _TASK_PLAN_FENCE_RULE = (
 # Concrete minimal examples (exact field names) — the model copies the SHAPE, not the content.
 _SKELETON_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
-    '{"epics":[{"title":"Foundation","plain_description":"Základ appky — databáza a spoločné pravidlá.",'
+    '{"epics":[{"title":"Foundation","plain_description":"Základ aplikácie — databáza a spoločné pravidlá.",'
     '"feats":[{"title":"Schéma a migrácie","description":"DB schéma + audit log",'
     '"plain_description":"Založíme databázu a záznam o zmenách.","estimated_minutes":120}]}],'
     '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu.",'
@@ -2800,11 +2800,11 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "Navrch objektu aj pole `flagship_features` (zoznam textov, ≥1): kľúčové funkcie, ktoré MUSÍ vydanie "
         "PREUKÁZATEĽNE robiť — release oracle vyžaduje ≥1 pozitívnu (FEATURE) akceptačnú skúšku na každú. "
         "A pole `safety_properties` (zoznam objektov {`key`,`name`,`risky_op`,`assertion`}): "
-        "bezpečnostné invarianty, ktoré appka "
+        "bezpečnostné invarianty, ktoré aplikácia "
         "MUSÍ VYNÚTIŤ — `risky_op` je konkrétna ZAKÁZANÁ operácia, ktorú oracle vyžaduje otestovať NEGATÍVNE "
         '(musí byť ODMIETNUTÁ; zelený „funguje to" test bezpečnostný invariant nikdy nedokáže). Vymenuj ich '
         "POCTIVO (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy, …); prázdny zoznam iba ak "
-        "appka naozaj nemá žiadny bezpečnostný invariant — Auditor prázdnu deklaráciu spochybní.\n"
+        "aplikácia naozaj nemá žiadny bezpečnostný invariant — Auditor prázdnu deklaráciu spochybní.\n"
         # ICCINT-127 — the binding + the sharpened red proof. Counting rejection tests was
         # satisfiable by any tests at all; a NAME says WHICH invariant each one guards.
         "`assertion` je MENO odmietacej skúšky, ktorá dokazuje, že `risky_op` sa ODMIETNE — to isté "
@@ -4153,7 +4153,7 @@ def dispatch_directive(
         c, c_seq = lc
         # ICCINT-36: a Verifikácia FIX card is NOT a document consultation, and rebuilding its directive here
         # was throwing the fix away. ``apply_action`` has already routed it: it recorded the concrete brief —
-        # the Auditor's finding plus "spusti appku ako engine a zreprodukuj zlyhanie" — as the
+        # the Auditor's finding plus "spusti aplikáciu ako engine a zreprodukuj zlyhanie" — as the
         # ``manazer→ai_agent`` verifikacia ``return`` that :func:`_latest_verifikacia_fix_scope` reads back,
         # and asked for this dispatch. Recomputing from the card's option LABEL replaced all of that with
         # "Manažér rozhodol: … → Nechaj to opraviť. Teraz PREPRACUJ Špecifikáciu/Návrh", so the agent got no
@@ -4162,7 +4162,7 @@ def dispatch_directive(
         # for the finding. A less careful turn would have rewritten the Špecifikácia off a card label.
         if c.get("source") in ("verifikacia_fix", "verifikacia_fail"):
             return _latest_verifikacia_fix_scope(db, version_id) or (
-                "Oprav blokujúce zlyhanie z koncovej Verifikácie: spusti appku tak ako engine "
+                "Oprav blokujúce zlyhanie z koncovej Verifikácie: spusti aplikáciu tak ako engine "
                 "(`docker compose up`), zreprodukuj zlyhanú skúšku po spustení a oprav jej príčinu. "
                 "Špecifikáciu ani Návrh NEPREPISUJ — toto je oprava aplikácie."
             )
@@ -5966,7 +5966,7 @@ async def _uprac_na_cieli(
     ⚠️ **Pripnuté obrazy zostávajú.** Maže sa vyrovnávacia pamäť a vrstvy, ktoré už nikto nedrží
     (``image prune`` bez ``-a``). Obraz predchádzajúcej verzie je návrat a ten sa nezahadzuje.
 
-    ⚠️ **Zlyhanie upratovania nezhodí nasadenie.** Je to údržba: appka beží, len disku sa neuľavilo.
+    ⚠️ **Zlyhanie upratovania nezhodí nasadenie.** Je to údržba: aplikácia beží, len disku sa neuľavilo.
     Povie sa to v hlásení, aby to nezostalo tajomstvom.
     """
     ciel = (deploy_host or "").strip()
@@ -6566,7 +6566,7 @@ async def _verify_uat_serves(
             route_state, route_last = await _verify_public_route(base, be_role, public_host)
         if route_state == "down":
             return False, (
-                f"appka beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
+                f"aplikácia beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
             )
         if route_state == "skip":
             # Audit P1 (2026-07-12): "couldn't verify the public route" is NOT clean success — it is the SAME
@@ -6576,14 +6576,14 @@ async def _verify_uat_serves(
             # warning in the detail so the manager checks the address, without failing the test run.
             if environment == "prod":
                 return False, (
-                    f"appka beží, ale verejnú adresu {public_host} sa nepodarilo overiť (smerovanie/Traefik "
+                    f"aplikácia beží, ale verejnú adresu {public_host} sa nepodarilo overiť (smerovanie/Traefik "
                     f"nedostupné): {route_last}. Nasadenie na PROD je zastavené, kým sa dostupnosť nepotvrdí."
                 )
             logger.warning(
                 "public-route verify skipped (host=%s) — Traefik unreachable from probe: %s", public_host, route_last
             )
             return True, (
-                f"OK — ⚠ verejnú adresu {public_host} sa nepodarilo overiť; skontroluj, či je appka dostupná."
+                f"OK — ⚠ verejnú adresu {public_host} sa nepodarilo overiť; skontroluj, či je aplikácia dostupná."
             )
     return True, "OK"
 
@@ -8051,7 +8051,7 @@ async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]
 
 #: What the boot probe itself established: the app came up and answered. The rest of the sentence is built
 #: from the measured container states (:func:`_boot_pass_detail`).
-_APP_RESPONDS = "appka nabehla a odpovedá"
+_APP_RESPONDS = "aplikácia nabehla a odpovedá"
 
 
 def _boot_pass_detail(stack: _SmokeStack, states: dict[str, tuple[str, int]]) -> str:
@@ -8211,7 +8211,7 @@ def _fast_fix_declaration_payload(db: Session, version_id: uuid.UUID) -> dict[st
     the same order Návrh uses. Declaring afterwards would let the claim be written to match whatever got built.
 
     Deliberately NOT scavenged from the Programovanie gate_reports: they do carry ``flagship_features``, but on
-    the stalled build that field held "Živý náhľad appky, nad ktorým Manažér schvaľuje vzhľad" — a NEX Studio
+    the stalled build that field held "Živý náhľad aplikácie, nad ktorým Manažér schvaľuje vzhľad" — a NEX Studio
     feature, echoed from the agent's own context and unrelated to the project. A floor built on that would look
     enforced while guarding nothing.
     """
@@ -8434,7 +8434,7 @@ def _release_coverage_brief(db: Session, version_id: uuid.UUID) -> str:
         return ""
     lines = ["   Deklarované pokrytie z Návrhu (over KAŽDÉ položku):\n"]
     if features:
-        lines.append("   Flagship funkcie (každá potrebuje POZITÍVNE overenie voči bežiacej appke):\n")
+        lines.append("   Flagship funkcie (každá potrebuje POZITÍVNE overenie voči bežiacej aplikácii):\n")
         lines += [f"     - {f}\n" for f in features if isinstance(f, str)]
     if safety:
         lines.append(
@@ -8804,13 +8804,13 @@ def _kontrola_directive(db: Session, version_id: uuid.UUID, *, smoke_block: str)
         "NIE nezávislý Auditor, a NIE je to release verdikt: nič nepodpisuješ ani nenasadzuješ — len po ľudsky "
         "povieš, čo je hotové a čo ešte nie, a vrátiš kormidlo Manažérovi.\n"
         f"1. Prečítaj si SCHVÁLENÚ Špecifikáciu `{spec_rel}` (jediný zdroj pravdy) a porovnaj ju s reálnym "
-        "stavom kódu — robí appka to, čo Špecifikácia sľúbila?\n"
-        "2. ČESTNE sa vyrovnaj s behom appky: engine ju UŽ NAOZAJ spustil v izolovanom kontajneri (boot + "
+        "stavom kódu — robí aplikácia to, čo Špecifikácia sľúbila?\n"
+        "2. ČESTNE sa vyrovnaj s behom aplikácie: engine ju UŽ NAOZAJ spustil v izolovanom kontajneri (boot + "
         "akceptačný beh) — výsledok je nižšie a je aj v denníku. Zohľadni ho. Ak je červený, NEMÔŽEŠ tvrdiť, "
         "že je všetko PEVNÉ — priznaj to.\n"
         + smoke_block
         + "3. Napíš PO ĽUDSKY (celé vety, žiaden žargón, žiadne vysypané kódy) DVE časti:\n"
-        "   - PEVNÉ: čo je overené a drží (oproti Špecifikácii aj behu appky).\n"
+        "   - PEVNÉ: čo je overené a drží (oproti Špecifikácii aj behu aplikácie).\n"
         "   - VRATKÉ: čo je rizikové, nedotiahnuté alebo NEOVERENÉ. Čo si nestihol reálne overiť, patrí SEM — "
         "radšej čestne priznaj neistotu, než sľúbiť PEVNÉ.\n"
         "4. Nič nerozhoduj za Manažéra a nič neschvaľuj — kontrola len ukáže stav a nechá ho rozhodnúť.\n"
@@ -9139,7 +9139,7 @@ async def _run_conversation_kontrola_round(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=(f"Kontrola — beh appky (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'}: {smoke_detail}"),
+        content=(f"Kontrola — beh aplikácie (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'}: {smoke_detail}"),
         payload={"phase": "priprava", "kontrola": True, "smoke": {"pass": smoke_ok, "detail": smoke_detail}},
     )
     if on_message is not None:
@@ -9167,12 +9167,12 @@ async def _run_conversation_kontrola_round(
             await on_message(acc_msg)
         acc_line = "PASS" if acc_ok else ("SKIP" if acc_skipped else "FAIL")
         smoke_block = (
-            f"   Beh appky (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'} — {smoke_detail}; "
+            f"   Beh aplikácie (interné fixtúry): boot {'PASS' if smoke_ok else 'FAIL'} — {smoke_detail}; "
             f"akceptácia {acc_line} — {acc_detail}.\n"
         )
     else:
         smoke_block = (
-            f"   Beh appky (interné fixtúry): boot FAIL — {smoke_detail} "
+            f"   Beh aplikácie (interné fixtúry): boot FAIL — {smoke_detail} "
             "(akceptácia sa nespustila). Priznaj to čestne v kontrole.\n"
         )
     # Deterministic runtime floor — the SAME mechanical truth the Verifikácia oracle computes (CR-V2-050): a
@@ -9243,7 +9243,7 @@ async def _run_conversation_kontrola_round(
             recipient="manazer",
             kind="notification",
             content=(
-                "Kontrola — beh appky je ČERVENÝ (appka nenaštartovala alebo akceptačný beh neprešiel). "
+                "Kontrola — beh aplikácie je ČERVENÝ (aplikácia nenaštartovala alebo akceptačný beh neprešiel). "
                 "Kontrola nič nepodpisuje — oprav to a spusti kontrolu znova."
             ),
             payload={"phase": "priprava", "kontrola": True, "kontrola_floor_red": True},
@@ -9259,12 +9259,12 @@ async def _run_conversation_kontrola_round(
             db,
             version_id,
             state,
-            content="Znovu overené po zmene kódu — beh appky je v poriadku, verzia je opäť označená ako hotová.",
+            content="Znovu overené po zmene kódu — beh aplikácie je v poriadku, verzia je opäť označená ako hotová.",
         )
         return state
     state.status = "awaiting_manazer"
     state.next_action = (
-        "Kontrola: beh appky je červený — pozri nález a oprav, potom spusti kontrolu znova."
+        "Kontrola: beh aplikácie je červený — pozri nález a oprav, potom spusti kontrolu znova."
         if runtime_floor_red
         else "Kontrola hotová — pozri, čo je PEVNÉ a čo VRATKÉ, a pokračuj v rozhovore."
     )
@@ -10120,7 +10120,7 @@ def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Opti
     lead = (row.content or "").strip()
     # ICCINT-131: „FAIL“ nie je veta pre človeka. Verdikt, ktorý neohlásil Auditor ale engine, nesie
     # ako ``content`` holý znak verdiktu — a karta ním potom ZAČÍNALA. Zmerané 14.09.2026 na NEX
-    # Inbox v1.5.0, 9. kolo: ôsma karta začínala vetou „Appka je v poriadku — chyba je v jednej novej
+    # Inbox v1.5.0, 9. kolo: ôsma karta začínala vetou „Aplikácia je v poriadku — chyba je v jednej novej
     # skúške…“, deviata slovom „FAIL“. Radšej nič než token: volajúci má vlastnú zrozumiteľnú vetu.
     if lead.upper() in _VERDICT_TOKENS:
         return None
@@ -10152,7 +10152,7 @@ def _engine_override_reason(db: Session, version_id: uuid.UUID) -> Optional[str]
         return None
     ci = str((row.payload or {}).get("ci") or "").strip()
     return (
-        "Chyba nie je v kóde — appku sa nepodarilo zostaviť. "
+        "Chyba nie je v kóde — aplikáciu sa nepodarilo zostaviť. "
         + (f"Posledné zostavenie projektu zlyhalo: {ci}. " if ci else "Posledné zostavenie projektu zlyhalo. ")
         + "Kým je zostavenie červené, verzia sa nedá vyhlásiť za overenú. "
         "Keď sa príčina odstránila inde (v projekte, mimo tejto slučky), stačí overenie zopakovať — "
@@ -11050,7 +11050,7 @@ async def _run_verifikacia_round(
         # Plain-language framing (v4.0.47, honest): this branch fires for a real BOOT failure AND for a
         # behavioural acceptance failure where the app DID boot (the Aktualizácie changelog gate — folded into
         # smoke_ok at _run_release_smoke). release_failure_headline distinguishes them so the manager-facing
-        # finding (which ALSO flows to the AI-Agent fixer via _latest_verifikacia_fix_scope) never says "Appka
+        # finding (which ALSO flows to the AI-Agent fixer via _latest_verifikacia_fix_scope) never says "Aplikácia
         # sa nespustila" when the app actually started and only a check failed. The raw probe string stays in
         # payload.technical_detail (the fixer's real lead, threaded by A) + the FE's collapsible detail.
         smoke_fail_content = failure_framing.release_failure_headline(smoke_detail)
@@ -11109,7 +11109,7 @@ async def _run_verifikacia_round(
             content=(
                 "Verdikt Auditora vo Verifikácii sa nepodarilo spracovať ani po opakovaných pokusoch — "
                 "Verifikácia je blokovaná (release gate, fail-closed). Aplikácia sama môže byť v poriadku — "
-                "zlyhal overovací beh, nie appka. Klikni „Znova spustiť overenie“; ak by to malo "
+                "zlyhal overovací beh, nie aplikácia. Klikni „Znova spustiť overenie“; ak by to malo "
                 "zmysel, usmerni opravu cez „Uprav“."
             ),
             payload=_failure_metrics_payload(review) or None,
@@ -11447,7 +11447,7 @@ def _recheck_headline(detail: str) -> str:
 
     Deliberately claims NOTHING it did not measure. When a container exited non-zero the app probe never ran,
     so this says which container died and stops — it does not get to say the app booted, nor that it didn't.
-    The first version of this sentence asserted "appka sa stále nespustí" in every case, and the very first
+    The first version of this sentence asserted "aplikácia sa stále nespustí" in every case, and the very first
     run it met had a healthy app and a failed test container."""
     text = (detail or "").strip()
     if text.startswith(_SMOKE_CONTAINER_FAILED):
@@ -11457,7 +11457,7 @@ def _recheck_headline(detail: str) -> str:
             return f"zlyhal kontajner {services}"
     if text.startswith("up exit "):
         return "spustenie neprešlo"
-    return "appka sa nespustila"
+    return "aplikácia sa nespustila"
 
 
 async def _settle_fix_boot_recheck(
@@ -11491,7 +11491,7 @@ async def _settle_fix_boot_recheck(
             author="system",
             recipient="manazer",
             kind="notification",
-            content="Kontrola po oprave — appka sa spustila. Overil engine tou istou skúškou, ktorá ju zhodila.",
+            content="Kontrola po oprave — aplikácia sa spustila. Overil engine tou istou skúškou, ktorá ju zhodila.",
             payload={
                 "phase": "programovanie",
                 "fix_boot_recheck": True,
@@ -11504,7 +11504,7 @@ async def _settle_fix_boot_recheck(
         db.flush()
         return False
     reopened = _reopen_verifikacia_fix_round(db, state.version_id)
-    # ICCINT-43: say WHAT was measured, never a category. The first version of this sentence read "appka sa
+    # ICCINT-43: say WHAT was measured, never a category. The first version of this sentence read "aplikácia sa
     # stále nespustí" whatever came back — and the run it met had a perfectly healthy app whose test
     # container had failed. A sentence that is right by luck is not right.
     msg = _record_message(
@@ -11743,7 +11743,7 @@ def _auditor_fix_parts(
     # v4.0.46: thread the smoke run's ``technical_detail`` — the CONCRETE, engine-verified reason the
     # boot/acceptance check failed (e.g. "Aktualizácie chýba: /api/v1/release-notes neobsahuje verziu
     # v0.1.0 (vrátené: žiadne)") — into the fix brief AS THE LEAD. Without it the AI Agent saw only the
-    # plain findings ("Appka sa nespustila") + a generic proposed_fix, could not locate the real cause,
+    # plain findings ("Aplikácia sa nespustila") + a generic proposed_fix, could not locate the real cause,
     # "fixed" an unrelated unit test, and the SAME smoke failed again → an endless fix↔re-verify loop. It
     # flows from here into the fix_it one-click brief + the materialized fix task, so a non-expert's single
     # click now hands the AI Agent the actual failure. The loop-breaker.
@@ -12335,7 +12335,7 @@ def _directive_for_build_task(
             # this is the turn that knows what actually changed.
             "DO STAVOVÉHO BLOKU PRIDAJ `customer_note`: JEDNU vetu po slovensky o tom, čo zákazník TERAZ MÁ — "
             "čítať ju bude laik na karte Aktualizácie. Píš v prítomnom/minulom čase o hotovej veci, NIE o "
-            "našom postupe („Appku otvoríte jedným kliknutím z NEX Managera“ — NIE „Opravili sme token“, NIE "
+            "našom postupe („Aplikáciu otvoríte jedným kliknutím z NEX Managera“ — NIE „Opravili sme token“, NIE "
             "„Rýchla oprava“). Žiadne interné kódy, názvy súborov ani počty kôl opráv. NEZAPISUJ text do "
             "RELEASE_NOTES.md — ten súbor vlastní a generuje NEX Studio a tvoju úpravu prepíše; táto veta je "
             "jediná cesta, ako sa tvoj text do vydania dostane."
@@ -12379,7 +12379,7 @@ def _directive_for_build_task(
     # Manažér spomenie, nie sú pravidlá.
     parts.append(QUALITY_RULES)
     parts.append(
-        "SÚHRN PRE MANAŽÉRA (`summary`): píš ĽUDSKOU rečou po slovensky — čo v appke pribudlo / čo teraz "
+        "SÚHRN PRE MANAŽÉRA (`summary`): píš ĽUDSKOU rečou po slovensky — čo v aplikácii pribudlo / čo teraz "
         "funguje z pohľadu POUŽÍVATEĽA, v 1–2 vetách. Manažér je NEŠPECIALISTA. ŽIADNE cesty k súborom, "
         "názvy endpointov, počty testov ani žargón (§4, type-check, lint, outbox, idempotentné, seam…). "
         "Technické detaily patria do `commits[]` / `deliverables[]`, NIE do `summary`."
@@ -13972,7 +13972,8 @@ async def apply_action(
             raise OrchestratorError("Skontrolovať je platné až po dokončení Programovania.")
         if kontrola_passed(db, version_id):
             raise OrchestratorError(
-                "Kontrola pre túto stavbu už prebehla a beh appky bol v poriadku — nová stavba/oprava ju znovu otvorí."
+                "Kontrola pre túto stavbu už prebehla a beh aplikácie bol v poriadku — "
+                "nová stavba/oprava ju znovu otvorí."
             )
         # Durable, restart-safe trigger (mirror of the compose_plan marker, FIX3): record a manazer→ai_agent
         # kind='directive' marker carrying payload.check. ``run_conversation_turn`` delegates to the kontrola
@@ -14015,7 +14016,7 @@ async def apply_action(
             # red floor (the partner always emits its honest gate_report); the runtime-floor gate is what keeps
             # a non-booting build off the deployable ``done`` state.
             raise OrchestratorError(
-                "Označiť ako hotové sa nedá — beh appky je červený (appka nenaštartovala alebo akceptačný "
+                "Označiť ako hotové sa nedá — beh aplikácie je červený (aplikácia nenaštartovala alebo akceptačný "
                 "beh neprešiel). Oprav to a spusti Kontrolu znova."
             )
         if state.current_stage == "done":
@@ -14297,7 +14298,7 @@ async def apply_action(
                 recipient="ai_agent",
                 kind="directive",
                 content=(
-                    "Over znova po zmene kódu — čestne prekontroluj vlastnú robotu; ak je beh appky v poriadku, "
+                    "Over znova po zmene kódu — čestne prekontroluj vlastnú robotu; ak je beh aplikácie v poriadku, "
                     "verzia sa znovu označí ako hotová."
                 ),
                 payload={"phase": "priprava", "check": True, "auto_hotovo": True},

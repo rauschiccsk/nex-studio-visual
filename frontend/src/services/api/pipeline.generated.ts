@@ -5539,6 +5539,8 @@ export interface components {
             updated_at: string;
             /** Version Number */
             version_number: string;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * DeployMatrix
@@ -5627,6 +5629,11 @@ export interface components {
              */
             prod_last_deploy_detail?: string | null;
             /**
+             * Prod Last Deploy Warnings
+             * @description Same, for PROD.
+             */
+            prod_last_deploy_warnings?: string[];
+            /**
              * Prod Url
              * @description Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.
              */
@@ -5651,9 +5658,14 @@ export interface components {
             uat_last_deploy_at?: string | null;
             /**
              * Uat Last Deploy Detail
-             * @description What that deploy reported — including any warnings (they are appended to the event's detail). Non-secret by construction (§4).
+             * @description What that deploy reported, without its warnings. Non-secret by construction (§4).
              */
             uat_last_deploy_detail?: string | null;
+            /**
+             * Uat Last Deploy Warnings
+             * @description DEV-129: that deploy's warnings, one sentence each — the only place the page reads them from, so each is said once.
+             */
+            uat_last_deploy_warnings?: string[];
             /**
              * Uat Url
              * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.

@@ -2,7 +2,7 @@
 
 ## Zlyhané nasadenie sa už netvári ako úspešné
 
-Keď nasadenie zlyhalo — appka sa nerozbehla, rozhranie sa neozvalo, migrácia neprešla — obrazovka napriek tomu ukázala zelené **„✓ Nasadené"**. Dôvod zlyhania pritom prišiel v odpovedi zo servera, len sa naň nikto nepozrel.
+Keď nasadenie zlyhalo — aplikácia sa nerozbehla, rozhranie sa neozvalo, migrácia neprešla — obrazovka napriek tomu ukázala zelené **„✓ Nasadené"**. Dôvod zlyhania pritom prišiel v odpovedi zo servera, len sa naň nikto nepozrel.
 
 Teraz sa zobrazí neúspech aj s dôvodom.
 

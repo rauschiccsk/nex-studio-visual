@@ -75,6 +75,8 @@ class DeployEventRead(BaseModel):
     status: DeployStatus
     actor_id: Optional[UUID] = None
     detail: Optional[str] = None
+    # DEV-129: the deploy's warnings, apart from ``detail`` (an event from before the field carries ``[]``).
+    warnings: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -150,13 +152,18 @@ class DeployMatrixRow(BaseModel):
     )
     uat_last_deploy_detail: Optional[str] = Field(
         default=None,
-        description="What that deploy reported — including any warnings (they are appended to the event's "
-        "detail). Non-secret by construction (§4).",
+        description="What that deploy reported, without its warnings. Non-secret by construction (§4).",
+    )
+    uat_last_deploy_warnings: list[str] = Field(
+        default_factory=list,
+        description="DEV-129: that deploy's warnings, one sentence each — the only place the page reads them from, "
+        "so each is said once.",
     )
     prod_last_deploy_at: Optional[datetime] = Field(
         default=None, description="Same, for PROD (None = never deployed there)."
     )
     prod_last_deploy_detail: Optional[str] = Field(default=None, description="Same, for PROD.")
+    prod_last_deploy_warnings: list[str] = Field(default_factory=list, description="Same, for PROD.")
     accepted_versions: list[str] = Field(
         default_factory=list,
         description="Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.",

@@ -64,8 +64,10 @@ function matrixAfterDeploy(over: Partial<DeployMatrix["rows"][0]> = {}): DeployM
         prod_last_attempt_failed: false,
         uat_last_deploy_at: "2026-09-11T02:24:02Z",
         uat_last_deploy_detail: "OK",
+        uat_last_deploy_warnings: [],
         prod_last_deploy_at: null,
         prod_last_deploy_detail: null,
+        prod_last_deploy_warnings: [],
         accepted_versions: [],
         uat_url: "https://uat-mager-manager.isnex.eu",
         prod_url: null,
@@ -113,7 +115,7 @@ describe("ICCINT-117 — po refreshi stav nezmizne", () => {
 
   it("upozornenia z nasadenia sa dajú prečítať aj po refreshi", async () => {
     vi.mocked(getDeployMatrix).mockResolvedValue(
-      matrixAfterDeploy({ uat_last_deploy_detail: "OK | prihlasovací lístok sa nepodarilo vydať" }),
+      matrixAfterDeploy({ uat_last_deploy_warnings: ["prihlasovací lístok sa nepodarilo vydať"] }),
     );
     render(<DeployMatrixPage environment="uat" />);
 

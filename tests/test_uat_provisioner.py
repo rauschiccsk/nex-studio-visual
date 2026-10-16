@@ -355,13 +355,30 @@ def test_env_secrets_synthetic_and_var_placeholder(tmp_path):
     import base64
 
     assert len(base64.b64decode(env["JWT_SECRET_KEY"], validate=True)) == 32
-    # ICCINT-67: tajomstvo už NEDOSTÁVA známu zástupnú hodnotu — tá je konštanta v našom kóde a appka,
+    # ICCINT-67: tajomstvo už NEDOSTÁVA známu zástupnú hodnotu — tá je konštanta v našom kóde a aplikácia,
     # ktorej pravidlo je „prázdne = zamknuté", ju číta ako odomknuté. Na verejnom UAT to 06.09.2026
     # pustilo dnu kohokoľvek. Zmysel testu zostáva (default sa nesmie dostať von, medzera je označená),
     # mení sa forma: skutočná náhodná hodnota nesie ten istý odkaz a neotvára nič.
     assert env["LLM_API_TOKEN"] != "__UAT_SYNTHETIC__"
     assert len(env["LLM_API_TOKEN"]) >= 32
     assert env["PLAIN_SETTING"] == "keepme"
+
+
+def test_a_secret_nobody_supplied_is_named_with_the_way_to_supply_it(tmp_path):
+    """DEV-129: Career Asistent's BACKUP_SSH_KEY (a key that must match the backup target) got a random value that is
+    valid nowhere. The warning names the secrets and says how a project marks the one that must match another system,
+    so the Manažér supplies it and the cockpit stops inventing it."""
+    env_example = "SESSION_SECRET=\nBACKUP_SSH_KEY=\n# @customer-secret: „Heslo k pošte“\nSMTP_PASSWORD=\n"
+    res = _provision(tmp_path, "nex-asistent", "asistent", ASISTENT_COMPOSE, env_example=env_example)
+    [said] = [w for w in res.warnings if w.startswith("Tieto tajomstvá nikto nedodal")]
+    assert said == (
+        "Tieto tajomstvá nikto nedodal, tak dostali náhodné hodnoty: BACKUP_SSH_KEY, SESSION_SECRET. Aplikácia je "
+        "bezpečná (nič nie je otvorené). Ak však niektoré musí sedieť s iným systémom (napríklad kľúč na cieľ "
+        "zálohy), náhodná hodnota nikde neplatí — projekt ho má v .env.example označiť „# @customer-secret“; potom "
+        "ho zadáš pri zákazníkovi a kokpit ho nevymyslí."
+    )
+    env = {ln.split("=", 1)[0]: ln.split("=", 1)[1] for ln in res.env_path.read_text().splitlines() if "=" in ln}
+    assert "SMTP_PASSWORD" not in env or env["SMTP_PASSWORD"] == ""  # marked: never invented
 
 
 def test_env_honours_var_default_for_nonsecret(tmp_path):

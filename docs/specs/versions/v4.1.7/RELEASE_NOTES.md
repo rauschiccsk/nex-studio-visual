@@ -20,9 +20,9 @@ Zavreté sú tým **štyri fázy z piatich**: Príprava, Návrh, Vizuál, Progra
 
 ## Verifikácia zostáva vonku — vedome
 
-Posledná fáza je nezávislá previerka pred vydaním. Jej úlohou je appku
+Posledná fáza je nezávislá previerka pred vydaním. Jej úlohou je aplikáciu
 **spustiť a presvedčiť sa na vlastné oči**, či robí to, čo dokumentácia sľubuje —
-nie veriť tomu, čo o sebe povie pomocník. Zobrať jej možnosť appku spustiť by
+nie veriť tomu, čo o sebe povie pomocník. Zobrať jej možnosť aplikáciu spustiť by
 znamenalo buď oslabiť poslednú nezávislú kontrolu pred vydaním, alebo postaviť
 novú, bezpečnostne krehkú súčiastku, ktorá by jej prístup sprostredkovala.
 
@@ -31,7 +31,7 @@ nič nezapisuje ani neukladá — iba číta a skúša.
 
 ## Pokyny pre pomocníka sa zmenili spolu s tým
 
-Pokyny dovtedy hovorili, že „postaviť a spustiť celú appku patrí do Vizuálu a
+Pokyny dovtedy hovorili, že „postaviť a spustiť celú aplikáciu patrí do Vizuálu a
 Verifikácie — tie fázy Docker majú". Pre Vizuál to prestalo platiť v ten istý
 deň, tak sa aj prepísali — vo všetkých projektoch aj v šablóne pre nové.
 Pravidlo, ktoré pomocník nevidí, nie je pravidlo, ale pasca; strážny test to

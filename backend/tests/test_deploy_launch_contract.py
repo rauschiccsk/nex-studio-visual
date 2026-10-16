@@ -261,7 +261,8 @@ class TestPostDeployLaunchProof:
         message = outcome.warnings[0]
         assert "NEX Manager" in message  # names exactly what is missing
         assert "nasaď" in message.lower()  # and what to do about it
-        assert message in (event.detail or "")  # persisted in the audit row too, not only in the response
+        # persisted in the audit row too, not only in the response — in its own field, never glued into the report
+        assert event.warnings == outcome.warnings and message not in (event.detail or "")
 
     async def test_a_warned_deploy_can_still_be_accepted_so_PROD_stays_reachable(
         self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
@@ -307,10 +308,8 @@ class TestPostDeployLaunchProof:
         pairing_warning = uat_provisioner.launch_pairing_warning(deploy_service._customer_dir_slug(customer))
 
         async def _runner_that_already_warned(**kwargs):
-            # Mirrors the real runner: the provisioner's warnings go into BOTH the detail and the list.
-            return deploy_service.RunnerResult(
-                True, f"OK (faked) | warnings: {pairing_warning}", "https://uat-x.isnex.eu", [pairing_warning]
-            )
+            # Mirrors the real runner: the provisioner's warnings travel beside the report (DEV-129).
+            return deploy_service.RunnerResult(True, "OK (faked)", "https://uat-x.isnex.eu", [pairing_warning])
 
         outcome = await deploy_service.deploy(
             db_session,
@@ -322,7 +321,7 @@ class TestPostDeployLaunchProof:
         )
 
         assert outcome.warnings.count(pairing_warning) == 1
-        assert (outcome[0].detail or "").count(pairing_warning) == 1
+        assert outcome[0].warnings.count(pairing_warning) == 1
 
     async def test_launchable_uat_stays_green(self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch):
         customer, project = deploy_fixture(auth_mode="token")
@@ -417,7 +416,7 @@ class TestWarningsChannel:
 
         async def _warning_runner(**kwargs):
             return deploy_service.RunnerResult(
-                True, "OK (faked)", "https://uat-x.isnex.eu", ["v appke nie je frontend — beží len /api"]
+                True, "OK (faked)", "https://uat-x.isnex.eu", ["v aplikácii nie je frontend — beží len /api"]
             )
 
         outcome = await deploy_service.deploy(
@@ -429,7 +428,7 @@ class TestWarningsChannel:
             deploy_runner=_warning_runner,
         )
 
-        assert outcome.warnings == ["v appke nie je frontend — beží len /api"]
+        assert outcome.warnings == ["v aplikácii nie je frontend — beží len /api"]
         assert outcome[0].status == "ok"  # a warning is a note about a success, never a failure
 
     async def test_a_runner_returning_a_plain_triple_still_works(
@@ -454,8 +453,8 @@ class TestWarningsChannel:
         assert (event.status, bool(url), bumped_to) == ("ok", True, None)
 
     def test_the_default_runner_carries_the_provisioners_warnings(self, monkeypatch):
-        """The real runner's own seam: whatever ``provision_uat`` warned about comes back on the result AND
-        stays in the recorded detail (the audit row keeps its full story)."""
+        """The real runner's own seam: whatever ``provision_uat`` warned about comes back on the result — beside the
+        report, never inside it (DEV-129: the deploy records them in the event's own field)."""
         import asyncio
 
         from backend.services import orchestrator as orch
@@ -480,7 +479,7 @@ class TestWarningsChannel:
 
         assert ok is True
         assert result.warnings == ["chýba spárovaný NEX Manager"]
-        assert "chýba spárovaný NEX Manager" in detail
+        assert detail == "OK"
         assert url == "https://uat-andros-shopify.isnex.eu"
 
 
@@ -505,7 +504,7 @@ def test_a_shut_door_is_reported_in_plain_words(monkeypatch) -> None:
     monkeypatch.setattr(
         uat_launch,
         "uat_door_opens",
-        lambda *a, **k: (False, "appka vstupenku prijala, ale sedenie hneď nato skončilo (stav 401)"),
+        lambda *a, **k: (False, "aplikácia vstupenku prijala, ale sedenie hneď nato skončilo (stav 401)"),
     )
     monkeypatch.setattr(deploy_service, "_customer_dir_slug", lambda customer: "acme")
     monkeypatch.setattr(deploy_service, "_instance_url", lambda *a, **k: "https://uat-acme-app.isnex.eu")

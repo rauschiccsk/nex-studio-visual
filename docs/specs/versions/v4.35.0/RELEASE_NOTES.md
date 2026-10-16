@@ -24,7 +24,7 @@ mazať nič netreba.
 Po nasadení si videl zelené „Nasadené". Po F5 bolo preč, akoby sa nič nestalo — a vedľa svietilo
 plnofarebné **Nasadiť** pri verzii, ktorá už na UAT bežala.
 
-Teraz pod verziou stojí, **kedy** sa naposledy nasadila, aj čo pri tom appka hlásila (vrátane
+Teraz pod verziou stojí, **kedy** sa naposledy nasadila, aj čo pri tom aplikácia hlásila (vrátane
 upozornení, ktoré predtým prebehli raz a zmizli). A keď vyberieš verziu, ktorá už tam je, tlačidlo
-sa volá **Nasadiť znova** a stlmí sa. Nezmizne — prestavať appku po zásahu je legitímne — len
+sa volá **Nasadiť znova** a stlmí sa. Nezmizne — prestavať aplikáciu po zásahu je legitímne — len
 prestane vyzerať ako ďalší krok, ktorý si ešte neurobil.

@@ -416,7 +416,7 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
   it("shows the amber paused note above 'Pokračovať v stavbe' when status is paused, and NOT otherwise", async () => {
     // ICCINT-52: tento test pôvodne pripínal text „Stavba pozastavená (token-limit)" — teda dôvod,
     // ktorý si pruh VYMÝŠĽAL. Stavba sa pozastaví tromi spôsobmi a token-limit je len jeden z nich,
-    // takže test strážil, aby appka v dvoch prípadoch z troch klamala. Pripína sa teraz to, čo naozaj
+    // takže test strážil, aby aplikácia v dvoch prípadoch z troch klamala. Pripína sa teraz to, čo naozaj
     // platí: pruh sa pri ``paused`` zobrazí a nesie dôvod ZO STAVBY.
     const { rerender } = render(
       <PlanUlohRail
@@ -1179,7 +1179,7 @@ describe("PlanUlohRail — done nodes survive a remount, not re-collapsed (obs #
   // Pruh mal natvrdo napísané „(token-limit)" a podmienku len ``status === "paused"``. Lenže stavba sa
   // pozastaví TROMI spôsobmi a systém ku každému drží pravdivý dôvod v ``next_action``. V dvoch prípadoch
   // z troch teda obrazovka klamala. Director na to narazil 03.09.2026 naživo: poslal agentovi opravu,
-  // stavba čakala na jeho potvrdenie, a on ohlásil poruchu — lebo mu appka povedala, že došli tokeny.
+  // stavba čakala na jeho potvrdenie, a on ohlásil poruchu — lebo mu aplikácia povedala, že došli tokeny.
 
   it("pri čakajúcej oprave NEHOVORÍ o token-limite", async () => {
     vi.mocked(getTaskPlan).mockResolvedValue(PLAN);

@@ -6,7 +6,7 @@ Vo v4.22.0 sa tlačidlo „Zveriť projekt" tvárilo, že pracuje, a skončilo h
 ## Čo bolo zle
 
 Obe nové adresy som napísal s predponou `/projects`, hoci ju systém pridáva sám.
-V appke tak vznikla cesta `/projects/projects/...` — kokpit volal správne miesto
+V aplikácii tak vznikla cesta `/projects/projects/...` — kokpit volal správne miesto
 a nikto tam nebol.
 
 Nič sa tým nepokazilo a nič sa nestratilo; funkcia len nebola dostupná.

@@ -40,7 +40,7 @@ from backend.services import task as task_service
 BOOT_FAIL_BRIEF = (
     "## Verifikácia FAIL — oprav podľa nálezov Auditora\n"
     "Konkrétny dôvod zlyhania: container nex-productcatalogs-smoke-migrate-1 exited (1)\n\n"
-    "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku po spustení a oprav jej "
+    "Spusti aplikáciu tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku po spustení a oprav jej "
     "príčinu, potom over znova."
 )
 # What the clean clone actually said on 29.08.2026, once ICCINT-37 made the log visible at all — in the
@@ -129,7 +129,7 @@ def _plain_plan(db, version) -> None:
         EpicCreate(
             project_id=version.project_id,
             version_id=version.id,
-            title="Základ appky",
+            title="Základ aplikácie",
             plain_description="Kostra aplikácie.",
         ),
     )

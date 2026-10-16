@@ -90,7 +90,7 @@ async def test_conversation_cold_start_first_message_is_kickoff(db_session) -> N
     # Cold-start precondition: a freshly-created conversation version has NO pipeline_state yet.
     assert orchestrator._get_state(db_session, version.id) is None
 
-    first_message = "Ahoj, chcem appku na evidenciu faktúr. Poď to spolu navrhnúť."
+    first_message = "Ahoj, chcem aplikáciu na evidenciu faktúr. Poď to spolu navrhnúť."
     state = await orchestrator.apply_action(
         db_session,
         version_id=version.id,

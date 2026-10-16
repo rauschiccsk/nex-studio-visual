@@ -61,7 +61,7 @@ vi.mock("@/services/api/pipeline", () => ({
 }));
 
 // The composer stub renders a button that fires the page's onRelay prop with a known text.
-const SEND_TEXT = "Ahoj, poďme spolu navrhnúť appku.";
+const SEND_TEXT = "Ahoj, poďme spolu navrhnúť aplikáciu.";
 vi.mock("@/components/riadiace/ConversationComposer", () => ({
   default: ({ onRelay }: { onRelay: (t: string) => Promise<{ deferred: boolean }> }) => (
     <button onClick={() => void onRelay(SEND_TEXT)}>send</button>

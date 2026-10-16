@@ -157,7 +157,7 @@ class Settings(BaseSettings):
     # Knowledge Base path (mounted read-only from host)
     knowledge_base_path: str = "/home/icc/knowledge"
     #: Beží slučka, ktorá dorovnáva RAG index so Znalostnou bázou? (ICCINT-111)
-    #: V testoch sa vypína: ``TestClient(app)`` spúšťa SKUTOČNÝ životný cyklus appky, takže by slučka
+    #: V testoch sa vypína: ``TestClient(app)`` spúšťa SKUTOČNÝ životný cyklus aplikácie, takže by slučka
     #: siahala na ostrý Qdrant — presne to spôsobilo incident 11.09.2026.
     kb_index_sync_enabled: bool = True
 

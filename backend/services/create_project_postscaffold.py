@@ -735,7 +735,7 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
                     health_url,
                 )
                 unhealthy = (
-                    "Projekt sa postavil a spustil, ale neodpovedal na kontrolu zdravia — appka sa "
+                    "Projekt sa postavil a spustil, ale neodpovedal na kontrolu zdravia — aplikácia sa "
                     "pravdepodobne nerozbehla. Treba sa na to pozrieť pred prvým nasadením."
                 )
     finally:

@@ -35,7 +35,7 @@ JetBrains Mono ako variabilné woff2 hosťované u nás.
   Nastavenie `kb_content_max_bytes` existovalo a čítanie súboru ho obchádzalo —
   ktorýkoľvek veľký súbor sa načítal celý do pamäte. Teraz sa veľkosť overí
   pred čítaním a príliš veľký súbor sa slušne odmietne.
-- **Nastavenia portov** tvrdili, že rozhodujú, kde appka počúva. Nerozhodujú —
+- **Nastavenia portov** tvrdili, že rozhodujú, kde aplikácia počúva. Nerozhodujú —
   porty sú napevno v obrazoch kontajnerov. Text to teraz hovorí priamo.
 - **CLAUDE.md §16** odkazovala na tri súbory, ktoré v tomto repozitári
   neexistujú. Pravidlo platí, adresy boli zlé.

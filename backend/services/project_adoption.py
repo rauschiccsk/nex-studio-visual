@@ -51,7 +51,7 @@ def _latest_version_on_disk(root: Path) -> tuple[Optional[str], Optional[str]]:
     """Posledná verzia, ktorú o sebe projekt hovorí — z priečinkov ``docs/specs/versions/vX.Y.Z`` (ICCINT-89).
 
     **Prečo to treba vedieť.** Zakladanie projektu vyrába novej verzii záznam „0.1.0 — Initial prototype“.
-    Pri PREVZATÍ je to výmysel: projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — appka
+    Pri PREVZATÍ je to výmysel: projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — aplikácia
     bežala ako 1.0.99 a v ``docs/specs/versions/`` mala ``v0.1.0`` aj ``v1.0.0`` s poznámkami k vydaniu,
     zatiaľ čo kokpit ukazoval jedinú „plánovanú“ 0.1.0 a ponúkal „Pridať verziu 0.2.0“.
 

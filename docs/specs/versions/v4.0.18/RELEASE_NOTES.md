@@ -9,4 +9,4 @@ Od tejto verzie:
 - **Nasadzovač rešpektuje predvolené hodnoty** z konfigurácie (`${PREMENNÁ:-predvolené}`) pri bežných nastaveniach — použije `mock` / `fake` a podobne, nie zástupný symbol.
 - **Zástupný symbol ostáva len pre tajné údaje** (heslá, tokeny) a premenné bez predvolenej hodnoty — teda tam, kde ho manažér naozaj musí doplniť.
 
-Vďaka tomu sa appka v UAT spustí správne bez ručného zásahu.
+Vďaka tomu sa aplikácia v UAT spustí správne bez ručného zásahu.

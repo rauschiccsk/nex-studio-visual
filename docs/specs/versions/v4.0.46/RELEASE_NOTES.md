@@ -2,7 +2,7 @@
 
 ## „Oprava po Verifikácii" dostane konkrétny dôvod zlyhania — koniec zacyklenia
 
-Keď Verifikácia našla blokujúcu chybu a klikol si **„Nechaj to opraviť"**, AI Agent niekedy dostal len všeobecné *„appka sa nespustila"* — **bez konkrétneho technického dôvodu**, ktorý skúška po spustení naozaj našla. Preto mohol opraviť nesprávnu vec (napr. odladiť test namiesto skutočnej príčiny) a **tá istá chyba sa vrátila** — dokola.
+Keď Verifikácia našla blokujúcu chybu a klikol si **„Nechaj to opraviť"**, AI Agent niekedy dostal len všeobecné *„aplikácia sa nespustila"* — **bez konkrétneho technického dôvodu**, ktorý skúška po spustení naozaj našla. Preto mohol opraviť nesprávnu vec (napr. odladiť test namiesto skutočnej príčiny) a **tá istá chyba sa vrátila** — dokola.
 
 Opravené:
 

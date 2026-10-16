@@ -49,7 +49,7 @@ def _version(db) -> tuple[Version, str]:
 def test_a_note_somebody_wrote_is_left_alone(db_session, tmp_path) -> None:
     """⚠️ Jadro ICCINT-96 — bez toho agent bojuje s kokpitom a stavba sa točí dokola."""
     version, _ = _version(db_session)
-    napisane = "# Čo je nové vo v1.1.0\n\nAppku si pripnete na plochu ako program.\n"
+    napisane = "# Čo je nové vo v1.1.0\n\nAplikáciu si pripnete na plochu ako program.\n"
     notes = release_note_writer.version_notes_dir(tmp_path, "1.1.0")
     notes.mkdir(parents=True, exist_ok=True)
     (notes / "RELEASE_NOTES.md").write_text(napisane, encoding="utf-8")

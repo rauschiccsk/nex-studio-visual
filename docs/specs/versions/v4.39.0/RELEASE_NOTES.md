@@ -10,7 +10,7 @@ nepozornosti: kokpit sa GitHubu na stav pýtal, ale z dvoch kontrol si vypýtal 
 ktorá prišla prvá. Raz to bola tá zelená, raz tá červená — hod mincou.
 
 To istý deň pokračovalo. Pozastavená stavba dala o sebe vedieť len zmeneným textom na tlačidle.
-Panel hlásil verziu o štyri vydania starú. Tlačidlo na prevzatie inštalácie by prešlo a appka by
+Panel hlásil verziu o štyri vydania starú. Tlačidlo na prevzatie inštalácie by prešlo a aplikácia by
 ticho prestala vidieť faktúry.
 
 ## Čo to znamená pre teba
@@ -31,7 +31,7 @@ klesali (alebo stúpali) blokujúce nálezy. Pri každej karte aj to, **prečo t
 **Karta po zlyhaní zostavenia povie príčinu rečou** a ponúkne opakované overenie namiesto kola opráv,
 v ktorom niet čo opravovať.
 
-**Panel prestal vydávať verziu obrazoviek za verziu celej appky.** Keď sa polovice líšia, uvidíš obe.
+**Panel prestal vydávať verziu obrazoviek za verziu celej aplikácie.** Keď sa polovice líšia, uvidíš obe.
 
 **Povinné celoICC štandardy vstupujú do stavby zadaním**, nie padnutou bránou na konci — takže sa
 dostanú do Špecifikácie aj do Vizuálu ako každá iná obrazovka a neschvaľuješ ich dodatočne.

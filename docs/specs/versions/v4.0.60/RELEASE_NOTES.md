@@ -6,7 +6,7 @@ Obrazovka doteraz odpovedala na otázku „sme rýchlejší a lacnejší ako čl
 
 Náklady vidíš v troch úrovniach — **po fázach, po verziách a za celý projekt**. V každej sú vedľa seba dve sumy: koľko stál výpočet AI a koľko by stála tá istá práca v ľudských hodinách.
 
-## Externé náklady — čo appka nevidí, teraz zadáš ručne
+## Externé náklady — čo aplikácia nevidí, teraz zadáš ručne
 
 Kokpit meria len prácu, ktorá prejde cez neho. Čokoľvek spravené mimo — v termináli, priamo v editore — v nákladoch projektu chýbalo, akoby to nič nestálo.
 

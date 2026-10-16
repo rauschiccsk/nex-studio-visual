@@ -121,7 +121,7 @@ def test_an_unreachable_index_raises_instead_of_reading_as_clean(monkeypatch):
 # --- INCIDENT 11.09.2026: dorovnanie vymazalo ostrý index ---------------------------------------
 #
 # O 07:42 som na hostiteľovi pustil testy. ``backend/tests/conftest.py`` robí ``with TestClient(app)``,
-# čo spustí SKUTOČNÝ životný cyklus appky — a v ňom moju novú slučku. ``tests/conftest.py:447`` pritom
+# čo spustí SKUTOČNÝ životný cyklus aplikácie — a v ňom moju novú slučku. ``tests/conftest.py:447`` pritom
 # prepína ``settings.knowledge_base_path`` na dočasný priečinok. Slučka sa teda pozrela na prázdny
 # strom, usúdila, že všetkých ~150 dokumentov v indexe je osirelých, a zmazala ich z OSTRÉHO Qdrantu:
 # 3718 bodov → 293.

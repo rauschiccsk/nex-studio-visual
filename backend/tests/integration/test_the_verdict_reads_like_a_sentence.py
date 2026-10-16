@@ -81,7 +81,7 @@ def test_machine_markup_never_reaches_the_screen() -> None:
 
 def test_a_sentence_without_markup_is_left_alone() -> None:
     """The control. Sanitising must not rewrite text that was fine."""
-    for intact in (CLEAN, "Appka sa spustila — 33 tvrdení, 0 chýb.", ""):
+    for intact in (CLEAN, "Aplikácia sa spustila — 33 tvrdení, 0 chýb.", ""):
         assert orchestrator._human_text(intact) == intact
 
 

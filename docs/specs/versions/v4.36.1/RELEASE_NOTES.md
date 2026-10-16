@@ -26,5 +26,5 @@ Bežné upratovanie funguje ďalej — keď naozaj zmažeš pár dokumentov, vyh
 ## Prečo to píšeme aj sem
 
 Pravidlo *„keď to neviem, nebudem tvrdiť, že je všetko v poriadku"* sme v tejto časti mali od začiatku —
-ale platilo len na to, **čo appka hovorí**. Nevzťahovalo sa na to, **čo appka robí**. Teraz sa vzťahuje
+ale platilo len na to, **čo aplikácia hovorí**. Nevzťahovalo sa na to, **čo aplikácia robí**. Teraz sa vzťahuje
 na oboje.

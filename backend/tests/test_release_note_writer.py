@@ -339,7 +339,7 @@ def test_graduation_idempotent_when_number_unchanged(db_session, tmp_path):
 #
 # NEX Manager 1.2.1, 10.09.2026: agent napísal ľudskú poznámku k vydaniu a commitol ju. Dve minúty po
 # commite sa súbor na disku vrátil na strojový polotovar — do písmena ten istý text, ktorý Audítor
-# predtým zamietol. Appka číta ten súbor z disku, takže používateľ videl polotovar. Agent opravoval,
+# predtým zamietol. Aplikácia číta ten súbor z disku, takže používateľ videl polotovar. Agent opravoval,
 # kokpit prepisoval späť, Audítor videl starý text a vrátil to — sedem kôl.
 #
 # Prečo: ``_is_ours`` sa pýtala len na PRÍTOMNOSŤ podpisu. Podpis je HTML komentár na poslednom riadku

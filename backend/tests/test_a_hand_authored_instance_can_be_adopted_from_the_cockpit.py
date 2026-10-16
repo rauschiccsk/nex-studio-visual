@@ -256,18 +256,20 @@ async def test_the_runner_reports_what_it_set_aside(tmp_path, monkeypatch) -> No
 
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_uat_deploy)
 
-    _ok, detail, _url = await ia.adopting_deploy_runner(
+    result = await ia.adopting_deploy_runner(
         project_slug="nex-manager", uat_slug="mager-uat", version_number="1.1.0", force_fresh=False
     )
+    _ok, detail, _url = result
 
     assert "docker-compose.yml.pre-nex-studio" in detail
     assert ".env.pre-nex-studio" in detail
-    assert "skúšobné upozornenie" in detail, "upozornenia provisionera sa cestou stratili"
+    # DEV-129: beside the report, never inside it — the deploy records them in the event's own field
+    assert result.warnings == ["skúšobné upozornenie"], "upozornenia provisionera sa cestou stratili"
 
 
 @pytest.mark.asyncio
 async def test_a_failed_provision_does_not_pretend_to_have_adopted(tmp_path, monkeypatch) -> None:
-    """Keď render zlyhá, vykonávateľ to povie — a nevymyslí si adresu bežiacej appky."""
+    """Keď render zlyhá, vykonávateľ to povie — a nevymyslí si adresu bežiacej aplikácie."""
     from backend.services import instance_adoption as ia
 
     d = _rucna_instalacia(tmp_path)
@@ -296,7 +298,7 @@ async def test_a_failed_provision_does_not_pretend_to_have_adopted(tmp_path, mon
 #     subnet: 192.168.48.0/24                                   ← Dockeru došli automatické siete
 #     mail.isnex.eu:192.168.55.250                              ← poštový hostiteľ
 #
-# Prevzatie by prešlo, ohlásilo úspech a appka by prestala vidieť faktúry. Ticho. Trinásť ručne
+# Prevzatie by prešlo, ohlásilo úspech a aplikácia by prestala vidieť faktúry. Ticho. Trinásť ručne
 # písaných inštalácií na ANDROSe nie je nedbalosť — je to zoznam miest, kde skutočnosť nesadla do
 # predstavy kokpitu.
 
@@ -380,7 +382,7 @@ def test_the_preview_says_what_would_be_LOST_not_which_files_move(tmp_path):
 
 def test_adoption_is_refused_when_something_would_be_lost(tmp_path):
     """Tá istá zásada, ktorá práve prešla do NEX Inboxu ako R16: akcia sa neponúkne tam, kde nemôže
-    uspieť. Úspešne vyzerajúce prevzatie, po ktorom appka oslepne, je horšie než odmietnutie."""
+    uspieť. Úspešne vyzerajúce prevzatie, po ktorom aplikácia oslepne, je horšie než odmietnutie."""
     from backend.services import instance_adoption
 
     d = _magerstav_instalacia(tmp_path)
@@ -528,7 +530,7 @@ def test_the_instances_own_data_directories_are_carried_too(tmp_path):
     ICCINT-130 niesol len ABSOLUTNE pripojenia s odovodnenim, ze zvazok relativny k priecinku
     instalacie generator vie sam. Pri tejto instalacii to NEPLATI: zdrojovy projekt ma
     ``./claude-config``, kym beziaca instalacia ma ``./originals`` a ``./exports`` — teda priecinky,
-    kam appka uklada originaly faktur a vyexportovane XML.
+    kam aplikácia uklada originaly faktur a vyexportovane XML.
 
     Vykreslenie by ich zahodilo, cesty v kontajneri by zostali bez pripojenia na disk a obsah by sa
     stratil pri kazdom dalsom nasadeni. Nie hlucne — ticho.

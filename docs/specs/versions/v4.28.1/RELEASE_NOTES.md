@@ -21,7 +21,7 @@ blok 10220–10229 je v evidencii tiež. Prevzatie to len odhalilo, lebo pri ňo
 
 Kontrola vie, ktorý projekt sa pýta, a blok napísaný na jeho meno mu pustí. Cudzí blok
 zostáva zatvorený — pomýliť sa opačným smerom by znamenalo, že si dvaja sadnú na tie isté
-porty a príde sa na to až tým, že jednému prestane appka bežať.
+porty a príde sa na to až tým, že jednému prestane aplikácia bežať.
 
 Vlastníci sú v evidencii voľný text a nie sú jednotní — `nex-manager`, `nex-payables`, ale
 aj `NEX Inbox`, `NEX Automat`, `icc-website (isnex.ai)`. Porovnáva sa preto zhovievavo, bez

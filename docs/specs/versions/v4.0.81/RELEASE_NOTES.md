@@ -32,10 +32,10 @@ Všetky teraz rozlišujú „zatiaľ nič" od „nepodarilo sa" a povedia to.
   Posielala sa v zlom type a GitHub ju zakaždým odmietol; jediná stopa bolo
   varovanie v logu. Každý nový projekt tak mal hlavnú vetvu otvorenú.
 
-## Nasadená appka je 1,5 MB namiesto piatich
+## Nasadená aplikácia je 1,5 MB namiesto piatich
 
 Slovenský kontrolór pravopisu bol dávno vypnutý, ale build stále kopíroval **3,5 MB
-slovník do každej nasadenej appky**. Spolu s ním odišlo vyše 2 800 riadkov mŕtveho
+slovník do každej nasadenej aplikácie**. Spolu s ním odišlo vyše 2 800 riadkov mŕtveho
 kódu aj s testami, ktoré ho testovali a predstierali pokrytie. Pokrytie testami
 stúplo na 90 %.
 

@@ -58,7 +58,7 @@ from tests.conftest import (  # noqa: F401
 )
 
 # ICCINT-111 / incident 11.09.2026: ``TestClient(app)`` nižšie prechádza SKUTOČNÝM životným cyklom
-# appky. Kým sa toto nevyplo, spúšťal sa v ňom aj dorovnávač RAG indexu — a keďže ``tests/conftest.py``
+# aplikácie. Kým sa toto nevyplo, spúšťal sa v ňom aj dorovnávač RAG indexu — a keďže ``tests/conftest.py``
 # prepína ``knowledge_base_path`` na dočasný priečinok, vyhodnotil celý OSTRÝ index ako osirelý
 # a zmazal ho (3718 bodov → 293). Vypínač je prvá poistka; druhá, ktorá chráni aj ostrú prevádzku,
 # je ``kb_index_sync.deletion_is_safe``.

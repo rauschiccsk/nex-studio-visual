@@ -9,7 +9,7 @@ A v zozname verzií stálo: **Plánované.**
 ## Prečo to nebola kozmetika
 
 Detail verzie sa podľa stavu rozvetvuje. Pri „plánovanej" ukáže panel **Zadanie** s návodom,
-ako stavbu spustiť. Nad verziou, ktorá je postavená, overená a schválená, ti teda appka
+ako stavbu spustiť. Nad verziou, ktorá je postavená, overená a schválená, ti teda aplikácia
 ponúkala tlačidlo na spustenie toho, čo už dávno prebehlo.
 
 A netýkalo sa to jednej stavby — **rovnako boli na tom všetky štyri dokončené verzie**

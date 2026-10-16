@@ -35,6 +35,8 @@ export interface DeployEventRead {
   actor_id: string | null;
   /** Non-secret human-readable summary only. */
   detail: string | null;
+  /** DEV-129: the deploy's warnings, apart from `detail` (an event from before the field carries `[]`). */
+  warnings: string[];
   created_at: string;
   updated_at: string;
 }
@@ -68,12 +70,16 @@ export interface DeployMatrixRow {
   /** Kedy sa naposledy ÚSPEŠNE nasadilo na UAT (null = nikdy). ICCINT-117: zelené potvrdenie žilo iba
    *  v pamäti prehliadača, takže prvý F5 ho zmazal — stav, ktorý neprežije refresh, nie je stav. */
   uat_last_deploy_at: string | null;
-  /** Čo to nasadenie ohlásilo, vrátane upozornení (tie sa do záznamu pripájajú). Bez tajomstiev (§4). */
+  /** Čo to nasadenie ohlásilo, bez upozornení. Bez tajomstiev (§4). */
   uat_last_deploy_detail: string | null;
+  /** DEV-129: upozornenia toho nasadenia, každé jednou vetou — jediné miesto, odkiaľ ich stránka číta. */
+  uat_last_deploy_warnings: string[];
   /** To isté pre PROD (null = nikdy tam nenasadené). */
   prod_last_deploy_at: string | null;
   /** To isté pre PROD. */
   prod_last_deploy_detail: string | null;
+  /** To isté pre PROD. */
+  prod_last_deploy_warnings: string[];
   /**
    * Versions accepted-for-PROD for this customer — the ONLY versions whose PROD
    * Nasadiť is open (the never-bypassed acceptance gate, §3.5).

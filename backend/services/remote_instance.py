@@ -111,7 +111,7 @@ def _write_cmd(instance_dir: Path) -> list[str]:
     """Príkaz, ktorý na cieli rozbalí tar zo štandardného vstupu do priečinka inštalácie.
 
     Tu je ``-v`` správne: priečinok pri prvom nasadení ešte neexistuje a zápis ho vyrobiť MÁ.
-    Vlastníka priečinka doženieme hneď — inak by patril rootovi a kontajnery appky by doň nevideli.
+    Vlastníka priečinka doženieme hneď — inak by patril rootovi a kontajnery aplikácie by doň nevideli.
     """
     return [
         "docker",

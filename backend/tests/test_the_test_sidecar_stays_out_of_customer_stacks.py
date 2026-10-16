@@ -3,10 +3,10 @@
 Existuje preto, aby CI spustilo sadu proti skutočnému Postgresu. Nasadenie ho skopírovalo spolu so
 všetkým ostatným a v UAT nemá testovaciu databázu (``TEST_DATABASE_URL`` sa vyrenderuje prázdna a
 správne sa vynechá, ICCINT-58), takže pri každom nasadení zlyhá — 727 chýb na nex-productcatalogs
-0.1.2. Je to šum, ktorý vyzerá presne ako rozbitá appka a zakryje skutočné zlyhanie vedľa seba.
+0.1.2. Je to šum, ktorý vyzerá presne ako rozbitá aplikácia a zakryje skutočné zlyhanie vedľa seba.
 
 ⚠️ **Rozpoznáva sa podľa obsahu, nie podľa názvu** — rovnako ako migračná služba
-(``has_alembic_migrate_service``). Názov služby je vec autora appky, správanie je naša.
+(``has_alembic_migrate_service``). Názov služby je vec autora aplikácie, správanie je naša.
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ def test_a_service_that_asks_for_a_test_database_says_what_it_is() -> None:
 
 
 def test_the_app_itself_is_never_excluded() -> None:
-    """Tri guľky do vlastnej nohy, ktoré toto pravidlo nesmie vystreliť: appka bez backendu, bez frontendu
+    """Tri guľky do vlastnej nohy, ktoré toto pravidlo nesmie vystreliť: aplikácia bez backendu, bez frontendu
     alebo bez databázy je horšia než hlučné nasadenie."""
     for role_name in ("backend", "frontend", "db"):
         svc = _svc(environment={"TEST_DATABASE_URL": "x"})
         assert u.is_test_runner_service(role_name, svc, ROLES) is False, (
-            f"{role_name} sa vynechal zo stacku — zákazník by dostal appku bez kusu"
+            f"{role_name} sa vynechal zo stacku — zákazník by dostal aplikáciu bez kusu"
         )
 
 
@@ -112,4 +112,4 @@ def test_the_rendered_stack_parks_the_sidecar_behind_a_profile() -> None:
     )
     assert "test" in services, "kontajner sa vymazal — súbor má ostať vernou kópiou, len sa nespúšťať"
     for part in ("backend", "frontend", "db", "migrate"):
-        assert "profiles" not in services[part], f"{part} sa omylom odparkoval a appka by nenabehla"
+        assert "profiles" not in services[part], f"{part} sa omylom odparkoval a aplikácia by nenabehla"

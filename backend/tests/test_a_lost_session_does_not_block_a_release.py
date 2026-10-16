@@ -10,7 +10,7 @@ Engine sa pokúsil nadviazať na sedenie, ktoré už neexistovalo. Agentove sede
 (``HOME=/root``, a ``/root/.claude`` sa pri nasadení vytvára nanovo), takže ich **zoberie každý
 reštart** — a ja som v ten deň nasadzoval päťkrát, kým Director staval.
 
-**Prečo je zomrieť nesprávna odpoveď.** Chýbajúca história rozhovoru nie je chyba appky ani nález
+**Prečo je zomrieť nesprávna odpoveď.** Chýbajúca história rozhovoru nie je chyba aplikácie ani nález
 Audítora. Prompt ťahu je sebestačný: engine v ňom Audítorovi hovorí, čo má overiť. Zablokovať kvôli
 tomu bránu vydania znamená zastaviť dobrú verziu z dôvodu, ktorý s ňou nesúvisí.
 

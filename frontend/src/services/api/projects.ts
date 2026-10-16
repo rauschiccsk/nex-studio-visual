@@ -222,8 +222,8 @@ export interface AdoptionPreview {
   db_port: number | null;
   /**
    * Čo projekt používa DNES — informatívne. Prevzatie prideľuje podľa štandardu, nepreberá staré
-   * čísla: tie polia nie sú záznam o tom, na čom appka počúva, ale položky v evidencii pridelených
-   * portov. Bežiacej appky sa to nedotkne. Zahodený údaj sa ale nesmie zahodiť potichu.
+   * čísla: tie polia nie sú záznam o tom, na čom aplikácia počúva, ale položky v evidencii pridelených
+   * portov. Bežiacej aplikácie sa to nedotkne. Zahodený údaj sa ale nesmie zahodiť potichu.
    */
   found_backend_port: number | null;
   found_frontend_port: number | null;

@@ -2,7 +2,7 @@
 
 Dve veci, ktoré tvrdili nepravdu.
 
-## Verzia, ktorú appka o sebe hlásila
+## Verzia, ktorú aplikácia o sebe hlásila
 
 Backend hlásil verziu **4.0.78**, hoci bežal na v4.0.94. Údaj v nastavení
 nasadenia zamrzol a odvtedy prešlo **šestnásť nasadení** — celý ten čas o sebe

@@ -2,7 +2,7 @@
 
 ## Vizuál skôr než kód
 
-NEX Studio Visual prináša vývoj po novom — **najprv vizuál, potom kód** (ako v Delphi: najskôr obrazovky). Medzi Návrhom a Programovaním pribudla nová fáza **Vizuál**: appka nabehne naživo v náhľade priamo v kokpite a ty ju **prejdeš ako hotovú** ešte pred stavbou. Napíšeš požiadavku na zmenu a AI ju **aplikuje okamžite** — náhľad sa sám prekreslí. Vzhľad a rozloženie tak doladíš skôr, než sa napíše čo i len riadok kódu.
+NEX Studio Visual prináša vývoj po novom — **najprv vizuál, potom kód** (ako v Delphi: najskôr obrazovky). Medzi Návrhom a Programovaním pribudla nová fáza **Vizuál**: aplikácia nabehne naživo v náhľade priamo v kokpite a ty ju **prejdeš ako hotovú** ešte pred stavbou. Napíšeš požiadavku na zmenu a AI ju **aplikuje okamžite** — náhľad sa sám prekreslí. Vzhľad a rozloženie tak doladíš skôr, než sa napíše čo i len riadok kódu.
 
 ## Plán úloh až podľa finálneho vzhľadu
 

@@ -1,15 +1,15 @@
 # v4.0.58 — NEX Studio Visual
 
-## Appka, ktorá sa nedá otvoriť, sa už nenasadí ako „hotovo"
+## Aplikácia, ktorá sa nedá otvoriť, sa už nenasadí ako „hotovo"
 
 Niektoré aplikácie sa neotvárajú menom a heslom, ale jedným kliknutím z NEX Managera. Aby to fungovalo, musí mať aplikácia aj Manager rovnaký podpisový kľúč — NEX Studio ho pri nasadení doplní.
 
-Rozpoznávalo si to však podľa toho, či aplikácia spomenie presne dohodnutý názov nastavenia. Keď si ho pomenovala po svojom (čo sa stalo pri NEX Websites), NEX Studio ju za takú aplikáciu nepovažovalo, kľúč jej nedoplnilo a vyrobilo jej náhodný vlastný — taký, aký nikto iný nepozná. **Nasadenie pritom ohlásilo úspech.** Že sa appka nedá otvoriť, sa ukázalo až o hodiny neskôr, keď na tlačidlo „Spustiť" klikol kolega — a odblokovať to musel niekto cez príkazový riadok.
+Rozpoznávalo si to však podľa toho, či aplikácia spomenie presne dohodnutý názov nastavenia. Keď si ho pomenovala po svojom (čo sa stalo pri NEX Websites), NEX Studio ju za takú aplikáciu nepovažovalo, kľúč jej nedoplnilo a vyrobilo jej náhodný vlastný — taký, aký nikto iný nepozná. **Nasadenie pritom ohlásilo úspech.** Že sa aplikácia nedá otvoriť, sa ukázalo až o hodiny neskôr, keď na tlačidlo „Spustiť" klikol kolega — a odblokovať to musel niekto cez príkazový riadok.
 
 Odteraz to NEX Studio kontroluje na dvoch miestach:
 
 - **Pred nasadením** overí, či aplikácia potrebné nastavenia vôbec deklaruje. Ak nie, nasadenie sa ani nespustí a rovno vypíše, ktoré názvy jej treba doplniť. Nič sa pritom nezhodí — bežiaca inštancia zákazníka zostáva nedotknutá.
-- **Po nasadení** si sám skúsi vystaviť vstupenku na otvorenie appky — presne tak, ako to robí tlačidlo „Spustiť". Ak to nejde, nasadenie sa označí ako **neúspešné** aj vtedy, keď sa appka technicky rozbehla. Bežiaca appka, do ktorej sa nikto nedostane, nie je hotové nasadenie.
+- **Po nasadení** si sám skúsi vystaviť vstupenku na otvorenie aplikácie — presne tak, ako to robí tlačidlo „Spustiť". Ak to nejde, nasadenie sa označí ako **neúspešné** aj vtedy, keď sa aplikácia technicky rozbehla. Bežiaca aplikácia, do ktorej sa nikto nedostane, nie je hotové nasadenie.
 
 ## Chybové hlášky pri nasadení už hovoria k veci
 

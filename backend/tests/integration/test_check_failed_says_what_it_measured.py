@@ -7,7 +7,7 @@ The agent had not failed. His fix worked — a fresh clone booted the db, ran th
 frontend and brought the backend up healthy. Three separate untruths stacked to produce that sentence:
 
   1. the re-check settled ``block_reason='agent_error'``, which the cockpit renders as "Agent zlyhal";
-  2. its message said "appka sa stále nespustí" — the app had started;
+  2. its message said "aplikácia sa stále nespustí" — the app had started;
   3. no container log came back, so nothing on screen could correct either of the first two.
 
 Underneath all three sat one measurement bug. ``docker compose up --wait`` returns NON-ZERO the moment any
@@ -150,7 +150,7 @@ async def test_a_clean_up_still_goes_straight_to_the_app_probe(monkeypatch) -> N
 
 def test_the_headline_never_claims_more_than_was_measured() -> None:
     """When a container failed, the app probe never ran — so the sentence may say which container died and
-    must NOT say whether the app booted. The first version said "appka sa stále nespustí" every time."""
+    must NOT say whether the app booted. The first version said "aplikácia sa stále nespustí" every time."""
     assert orchestrator._recheck_headline("kontajner zlyhal: test (exit 2)\n--- test ---\nx") == (
         "zlyhal kontajner test"
     )
@@ -158,7 +158,7 @@ def test_the_headline_never_claims_more_than_was_measured() -> None:
         "zlyhal kontajner backend, test"
     )
     # The app probe DID run and the app did not answer — here the plain claim is the true one.
-    assert orchestrator._recheck_headline("backend not responding on /health") == "appka sa nespustila"
+    assert orchestrator._recheck_headline("backend not responding on /health") == "aplikácia sa nespustila"
     # Could not look at all.
     assert orchestrator._recheck_headline("up exit 1: something") == "spustenie neprešlo"
 

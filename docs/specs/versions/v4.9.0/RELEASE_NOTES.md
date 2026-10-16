@@ -6,7 +6,7 @@ Toto je oprava najzávažnejšej chyby, akú sme v NEX Studiu zatiaľ mali.
 
 ## Čo sa dialo
 
-Pred vydaním sa spúšťa automatická skúška, ktorá overí, že appka naozaj robí to, čo
+Pred vydaním sa spúšťa automatická skúška, ktorá overí, že aplikácia naozaj robí to, čo
 sľubuje. Aby vedela **čo** má vyskúšať, potrebuje zoznam kľúčových vecí, ktoré má
 vydanie predviesť. Ten zoznam vzniká vo fáze **Návrh**.
 
@@ -15,7 +15,7 @@ neexistoval, skúška hlásila „niet čo predviesť, vydanie sa nedá overiť"
 verziu neprepustila.
 
 A keďže neúspech zakladá opravnú úlohu, agent musel zakaždým niečo robiť. Chyba pritom
-nebola v appke — tak vyrábal výplň. Auditor hlásil „Bez nálezu", engine dal znova
+nebola v aplikácii — tak vyrábal výplň. Auditor hlásil „Bez nálezu", engine dal znova
 neúspech, a šlo ďalšie kolo.
 
 Na projekte NEX ProductCatalogs to bežalo **22 hodín, 16 kôl a 91 ťahov agenta** — pri
@@ -26,7 +26,7 @@ hotový a preverený — AI Agent už nemá čo opraviť."*
 
 Rýchla oprava si ten zoznam **povie sama, vo fáze, ktorú má** — v Príprave, a **pred**
 tým, než sa začne opravovať. Agent odvodí zo zadania jednu vetu o tom, čo má byť po
-oprave vyskúšateľné na bežiacej appke, a skúška si prah zoberie odtiaľ.
+oprave vyskúšateľné na bežiacej aplikácii, a skúška si prah zoberie odtiaľ.
 
 ## Čo sa nemení — a to je dôležité
 

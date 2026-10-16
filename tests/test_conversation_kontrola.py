@@ -376,7 +376,7 @@ class TestRuntimeFloorRed:
         _approve_spec(db_session, version.id)
         _seed_programming_complete(db_session, version.id)
         _stub_smoke(monkeypatch, boot_ok=False, boot_detail="up exit 1", acceptance=None)
-        _stub_partner_turn(monkeypatch, _gate_report_block("appka nenaštartovala — VRATKÉ"))
+        _stub_partner_turn(monkeypatch, _gate_report_block("aplikácia nenaštartovala — VRATKÉ"))
 
         state = await _drive_kontrola(db_session, version.id)
 
@@ -438,7 +438,7 @@ class TestRedKontrolaIsReopenable:
         _approve_spec(db_session, version.id)
         _seed_programming_complete(db_session, version.id)
         _stub_smoke(monkeypatch, boot_ok=False, boot_detail="up exit 1", acceptance=None)
-        _stub_partner_turn(monkeypatch, _gate_report_block("appka nenaštartovala — VRATKÉ"))
+        _stub_partner_turn(monkeypatch, _gate_report_block("aplikácia nenaštartovala — VRATKÉ"))
         state = await _drive_kontrola(db_session, version.id)
         return version, state
 

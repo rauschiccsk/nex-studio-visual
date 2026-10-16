@@ -216,7 +216,7 @@ def _stub_plan_passes(monkeypatch, plan_spec, *, cross="## Invarianty\n- x"):
     monkeypatch.setattr(orchestrator, "_resolve_dispatch_overrides", lambda db, vid, role: (None, None))
 
 
-def _plan(*, epic_plain="Základ appky.", feat_plain="Založíme databázu.", task_plain="Tabuľky používateľov."):
+def _plan(*, epic_plain="Základ aplikácie.", feat_plain="Založíme databázu.", task_plain="Tabuľky používateľov."):
     return [
         {
             "title": "Foundation",
@@ -394,14 +394,14 @@ class TestConversationPlanRound:
         _approve_spec(db_session, version.id)
         _stub_plan_passes(
             monkeypatch,
-            _plan(epic_plain="Základ appky.", feat_plain="Databáza a audit.", task_plain="Tabuľka faktúr."),
+            _plan(epic_plain="Základ aplikácie.", feat_plain="Databáza a audit.", task_plain="Tabuľka faktúr."),
         )
 
         await orchestrator.apply_action(db_session, version_id=version.id, action="zostav_plan")
         await orchestrator.run_conversation_turn(db_session, version.id)
 
         epic = _epics(db_session, version.id)[0]
-        assert epic.plain_description == "Základ appky."  # the Epic's ONLY prose
+        assert epic.plain_description == "Základ aplikácie."  # the Epic's ONLY prose
         feat = db_session.execute(select(Feat).where(Feat.epic_id == epic.id)).scalars().one()
         assert feat.plain_description == "Databáza a audit."
         assert feat.description == "DB schema"  # distinct technical description preserved

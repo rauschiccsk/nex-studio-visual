@@ -603,8 +603,8 @@ class TestZadanie:
         project = _make_project(db_session, user=user)
         version = service.create(db_session, project.id, _payload("0.1.0"), user.id)
         monkeypatch.setattr(service, "_PROJECTS_ROOT", tmp_path)
-        service.write_zadanie(db_session, version.id, "Zadanie: postav appku X.")
-        assert service.read_zadanie(db_session, version.id) == "Zadanie: postav appku X."
+        service.write_zadanie(db_session, version.id, "Zadanie: postav aplikáciu X.")
+        assert service.read_zadanie(db_session, version.id) == "Zadanie: postav aplikáciu X."
 
     def test_read_reflects_a_direct_file_edit(self, db_session, monkeypatch, tmp_path):
         # The Director's case: the Zadanie was edited DIRECTLY on disk (an appended CSV-export spec). Because

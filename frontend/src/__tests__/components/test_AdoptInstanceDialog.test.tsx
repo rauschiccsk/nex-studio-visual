@@ -157,7 +157,7 @@ describe("Prevzatie inštalácie — keď niet čo preberať", () => {
 //
 // Zmerané 14.09.2026 na UAT MÁGERSTAVU. Ručne písaný compose niesol pripojenie priečinka, kam
 // Genesis ukladá faktúry. Generátor oň nevie: v projektovom docker-compose.yml nie je a v evidencii
-// zákazníkov naň nie je stĺpec. Prevzatie by prešlo, ohlásilo úspech — a appka by oslepla. Ticho.
+// zákazníkov naň nie je stĺpec. Prevzatie by prešlo, ohlásilo úspech — a aplikácia by oslepla. Ticho.
 
 describe("Prevzatie inštalácie — čo sa prenesie a čo by sa stratilo (ICCINT-130)", () => {
   it("vymenuje údaje, ktoré vie len tá bežiaca inštalácia", async () => {

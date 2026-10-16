@@ -56,7 +56,7 @@ def test_blocked_question_offers_answer_and_retry() -> None:
 
 def test_parse_exhaustion_at_verifikacia_no_verdict() -> None:
     # ICCINT-109: k trom pôvodným akciám pribudlo „Znova spustiť overenie“ (``overit_bez_opravy``).
-    # Keď zlyhá SÁM overovací beh, appka môže byť v poriadku a jediná rozumná odpoveď je zopakovať
+    # Keď zlyhá SÁM overovací beh, aplikácia môže byť v poriadku a jediná rozumná odpoveď je zopakovať
     # ten beh. Dovtedy tu zostávalo len „Uprav“, čo pošle opravného agenta hľadať chybu, ktorá
     # neexistuje — zmerané 10.09.2026 na NEX Manager 1.2.0.
     #

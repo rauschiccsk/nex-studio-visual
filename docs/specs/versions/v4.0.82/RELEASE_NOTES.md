@@ -1,6 +1,6 @@
 # v4.0.82 — prevzatie ručne postavenej inštalácie sa dá vyžiadať
 
-Kokpit vie sám postaviť inštaláciu appky. Odkedy má poistku proti prepísaniu
+Kokpit vie sám postaviť inštaláciu aplikácie. Odkedy má poistku proti prepísaniu
 cudzieho nasadenia, odmieta siahnuť na priečinok, ktorý sám nevytvoril — a tým je
 **trinásť inštalácií, ktoré na tomto stroji bežia**, vrátane ostrého MÁGERSTAV-u a
 spoločného smerovača, cez ktorý ide 29 kontajnerov.

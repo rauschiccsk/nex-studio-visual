@@ -20,7 +20,7 @@ aplikácie hneď. Nič nespúšťaš a na nič si nepamätáš.
 - *vyhľadávanie nesedí: N dokumentov* — koľko ešte nestihlo; po nabehnutí myšou uvidíš aj ktoré,
 - *vyhľadávanie: nedá sa zistiť* — služba vyhľadávania nebeží.
 
-Tá tretia je tam zámerne. Keď sa stav zistiť nedá, appka to **povie** — namiesto toho, aby mlčala
+Tá tretia je tam zámerne. Keď sa stav zistiť nedá, aplikácia to **povie** — namiesto toho, aby mlčala
 a nechala ťa v presvedčení, že je všetko v poriadku. Prehliadanie a čítanie dokumentov funguje aj
 vtedy; nefunguje len vyhľadávanie.
 

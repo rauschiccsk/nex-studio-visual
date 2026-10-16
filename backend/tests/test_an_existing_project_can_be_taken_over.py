@@ -217,7 +217,7 @@ def test_a_block_reserved_for_somebody_else_stays_shut() -> None:
     """⚠️ Zhovievavosť porovnania nesmie zájsť tak ďaleko, že pustí cudzí projekt do cudzieho bloku.
 
     To by bola horšia chyba než tá, ktorú opravujeme: dvaja by si sadli na tie isté porty a prišlo by
-    sa na to až tým, že jednému prestane appka bežať.
+    sa na to až tým, že jednému prestane aplikácia bežať.
     """
     from backend.services.port_registry import _same_holder
 
@@ -385,7 +385,7 @@ def test_the_adopt_dialog_names_the_charter_before_the_manager_confirms() -> Non
 
 # ── Prevzatému projektu sa verzia nevymýšľa (ICCINT-89) ──────────────────────
 #
-# ⚠️ Zmerané 09.09.2026 na NEX Managerovi hneď po prevzatí: appka bežala ako 1.0.99 a v
+# ⚠️ Zmerané 09.09.2026 na NEX Managerovi hneď po prevzatí: aplikácia bežala ako 1.0.99 a v
 # docs/specs/versions/ mala v0.1.0 aj v1.0.0 s poznámkami k vydaniu — kokpit ukazoval jedinú
 # „plánovanú“ 0.1.0 a ponúkal „Pridať verziu 0.2.0“.
 #
@@ -454,7 +454,7 @@ def test_the_real_projects_report_a_version_that_matches_their_own_folders() -> 
 # backend na začiatku bloku, frontend +1, databáza +2), takže ich kokpit odmietol — a prevzatie padlo.
 #
 # ⚠️ Najprv som navrhoval, aby kokpit staré porty PRIJAL a kontroly pri preberaní vynechal. Director to
-# zamietol a mal pravdu: tie polia nie sú záznam o tom, na čom appka počúva — sú to položky v EVIDENCII
+# zamietol a mal pravdu: tie polia nie sú záznam o tom, na čom aplikácia počúva — sú to položky v EVIDENCII
 # pridelených portov. Zapísať do nej 8000/5173/5433 by neznamenalo zaznamenať skutočnosť, ale zaviesť
 # trvalú výnimku. Evidencia s výnimkami prestane byť evidenciou.
 #

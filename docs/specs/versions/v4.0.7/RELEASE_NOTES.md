@@ -6,5 +6,5 @@ Počas Programovania ti AI po každej úlohe píše, čo spravila. Doteraz to bo
 
 Od tejto verzie:
 
-- **Správy o postupe sú po slovensky, ľudsky** — čo v appke pribudlo z pohľadu používateľa, v pár vetách; technické detaily sa už nesypú do súhrnu.
+- **Správy o postupe sú po slovensky, ľudsky** — čo v aplikácii pribudlo z pohľadu používateľa, v pár vetách; technické detaily sa už nesypú do súhrnu.
 - **Úlohy majú jednoznačné hierarchické číslo** (napr. **1.2.1**) — konkrétnu úlohu nájdeš bez hľadania podľa textu.

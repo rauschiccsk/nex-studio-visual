@@ -292,8 +292,8 @@ def last_successful_deploy(db: Session, customer_id: UUID, environment: str) -> 
 
     ICCINT-117. Zelené „✓ Nasadené“ aj upozornenia žili iba v premennej v pamäti prehliadača (odpoveď
     na klik), takže F5 ich zmazal a obrazovka vyzerala ako pred nasadením. Pritom ``deploy_events`` je
-    append-only audit a warnings sa doň UŽ ukladajú (pripájajú sa do ``detail``) — len ich nikto nečítal
-    späť. **Stav, ktorý platí len do prvého refreshu, nie je stav.**
+    append-only audit a upozornenia sa doň UŽ ukladali — len ich nikto nečítal späť. **Stav, ktorý platí
+    len do prvého refreshu, nie je stav.** Čo nasadenie ohlásilo, číta :func:`deploy_report`.
 
     Viaže sa na ÚSPEŠNÉ nasadenie, rovnako ako :func:`current_version`: keby čas posunul aj zlyhaný
     pokus, obrazovka by tvrdila, že posledné dobré nasadenie je novšie, než v skutočnosti je. Zlyhanie
@@ -310,6 +310,27 @@ def last_successful_deploy(db: Session, customer_id: UUID, environment: str) -> 
         .order_by(DeployEvent.seq.desc())
         .limit(1)
     ).scalar_one_or_none()
+
+
+# DEV-129: until the event kept its warnings in a field of their own, they were glued into its text — the provisioner's
+# behind this prefix, the deploy's own after it, each part after " | ".
+_LEGACY_PART = " | "
+_LEGACY_WARNINGS = "warnings: "
+
+
+def deploy_report(event: Optional[DeployEvent]) -> tuple[Optional[str], list[str]]:
+    """What a deploy reported and its warnings, apart (DEV-129) — ``(None, [])`` when there is no event.
+
+    An event recorded before the warnings had a field of their own carries them in ``detail``; it is split here, when
+    read, so the audit log is never rewritten. The provisioner's block stays whole without its English prefix: a
+    warning may itself hold „; “, so splitting on it would cut a sentence in two.
+    """
+    if event is None:
+        return None, []
+    if event.warnings or not event.detail or _LEGACY_PART not in event.detail:
+        return event.detail, list(event.warnings or [])
+    head, *parts = event.detail.split(_LEGACY_PART)
+    return head, [part.removeprefix(_LEGACY_WARNINGS) for part in parts if part.strip()]
 
 
 def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
@@ -344,7 +365,7 @@ def _is_pre_release(version_number: str) -> bool:
 
     Na tomto stojí povýšenie pri prvom ostrom nasadení: povýšiť na 1.0.0 má zmysel len tam, odkiaľ
     sa povyšuje. Projekt, ktorý je už na 1.2.2, by sa tým OZNAČIL NIŽŠÍM číslom, než aký kód nesie —
-    a appka by potom tvrdila verziu, ktorou nie je.
+    a aplikácia by potom tvrdila verziu, ktorou nie je.
 
     Prázdne alebo nečitateľné číslo sa berie ako vývojové: to je pôvodné správanie a mení sa len
     tam, kde je číslo jasne 1.0.0 alebo vyššie.
@@ -692,8 +713,8 @@ def _uat_door_warning(db: Session, customer: Customer, project: Project, actor_i
     if opens is not False:
         return None  # entered, or could not tell — ignorance never raises an alarm
     return (
-        f"Nasadenie prebehlo, ale do appky sa nedá vojsť: {detail}. "
-        "Appka beží — pokazený je vstup, takže ju zatiaľ neodovzdávaj používateľom."
+        f"Nasadenie prebehlo, ale do aplikácie sa nedá vojsť: {detail}. "
+        "Aplikácia beží — pokazený je vstup, takže ju zatiaľ neodovzdávaj používateľom."
     )
 
 
@@ -759,6 +780,8 @@ def build_matrix(
         prod_version = current_version(db, customer.id, "prod")
         uat_last = last_successful_deploy(db, customer.id, "uat")
         prod_last = last_successful_deploy(db, customer.id, "prod")
+        uat_detail, uat_warnings = deploy_report(uat_last)
+        prod_detail, prod_warnings = deploy_report(prod_last)
         rows.append(
             {
                 "customer_id": customer.id,
@@ -775,9 +798,11 @@ def build_matrix(
                 # držala potvrdenie iba v pamäti prehliadača a prvý F5 ho zmazal — stav, ktorý neprežije
                 # refresh, nie je stav. Údaje ležia v append-only audite; doteraz sa len nečítali späť.
                 "uat_last_deploy_at": uat_last.created_at if uat_last else None,
-                "uat_last_deploy_detail": uat_last.detail if uat_last else None,
+                "uat_last_deploy_detail": uat_detail,
+                "uat_last_deploy_warnings": uat_warnings,
                 "prod_last_deploy_at": prod_last.created_at if prod_last else None,
-                "prod_last_deploy_detail": prod_last.detail if prod_last else None,
+                "prod_last_deploy_detail": prod_detail,
+                "prod_last_deploy_warnings": prod_warnings,
                 "accepted_versions": accepted_versions(db, customer.id),
                 # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.
@@ -834,7 +859,7 @@ def _vrat_predpis_po_zlyhani(
 
     **Prečo.** 25.09.2026 na ostrom NEX Inboxe MÁGERSTAVU: nasadenie prekročilo časový limit, ale
     predpis na MAGERi už ukazoval na verziu 1.5.6, ktorej obrazy sa nepostavili. Kontajnery bežali
-    ďalej na 1.5.5, takže zákazník nič nespozoroval — ale pri najbližšom reštarte by sa appka pokúsila
+    ďalej na 1.5.5, takže zákazník nič nespozoroval — ale pri najbližšom reštarte by sa aplikácia pokúsila
     naštartovať z nového predpisu, obrazy by nenašla a **nenaštartovala by vôbec**. Nesúlad si všimol
     človek pri kontrole; sám sa neohlásil.
 
@@ -968,9 +993,8 @@ async def _default_deploy_runner(
         )
         ok, detail = outcome
         url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
-    # Surface any provision warnings in the recorded (non-secret) detail — AND return them typed, so the
-    # deploy screen can show them on a SUCCESSFUL deploy (``detail`` is only rendered on a failure, which is
-    # how every provisioning warning has been silently discarded until now).
+    # The provisioner's warnings travel beside the report, never inside it (DEV-129): the event keeps them in a field
+    # of their own, and the deploy screen says each once.
     warnings = list(result.warnings)
     # DEV-42: a private project's installation must not be reachable from outside Tailscale — checked on what
     # was written and on the live server, after every deploy that brought it up here. An installation on
@@ -988,8 +1012,6 @@ async def _default_deploy_runner(
                 + "; ".join(worse)
                 + ". Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
             )
-    if warnings:
-        detail = f"{detail} | warnings: {'; '.join(warnings)}"
     return RunnerResult(ok, detail, url, warnings, new_version_started=_started(outcome))
 
 
@@ -1208,7 +1230,7 @@ async def deploy(
                 "Nasadenie sa nedá spustiť: táto aplikácia sa otvára jedným kliknutím (bez hesla), ale "
                 "nedeklaruje nastavenia, cez ktoré sa to zapája. Doplň do jej `.env.example` tieto názvy: "
                 + ", ".join(_missing)
-                + ". Bez nich by sa appka nasadila, ale nedala by sa otvoriť."
+                + ". Bez nich by sa aplikácia nasadila, ale nedala by sa otvoriť."
             )
 
     # DEV-72 — what the app's ``.env.example`` asks of the customer (``@customer`` / ``@customer-secret``) and what
@@ -1307,7 +1329,6 @@ async def deploy(
             warning = uat_provisioner.launch_pairing_warning(_customer_dir_slug(customer))
             if warning not in warnings:
                 warnings.append(warning)
-                detail = f"{detail} | {warning}"
         else:
             # ICCINT-69: signing a ticket only proves we HAVE a key. This opens the door with it and follows
             # through to the session — the step where a contract mismatch with the neighbour actually shows.
@@ -1317,7 +1338,6 @@ async def deploy(
             door_warning = _uat_door_warning(db, customer, project, actor_id)
             if door_warning and door_warning not in warnings:
                 warnings.append(door_warning)
-                detail = f"{detail} | {door_warning}"
 
     # DEV-69: a NEX Manager and the modules it opens must agree on the ticket. After a deploy of either, both sides
     # are compared — never showing a key — and every module the Manager could not open is named. The list of modules
@@ -1335,7 +1355,6 @@ async def deploy(
         )
         if pairing_warning and pairing_warning not in warnings:
             warnings.append(pairing_warning)
-            detail = f"{detail} | {pairing_warning}"
 
     # Graduation (§3.6): on a SUCCESSFUL first PROD deploy, promote the BUILT version to v1.0.0 IN
     # PLACE + mark it released — never spin up a new empty v1.0.0 shell beside it (which would strand
@@ -1370,6 +1389,8 @@ async def deploy(
         warning = await _follow_fix_ticket(version, deployed_version, customer, environment)
         if warning:
             warnings.append(warning)
+    # DEV-129: the record keeps every warning — the tickets' too, which answer only after the event exists.
+    event.warnings = list(warnings)
 
     # A failed deploy did not graduate the project — drop the bump signal.
     if not ok:

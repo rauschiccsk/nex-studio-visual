@@ -323,7 +323,7 @@ async def test_fast_fix_priprava_brief_carries_the_manager_directive(db_session)
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    directive = "Appka sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
+    directive = "Aplikácia sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
     await orchestrator.apply_action(
         db_session,
         version_id=patch.id,
@@ -533,7 +533,7 @@ def test_customer_note_reaches_the_changelog(db_session, tmp_path) -> None:
         )
     )
     _fix_epic(db_session, project, version)
-    note = "Appku otvoríte jedným kliknutím z NEX Managera — bez zadávania mena a hesla."
+    note = "Aplikáciu otvoríte jedným kliknutím z NEX Managera — bez zadávania mena a hesla."
     _block_with_note(db_session, version.id, note)
 
     orchestrator._apply_customer_note_to_fix_epic(db_session, version.id)
@@ -748,7 +748,7 @@ def test_a_new_version_still_reads_its_declaration_from_the_design(db_session) -
 
 def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> None:
     """Nobody can declare what nobody asked for — and the ask must name the APP, not our own tooling: on the
-    stalled build the agent's unprompted declaration read "Živý náhľad appky…", a NEX Studio feature."""
+    stalled build the agent's unprompted declaration read "Živý náhľad aplikácie…", a NEX Studio feature."""
     from backend.services import orchestrator
 
     creator = _seed_user(db_session)
@@ -924,7 +924,7 @@ def test_the_task_plan_carries_the_managers_own_words(db_session) -> None:
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "v1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    directive = "Vstup tokenom cez NEX Manager zlyhá — appka posiela inú hlavičku, než Manager čaká."
+    directive = "Vstup tokenom cez NEX Manager zlyhá — aplikácia posiela inú hlavičku, než Manager čaká."
     _record_kickoff(db_session, patch.id, directive)
 
     task = fast_fix.ensure_build_task(db_session, patch.id)
@@ -995,10 +995,10 @@ def test_the_rules_name_the_three_things_that_cost_us_the_seven_rounds(db_sessio
 def test_the_rules_do_not_replace_the_managers_own_instruction(db_session):
     """Pravidlá sa PRIDÁVAJÚ, nenahrádzajú. Pokyn Manažéra zostáva autoritatívny."""
     task = _minimal_task(db_session)
-    task.description = "Po inštalácii nesmie appka ponúkať inštaláciu."
+    task.description = "Po inštalácii nesmie aplikácia ponúkať inštaláciu."
     db_session.flush()
 
     brief = orchestrator._directive_for_build_task(task, None, [], flow_type="fast_fix")
 
-    assert "Po inštalácii nesmie appka ponúkať inštaláciu." in brief
+    assert "Po inštalácii nesmie aplikácia ponúkať inštaláciu." in brief
     assert "AUTORITATÍVNY" in brief

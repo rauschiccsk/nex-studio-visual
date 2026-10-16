@@ -269,7 +269,7 @@ def test_adoption_keeps_the_instance_identity_and_still_gets_a_buildable_image(t
     Prešlo to, lebo stavba Managera je projektu podobná.
 
     O deň neskôr zmerané na NEX Inboxe: to isté by mu prepísalo mená služieb (`postgres`→`db`) aj
-    meno úložiska (`postgres-data`→`inbox_dev_pg_data`). Appka by naštartovala s PRÁZDNOU databázou
+    meno úložiska (`postgres-data`→`inbox_dev_pg_data`). Aplikácia by naštartovala s PRÁZDNOU databázou
     a faktúry zákazníka by zostali vedľa, nedotknuté, ale bez odkazu.
 
     Skutočná príčina bola inde: stavba sa párovala len podľa mena obrazu, a ručne písaná inštalácia
@@ -292,7 +292,7 @@ def test_adoption_keeps_the_instance_identity_and_still_gets_a_buildable_image(t
 
     zapisany = ciel.zapisane["docker-compose.yml"][0]
     assert "postgres:" in zapisany and "postgres-data" in zapisany, "prevzatie prepísalo mená inštalácie"
-    assert "  db:" not in zapisany, "služba sa premenovala podľa projektu — appka by stratila adresu k dátam"
+    assert "  db:" not in zapisany, "služba sa premenovala podľa projektu — aplikácia by stratila adresu k dátam"
     assert "build:" in zapisany, "obraz by sa nemal odkiaľ vziať"
     assert "nexmanager-backend:1.0.0" not in zapisany, "verzia sa nepovýšila"
 
@@ -503,8 +503,8 @@ def test_the_build_recipe_is_matched_by_role_when_the_image_name_differs(tmp_pat
 
 
 def test_the_service_and_volume_names_of_the_instance_are_never_rewritten(tmp_path) -> None:
-    """⚠️ Prípad NEX Inboxu. Meno služby je adresa, na ktorú sa appka k databáze pripája; meno
-    úložiska je miesto, kde tie dáta ležia. Prepísať ich znamená naštartovať appku s prázdnou
+    """⚠️ Prípad NEX Inboxu. Meno služby je adresa, na ktorú sa aplikácia k databáze pripája; meno
+    úložiska je miesto, kde tie dáta ležia. Prepísať ich znamená naštartovať aplikáciu s prázdnou
     databázou, kým pôvodná leží vedľa bez odkazu."""
     _projekt(tmp_path)
     instalacia = tmp_path / "inst"
@@ -545,7 +545,7 @@ class _VysledokProvisioningu:
 def test_a_failed_deploy_puts_the_previous_description_back(monkeypatch) -> None:
     """⚠️ Zmerané 25.09.2026 na ostrom NEX Inboxe. Nasadenie prekročilo časový limit, ale predpis na
     MAGERi už ukazoval na 1.5.6, ktorej obrazy sa nepostavili. Kontajnery bežali ďalej na 1.5.5, takže
-    zákazník nič nespozoroval — pri najbližšom reštarte by však appka nenaštartovala vôbec."""
+    zákazník nič nespozoroval — pri najbližšom reštarte by však aplikácia nenaštartovala vôbec."""
     from backend.services import deploy as D
 
     ciel = _Ciel()

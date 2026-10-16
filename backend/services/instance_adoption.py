@@ -72,7 +72,7 @@ class AdoptionPreview(NamedTuple):
     #: sa dá bez pozerania sa na to, ktorého inštalácia to je.
     confirmation_phrase: str
     #: Smie sa prevzatie vôbec ponúknuť. Zásada R16 z NEX Inboxu: akcia sa neponúka tam, kde nemôže
-    #: uspieť. Úspešne vyzerajúce prevzatie, po ktorom appka oslepne, je horšie než odmietnutie.
+    #: uspieť. Úspešne vyzerajúce prevzatie, po ktorom aplikácia oslepne, je horšie než odmietnutie.
     can_adopt: bool
 
 
@@ -395,7 +395,7 @@ def _facts_that_cannot_survive(fakty: uat_provisioner.InstanceFacts) -> list[str
     """Čo by sa prevzatím STRATILO — vlastnosti, ktoré provisioner nevie vykresliť.
 
     Tá istá zásada, ktorá práve prešla do NEX Inboxu ako R16: akcia sa neponúka tam, kde nemôže
-    uspieť. Prevzatie, ktoré ohlási úspech a pritom appku oberie o vlastnosť, je horšie než
+    uspieť. Prevzatie, ktoré ohlási úspech a pritom aplikáciu oberie o vlastnosť, je horšie než
     odmietnutie — pri odmietnutí sa aspoň vie, že sa treba pozrieť.
     """
     return [
@@ -615,9 +615,7 @@ async def adopting_deploy_runner(
         # ale na disku hotovo. Preto sa URL berie z toho istého pomocníka ako pri bežnom nasadení.
         url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
 
-    warnings = list(result.warnings)
     if odlozene:
         detail = f"{detail} Ručné súbory odložené: {', '.join(odlozene)}."
-    if warnings:
-        detail = f"{detail} | warnings: {'; '.join(warnings)}"
-    return RunnerResult(ok, detail, url, warnings)
+    # The provisioner's warnings travel beside the report, never inside it (DEV-129) — the deploy records them.
+    return RunnerResult(ok, detail, url, list(result.warnings))

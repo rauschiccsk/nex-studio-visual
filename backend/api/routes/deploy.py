@@ -159,7 +159,7 @@ def uat_launch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"NEX Manager tejto aplikácie nepozná meno „{_current_user.username}“. "
-                "Priraď si v ňom prístup (Používatelia), alebo appku otvor z NEX Managera pod menom, "
+                "Priraď si v ňom prístup (Používatelia), alebo aplikáciu otvor z NEX Managera pod menom, "
                 "ktoré tam máš."
             ),
         )
@@ -473,7 +473,7 @@ async def adopt_instance(
         )
     # ICCINT-130 — a odmietni, keď by prevzatie niečo zmazalo. Poistka je tu, na serveri, nie len v
     # tom, že sa tlačidlo nezobrazí: obrazovka sa dá obísť, táto brána nie. Zmerané 14.09.2026 na UAT
-    # MÁGERSTAVU — prevzatie by prešlo a appka by prestala vidieť faktúry, ticho.
+    # MÁGERSTAVU — prevzatie by prešlo a aplikácia by prestala vidieť faktúry, ticho.
     if nahlad.blocking:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -481,7 +481,7 @@ async def adopt_instance(
                 "Prevzatie by z tejto inštalácie niečo zmazalo, preto sa nevykonalo:\n"
                 + "\n".join(f"  · {v}" for v in nahlad.blocking)
                 + "\n\nNič sa nezmenilo. Tieto vlastnosti treba najprv doplniť do generátora — "
-                "prevzatie, ktoré ohlási úspech a appku pritom oberie o vlastnosť, je horšie než "
+                "prevzatie, ktoré ohlási úspech a aplikáciu pritom oberie o vlastnosť, je horšie než "
                 "odmietnutie."
             ),
         )

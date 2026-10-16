@@ -2,7 +2,7 @@
 
 Všetky štyri sa našli za dva dni na jednom projekte — od chvíle, keď mal
 122 hotových úloh, po chvíľu, keď ho previerka pred vydaním odmietla. Sú tu
-spolu, lebo patria k sebe: v každej z nich appka povedala niečo, čo neplatilo.
+spolu, lebo patria k sebe: v každej z nich aplikácia povedala niečo, čo neplatilo.
 
 ## „Nechaj to opraviť" doručilo prázdne zadanie
 

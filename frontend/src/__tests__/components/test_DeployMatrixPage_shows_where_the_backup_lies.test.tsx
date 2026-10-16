@@ -35,7 +35,7 @@ const BACKUP =
   "(1.4 MB, 52 položiek, sha256 abababababab…; obnova: pg_restore --clean --if-exists v databázovom kontajneri inštalácie). " +
   "Ponechaných je posledných 5 záloh.";
 
-function matrix(detail: string | null): DeployMatrix {
+function matrix(detail: string | null, warnings: string[] = []): DeployMatrix {
   return {
     project_slug: "nex-inbox",
     auth_mode: "password",
@@ -56,8 +56,10 @@ function matrix(detail: string | null): DeployMatrix {
         prod_last_attempt_failed: false,
         uat_last_deploy_at: null,
         uat_last_deploy_detail: null,
+        uat_last_deploy_warnings: [],
         prod_last_deploy_at: "2026-10-15T01:05:00Z",
         prod_last_deploy_detail: detail,
+        prod_last_deploy_warnings: warnings,
         accepted_versions: ["1.8.1"],
         uat_url: null,
         prod_url: null,
@@ -73,7 +75,7 @@ beforeEach(() => {
 describe("Riadok PROD povie, kde leží záloha pred nasadením", () => {
   it("⚠️ veta o zálohe z hlásenia nasadenia je v riadku, bez upratovania a vedľa upozornení", async () => {
     vi.mocked(getDeployMatrix).mockResolvedValue(
-      matrix(`OK ${BACKUP} Upratané na cieli — vyrovnávacia pamäť stavby: 0B. | Kontrola po nasadení: pomalá odpoveď`),
+      matrix(`OK ${BACKUP} Upratané na cieli — vyrovnávacia pamäť stavby: 0B.`, ["Kontrola po nasadení: pomalá odpoveď"]),
     );
 
     render(<DeployMatrixPage environment="prod" />);

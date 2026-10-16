@@ -106,7 +106,7 @@ async def test_boot_fail_settles_honest_fail_verdict_ahead_of_auditor(db_session
     # (the FE's collapsible "Technický detail"), and the AI Agent fixer reproduces the boot failure itself.
     # v4.0.47 honest framing: an interpolation/config failure (missing POSTGRES_PASSWORD) is a DEPLOYMENT-
     # config issue, not an app boot failure — say so ("... v nastavení nasadenia ... nie je to chyba v kóde"),
-    # no longer a blanket "Appka sa nespustila" prefix. engine_override stays boot_fail (a red smoke floors it).
+    # no longer a blanket "Aplikácia sa nespustila" prefix. engine_override stays boot_fail (a red smoke floors it).
     assert "nasadenia" in verdict.content.lower()
     assert _BOOT_FAIL_DETAIL not in verdict.content
     assert _BOOT_FAIL_DETAIL in verdict.payload["technical_detail"]
@@ -285,7 +285,7 @@ def test_fix_consultation_leads_with_plain_summary_technical_collapsed(db_sessio
         author="auditor",
         recipient="manazer",
         kind="verdict",
-        content="Appka je v poriadku, ale záverečná skúška nie je spoľahlivo opakovateľná.",
+        content="Aplikácia je v poriadku, ale záverečná skúška nie je spoľahlivo opakovateľná.",
         payload={
             "verdict": "FAIL",
             "findings": ["Skúška občas zlyhá a jeden test sa nedá spustiť dvakrát."],
@@ -296,7 +296,7 @@ def test_fix_consultation_leads_with_plain_summary_technical_collapsed(db_sessio
     card = orchestrator._build_fix_consultation(db_session, version_id, state)
     dec = card.decisions[0]
     # The card LEADS with the plain summary — the jargon is NOT in the manager-facing explanation…
-    assert dec.explanation.startswith("Appka je v poriadku")
+    assert dec.explanation.startswith("Aplikácia je v poriadku")
     assert "990001" not in dec.explanation
     # …it rides the collapsible technical_detail instead (nothing lost).
     assert "990001" in dec.technical_detail

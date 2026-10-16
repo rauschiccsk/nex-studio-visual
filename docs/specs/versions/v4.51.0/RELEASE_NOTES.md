@@ -45,3 +45,12 @@ každá verzia: na ANDROSe mal NEX Inbox deväť verzií po 2 GB.
 dokument zo stránky Znalostnej bázy, živé dokumenty projektu (STATUS, HISTORY), evidencia portov aj ich nové
 priečinky po zápise patrili správcovi — vlastník ich potom nevedel v termináli zmeniť. Každý zápis kokpitu do
 Znalostnej bázy teraz ide cez jedno miesto, ktoré súbor aj nové priečinky odovzdá jej vlastníkovi.
+
+**Hlásenia pri nasadení: každé upozornenie raz a po slovensky.** Stránky UAT a PROD ukazovali upozornenia
+nasadenia dvakrát — v stĺpci nasadenej verzie s anglickou predponou „warnings:“ a ešte raz pod tlačidlom nasadenia.
+Záznam nasadenia teraz nesie upozornenia oddelene od hlásenia a riadok zákazníka ich povie raz, každé na vlastnom
+riadku, aj po obnovení stránky; pod tlačidlom zostanú len upozornenia nasadenia, ktoré zlyhalo. Staršie záznamy sa
+rozdelia pri čítaní, bez prepisovania evidencie. Texty kokpitu aj jeho poznámky k vydaniam píšu „aplikácia“ bez slangovej
+skratky a stráž slang späť nepustí. Kľúč, ktorý musí sedieť s iným systémom (napríklad SSH kľúč na cieľ zálohy), si kokpit nevymýšľa, keď
+ho projekt v súbore `.env.example` označí ako údaj zákazníka; agent stavby také kľúče takto označuje a hlásenie
+o vymyslených hodnotách povie, ako to napraviť.

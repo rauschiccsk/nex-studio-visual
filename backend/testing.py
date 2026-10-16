@@ -11,7 +11,7 @@ and common test factory functions.
 
 
 def preview_accepted_values(text: str, *, src_dir=None):
-    """Hodnoty, ktoré appka prijme ako „zapni náhľad“; ``None`` = kontroluje PRAVDIVOSTNE.
+    """Hodnoty, ktoré aplikácia prijme ako „zapni náhľad“; ``None`` = kontroluje PRAVDIVOSTNE.
 
     ⚠️ **Býva to napísané na dvoch miestach a to je práve ten problém.** Stráže nad príznakom náhľadu
     stoja v dvoch stromoch testov (``backend/tests`` aj ``tests/services``) a každá si to čítanie

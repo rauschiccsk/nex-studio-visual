@@ -1,7 +1,7 @@
 """DEV-61 — when the app does not start in Verifikácia, the one click "Nechaj to opraviť" leads to a fix.
 
 Career Asistent 0.1.0, 11.10.2026: the frontend container ran and refused the connection. The fix brief the one
-click hands the AI Agent said "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku" —
+click hands the AI Agent said "Spusti aplikáciu tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku" —
 but Programovanie runs in the build sandbox without Docker — and carried only "Connection refused": logs were
 collected only from containers that EXITED non-zero, and this one was running. The Director wrote the fix by hand.
 Now the brief asks for nothing the fix turn cannot do, and carries the log of the service that did not answer,

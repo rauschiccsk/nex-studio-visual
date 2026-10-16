@@ -58,4 +58,4 @@ A `nex-payables` patrí staršiemu kokpitu, ktorý je iný program — tam táto
 ---
 
 *Prečo stredná číslica: mení sa správanie, na ktoré sa dá spoľahnúť — agent odteraz pracuje podľa
-aktuálnych pravidiel. Nie je to oprava chyby v tom, čo appka robí, ale v tom, čo sľubuje.*
+aktuálnych pravidiel. Nie je to oprava chyby v tom, čo aplikácia robí, ale v tom, čo sľubuje.*

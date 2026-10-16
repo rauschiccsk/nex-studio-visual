@@ -82,7 +82,7 @@ def _floor_red_note(db, vid):
         author="system",
         recipient="manazer",
         kind="notification",
-        content="beh appky je ČERVENÝ",
+        content="beh aplikácie je ČERVENÝ",
         payload={"kontrola_floor_red": True, "kontrola": True},
     )
 

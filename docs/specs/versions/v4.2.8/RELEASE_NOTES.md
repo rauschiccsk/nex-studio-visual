@@ -32,7 +32,7 @@ Teraz sa **pýtame kontajnerov, nie príkazu**:
 
 ## Hlásenie tvrdí len to, čo sa zmeralo
 
-Predošlá veta znela „appka sa stále nespustí" bez ohľadu na to, čo sa naozaj
+Predošlá veta znela „aplikácia sa stále nespustí" bez ohľadu na to, čo sa naozaj
 stalo. Prvý raz, keď zaznela, bola nepravdivá.
 
 Nové hlásenie povie jedno z troch — podľa toho, čo sa zistilo: *zlyhal kontajner

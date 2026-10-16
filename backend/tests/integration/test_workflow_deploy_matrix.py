@@ -1090,7 +1090,7 @@ class TestDeployStatusSurvivesRefresh:
         assert row.get("prod_last_deploy_at") is None, "PROD sa nenasadil, a predsa hlási čas"
 
     def test_row_carries_what_the_deploy_reported(self, client, db_session, fake_deploy_runner):
-        """Upozornenia („nasadilo sa, ale niečo nebolo ideálne“) povedala appka raz a už nikdy."""
+        """Upozornenia („nasadilo sa, ale niečo nebolo ideálne“) povedala aplikácia raz a už nikdy."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
         _seed_verified_version(db_session, project, "v0.1.0")

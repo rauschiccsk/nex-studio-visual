@@ -138,7 +138,7 @@ def test_an_app_with_no_paired_manager_is_not_asked_about(tmp_path, monkeypatch)
     _write_env(tmp_path / "acme" / "solo-app", SOME_OTHER="x")
 
     def never(url, headers=None, timeout=None):  # pragma: no cover — must not run
-        raise AssertionError("appka bez spárovaného Managera sa nemá koho pýtať")
+        raise AssertionError("aplikácia bez spárovaného Managera sa nemá koho pýtať")
 
     monkeypatch.setattr(uat_launch.httpx, "get", never)
 
@@ -299,7 +299,7 @@ def test_an_unreachable_app_is_not_accused(tmp_path, monkeypatch) -> None:
 # ── Kontrola dverí skúša ten tvar, ktorý sa reálne používa (ICCINT-92) ────────
 #
 # NEX Manager 1.1.0 prestáva posielať vstupenku v adrese a posiela ju v tele požiadavky — lístok
-# v adrese totiž končí aj v histórii prehliadača a v záložkách. Appky majú prechodne prijímať oba tvary.
+# v adrese totiž končí aj v histórii prehliadača a v záložkách. Aplikácie majú prechodne prijímať oba tvary.
 #
 # ⚠️ Tu je tá zákernosť: keby kontrola ďalej skúšala IBA starý tvar, svietila by nazeleno aj vtedy, keby
 # ten skutočne používaný tvar nefungoval. Zelená stráž, ktorá neskúša cestu, po ktorej sa naozaj chodí,
@@ -360,7 +360,7 @@ def test_the_door_is_tried_with_the_shape_the_manager_actually_uses(monkeypatch)
 
 
 def test_an_app_that_does_not_know_the_new_shape_still_opens_but_says_so(monkeypatch) -> None:
-    """Náhrada je v poriadku — appka funguje. Ale zamlčať sa nesmie: overené je niečo iné než to,
+    """Náhrada je v poriadku — aplikácia funguje. Ale zamlčať sa nesmie: overené je niečo iné než to,
     čo NEX Manager reálne používa, a to má Manažér vedieť."""
     client = _ShapeRecorder(post_status=405)
     _shape_probe(monkeypatch, client)
@@ -373,7 +373,7 @@ def test_an_app_that_does_not_know_the_new_shape_still_opens_but_says_so(monkeyp
 
 
 def test_a_real_refusal_is_not_papered_over_by_the_fallback(monkeypatch) -> None:
-    """⚠️ Náhrada platí len pre „o tomto tvare neviem“ (404/405). Keď appka vstupenku ODMIETNE, je to
+    """⚠️ Náhrada platí len pre „o tomto tvare neviem“ (404/405). Keď aplikácia vstupenku ODMIETNE, je to
     porucha — a druhý pokus iným tvarom by ju len zakryl."""
     client = _ShapeRecorder(post_status=401)
     _shape_probe(monkeypatch, client)

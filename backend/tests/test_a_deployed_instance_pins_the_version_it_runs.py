@@ -135,14 +135,14 @@ def test_the_version_actually_reaches_the_renderer(tmp_path) -> None:
     assert f"{u.GENERATED_BY_MARKER}" in napisane, "vyrenderovaný súbor nenesie hlavičku provisionera"
 
 
-# ── appka hovorí o sebe nasadenú verziu (ICCINT-104) ──────────────────────────
+# ── aplikácia hovorí o sebe nasadenú verziu (ICCINT-104) ──────────────────────────
 
 
 def test_the_app_reports_the_version_that_was_deployed(tmp_path) -> None:
-    """⚠️ Jadro ICCINT-104: appka nesmie o sebe hovoriť číslo z čias, keď niekto písal `.env.example`.
+    """⚠️ Jadro ICCINT-104: aplikácia nesmie o sebe hovoriť číslo z čias, keď niekto písal `.env.example`.
 
     Zmerané 10.09.2026 na UAT MÁGERSTAVU po nasadení 1.1.0: frontend hlásil 1.1.0 správne, ale
-    ``VITE_APP_VERSION`` v kontajneri zostalo ``1.0.0``. Dve časti tej istej appky sa hlásili rôznymi
+    ``VITE_APP_VERSION`` v kontajneri zostalo ``1.0.0``. Dve časti tej istej aplikácie sa hlásili rôznymi
     číslami — pri hľadaní chyby je to presne ten údaj, ktorý zavedie na nesprávnu stopu.
     """
     napisane = u.generate_uat_env(
@@ -159,13 +159,13 @@ def test_the_app_reports_the_version_that_was_deployed(tmp_path) -> None:
         preserved_secrets={},
     )
 
-    assert "VITE_APP_VERSION=1.1.0" in napisane, "appka o sebe hovorí verziu z .env.example, nie nasadenú"
+    assert "VITE_APP_VERSION=1.1.0" in napisane, "aplikácia o sebe hovorí verziu z .env.example, nie nasadenú"
     assert "APP_VERSION=1.1.0" in napisane
     assert "1.0.0" not in napisane and "0.9.0" not in napisane, "stará hodnota v súbore ostala"
 
 
 def test_a_version_variable_is_never_invented(tmp_path) -> None:
-    """Appke, ktorá o svojej verzii nehovorí, sa nastavenie nedopĺňa — nevymýšľame jej premenné."""
+    """Aplikácii, ktorá o svojej verzii nehovorí, sa nastavenie nedopĺňa — nevymýšľame jej premenné."""
     napisane = u.generate_uat_env(
         slug="skuska-uat",
         project="nex-manager",
@@ -180,15 +180,15 @@ def test_a_version_variable_is_never_invented(tmp_path) -> None:
         preserved_secrets={},
     )
 
-    assert "APP_VERSION=" not in napisane, "appke sa dopísala premenná, ktorú sama nedeklaruje"
+    assert "APP_VERSION=" not in napisane, "aplikácii sa dopísala premenná, ktorú sama nedeklaruje"
     assert "VITE_APP_VERSION=" not in napisane
 
 
 def test_a_contract_version_is_left_alone(tmp_path) -> None:
-    """⚠️ ``API_VERSION`` je číslo zmluvy rozhrania, nie appky — prepísať ho by bola väčšia chyba.
+    """⚠️ ``API_VERSION`` je číslo zmluvy rozhrania, nie aplikácie — prepísať ho by bola väčšia chyba.
 
     Bez tohto tvrdenia by stráže vyššie prešli aj vtedy, keby sa prepisovalo všetko, čo končí na
-    ``_VERSION`` — a nasadenie by appke ticho zmenilo cestu rozhrania.
+    ``_VERSION`` — a nasadenie by aplikácii ticho zmenilo cestu rozhrania.
     """
     napisane = u.generate_uat_env(
         slug="skuska-uat",

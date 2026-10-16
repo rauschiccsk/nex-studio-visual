@@ -806,7 +806,7 @@ async def test_the_sandboxed_phases_run_in_the_sandbox(monkeypatch, stage) -> No
 @pytest.mark.parametrize("stage", ["verifikacia", "hotovo", None, "", "unknown"])
 async def test_every_other_phase_still_runs_as_a_subprocess(monkeypatch, stage) -> None:
     """Four phases of five are in. **Verifikácia** stays OUT and that is a decision, not an oversight: the
-    independent Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej appke, nie oproti
+    independent Auditor is READ + RUN-ONLY and is told to check the app "oproti bežiacej aplikácii, nie oproti
     slovu AI Agenta" — being able to boot the thing it judges IS the phase (§2.5). It is also the phase
     carrying the least accident risk of the five, because the Auditor never writes and never commits.
 
@@ -833,7 +833,7 @@ def test_the_charter_tells_the_agent_which_phases_have_docker() -> None:
     ``SANDBOXED_PHASES`` decides what the agent's turn CAN do; the charter is the only place the agent
     learns it. When the two drift, the agent finds out by having something fail mid-build and — worse —
     may escalate a working engine as broken. ICCINT-20 is exactly that risk: before it, the charter told
-    the agent in as many words that "Postaviť a spustiť CELÚ appku patrí do Vizuálu a Verifikácie — tie
+    the agent in as many words that "Postaviť a spustiť CELÚ aplikáciu patrí do Vizuálu a Verifikácie — tie
     fázy Docker majú", which the code change makes false for Vizuál on the same day.
 
     Checked mechanically against the TEMPLATE (the source every new project's charter is written from),

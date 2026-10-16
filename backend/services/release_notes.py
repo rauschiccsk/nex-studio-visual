@@ -51,6 +51,8 @@ from backend.db.models.versions import Version
 #: root (``/app`` in the image, the repo root in dev/tests). The Dockerfile
 #: copies ``RELEASE_NOTES.md`` files into ``<root>/docs/specs/versions/v<X>/``.
 DOCS_VERSIONS_ROOT = Path(__file__).resolve().parents[2] / "docs" / "specs" / "versions"
+#: The notes the *Aktualizácie* tab shows — one per version directory.
+RELEASE_NOTES_GLOB = "v*/RELEASE_NOTES.md"
 
 #: Version directory names: ``v`` followed by dot-separated integers
 #: (``v0``, ``v0.9``, ``v0.9.0``). Anything else is ignored.
@@ -73,7 +75,7 @@ def list_release_notes(db: Session) -> list[dict]:
 
     root = DOCS_VERSIONS_ROOT.resolve()
     discovered: list[tuple[str, Path, str]] = []
-    for path in DOCS_VERSIONS_ROOT.glob("v*/RELEASE_NOTES.md"):
+    for path in DOCS_VERSIONS_ROOT.glob(RELEASE_NOTES_GLOB):
         resolved = path.resolve()
         # Defense in depth — the glob leaf is hard-coded with no caller input,
         # but reject anything that resolves outside the docs tree (e.g. a

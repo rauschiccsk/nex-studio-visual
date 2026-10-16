@@ -2,7 +2,7 @@
 
 ## Build verne dodá to, čo Manažér schválil vo Vizuáli
 
-Druhý (a hlavný) krok opravy: doteraz sa výsledná appka mohla od schváleného Vizuálu **líšiť** — Programovanie stavalo nezávisle a schválený vizuál nič neviazalo. Manažér tak mohol schváliť jeden vzhľad a dostať iný.
+Druhý (a hlavný) krok opravy: doteraz sa výsledná aplikácia mohla od schváleného Vizuálu **líšiť** — Programovanie stavalo nezávisle a schválený vizuál nič neviazalo. Manažér tak mohol schváliť jeden vzhľad a dostať iný.
 
 Od tejto verzie je Vizuál **zmluva pre build**:
 

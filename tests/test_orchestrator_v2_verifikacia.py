@@ -396,7 +396,7 @@ async def test_fail_loops_targeted_fix_and_gates_new_version(db_session, monkeyp
 
 def test_fix_scope_threads_technical_detail(db_session):
     """v4.0.46 (loop-breaker): the engine-verified smoke reason (``payload.technical_detail``) is threaded
-    into the AI-Agent fix brief AS THE LEAD. Without it the Agent saw only the plain finding ("Appka sa
+    into the AI-Agent fix brief AS THE LEAD. Without it the Agent saw only the plain finding ("Aplikácia sa
     nespustila") + a generic proposed_fix, could not locate the cause, "fixed" an unrelated unit test, and
     the SAME smoke failed again → an endless fix↔re-verify loop (the nex-websites release-notes case)."""
     version, _ = _make_version(db_session, project_dial="plna")
@@ -408,11 +408,11 @@ def test_fix_scope_threads_technical_detail(db_session):
         author="auditor",
         recipient="manazer",
         kind="verdict",
-        content="Appka sa nespustila — skúška po spustení zlyhala",
+        content="Aplikácia sa nespustila — skúška po spustení zlyhala",
         payload={
             "verdict": "FAIL",
-            "findings": ["Appka sa nespustila — skúška po spustení zlyhala"],
-            "proposed_fix": "Zisti a oprav dôvod, prečo sa appka nespustí (docker compose up), a over znova.",
+            "findings": ["Aplikácia sa nespustila — skúška po spustení zlyhala"],
+            "proposed_fix": "Zisti a oprav dôvod, prečo sa aplikácia nespustí (docker compose up), a over znova.",
             "technical_detail": detail,
         },
     )
@@ -708,7 +708,7 @@ async def test_red_acceptance_floors_auditor_pass_to_fail(db_session, monkeypatc
 
 async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, monkeypatch):
     # release-smoke-boot-and-batch-fixes.md B: a boot-FAIL (the app never even came up) is a DECISIVE product
-    # FAIL — it settles a clean Verifikácia FAIL carrying the boot reason ("Appka sa nespustila — …") AHEAD of the
+    # FAIL — it settles a clean Verifikácia FAIL carrying the boot reason ("Aplikácia sa nespustila — …") AHEAD of the
     # Auditor turn, independent of whether the Auditor could emit a parseable verdict. (Before B the Auditor
     # still ran and its PASS was floored to FAIL with engine_override=runtime_floor_red; now the boot-FAIL
     # short-circuits the Auditor entirely.) The Auditor PASS stub stays as a REGRESSION GUARD: were the Auditor
@@ -724,7 +724,7 @@ async def test_red_boot_settles_honest_boot_fail_ahead_of_auditor(db_session, mo
     assert verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "boot_fail"
     # v4.0.47: the finding is the HONEST headline — a stack that never came up ("up exit …") is framed as a
-    # startup failure ("aplikácia sa nespustila …"), no longer a hardcoded "Appka sa nespustila —" prefix.
+    # startup failure ("aplikácia sa nespustila …"), no longer a hardcoded "Aplikácia sa nespustila —" prefix.
     assert "nespustila" in verdicts[-1].content.lower()
     assert state.current_stage != "done"
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
@@ -1241,7 +1241,7 @@ def test_card_builder_reject_surfaces_why_and_hides_accept(db_session):
 # Zmerané 14.09.2026 na NEX Inbox v1.5.0, 9. kolo opráv. Porovnanie ôsmej a deviatej karty, doslova
 # z evidencie:
 #
-#   8. kolo   „Appka je v poriadku — chyba je v jednej novej skúške. Nedozvie sa, kam sa má pozrieť…“
+#   8. kolo   „Aplikácia je v poriadku — chyba je v jednej novej skúške. Nedozvie sa, kam sa má pozrieť…“
 #   9. kolo   „FAIL“
 #
 # Deviate zlyhanie neprišlo od Audítora, ale od enginu (červené zostavenie projektu). Vtedy niet

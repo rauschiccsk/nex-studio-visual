@@ -169,7 +169,7 @@ def test_the_header_does_not_claim_a_network_the_file_does_not_use(projekt) -> N
 
 def test_every_service_gets_the_networks_not_just_the_routed_ones(projekt) -> None:
     """⚠️ Keby vlastnú sieť dostal len frontend s backendom, databáza by zostala na ``default`` a
-    aplikácia by ju prestala vidieť — chyba, ktorá vyzerá ako rozbitá appka, nie ako stratený riadok."""
+    aplikácia by ju prestala vidieť — chyba, ktorá vyzerá ako rozbitá aplikácia, nie ako stratený riadok."""
     predpis = _vykresli(projekt, MAGERSTAV)
     siete = {m: uat_provisioner._networks_as_list(s.get("networks")) for m, s in predpis["services"].items()}
 

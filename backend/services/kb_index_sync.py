@@ -121,7 +121,7 @@ def deletion_is_safe(porovnanie: KbIndexComparison) -> bool:
     """Smie sa toto porovnanie použiť na MAZANIE osirelých dokumentov?
 
     ⚠️ **Incident 11.09.2026 — táto poistka vznikla z reálnej škody.** Testy na hostiteľovi spustili
-    cez ``TestClient(app)`` skutočný životný cyklus appky a s ním túto slučku, kým
+    cez ``TestClient(app)`` skutočný životný cyklus aplikácie a s ním túto slučku, kým
     ``tests/conftest.py`` mal ``knowledge_base_path`` prepnutý na dočasný priečinok. Slučka videla
     prázdny strom, vyhodnotila všetkých ~150 dokumentov ako osirelých a zmazala ich z OSTRÉHO
     indexu: 3718 bodov → 293. Obnoviť sa to dalo (zdrojom pravdy je disk), ale chyba nebola v testoch

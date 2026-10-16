@@ -1,10 +1,10 @@
 """Dohoda o zapnutí živého náhľadu je napísaná, nie tipovaná (ICCINT-93, ICCINT-95).
 
-**Čo sa stalo prvýkrát.** Pieskovisko náhľadu nastavovalo appke ``VITE_PREVIEW=1``, ale nikde nebolo
-napísané, akú hodnotu má appka očakávať. Štyri projekty tipli pravdivostnú kontrolu a náhľad im
+**Čo sa stalo prvýkrát.** Pieskovisko náhľadu nastavovalo aplikácii ``VITE_PREVIEW=1``, ale nikde nebolo
+napísané, akú hodnotu má aplikácia očakávať. Štyri projekty tipli pravdivostnú kontrolu a náhľad im
 fungoval; NEX Manager tipol ``=== "true"`` a náhľad sa mu vôbec nezapol.
 
-⚠️ **A prejavilo sa to ako niečo úplne iné.** Predstierané odpovede sa nezapli, appka sa pýtala
+⚠️ **A prejavilo sa to ako niečo úplne iné.** Predstierané odpovede sa nezapli, aplikácia sa pýtala
 skutočného servera, ten v náhľade nie je — a Manažér dostal PRIHLASOVACIU STENU a hlásil „nepoznám
 prihlasovacie údaje“. Skutočná príčina bol preklep v podmienke. Zmerané 09.09.2026 na NEX Manager 1.1.0;
 zastavilo to prácu na hodinu.
@@ -19,7 +19,7 @@ teoretické: vypínač ``VITE_LAUNCH_LIVE=false`` sa reťazcom „false“ naoza
 zapnú, čokoľvek iné — ``false``, ``0``, ``off``, prázdno — nie. Obe chyby tým zanikajú naraz.
 
 Stráže čítajú SKUTOČNÉ súbory: hodnotu z argv pieskoviska, podmienku zo šablóny na disku a podmienky
-skutočných appiek. Je to tá istá myšlienka ako pri stráži nad ``init.sh``: dohoda medzi dvoma
+skutočných aplikácií. Je to tá istá myšlienka ako pri stráži nad ``init.sh``: dohoda medzi dvoma
 repozitármi sa overuje proti nim samým, nie proti kópii vedľa.
 """
 
@@ -38,7 +38,7 @@ OFF_VALUES = ("false", "0", "off", "no", "")
 TEMPLATE = pathlib.Path("/home/icc/knowledge/templates/claude-project/frontend-skeleton")
 FRONTENDS = pathlib.Path("/opt/projects")
 
-#: Appky, ktoré ešte kontrolujú príznak PRAVDIVOSTNE. Dnes im to nič nekazí (``VITE_PREVIEW`` sa
+#: Aplikácie, ktoré ešte kontrolujú príznak PRAVDIVOSTNE. Dnes im to nič nekazí (``VITE_PREVIEW`` sa
 #: nikde nenastavuje na ``false``), ale zoznam je západka: keď sa niektorá prepíše na výslovný
 #: zoznam, táto stráž spadne a zoznam sa musí skrátiť. Prázdny zoznam = hospodárstvo je zjednotené.
 #:
@@ -51,12 +51,12 @@ APPS_STILL_ON_TRUTHINESS = ("nex-productcatalogs", "nex-shopify")
 
 
 def _flag_value() -> str:
-    """Hodnota, ktorú pieskovisko appke naozaj pošle — čítaná z argv, nie z konštanty vedľa."""
+    """Hodnota, ktorú pieskovisko aplikácii naozaj pošle — čítaná z argv, nie z konštanty vedľa."""
     argv = vizual_sandbox.build_run_argv(slug="vzor", frontend_host_path=pathlib.Path("/tmp/vzor"))
     for arg in argv:
         if isinstance(arg, str) and arg.startswith("VITE_PREVIEW="):
             return arg.split("=", 1)[1]
-    raise AssertionError("pieskovisko appke vôbec nepovie, že ide o náhľad")
+    raise AssertionError("pieskovisko aplikácii vôbec nepovie, že ide o náhľad")
 
 
 #: Čítanie je v ``backend.testing`` — používajú ho obe stráže nad príznakom náhľadu (v tomto
@@ -66,13 +66,13 @@ _accepted_values = preview_accepted_values
 
 
 def test_the_sandbox_sends_a_value_from_the_agreed_list() -> None:
-    """Čo pieskovisko posiela, musí byť na zozname — inak by náhľad nezaplo ani správne napísanej appke."""
+    """Čo pieskovisko posiela, musí byť na zozname — inak by náhľad nezaplo ani správne napísanej aplikácii."""
     posiela = _flag_value()
 
     assert posiela, "prázdna hodnota náhľad nezapne nijakou kontrolou"
     assert posiela in vizual_sandbox.PREVIEW_ON, (
         f"pieskovisko posiela {posiela!r}, čo na zozname zapínacích hodnôt {vizual_sandbox.PREVIEW_ON} "
-        "nie je — appka podľa šablóny náhľad nezapne a Manažér dostane prihlasovaciu stenu"
+        "nie je — aplikácia podľa šablóny náhľad nezapne a Manažér dostane prihlasovaciu stenu"
     )
 
 
@@ -138,7 +138,7 @@ def test_the_agent_is_told_the_list_not_just_the_flag_name(tmp_path) -> None:
 
 @pytest.mark.parametrize("slug", ["nex-manager", "nex-productcatalogs", "nex-shopify", "nex-websites"])
 def test_the_real_apps_accept_what_the_sandbox_sends(slug: str) -> None:
-    """⚠️ Dohoda sa overuje proti SKUTOČNÝM appkám, nie proti vymyslenému vzoru.
+    """⚠️ Dohoda sa overuje proti SKUTOČNÝM aplikáciám, nie proti vymyslenému vzoru.
 
     Práve toto by bolo chytilo NEX Manager hneď — mal ``=== "true"``, kým pieskovisko posielalo ``1``.
     Mimo ANDROSu sa preskočí s uvedeným dôvodom, nie potichu prejde.
@@ -165,7 +165,7 @@ def test_the_real_apps_accept_what_the_sandbox_sends(slug: str) -> None:
 def test_the_apps_still_on_truthiness_are_a_known_and_shrinking_list() -> None:
     """Západka nad zvyškom hospodárstva (ICCINT-95).
 
-    Nie je to výnimka, ktorá by dieru zakryla — je to jej evidencia. Keď sa appka prepíše na výslovný
+    Nie je to výnimka, ktorá by dieru zakryla — je to jej evidencia. Keď sa aplikácia prepíše na výslovný
     zoznam, táto stráž spadne a zoznam sa musí skrátiť; nedá sa na to ticho zabudnúť.
     """
     truthiness = []
@@ -177,7 +177,7 @@ def test_the_apps_still_on_truthiness_are_a_known_and_shrinking_list() -> None:
             truthiness.append(slug)
 
     assert tuple(truthiness) == APPS_STILL_ON_TRUTHINESS, (
-        f"appky s pravdivostnou kontrolou sú {tuple(truthiness)}, evidencia hovorí "
+        f"aplikácie s pravdivostnou kontrolou sú {tuple(truthiness)}, evidencia hovorí "
         f"{APPS_STILL_ON_TRUTHINESS} — priprav zoznam do súladu (a ak sa skrátil, je to dobrá správa)"
     )
 
@@ -185,7 +185,7 @@ def test_the_apps_still_on_truthiness_are_a_known_and_shrinking_list() -> None:
 def test_the_guard_recognises_a_check_moved_into_a_helper(tmp_path) -> None:
     """⚠️ Jadro ICCINT-108: stráž musí vidieť aj rozhodovanie o súbor vedľa.
 
-    Kým hľadala porovnania len v ``main.tsx``, appka, ktorá si ich vytiahla do pomocníka, jej
+    Kým hľadala porovnania len v ``main.tsx``, aplikácia, ktorá si ich vytiahla do pomocníka, jej
     pripadala ako pravdivostná — a hlásila dlh, ktorý už neexistoval. Slepé miesto na bezpečnú
     stranu je stále slepé miesto: západka nad zvyškom hospodárstva bola tým nepravdivá.
     """

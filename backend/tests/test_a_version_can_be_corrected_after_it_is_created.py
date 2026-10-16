@@ -55,7 +55,7 @@ def _seed(db_session, tmp_path, monkeypatch, *, slug: str) -> Version:
         id=uuid.uuid4(),
         project_id=project.id,
         version_number="1.1.0",
-        name="Inštalovateľná appka",
+        name="Inštalovateľná aplikácia",
         status="planned",
     )
     db_session.add_all([owner, project, version])

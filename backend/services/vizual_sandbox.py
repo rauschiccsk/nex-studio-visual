@@ -61,9 +61,9 @@ PROJECTS_ROOT = Path("/opt/projects")
 #: The port Vite listens on INSIDE the sandbox (Traefik load-balances to it over ``nex-proxy-net``).
 VITE_INTERNAL_PORT = 5173
 
-#: Hodnoty, ktorými sa živý náhľad ZAPÍNA — a nič iné (ICCINT-93, ICCINT-95). Appka porovnáva
+#: Hodnoty, ktorými sa živý náhľad ZAPÍNA — a nič iné (ICCINT-93, ICCINT-95). Aplikácia porovnáva
 #: ``import.meta.env.VITE_PREVIEW`` s celým týmto zoznamom; šablóna nového projektu to má tak
-#: napísané a stráž to kontroluje proti skutočným appkám na disku.
+#: napísané a stráž to kontroluje proti skutočným aplikáciám na disku.
 #:
 #: ⚠️ Dva protichodné omyly, oba už zmerané:
 #: - porovnanie s JEDINÝM slovom sa minie s hodnotou a náhľad sa vôbec nezapne — NEX Manager mal
@@ -76,8 +76,8 @@ VITE_INTERNAL_PORT = 5173
 #: prázdno) nezapína.
 PREVIEW_ON = ("1", "true", "yes", "on")
 
-#: Čo pieskovisko appke naozaj pošle. Musí byť z ``PREVIEW_ON``; ``true`` je z nich to jediné, ktoré
-#: vyhovie aj starším appkám s pravdivostnou kontrolou, aj tým s porovnaním so slovom.
+#: Čo pieskovisko aplikácii naozaj pošle. Musí byť z ``PREVIEW_ON``; ``true`` je z nich to jediné, ktoré
+#: vyhovie aj starším aplikáciám s pravdivostnou kontrolou, aj tým s porovnaním so slovom.
 PREVIEW_FLAG_VALUE = "true"
 
 #: The dev-server base image (the PoC image). node:20's ``node`` user is uid/gid 1000 — the same as the
@@ -359,7 +359,7 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
         # (replacing the decoupled self-contained mockup): the Manažér approves the REAL nex-shared screens.
         #
         # ⚠️ HODNOTA JE ``true``, A NIE ``1`` — ICCINT-93. Dovtedy sa posielala ``1`` a nikde nebolo
-        # napísané, akú hodnotu má appka očakávať, takže si to každý projekt tipol. Štyri projekty tipli
+        # napísané, akú hodnotu má aplikácia očakávať, takže si to každý projekt tipol. Štyri projekty tipli
         # pravdivostnú kontrolu a fungovalo im to; NEX Manager tipol ``=== "true"`` a náhľad sa mu vôbec
         # nezapol. Zmerané 09.09.2026 — a Manažér z toho videl PRIHLASOVACIU STENU a hlásil „nepoznám
         # prihlasovacie údaje“, teda niečo úplne iné, než čo bolo príčinou.
@@ -368,8 +368,8 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
         # rozumná kontrola, ktorá by prešla pri ``1`` a zlyhala pri ``true``. Odstraňuje to celú triedu
         # chyby namiesto toho, aby sa na správnu hodnotu spoliehalo.
         #
-        # Hodnota sa skladá z ``PREVIEW_ON`` (nižšie) — appky porovnávajú s tým istým zoznamom, takže
-        # dohoda medzi pieskoviskom a appkou stojí na jednom mieste, nie na dvoch kópiách.
+        # Hodnota sa skladá z ``PREVIEW_ON`` (nižšie) — aplikácie porovnávajú s tým istým zoznamom, takže
+        # dohoda medzi pieskoviskom a aplikáciou stojí na jednom mieste, nie na dvoch kópiách.
         "-e",
         f"VITE_PREVIEW={PREVIEW_FLAG_VALUE}",
         # A writable HOME for numeric --user (node user's /home/node is 1000-owned, but be explicit).

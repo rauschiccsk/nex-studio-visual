@@ -58,6 +58,6 @@ def customer_warning(manager_env: Mapping[str, str], module_envs: Mapping[str, M
     if not broken:
         return None
     return (
-        "Z NEX Managera sa nedá otvoriť: " + " | ".join(broken) + ". Appky bežia — pokazené je otvorenie z NEX "
+        "Z NEX Managera sa nedá otvoriť: " + " | ".join(broken) + ". Aplikácie bežia — pokazené je otvorenie z NEX "
         "Managera; nastavenia treba zladiť (urobí to technický tím)."
     )

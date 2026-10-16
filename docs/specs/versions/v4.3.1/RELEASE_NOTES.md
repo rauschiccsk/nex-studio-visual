@@ -6,7 +6,7 @@ Dve vety, ktoré zneli upokojujúco a nič nehovorili. Obe opravené.
 
 Po každej oprave stálo na obrazovke to isté:
 
-> Kontrola po oprave — appka sa spustila.
+> Kontrola po oprave — aplikácia sa spustila.
 > *Technický detail:* `app booted + responds`
 
 Zakaždým rovnako, po anglicky, bez ohľadu na to, čo sa nameralo. Manažér sa
@@ -17,7 +17,7 @@ Kontrola pritom v tej chvíli vie dosť — ktoré služby odpovedali, čo dobeh
 
 Odteraz povie napríklad:
 
-> Appka nabehla a odpovedá. Odpovedali: backend, frontend. Dobehli čisto:
+> Aplikácia nabehla a odpovedá. Odpovedali: backend, frontend. Dobehli čisto:
 > migrate. **V tom čase ešte bežali: test — ich výsledok táto kontrola
 > neposudzuje.**
 

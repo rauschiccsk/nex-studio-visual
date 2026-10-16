@@ -180,7 +180,7 @@ def test_refusal_message_names_the_path_the_file_and_that_nothing_changed(tmp_pa
     # had to move because the exit it named was the wrong one: first "allow_overwrite", an internal
     # keyword argument nobody can pass, then the terminal command — which ICCINT-130 measured going
     # to a DIFFERENT directory than the cockpit uses (``/opt/uat/<slug>`` vs
-    # ``/opt/uat/<zákazník>/<appka>``), so following it would build a second, parallel deployment.
+    # ``/opt/uat/<zákazník>/<aplikácia>``), so following it would build a second, parallel deployment.
     # The real exit has been a button since ICCINT-102.
     assert "Prevziať inštaláciu" in message
     assert "uat-deploy.py" not in message, "hláška posiela na príkaz, ktorý mieri do iného priečinka"

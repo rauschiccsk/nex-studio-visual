@@ -25,4 +25,4 @@ Veta vnútri objektu je stále veta. Odteraz sa vytiahne a ukáže. Poistka prot
 zostáva.
 
 Platí to pre **celý kokpit**, nielen pre prevzatie — cez to isté miesto ide každá chybová
-hláška v appke.
+hláška v aplikácii.

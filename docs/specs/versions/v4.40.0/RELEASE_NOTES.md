@@ -7,7 +7,7 @@ projektu. Odteraz do nej dodá novú verziu a ničoho iného sa nedotkne.
 
 Pri prvom skutočnom nasadení NEX Inboxu k MÁGERSTAVU sa ukázalo, čo to znamená. Nasadenie prepísalo
 inštalácii mená služieb, sieť, **názov databázy** aj **označenie zákazníka** — hodnotami z vývojového
-projektu. Appka potom hľadala databázu, ktorá na tom stroji neexistuje, a bola sedem minút mimo
+projektu. Aplikácia potom hľadala databázu, ktorá na tom stroji neexistuje, a bola sedem minút mimo
 prevádzky. Dáta zostali nedotknuté a inštalácia sa obnovila zo zálohovaných súborov.
 
 Pokúšali sme sa to riešiť tak, že sme vymenúvali údaje, ktoré treba zachovať. Za dva dni to boli

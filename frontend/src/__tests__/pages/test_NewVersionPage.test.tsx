@@ -344,7 +344,7 @@ describe("NewVersionPage — pripravené zadanie a úpravy hlavičky", () => {
   });
 
   it("po prvom neúspechu uloží prepísaný názov, nie ten pôvodný (ICCINT-91)", async () => {
-    createVersionMock.mockResolvedValue({ ...version, name: "Inštalovateľná appka", description: "Moje zadanie." });
+    createVersionMock.mockResolvedValue({ ...version, name: "Inštalovateľná aplikácia", description: "Moje zadanie." });
     // Prvé uloženie odmietne poistka proti prepísaniu — verzia však už vznikla.
     writeZadanieMock.mockRejectedValueOnce(
       new ApiError(409, "conflict", {
@@ -357,7 +357,7 @@ describe("NewVersionPage — pripravené zadanie a úpravy hlavičky", () => {
     writeZadanieMock.mockResolvedValue({ relative_path: "x", status: "saved" });
 
     await renderPage();
-    await userEvent.type(await screen.findByPlaceholderText(/napr. platobný modul/i), "Inštalovateľná appka");
+    await userEvent.type(await screen.findByPlaceholderText(/napr. platobný modul/i), "Inštalovateľná aplikácia");
     await userEvent.type(screen.getByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Moje zadanie.");
     await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
     expect(await screen.findByRole("button", { name: "Prevziať text z disku do poľa" })).toBeInTheDocument();

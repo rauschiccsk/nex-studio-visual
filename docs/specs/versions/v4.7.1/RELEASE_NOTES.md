@@ -30,7 +30,7 @@ ten istý. V dvoch prípadoch z troch teda hovoril nepravdu.
 Zlepší sa tým aj ten prípad, kde bol text náhodou správny: pravdivá hláška o limite
 **menuje konkrétny strop v miliónoch**, kým tá natvrdo napísaná nie.
 
-A keď dôvod chýba, appka si ho **nevymyslí** — povie len, že stavba je pozastavená.
+A keď dôvod chýba, aplikácia si ho **nevymyslí** — povie len, že stavba je pozastavená.
 Radšej menej, než nepravdu.
 
 ## Ešte niečo, čo stojí za zmienku

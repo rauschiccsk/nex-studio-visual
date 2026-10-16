@@ -28,15 +28,15 @@ prehliadka pred prevzatím mu ukáže poslednú verziu, ktorú o sebe projekt ho
 
 ## Príznak živého náhľadu sa nedá tipnúť zle
 
-Pieskovisko posielalo appke hodnotu, o ktorej nikde nestálo, ako ju má appka čítať. Štyri
+Pieskovisko posielalo aplikácii hodnotu, o ktorej nikde nestálo, ako ju má aplikácia čítať. Štyri
 projekty si to tipli správne, jeden nesprávne — a jeho náhľad sa vôbec nezapol. Manažér
 z toho videl prihlasovaciu obrazovku a príčinu hľadal úplne inde.
 
 Posiela sa hodnota, ktorá vyhovie obom zvyklostiam naraz. Trieda chyby tým zaniká.
 
-## Kontrola dverí do nasadenej appky skúša tú cestu, po ktorej sa naozaj chodí
+## Kontrola dverí do nasadenej aplikácie skúša tú cestu, po ktorej sa naozaj chodí
 
-Skúšala starý spôsob spúšťania — ten, ktorý appky ďalej prijímajú. Svietila by teda
+Skúšala starý spôsob spúšťania — ten, ktorý aplikácie ďalej prijímajú. Svietila by teda
 nazeleno aj vtedy, keby ten skutočne používaný spôsob nefungoval. Zelená stráž, ktorá
 neskúša cestu, po ktorej sa chodí, je horšia než červená.
 

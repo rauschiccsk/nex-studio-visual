@@ -12,7 +12,7 @@ Pri prvom ostrom použití sa ukázalo, že to odôvodnenie neplatí. Skúšobn�
 ukladá originály faktúr do `originals` a vyexportované XML do `exports` — a zdrojový projekt o tých
 priečinkoch nevie, lebo sám používa iné.
 
-Prevzatie by ich zahodilo. Cesty v appke by zostali bez pripojenia na disk a ich obsah by sa stratil
+Prevzatie by ich zahodilo. Cesty v aplikácii by zostali bez pripojenia na disk a ich obsah by sa stratil
 pri každom ďalšom nasadení. Nie hlučne, ticho.
 
 ## Čo to znamená pre teba

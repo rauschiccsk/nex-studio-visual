@@ -2,7 +2,7 @@
 
 Popis verzie vzniká pri zakladaní ako kópia Zadania a odvtedy sa nemal ako opraviť.
 Prejavilo sa to hneď: verzia sa premenovala na „Inštalovateľná aplikácia PWA", ale popis
-zostal starý — „Inštalovateľná appka PWA".
+zostal starý — „Inštalovateľná aplikácia PWA".
 
 Panel Nastavenia verzie ho teraz ponúka spolu s Číslom, Názvom a Cieľovým dátumom.
 

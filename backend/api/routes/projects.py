@@ -687,11 +687,11 @@ def _ports_for_adoption(db: Session, found: project_adoption.Discovered) -> dict
     Director 11.09.2026: *„Prevziať aplikáciu do NEX Studio Visual znamená zaviesť aj ustanovené
     pravidlá. Starý projekt nemá rozbiť.“*
 
-    Tie polia totiž nie sú záznam o tom, na čom appka počúva — sú to položky v **evidencii pridelených
+    Tie polia totiž nie sú záznam o tom, na čom aplikácia počúva — sú to položky v **evidencii pridelených
     portov**. Zapísať do nej staré čísla by neznamenalo zaznamenať skutočnosť, ale zaviesť trvalú
     výnimku; evidencia s výnimkami prestane byť evidenciou.
 
-    **Bežiacej appky sa to nedotkne** — overené po celej ceste: generované nasadenie si vnútorné porty
+    **Bežiacej aplikácie sa to nedotkne** — overené po celej ceste: generované nasadenie si vnútorné porty
     číta z compose samotného projektu (``uat_provisioner.detect_internal_port``), tieto polia sa
     používajú IBA na zápis do evidencie (``port_registry.record_allocation``), a ``loopback_base_port``
     nikto pri nasadzovaní neodovzdáva.
@@ -711,7 +711,7 @@ def _ports_for_adoption(db: Session, found: project_adoption.Discovered) -> dict
     poznamka = (
         f"porty: projekt dnes používa {be or '?'} / {fe or '?'} / {dbp or '?'}; pri prevzatí dostane "
         f"blok {base} / {base + 1} / {base + 2} podľa nášho štandardu (D-020). "
-        "Na bežiacu aplikáciu to nemá vplyv — je to zápis do evidencie, appka počúva ďalej na svojom."
+        "Na bežiacu aplikáciu to nemá vplyv — je to zápis do evidencie, aplikácia počúva ďalej na svojom."
     )
     return {
         "backend_port": base,
@@ -1042,7 +1042,7 @@ def create_project(
         #
         # Novému projektu sa prvá verzia 0.1.0 založiť musí — bez nej sa v ňom nedá začať a §2 charty
         # hovorí, že žiadna zmena dokumentu neexistuje bez verzie. Pri PREVZATÍ je to však výmysel:
-        # projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — appka bežala ako 1.0.99
+        # projekt svoju históriu má. Zmerané 09.09.2026 na NEX Managerovi — aplikácia bežala ako 1.0.99
         # a v docs/specs/versions/ mala v0.1.0 aj v1.0.0, kým kokpit ukazoval jedinú „plánovanú“ 0.1.0.
         #
         # ⚠️ A nebolo to len nepekné číslo: priečinok docs/specs/versions/v0.1.0/ tam UŽ EXISTOVAL

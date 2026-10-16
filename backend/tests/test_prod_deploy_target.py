@@ -60,7 +60,7 @@ def test_the_original_environment_is_not_mutated():
 def test_the_readiness_check_asks_the_same_machine_it_deployed_to(monkeypatch):
     """Nasadenie a overenie musia hovoriť s TÝM ISTÝM strojom.
 
-    Overenie „appka naozaj slúži" sa robí príkazom ``docker compose exec`` — teda cez Docker. Keby
+    Overenie „aplikácia naozaj slúži" sa robí príkazom ``docker compose exec`` — teda cez Docker. Keby
     nasadenie išlo na MAGER a overenie sa pýtalo tunajšieho Dockera, kokpit by hlásil úspech podľa
     stroja, na ktorom sa nič nenasadilo. To je horšie než neoverovať vôbec.
     """

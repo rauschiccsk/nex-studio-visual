@@ -2,7 +2,7 @@
 
 Two sentences the Director met on one long build day, both reassuring, both content-free.
 
-**ICCINT-44.** Every round the screen read the same line — *"Kontrola po oprave — appka sa spustila"* with
+**ICCINT-44.** Every round the screen read the same line — *"Kontrola po oprave — aplikácia sa spustila"* with
 ``app booted + responds`` behind the disclosure. Eleven characters of English on an otherwise Slovak screen,
 identical whatever had happened, because the probe returned a constant and everything it had measured was
 thrown away. On 31.08.2026 that hid the fact that mattered: the ``test`` container was still RUNNING when the

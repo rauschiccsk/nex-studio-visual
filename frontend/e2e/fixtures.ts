@@ -504,11 +504,16 @@ const DEPLOY_MATRIX: S["DeployMatrix"] = {
       uat_last_deploy_at: "2026-10-11T13:30:00Z",
       uat_last_deploy_detail:
         "Nasadené 1.7.1. Kontrola zdravia pred aj po nasadení: database ok, imap ok, smb ok. Vstupenka z NEX Managera prešla.",
+      uat_last_deploy_warnings: [],
       uat_last_attempt_failed: false,
       prod_version: "1.7.1",
       prod_url: "https://magerstav-inbox.icc.sk",
       prod_last_deploy_at: "2026-10-11T19:53:00Z",
       prod_last_deploy_detail: "Nasadené na MAGER; verejná adresa odpovedá.",
+      // DEV-129: a long warning the row must wrap, not push the page sideways.
+      prod_last_deploy_warnings: [
+        "Aplikácia je nasadená a beží, ale spustenie jedným kliknutím (tlačidlo „Spustiť“) zatiaľ nefunguje: nie je nasadený NEX Manager tohto zákazníka.",
+      ],
       prod_last_attempt_failed: false,
     },
     {
@@ -521,11 +526,13 @@ const DEPLOY_MATRIX: S["DeployMatrix"] = {
       uat_url: null,
       uat_last_deploy_at: null,
       uat_last_deploy_detail: null,
+      uat_last_deploy_warnings: [],
       uat_last_attempt_failed: false,
       prod_version: null,
       prod_url: null,
       prod_last_deploy_at: null,
       prod_last_deploy_detail: null,
+      prod_last_deploy_warnings: [],
       prod_last_attempt_failed: false,
     },
   ],

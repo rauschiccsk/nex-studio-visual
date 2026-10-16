@@ -27,8 +27,8 @@ once and mirrored by a DB CHECK so the value set has a single source of truth
 (the established enum-tuple pattern).
 """
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, Identity, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, Identity, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -114,6 +114,10 @@ class DeployEvent(Base, UUIDMixin, TimestampMixin):
     # Short non-secret detail (e.g. ``"OK"``, a deploy error tail, the deployed
     # URL). NEVER holds secret material (§4) — only a human-readable summary.
     detail = Column(Text, nullable=True)
+    # DEV-129: what went imperfectly, one sentence each — kept apart from ``detail``, never glued into it (the page
+    # said every warning twice, the first copy behind an English „warnings:“). Non-secret, like ``detail``. Events
+    # recorded before this column carry ``[]`` and their warnings in ``detail`` (:func:`deploy.deploy_report`).
+    warnings = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
 
     __table_args__ = (
         CheckConstraint(_ck_in("environment", ENVIRONMENT_VALUES), name="ck_deploy_events_environment"),

@@ -13,7 +13,7 @@ bude musieť vždy upratať niečo?"* Nemá. Je to chýbajúci krok v nasadzovan
 ⚠️ Čo tieto stráže NEDOVOLIA zmeniť: po ZLYHANÍ sa neupratuje (cesta späť je dôležitejšia než
 miesto), pripnuté obrazy zostávajú (sú tou cestou späť), pri inštalácii na tomto stroji sa vyrovnávacia
 pamäť stavby neupratuje (potrebujú ju skúšky CI na bežcoch), a zlyhanie upratovania nesmie zhodiť nasadenie —
-appka beží, len disku sa neuľavilo. Staršie verzie obrazov inštalácie sa od DEV-124 upratujú aj tu
+aplikácia beží, len disku sa neuľavilo. Staršie verzie obrazov inštalácie sa od DEV-124 upratujú aj tu
 (``test_old_image_versions_go_after_a_deploy.py``).
 """
 
@@ -117,7 +117,7 @@ def test_an_instance_on_this_machine_is_not_cleaned(monkeypatch) -> None:
 
 
 def test_a_failed_cleanup_does_not_fail_the_deploy(monkeypatch) -> None:
-    """Appka beží, len disku sa neuľavilo. Zhodiť kvôli tomu nasadenie by bolo neúmerné."""
+    """Aplikácia beží, len disku sa neuľavilo. Zhodiť kvôli tomu nasadenie by bolo neúmerné."""
     _zachyt(monkeypatch, returncode=1)
 
     detail = asyncio.run(O._uprac_na_cieli(True, "OK", "mager"))

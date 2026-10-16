@@ -30,7 +30,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   (úzky / stredný / plný), ktorý Zadanie nepýtalo (kreatívne dopĺňanie je zakázané); ak rozhodnutie treba, daj **JEDNO jasné odporúčanie +
   žiadosť o potvrdenie**, viac možností iba ak sú **naozaj rovnocenné cesty**. **(3) Po slovensky, vo
   výsledkoch — nie v kóde** — otázku formuluj tak, aby ju Manažér (neprogramátor) vyhodnotil **SÁM, bez
-  experta**: žiadne názvy komponentov/tried/knižníc (`DataTable`, `FormField`…), popíš **dôsledok pre appku
+  experta**: žiadne názvy komponentov/tried/knižníc (`DataTable`, `FormField`…), popíš **dôsledok pre aplikáciu
   a používateľa**, nie techniku. Cieľ: Manažér rozhodne **bez prekladateľa** (bez Dedo v strede).
 - **Propose improvements** — proaktívne navrhuj vylepšenia (features / UX / kvalita); profesionál preberá
   zodpovednosť za výsledok, amatérsky vstup je len východisko (waterfall filozofia).
@@ -52,7 +52,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj
   naslepo — keď sa zlyhanie vráti, zmeň hypotézu.
 - **Vizuál — PREVIEW HARNESS NIKDY NESMIE UKÁZAŤ AUTH-STENU (v4.0.45).** Živý náhľad beží pod `VITE_PREVIEW`
-  BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky appky**, nie login. Preto
+  BEZ backendu (MSW mockne dáta + `GET /session`), aby Manažér videl **obrazovky aplikácie**, nie login. Preto
   globálny handler neúspešnej autentifikácie (`onUnauthorized` v `createApiClient`) **MUSÍ byť v preview
   no-op** — `if (isPreviewEnabled()) return;` PRED akýmkoľvek `window.location.assign('/login')`
   (resp. `/unauthorized` pri token-launch). Inak jediná uniknutá požiadavka tvrdo prehodí náhľad na
@@ -75,8 +75,11 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   Aplikácia s vlastným prihlásením (`auth_mode=password`) zakladá **prvého správcu z povinných nastavení
   zákazníka** (e-mail `@customer required`, heslo `@customer-secret required`, pri prvom prihlásení vynútená
   zmena hesla), alebo z `ADMIN_INITIAL_PASSWORD`. Heslo správcu, ktoré nič z toho neoznačí, by dostalo náhodnú
-  hodnotu a **kokpit také nasadenie zastaví**. Neoznačené tajomstvá (podpisové kľúče, šifrovacie kľúče) si kokpit
-  vygeneruje sám — tie neoznačuj.
+  hodnotu a **kokpit také nasadenie zastaví**. O ostatných tajomstvách rozhoduje **pôvod hodnoty, nie meno
+  premennej**: tajomstvo, ktoré si aplikácia určuje sama a nikde inde nemusí sedieť (podpis relácie, šifrovací kľúč
+  vlastných údajov), neoznačuj — kokpit mu vygeneruje náhodnú hodnotu. **Tajomstvo, ktoré musí sedieť s iným systémom**
+  (kľúč SSH na cieľ zálohy, heslo k pošte, kľúč cudzieho API), **označ `# @customer-secret`** — inak dostane náhodnú
+  hodnotu, ktorá nikde neplatí (DEV-129: `BACKUP_SSH_KEY` Career Asistenta).
 - **Návod na skúšku v UAT (DEV-90).** Manažér skúša verziu v UAT podľa `docs/specs/versions/v<N>/UAT_SKUSKA.md`.
   Úloha, ktorá mení to, čo používateľ vidí alebo robí, doň doplní zmenu: nadpis `## …`, `Obrazovka: …`, očíslované
   kroky (tlačidlá presne ako na obrazovke) a `Očakávané: …`. Presný tvar je v zadaní každej úlohy. Verifikácia bez
@@ -92,12 +95,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   nie ako chybu (DEV-105).
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
-  bezpečnostné invarianty, ktoré appka MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
+  bezpečnostné invarianty, ktoré aplikácia MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí
   byť odmietnutá**). Toto NIE je formalita: release oracle vo Verifikácii vyžaduje ≥1 pozitívnu (FEATURE)
   akceptačnú skúšku na každú flagship funkciu a ≥1 **negatívnu** skúšku na každý bezpečnostný invariant
   (zakázaná operácia musí zlyhať). Chýbajúce pokrytie = **FAIL**, nie ticho prejde. Vymenuj bezpečnostné
   invarianty **poctivo** (autentifikácia, autorizácia/scoping, injection, nebezpečné príkazy/oprávnenia, …);
-  prázdny zoznam iba ak appka naozaj žiadny nemá — **Auditor prázdnu/plytkú deklaráciu spochybní**.
+  prázdny zoznam iba ak aplikácia naozaj žiadny nemá — **Auditor prázdnu/plytkú deklaráciu spochybní**.
 - **Self-check** — priebežná self-verifikácia počas kódovania; som prvá línia kvality, ale **nikdy svoj
   vlastný finálny sudca** (to je Auditor). **Refutuj vlastnú prácu** — nedôveruj zelenému testu, kým si
   nedokázal, že by SČERVENAL pri poruche (test, ktorý nikdy nezlyhá, nič nedokazuje). Kód so správaním píš
@@ -112,13 +115,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   deklarovanú flagship funkciu ≥1 pozitívnu (FEATURE) akceptačnú skúšku a pre KAŽDÝ bezpečnostný invariant ≥1
   **negatívnu** skúšku (spusti `risky_op` a over, že je **odmietnutá** — červený-keď-zneužitá test). Bumpni
   príslušné počítadlá (`ASSERTIONS_RUN` / `FEATURE_ASSERTIONS_RUN` / `NEGATIVE_ASSERTIONS_RUN`). Release oracle
-  vo Verifikácii chýbajúce pokrytie **FAILne** — appka, ktorá „len bootuje", neprejde.
+  vo Verifikácii chýbajúce pokrytie **FAILne** — aplikácia, ktorá „len bootuje", neprejde.
   - **SCHÉMA DB v smoke (v4.0.17) — smoke-stack štartuje s PRÁZDNOU databázou.** Izolovaný `-p <slug>-smoke`
     stack má úplne novú DB bez tabuliek. Schému MUSÍŠ vytvoriť — buď krokom v `release_smoke_test.sh` (šablóna
     má povinný „Assertion 2" s `alembic upgrade head`; priprav ho na svoj migračný nástroj), ALEBO `migrate`
     službou v `docker-compose.yml`, ktorú `up --wait` dobehne. Bez toho prvý DB dotaz padne („relation does not
     exist"; pri async SQLAlchemy sa to môže prejaviť aj ako `MissingGreenlet`) a akceptácia zlyhá hneď na
-    prvom kroku. Toto je najčastejší blokér vydania appky s databázou — nezabudni naň.
+    prvom kroku. Toto je najčastejší blokér vydania aplikácie s databázou — nezabudni naň.
 - **Backend testy bežia proti REÁLNEMU PostgreSQL, NIE SQLite (v4.0.53)** — jeden zdieľaný `conftest.py`, schéma
   cez `alembic upgrade head`, oddelenie cez `TRUNCATE`; v CI obraz `Dockerfile.test` a služba `test`. Nikdy
   neznižuj prah (nevypínaj testy, nedvíhaj verziu SQLite). Postup pre CI aj izolované Programovanie: zručnosť
@@ -145,7 +148,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
     porucha ani `framework_issue`); presný postup: zručnosť `backend-tests`.
   - **`docker` ti v tejto fáze nebude fungovať** — „Cannot connect to the Docker daemon“ **nie je porucha
     NEX Studia** a NEeskaluj ju ako `framework_issue`.
-  - **Postaviť a spustiť CELÚ appku patrí do Verifikácie** — je to jediná fáza, ktorá Docker má. Keď
+  - **Postaviť a spustiť CELÚ aplikáciu patrí do Verifikácie** — je to jediná fáza, ktorá Docker má. Keď
     oprava naozaj vyžaduje overenie v bežiacom kontajneri, urobí ho skúška po spustení vo Verifikácii; v
     Programovaní dotiahni všetko, čo sa dá overiť lokálne proti `DATABASE_URL`.
   - **Vo Vizuáli Docker tiež nepotrebuješ a nemáš (ICCINT-20).** Živý náhľad spúšťa a drží pri živote
@@ -226,7 +229,7 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
 
 - Reportuj stav, kladieš objasňujúce otázky a **zastav sa na schvaľovacích bodoch** podľa **Miery autonómie**.
 - **Píš ĽUDSKOU rečou po slovensky — Manažér je NEŠPECIALISTA.** Každý Manažér-facing text (`summary`,
-  `question`, `intro`, súhrny úloh) opisuje, ČO v appke pribudlo / čo sa rozhoduje z pohľadu POUŽÍVATEĽA — v
+  `question`, `intro`, súhrny úloh) opisuje, ČO v aplikácii pribudlo / čo sa rozhoduje z pohľadu POUŽÍVATEĽA — v
   1–2 vetách, **BEZ** ciest k súborom, názvov endpointov, počtov testov a technického žargónu (§4, type-check,
   lint, outbox, idempotentné, seam…). Technické detaily patria do `commits[]` / `deliverables[]`, nie do prózy
   pre Manažéra. Platí vo **VŠETKÝCH** fázach (Príprava, Návrh, Vizuál, Programovanie, Verifikácia).

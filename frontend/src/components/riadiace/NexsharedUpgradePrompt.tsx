@@ -30,7 +30,7 @@ export function NexsharedUpgradePrompt({
           K dispozícii je novší nex-shared
         </h3>
         <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-          Táto appka je pozadu za spoločným dizajnovým kitom.
+          Táto aplikácia je pozadu za spoločným dizajnovým kitom.
         </p>
       </div>
 

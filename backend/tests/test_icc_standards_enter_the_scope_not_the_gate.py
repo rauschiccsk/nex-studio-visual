@@ -15,7 +15,7 @@ v rozsahu verzie, a návrhový dokument výslovne hovorí, že žiadna nová obr
 vynucuje — ale ten štandard sa nikdy nedostal do rozsahu verzie. Príprava ho nezahrnula, Vizuál ho
 nemal odkiaľ vziať, Návrh napísal opak, a Verifikácia ho vymáhala na konci, keď už je neskoro.
 
-Stane sa to pri KAŽDEJ appke, ktorá kartu Aktualizácie nemá — a to sú všetky prevzaté projekty.
+Stane sa to pri KAŽDEJ aplikácii, ktorá kartu Aktualizácie nemá — a to sú všetky prevzaté projekty.
 
 ⚠️ Neriešime to oslabením brány. Sonda funguje správne a chytila skutočnú medzeru. Chyba je, že
 chytila až ona.
@@ -47,7 +47,7 @@ def test_a_project_without_the_updates_tab_is_reported_as_missing_it(tmp_path):
 
 
 def test_a_project_that_already_has_it_is_left_alone(tmp_path):
-    """Poistka, aby sa z opravy nestalo nariadenie dostavovať už hotové. Appka, ktorá kartu má, sa
+    """Poistka, aby sa z opravy nestalo nariadenie dostavovať už hotové. Aplikácia, ktorá kartu má, sa
     nemá čo dozvedieť o novej povinnosti."""
     src = tmp_path / "frontend" / "src"
     (src / "pages").mkdir(parents=True)

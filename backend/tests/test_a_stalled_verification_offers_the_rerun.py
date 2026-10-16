@@ -3,7 +3,7 @@
 **Čo sa stalo.** Verifikácia NEX Managera 1.2.0 uviazla, lebo Audítor nevrátil verdikt. Kokpit napísal
 „Usmerni (Uprav) alebo over znova“ — ale **tlačidlo „over znova“ na obrazovke nebolo**. Manažérovi
 zostalo jediné: „Uprav“. To pošle OPRAVNÉHO agenta hľadať chybu, ktorá neexistuje: agent spustil celú
-previerku (304 kontrol appky, 412 servera), našiel ju zelenú a musel sa spýtať „čo mám opraviť?“.
+previerku (304 kontrol aplikácie, 412 servera), našiel ju zelenú a musel sa spýtať „čo mám opraviť?“.
 Minul sa beh agenta a stavba uviazla o úroveň nižšie.
 
 ⚠️ **Engine to vedel celý čas.** ``apply_action`` má pre presne tento prípad vetvu (``_verif_stall``) a

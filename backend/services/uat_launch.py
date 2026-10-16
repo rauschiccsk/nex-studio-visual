@@ -85,7 +85,7 @@ def _uat_env_path(customer_slug: str, project_slug: str) -> Path:
 
 
 def _mint_launch_token(customer_slug: str, project_slug: str, *, subject: str) -> Optional[str]:
-    """Vyraz jednorazovú vstupenku do appky, alebo ``None``, keď nie je čím (ICCINT-92).
+    """Vyraz jednorazovú vstupenku do aplikácie, alebo ``None``, keď nie je čím (ICCINT-92).
 
     Oddelené od skladania adresy, lebo tú istú vstupenku treba vedieť podať DVOMA spôsobmi: v adrese
     (starý tvar) aj v tele požiadavky (nový). Podpisový kľúč sa používa LEN na podpis — nikdy sa
@@ -187,10 +187,10 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
 
     # ICCINT-92: skús NAJPRV ten tvar, ktorý NEX Manager reálne používa — vstupenku v tele požiadavky.
     #
-    # Dovtedy sa skúšal iba starý tvar (vstupenka v adrese). Appky majú prijímať oba, takže by kontrola
+    # Dovtedy sa skúšal iba starý tvar (vstupenka v adrese). Aplikácie majú prijímať oba, takže by kontrola
     # svietila nazeleno aj vtedy, keby ten skutočne používaný tvar nefungoval — a to je horšie než
     # červená: zelená stráž, ktorá neskúša tú cestu, po ktorej sa naozaj chodí. Preto sa starý tvar
-    # skúša len ako NÁHRADA, keď appka o novom nevie, a odpoveď potom povie, ktorým tvarom sa otvorilo.
+    # skúša len ako NÁHRADA, keď aplikácia o novom nevie, a odpoveď potom povie, ktorým tvarom sa otvorilo.
     used_legacy = False
     try:
         with httpx.Client(follow_redirects=False, timeout=_DOOR_TIMEOUT_SECONDS) as client:
@@ -202,27 +202,27 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
                 opened = client.get(f"{launch_endpoint}?lt={token}")
             if opened.status_code >= 400:
                 shape = "starým tvarom (v adrese)" if used_legacy else "novým tvarom (v tele)"
-                return False, f"appka vstupenku odmietla {shape} (stav {opened.status_code})"
+                return False, f"aplikácia vstupenku odmietla {shape} (stav {opened.status_code})"
             if not opened.cookies:
-                return None, "appka po vstupe nevrátila sedenie, takže sa nedá pokračovať"
+                return None, "aplikácia po vstupe nevrátila sedenie, takže sa nedá pokračovať"
             session = client.get(f"{uat_url.rstrip('/')}{_SESSION_PATH}", cookies=opened.cookies)
     except httpx.HTTPError as unreachable:
-        return None, f"nasadená appka sa nedá osloviť ({type(unreachable).__name__})"
+        return None, f"nasadená aplikácia sa nedá osloviť ({type(unreachable).__name__})"
 
     if session.status_code == httpx.codes.NOT_FOUND:
-        return None, f"appka nemá {_SESSION_PATH}, takže sa vstup nedá dopovedať"
+        return None, f"aplikácia nemá {_SESSION_PATH}, takže sa vstup nedá dopovedať"
     if session.status_code == httpx.codes.OK:
         if used_legacy:
-            # Otvorilo sa, ale iba náhradným tvarom. Nie je to porucha — appka funguje — ale NEX Manager
+            # Otvorilo sa, ale iba náhradným tvarom. Nie je to porucha — aplikácia funguje — ale NEX Manager
             # po tejto ceste nechodí, takže overené je niečo iné než to, čo sa reálne používa. Povedať to.
             return True, (
                 "vstup overený až po prihlásené sedenie, ale iba STARÝM tvarom (vstupenka v adrese) — "
-                "appka ešte nepozná tvar s vstupenkou v tele, ktorý NEX Manager používa"
+                "aplikácia ešte nepozná tvar s vstupenkou v tele, ktorý NEX Manager používa"
             )
         return True, "vstup jedným kliknutím overený až po prihlásené sedenie"
     # THE case this exists for: the ticket was accepted and the session died right after — which is what a
     # contract mismatch with the neighbour looks like from outside.
     return False, (
-        f"appka vstupenku prijala, ale sedenie hneď nato skončilo (stav {session.status_code}) — "
-        "appka sa so svojím NEX Managerom nezhodne na tvare, hoci nastavenia má správne"
+        f"aplikácia vstupenku prijala, ale sedenie hneď nato skončilo (stav {session.status_code}) — "
+        "aplikácia sa so svojím NEX Managerom nezhodne na tvare, hoci nastavenia má správne"
     )

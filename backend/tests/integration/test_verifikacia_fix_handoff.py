@@ -32,7 +32,7 @@ from backend.services.pipeline_status import PipelineStatusBlock
 BOOT_FAIL = (
     "## Verifikácia FAIL — oprav podľa nálezov Auditora\n"
     "Konkrétny dôvod zlyhania: container nex-productcatalogs-smoke-migrate-1 exited (1)\n\n"
-    "Spusti appku tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku a oprav jej príčinu."
+    "Spusti aplikáciu tak ako engine (`docker compose up`), zreprodukuj zlyhanú skúšku a oprav jej príčinu."
 )
 
 
@@ -519,12 +519,12 @@ def test_a_legacy_fix_epic_is_reused_not_joined_by_a_third(db_session) -> None:
 
 AUDITOROVO_HLASENIE = [
     "AI Agent svoju prácu spravil správne — prepísaná poznámka k vydaniu je commitnutá.",
-    "Text sa však do appky nedostal: dve minúty po commite sa súbor vrátil na starý polotovar.",
-    "Appka číta ten súbor z disku — overil som na bežiacej appke, že veta je tam znova.",
+    "Text sa však do aplikácie nedostal: dve minúty po commite sa súbor vrátil na starý polotovar.",
+    "Aplikácia číta ten súbor z disku — overil som na bežiacej aplikácii, že veta je tam znova.",
     "Podľa záznamu o behu nastal prepis v čase, keď nepracoval žiadny agent.",
     "V súbore je pritom napísané, že ručne prepísaný text sa už prepisovať nebude.",
     "Automatické stráže to nezachytia — kontrolujú len dátum a to, či text nie je prázdny.",
-    "Všetko ostatné je v poriadku: oprava appky, dokumentácia, dátum vydania aj bezpečnosť.",
+    "Všetko ostatné je v poriadku: oprava aplikácie, dokumentácia, dátum vydania aj bezpečnosť.",
 ]
 
 

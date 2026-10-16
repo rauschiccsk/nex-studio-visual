@@ -63,8 +63,10 @@ function deployableMatrix(): DeployMatrix {
         prod_last_attempt_failed: false,
         uat_last_deploy_at: null,
         uat_last_deploy_detail: null,
+        uat_last_deploy_warnings: [],
         prod_last_deploy_at: null,
         prod_last_deploy_detail: null,
+        prod_last_deploy_warnings: [],
         accepted_versions: ["0.2.0"],
         uat_url: "https://uat-icc-nex-websites.isnex.eu",
         prod_url: null,
@@ -85,6 +87,7 @@ function event(over: Partial<DeployEventRead> = {}): DeployEventRead {
     status: "ok",
     actor_id: "user-1",
     detail: null,
+    warnings: [],
     created_at: "2026-07-26T10:00:00Z",
     updated_at: "2026-07-26T10:02:00Z",
     ...over,
@@ -139,7 +142,6 @@ describe("DeployMatrixPage — a failed deploy never reads as a success", () => 
         ok: true,
         url: "https://uat-icc-nex-websites.isnex.eu",
         bumped_to: "1.0.0",
-        warnings: ["migrácie preskočené"],
       }),
     );
 
@@ -150,7 +152,6 @@ describe("DeployMatrixPage — a failed deploy never reads as a success", () => 
     expect(screen.getByText(/projekt povýšený na/)).toBeInTheDocument();
     // Two links now: the row's persistent one and the fresh post-deploy one.
     expect(screen.getAllByRole("link", { name: /Otvoriť aplikáciu/ })).toHaveLength(2);
-    expect(screen.getByText(/migrácie preskočené/)).toBeInTheDocument();
     expect(screen.queryByText(/Nasadenie zlyhalo/)).not.toBeInTheDocument();
   });
 });

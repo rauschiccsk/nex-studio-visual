@@ -2,7 +2,7 @@
 
 Focus: ``release_failure_headline`` (v4.0.47) must NOT say "the app didn't start" when the app actually
 booted and only a behavioural acceptance check (the Aktualizácie changelog gate) failed — the engine folds
-that acceptance failure into the same smoke-FAIL signal, and a false "Appka sa nespustila" sent the manager
+that acceptance failure into the same smoke-FAIL signal, and a false "Aplikácia sa nespustila" sent the manager
 + the AI-Agent fixer boot-debugging instead of at the failing check.
 """
 

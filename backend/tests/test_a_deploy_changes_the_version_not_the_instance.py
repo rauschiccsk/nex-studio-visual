@@ -1,7 +1,7 @@
 """Nasadenie verzie mení VERZIU, nie stavbu inštalácie (ICCINT-133).
 
 Zistené 15.09.2026 pri prvom skutočnom nasadení NEX Inbox 1.5.0 na UAT MAGERSTAVU. Nasadenie
-prestavalo celu instalaciu podla vyvojoveho projektu a zhodilo appku na sedem minut.
+prestavalo celu instalaciu podla vyvojoveho projektu a zhodilo aplikáciu na sedem minut.
 
     ziva instalacia:      postgres  alembic-init   inbox-net   nex_inbox_mager   mager
     co vyrobilo nasadenie: db        migrate        inbox-dev-net nex_inbox_dev    dev
@@ -147,7 +147,7 @@ def test_services_keep_their_names(tmp_path):
 
 
 def test_the_database_name_is_the_instances_own(tmp_path):
-    """Najhorsi z prepisov. ``nex_inbox_dev`` na tom stroji NEEXISTUJE, takze appka po nasadeni
+    """Najhorsi z prepisov. ``nex_inbox_dev`` na tom stroji NEEXISTUJE, takze aplikácia po nasadeni
     nema kam siahnut."""
     d = _instalacia(tmp_path)
     novy = P.render_version_bump(d, version="1.5.0")
