@@ -11,8 +11,10 @@ Director na návrh, že by to upratoval človek: *„to znamená, že po nasaden
 bude musieť vždy upratať niečo?"* Nemá. Je to chýbajúci krok v nasadzovaní.
 
 ⚠️ Čo tieto stráže NEDOVOLIA zmeniť: po ZLYHANÍ sa neupratuje (cesta späť je dôležitejšia než
-miesto), pripnuté obrazy zostávajú (sú tou cestou späť), pri inštalácii na tomto stroji sa neupratuje
-nič, a zlyhanie upratovania nesmie zhodiť nasadenie — appka beží, len disku sa neuľavilo.
+miesto), pripnuté obrazy zostávajú (sú tou cestou späť), pri inštalácii na tomto stroji sa vyrovnávacia
+pamäť stavby neupratuje (potrebujú ju skúšky CI na bežcoch), a zlyhanie upratovania nesmie zhodiť nasadenie —
+appka beží, len disku sa neuľavilo. Staršie verzie obrazov inštalácie sa od DEV-124 upratujú aj tu
+(``test_old_image_versions_go_after_a_deploy.py``).
 """
 
 from __future__ import annotations
@@ -103,7 +105,7 @@ def test_a_failed_deploy_cleans_nothing(monkeypatch) -> None:
 
 
 def test_an_instance_on_this_machine_is_not_cleaned(monkeypatch) -> None:
-    """Tunajší disk má vlastnú správu; nasadenie doň nehovorí."""
+    """Vyrovnávaciu pamäť stavby na tomto stroji potrebujú skúšky CI na bežcoch; nasadenie ju tu nemaže."""
     videne = _zachyt(monkeypatch)
 
     detail = asyncio.run(O._uprac_na_cieli(True, "OK", None))

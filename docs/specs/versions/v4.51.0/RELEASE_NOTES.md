@@ -34,3 +34,9 @@ skončia (napríklad migrácia databázy), bežia z obrazu backendu a dedili jeh
 neobsluhujú, po úspešnom skončení ostali označené ako choré a strážca by z toho hlásil falošný poplach. Kokpit im
 teraz zdedenú kontrolu vypne; kontrolu, ktorú si krok určil sám, a kontroly bežiacich služieb nechá tak. Inštalácie
 to dostanú pri najbližšom nasadení.
+
+**Staré verzie aplikácie už neostávajú na serveri navždy.** Po úspešnom nasadení kokpit na stroji, kde inštalácia
+beží (MAGER aj ANDROS), ponechá z jej obrazov nasadenú verziu, každú novšiu a jednu predchádzajúcu ako cestu
+späť; staršie zmaže. Nikdy nezmaže obraz, ktorý používa akýkoľvek kontajner na stroji — aj zastavený alebo inej
+inštalácie či zákazníka. Čo zmazal a približne koľko miesta uvoľnil, povie v zázname nasadenia. Doteraz ostávala
+každá verzia: na ANDROSe mal NEX Inbox deväť verzií po 2 GB.

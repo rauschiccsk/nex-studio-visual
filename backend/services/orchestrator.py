@@ -6001,6 +6001,108 @@ async def _uprac_na_cieli(
     return detail
 
 
+#: DEV-124: a version tag of an installation's image — ``1.8.0`` or ``v1.8.0``; anything else (``latest``) is kept.
+_IMAGE_VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_IMAGE_SIZE = re.compile(r"^([\d.]+)\s*([kMG]?B)$")
+_SIZE_UNITS = {"B": 1, "kB": 1e3, "MB": 1e6, "GB": 1e9}
+
+
+def _image_version(tag: str) -> Optional[tuple[int, int, int]]:
+    found = _IMAGE_VERSION.match(tag)
+    return tuple(int(part) for part in found.groups()) if found else None  # type: ignore[return-value]
+
+
+def _deployed_images(compose_path: Path) -> dict[str, str]:
+    """``repository → version tag`` of every image the installation's compose names with a version."""
+    try:
+        services = (yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    deployed: dict[str, str] = {}
+    for svc in services.values():
+        repo, _, tag = str((svc or {}).get("image") or "").rpartition(":")
+        if repo and "/" not in tag and _image_version(tag):
+            deployed[repo] = tag
+    return deployed
+
+
+async def _docker_out(cmd: list[str], env: Optional[dict[str, str]]) -> str:
+    """Output of one docker call within :data:`CLEANUP_TIMEOUT`; :class:`RuntimeError` when it fails or hangs."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=CLEANUP_TIMEOUT)
+    except (OSError, asyncio.TimeoutError) as exc:
+        raise RuntimeError(exc.__class__.__name__) from exc
+    if proc.returncode != 0:
+        raise RuntimeError((out or b"").decode("utf-8", "replace").strip()[:200])
+    return (out or b"").decode("utf-8", "replace")
+
+
+async def _uprac_stare_verzie(ok: bool, detail: str, deploy_host: Optional[str], compose_path: Path) -> str:
+    """Po ÚSPEŠNOM nasadení zmazať staršie verzie obrazov tejto inštalácie (DEV-124).
+
+    14.10.2026: na MAGERi ostali obrazy NEX Inboxu 1.5.6 (~3 GB) popri 1.8.0 a 1.7.1, na ANDROSe mal
+    ``nex-inbox-backend`` deväť verzií po ~2,1 GB — upratovanie (ICCINT-154) mazalo len vyrovnávaciu pamäť
+    a nepomenované vrstvy, každé nasadenie pridalo ďalšiu verziu.
+
+    Ostáva nasadená verzia, každá novšia (návrat z novšej verzie ju nesmie zahodiť) a najnovšia staršia — cesta
+    späť. Obraz, ktorý používa akýkoľvek kontajner na stroji (aj zastavený, aj inej inštalácie či zákazníka),
+    ostáva. Upratuje sa na stroji, kde inštalácia beží — aj na tomto: na rozdiel od vyrovnávacej pamäte stavby,
+    ktorú tu potrebujú skúšky, staré verzie obrazov inštalácie nepotrebuje nikto. Zlyhanie nasadenie nezhodí.
+    """
+    deployed = _deployed_images(compose_path) if ok else {}
+    if not deployed:
+        return detail
+
+    from backend.services import remote_instance
+
+    env = remote_instance.docker_env(deploy_host)
+    try:
+        listing = await _docker_out(
+            ["docker", "image", "ls", "--no-trunc", "--format", "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"], env
+        )
+        containers = (await _docker_out(["docker", "ps", "-a", "-q", "--no-trunc"], env)).split()
+        used = (
+            set((await _docker_out(["docker", "inspect", "--format", "{{.Image}}", *containers], env)).split())
+            if containers
+            else set()
+        )
+    except RuntimeError as exc:
+        return f"{detail} ⚠️ Staršie verzie obrazov sa nepodarilo upratať ({exc})."
+
+    tags: dict[str, list[tuple[tuple[int, int, int], str, str, str]]] = {}
+    for row in listing.splitlines():
+        parts = row.split("\t")
+        if len(parts) == 4 and parts[0] in deployed and _image_version(parts[1]):
+            tags.setdefault(parts[0], []).append((_image_version(parts[1]), parts[1], parts[2], parts[3]))
+
+    removed: dict[str, list[str]] = {}
+    failed: list[str] = []
+    freed = 0.0
+    for repo, versions in tags.items():
+        older = sorted((v for v in versions if v[0] < _image_version(deployed[repo])), reverse=True)
+        for _, tag, image_id, size in older[1:]:
+            if image_id in used:
+                continue
+            try:
+                await _docker_out(["docker", "image", "rm", f"{repo}:{tag}"], env)
+            except RuntimeError:
+                failed.append(f"{repo}:{tag}")
+                continue
+            removed.setdefault(repo, []).append(tag)
+            found = _IMAGE_SIZE.match(size.strip())
+            freed += float(found.group(1)) * _SIZE_UNITS[found.group(2)] if found else 0.0
+    if removed:
+        names = "; ".join(f"{repo} {', '.join(tags_)}" for repo, tags_ in removed.items())
+        gigabytes = f"{freed / 1e9:.1f}".replace(".", ",")
+        detail = f"{detail} Staršie verzie obrazov zmazané: {names} (spolu približne {gigabytes} GB)."
+    if failed:
+        detail = f"{detail} ⚠️ Niektoré staršie verzie obrazov sa zmazať nepodarilo: {', '.join(failed)}."
+    return detail
+
+
 class InstanceDeployResult(tuple):
     """``(ok, detail)`` of an instance deploy + whether the NEW version was started on the machine (DEV-68).
 
@@ -6175,8 +6277,10 @@ async def _run_uat_deploy(
 
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
         (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
+    detail = await _uprac_na_cieli(ok, detail + backup_note, deploy_host, compose.parent)
+    # DEV-124: older versions of this installation's images go too — on whichever machine it runs.
     return InstanceDeployResult(
-        ok, await _uprac_na_cieli(ok, detail + backup_note, deploy_host, compose.parent), new_version_started=True
+        ok, await _uprac_stare_verzie(ok, detail, deploy_host, compose), new_version_started=True
     )
 
 
