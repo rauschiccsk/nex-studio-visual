@@ -61,6 +61,7 @@ SHELLING_MODULES = {
     "template_bootstrap",
     "uat_guide",
     "uat_provisioner",
+    "verified_build",
     "vizual_sandbox",
 }
 

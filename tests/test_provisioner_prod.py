@@ -377,6 +377,12 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)
     monkeypatch.setattr(orchestrator.predeploy_backup, "back_up", _backed_up)
+    # DEV-139 builds from the verified commit; this test is about WHICH compose is deployed — without the stub it
+    # would export the real repository behind the real /opt/customers path. Own tests:
+    # backend/tests/test_a_deploy_builds_from_the_verified_commit.py.
+    monkeypatch.setattr(
+        orchestrator.verified_build, "prepare", lambda _compose: orchestrator.verified_build.Preparation(None)
+    )
 
     ok, detail = await orchestrator._run_prod_deploy("nex-payables", "andros", "payables", "nex-payables")
 

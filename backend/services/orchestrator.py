@@ -80,6 +80,7 @@ from backend.services import (
     source_language,
     uat_guide,
     uat_provisioner,
+    verified_build,
 )
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
@@ -6207,7 +6208,18 @@ async def _run_uat_deploy(
     # service block would hand the secret to the deployed app). Same withholding as every other spawn.
     # ICCINT-166: vedľa verzie aj zmena, z ktorej sa obraz stavia (``APP_COMMIT``) — z kontextov stavby
     # tohto compose, nie z mena projektu.
-    provenance = await _build_provenance_env(compose)
+    # DEV-139 — the images are built from the verified commit only: its tracked files exported into a throwaway
+    # folder, each image once. The working folder (agent caches, untracked files) no longer travels to the target
+    # — 17.10.2026 it was ~600 MB up ANDROS's 4.6 Mbit/s line for a 24 MB commit.
+    try:
+        prepared = await run_blocking(verified_build.prepare, compose, cap=VERIFIED_BUILD_CAP)
+    except BlockingWorkTimedOut:
+        prepared = verified_build.Preparation(
+            None, f"Stavba z pracovného priečinka — príprava overeného commitu nestihla {VERIFIED_BUILD_CAP} s."
+        )
+    clean = prepared.build
+    build_note = f" {clean.note()}" if clean else (f" {prepared.note}" if prepared.note else "")
+    provenance = {build_provenance.APP_COMMIT_ENV: clean.commit} if clean else await _build_provenance_env(compose)
     env = _docker_env_for_target(
         agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
     )
@@ -6218,9 +6230,13 @@ async def _run_uat_deploy(
     # replaced. ``up --build`` did both in one step, so whoever had to stop the running app before the new one
     # (a migration the old code must not watch, SERVER-105) stopped it before a build of 16 minutes on the
     # customer's machine — NEX Inbox of MAGERSTAV was away for 20 minutes on 11.10.2026.
-    built, failure = await _deploy_compose_step(base + ["build"], env, deadline, limit)
+    build_cmd = base + (["-f", str(clean.override)] if clean else []) + ["build"]
+    try:
+        built, failure = await _deploy_compose_step(build_cmd, env, deadline, limit)
+    finally:
+        verified_build.cleanup(clean)
     if not built:
-        return InstanceDeployResult(False, failure)
+        return InstanceDeployResult(False, failure + build_note)
     # DEV-116 — a PROD installation's database is backed up while the running version still serves, before anything
     # is replaced. No backup, no deploy: a migration of the customer's data must always have a way back.
     backup_note = ""
@@ -6282,7 +6298,7 @@ async def _run_uat_deploy(
 
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
         (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
-    detail = await _uprac_na_cieli(ok, detail + backup_note, deploy_host, compose.parent)
+    detail = await _uprac_na_cieli(ok, detail + build_note + backup_note, deploy_host, compose.parent)
     # DEV-124: older versions of this installation's images go too — on whichever machine it runs.
     return InstanceDeployResult(
         ok, await _uprac_stare_verzie(ok, detail, deploy_host, compose), new_version_started=True
@@ -7248,6 +7264,8 @@ class _SmokeStack:
 
 #: Strop na zistenie čísla zmeny (niekoľko volaní gitu, každé so stropom 15 s).
 BUILD_PROVENANCE_CAP = 60
+#: Ceiling on exporting the verified commit for a deploy's build (DEV-139) — git archive of the tracked tree.
+VERIFIED_BUILD_CAP = 180
 
 #: DEV-65: how long the source-language check of a version may take (git diff + reading the changed files).
 SOURCE_LANGUAGE_CAP = 120

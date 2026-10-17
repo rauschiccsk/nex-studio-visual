@@ -312,6 +312,11 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)  # serve-verify is its own unit
+    # DEV-139 (build from the verified commit) has its own tests — test_a_deploy_builds_from_the_verified_commit.py;
+    # here the real /opt/uat path must not decide what this test sees.
+    monkeypatch.setattr(
+        orchestrator.verified_build, "prepare", lambda _compose: orchestrator.verified_build.Preparation(None)
+    )
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="v0.1.42")
 
     assert ok is True and detail == "OK"
