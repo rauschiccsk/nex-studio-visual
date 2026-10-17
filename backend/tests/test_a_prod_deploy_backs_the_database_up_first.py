@@ -37,6 +37,10 @@ def _docker(monkeypatch, *, fail: str | None = None, fail_token: str | None = No
             return _Proc(1, f"{fail} failed")
         if fail_token is not None and fail_token in cmd:
             return _Proc(1, f"{fail_token} failed")
+        if cmd[-1].startswith('cat "/target/') and cmd[-1].endswith('.dump"'):
+            # Streaming a stored dump OUT of the target dies the way it did on MAGER 17.10.2026 (DEV-140): the reader,
+            # ``pg_restore -l``, stops after the archive's table of contents and the sender gets a broken pipe.
+            return _Proc(1, "write /dev/stdout: broken pipe")
         answer = fake_backup.reply(cmd, **replies)
         if answer is not None:
             return _Proc(0, answer)
@@ -86,12 +90,16 @@ def _is_compose(sub: str):
     return lambda cmd: cmd[:2] == ["docker", "compose"] and cmd[4] == sub
 
 
+def _is_read_back(cmd: list[str]) -> bool:
+    return cmd[:3] == ["docker", "run", "--rm"] and "pg_restore" in cmd
+
+
 def test_the_database_is_backed_up_after_the_build_and_before_anything_is_replaced(tmp_path, monkeypatch):
     result, events, compose = _deploy(monkeypatch, tmp_path)
 
     build = _index(events, _is_compose("build"))
     dump = _index(events, lambda cmd: cmd[-1] == B._DUMP_SH)
-    read_back = _index(events, lambda cmd: cmd[-1] == B._LIST_SH)
+    read_back = _index(events, _is_read_back)
     up = _index(events, _is_compose("up"))
     assert build < dump < read_back < up, "the backup must lie between the build and the replacement of containers"
     assert events[dump][1] == deploy_progress.KROK_ZALOHA
@@ -179,6 +187,49 @@ def test_old_backups_are_pruned_to_the_setting(tmp_path, monkeypatch):
         f'cd "/target/{B.BACKUP_DIR}" && ls -1t -- *.dump | tail -n +3 | while read f; do rm -f -- "$f"; done'
     ]
     assert "Ponechaných je posledných 2 záloh." in result[1]
+
+
+def test_the_backup_is_read_back_on_the_target_from_the_stored_file(tmp_path, monkeypatch):
+    """DEV-140 — 17.10.2026 NEX Inbox 1.9.0 stopped twice at „Záloha sa nedá prečítať“ on MÁGERSTAV's PROD.
+
+    The read-back streamed the stored dump target → cockpit → target into ``pg_restore -l``, which stops reading after
+    the archive's table of contents; the sender then died of a broken pipe (measured against MAGER: sender exit 1
+    „write /dev/stdout: broken pipe“, pg_restore exit 0 with 113 entries) and the cockpit took a good 15 MB backup for
+    an unreadable one. Only a dump that fits a pipe's buffer passed. The file is now read where it lies — a throwaway
+    container of the database's own image, the backup folder mounted read-only, nothing travelling back.
+    """
+    result, events, compose = _deploy(monkeypatch, tmp_path)
+
+    assert result[0] is True, result[1]
+    reads = [cmd for cmd, _step in events if _is_read_back(cmd)]
+    assert len(reads) == 1, reads
+    cmd = reads[0]
+    assert cmd[:-1] == [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        f"type=bind,source={compose.parent},target=/target,readonly",
+        "--entrypoint",
+        "pg_restore",
+        fake_backup.DB_IMAGE,
+        "-l",
+    ]
+    assert cmd[-1].startswith(f"/target/{B.BACKUP_DIR}/nex-inbox-1.8.1-") and cmd[-1].endswith(".dump"), cmd[-1]
+    image = _index(events, _is_compose("images"))
+    assert events[image][0][-2:] == ["-q", "postgres"], "the image is the one the database container runs from"
+    assert not any(c[-1].startswith('cat "/target/') for c, _step in events), "nothing of the dump streams back"
+
+
+def test_an_unreadable_backup_says_why(tmp_path, monkeypatch):
+    reason = "pg_restore: error: did not find magic string in file header"
+
+    result, _events, _compose = _deploy(monkeypatch, tmp_path, toc=reason)
+
+    assert result[0] is False
+    assert result[1] == f"Záloha sa nedá prečítať ({reason}), nasadenie by nemalo cestu späť. {NOT_STARTED}"
 
 
 def test_the_pipe_streams_between_two_real_processes():

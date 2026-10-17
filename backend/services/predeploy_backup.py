@@ -12,8 +12,15 @@ failure here costs nothing but the deploy itself: no container has been replaced
 installation's own database container, with the user and the database taken from that container's environment, so
 no argument carries anything secret. Its output streams into a short-lived container that writes it into the
 installation folder on the SAME machine — the backup lies next to the data it protects, where whoever repairs that
-machine looks for it. The written file is then read back by ``pg_restore -l`` of the running database container,
-so a dump that cannot be restored is a failed backup, not a file that merely exists.
+machine looks for it. The written file is then read back by ``pg_restore -l`` where it lies — a throwaway container
+of the database's own image with the backup folder mounted read-only — so a dump that cannot be restored is a failed
+backup, not a file that merely exists.
+
+**Why not stream it back (DEV-140).** The first read-back streamed the file target → cockpit → target into
+``pg_restore -l``. pg_restore stops reading after the archive's table of contents, so for any dump bigger than a
+pipe's buffer the sending side died of a broken pipe and a good backup was reported unreadable — NEX Inbox 1.9.0
+stopped twice on MÁGERSTAV's PROD (17.10.2026, a 15 MB database). Reading the file on the target also keeps it off
+the cockpit's line.
 """
 
 from __future__ import annotations
@@ -38,7 +45,9 @@ BACKUP_DIR = "pre-deploy-backups"
 _DB = '-U "$POSTGRES_USER" -d "${POSTGRES_DB:-$POSTGRES_USER}"'
 _DUMP_SH = f"exec pg_dump {_DB} -Fc"
 _SIZE_SH = f'exec psql {_DB} -Atc "SELECT pg_database_size(current_database())"'
-_LIST_SH = "exec pg_restore -l"
+#: One line of ``pg_restore -l`` per archived object — ``215; 1259 16385 TABLE public invoices nex``; comments start
+#: with ``;`` and an error is neither.
+_TOC_ENTRY = re.compile(r"^\d+;")
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -145,6 +154,25 @@ async def _pipe(
     return producer.returncode or 0, consumer.returncode or 0, text
 
 
+def _read_back(instance_dir: Path, image: str, path: str) -> list[str]:
+    """``pg_restore -l`` over the stored file, ON the target: the database's own image (the same pg_restore that would
+    restore it), the installation folder read-only, no network — nothing of the dump travels anywhere (DEV-140)."""
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        f"type=bind,source={instance_dir},target=/target,readonly",
+        "--entrypoint",
+        "pg_restore",
+        image,
+        "-l",
+        path,
+    ]
+
+
 def _db_service(compose: Path) -> Optional[str]:
     data = yaml.safe_load(compose.read_text(encoding="utf-8")) or {}
     return uat_provisioner.identify_service_roles(data.get("services") or {}).get("db")
@@ -196,6 +224,13 @@ async def back_up(
     if code != 0 or not out:
         return BackupOutcome(
             False, f"Databáza inštalácie (služba {service}) nebeží, zálohu nemožno urobiť. {_NOT_STARTED}"
+        )
+    # The image its container runs from carries the pg_restore that reads the backup back (and would restore it).
+    code, out = await _run(_compose(compose, "images", "-q", service), env, left())
+    image = out.splitlines()[-1].strip() if code == 0 and out else ""
+    if not image:
+        return BackupOutcome(
+            False, f"Obraz databázy (služba {service}) sa nedal zistiť, zálohu nemožno overiť. {_NOT_STARTED}"
         )
 
     # Room first: a dump that fills the customer's disk would stop the very installation it is meant to protect.
@@ -250,17 +285,15 @@ async def back_up(
         return BackupOutcome(False, f"Zálohu sa nepodarilo uložiť: {out[-200:]}. {_NOT_STARTED}")
     dump_bytes, sha = int(lines[-2]), lines[-1]
 
-    # Read back with the database's own pg_restore — the same version that would restore it.
-    read_rc, list_rc, out = await _pipe(
-        _tool(instance_dir, f'cat "{final}"', readonly=True),
-        _compose(compose, "exec", "-T", service, "sh", "-c", _LIST_SH),
-        env,
-        left(),
-    )
-    entries = sum(1 for line in out.splitlines() if line.strip() and not line.startswith(";"))
-    if read_rc != 0 or list_rc != 0 or entries == 0:
+    # Read back where it lies, with the database's own pg_restore — the same version that would restore it.
+    code, out = await _run(_read_back(instance_dir, image, final), env, left())
+    entries = sum(1 for line in out.splitlines() if _TOC_ENTRY.match(line))
+    if code != 0 or entries == 0:
         await _run(_tool(instance_dir, f'rm -f "{final}"'), env, 60)
-        return BackupOutcome(False, f"Záloha sa nedá prečítať, nasadenie by nemalo cestu späť. {_NOT_STARTED}")
+        reason = out.strip()[-300:] or f"exit {code}"
+        return BackupOutcome(
+            False, f"Záloha sa nedá prečítať ({reason}), nasadenie by nemalo cestu späť. {_NOT_STARTED}"
+        )
 
     keep = settings.predeploy_backup_keep
     await _run(

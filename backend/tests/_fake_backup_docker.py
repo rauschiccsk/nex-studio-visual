@@ -15,6 +15,8 @@ DB_BYTES = 5 * 1024**2
 FREE_KB = 50 * 1024**2
 DUMP_BYTES = 123_456
 SHA = "ab" * 32
+#: The image the installation's database container runs from (``docker compose images -q <service>``).
+DB_IMAGE = "sha256:0db1ma6e"
 #: ``pg_restore -l`` of a small dump: comment lines start with ``;``, every other line is one entry.
 TOC = (
     ";\n; Archive created at 2026-10-14 12:50:00 UTC\n;\n"
@@ -34,6 +36,7 @@ def reply(
     toc: str = TOC,
     containers: str = "c0ffee",
     running: str = "c0ffee",
+    image: str = DB_IMAGE,
 ) -> Optional[str]:
     """The output a backup command gets, or ``None`` when the command is not one of the backup's.
 
@@ -45,12 +48,16 @@ def reply(
     script = cmd[-1]
     if cmd[1] == "compose" and cmd[4] == "ps":
         return containers if "-a" in cmd else running
+    if cmd[1] == "compose" and cmd[4] == "images":
+        return image
+    if cmd[1] == "run" and "--entrypoint" in cmd and cmd[cmd.index("--entrypoint") + 1] == "pg_restore":
+        return toc
     if script == B._SIZE_SH:
         return str(DB_BYTES)
     if script == "df -Pk /target":
         return df_line(free_kb)
-    if script in (B._DUMP_SH, B._LIST_SH):
-        return toc if script == B._LIST_SH else ""
+    if script == B._DUMP_SH:
+        return ""
     if script.startswith("set -e; mv "):
         return f"{DUMP_BYTES}\n{SHA}"
     if script.startswith(("set -e; mkdir -p ", "cat ", "rm -f ", "cd ")):
