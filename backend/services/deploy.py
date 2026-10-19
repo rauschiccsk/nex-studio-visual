@@ -1364,7 +1364,23 @@ async def deploy(
     if first_prod and ok:
         from backend.services import claude_agent
 
-        _graduate_version_in_place(db, version, graduation_target, claude_agent.PROJECTS_ROOT / project.slug)
+        proj_root = claude_agent.PROJECTS_ROOT / project.slug
+        _graduate_version_in_place(db, version, graduation_target, proj_root)
+        # DEV-147: the graduation commits the moved release notes; publish them off the main loop (a push waits on
+        # the network), and a push that did not go through is said, never silent.
+        from backend.core.offload import BlockingWorkTimedOut, run_blocking
+        from backend.services.orchestrator import GIT_PUSH_CAP
+
+        try:
+            graduation_warning = await run_blocking(
+                _publish_graduation, proj_root, version.version_number, cap=GIT_PUSH_CAP
+            )
+        except BlockingWorkTimedOut:
+            graduation_warning = GRADUATION_NOT_PUSHED.format(
+                version=version.version_number, why=f"odoslanie neskončilo do {GIT_PUSH_CAP} s"
+            )
+        if graduation_warning:
+            warnings.append(graduation_warning)
 
     event = DeployEvent(
         customer_id=customer_id,
@@ -1521,6 +1537,31 @@ def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> Non
         proj_root,
         ["commit", "-m", f"docs(release-notes): graduate notes to v{target.lstrip('v')}", "--", old_rel, new_rel],
     )
+
+
+#: DEV-147 — what the Manažér reads when the graduation commit stayed on the cockpit's server.
+GRADUATION_NOT_PUSHED = (
+    "Poznámky k vydaniu sa presunuli do {version}, ale zmena ostala len na serveri — na GitHub sa neodoslala "
+    "({why}). Kontroly (CI) pre ňu nebežia, kým sa neodošle."
+)
+
+
+def _publish_graduation(proj_root: Path, version_number: str) -> Optional[str]:
+    """Push what the first PROD deploy committed in the project — ``None`` when it reached GitHub or there was
+    nothing waiting, else the sentence for the Manažér (DEV-147).
+
+    15.10.2026 the graduation commit of Career Asistent v1.0.0 (11a225d, the release notes moved to v1.0.0) was never
+    pushed: CI never ran for it and the checkout stayed ahead of GitHub. Only a branch with commits waiting is
+    pushed, so a deploy with nothing to publish does not depend on GitHub answering."""
+    from backend.services.orchestrator import _push_branch
+
+    _branch, waiting = ci_status.unpushed_commits(proj_root, "HEAD")
+    if not waiting:
+        return None
+    pushed, _branch, why = _push_branch(proj_root)
+    if pushed or why is None:
+        return None
+    return GRADUATION_NOT_PUSHED.format(version=version_number, why=why)
 
 
 def _graduate_version_in_place(db: Session, version: Version, target: str, proj_root: Path) -> Version:
