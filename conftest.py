@@ -71,6 +71,26 @@ def _isolate_knowledge_base_git(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_knowledge_base_owner(monkeypatch):
+    """No test asks who owns the LIVE Knowledge Base (DEV-144).
+
+    What the cockpit writes into a Knowledge Base it hands to that base's owner (``kb_owner.owner``). A test that gets
+    there with a temporary copy compares the copy against the owner of the live one — equal only while the suite runs
+    as that owner. It did on the old CI runner; 19.10.2026 a runner with another user turned the gap red.
+    """
+    from backend.services import kb_owner
+
+    real_owner = kb_owner.owner
+
+    def owner(root):
+        if Path(root).resolve() == _LIVE_KNOWLEDGE_BASE:
+            pytest.fail(f"a test asked who owns the live Knowledge Base {root}")
+        return real_owner(root)
+
+    monkeypatch.setattr(kb_owner, "owner", owner)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_schema_publishing(tmp_path_factory, monkeypatch):
     """Keep the suite from ever committing into the LIVE Knowledge Base (DEV-7).
 

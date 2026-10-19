@@ -78,6 +78,8 @@ def kb(tmp_path: Path, monkeypatch) -> Path:
     _git(root, "push", "-q", "origin", "main")
     (root / "notes/somebodys.md").write_text("rozpísané — ešte nie je hotové\n", encoding="utf-8")
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", root / "infrastructure/port-registry.yaml")
+    # The whole base, not just the registry in it: whoever writes it asks who owns the base (DEV-144).
+    monkeypatch.setattr(settings, "knowledge_base_path", str(root))
     return root
 
 
