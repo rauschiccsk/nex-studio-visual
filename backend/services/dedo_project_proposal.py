@@ -82,6 +82,7 @@ def record(
     project_id: uuid.UUID,
     content: str,
     proposed_action: str,
+    proposed_version_number: Optional[str] = None,
 ) -> DedoProjectProposal:
     """Zapíš Dedov návrh. Starší otvorený návrh sa archivuje ako ``superseded``.
 
@@ -105,11 +106,22 @@ def record(
         project_id=project_id,
         content=text,
         proposed_action=proposed_action,
+        proposed_version_number=(proposed_version_number or "").strip() or None,
         status=PROPOSED,
     )
     db.add(row)
     db.flush()
     return row
+
+
+def founding_number(db: Session, proposal: DedoProjectProposal) -> Optional[str]:
+    """The number a ``new_version`` brief founds its version with unless the Manažér changes it (DEV-149) — Dedo's
+    proposed number, else the cockpit's suggestion. ``None`` for a fast fix: its number follows the fix rule."""
+    if proposal.proposed_action != "new_version":
+        return None
+    from backend.services import version as version_service
+
+    return proposal.proposed_version_number or version_service.suggest_next_version_number(db, proposal.project_id)
 
 
 def mark_sent(

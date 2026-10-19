@@ -53,6 +53,9 @@ const FALLBACK_COPY = {
   effect: "Zo zadania vznikne nová verzia.",
 };
 
+/** DEV-149 — the shape a version number has (the same one the new-version screen asks for). */
+const VERSION_NUMBER_RE = /^\d+\.\d+\.\d+$/;
+
 interface Props {
   projectId: string;
   proposal: DedoProjectProposal | null;
@@ -78,6 +81,9 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   // DEV-56: a fast fix starts only with the Manažér's work kind, as in the „Rýchla oprava“ dialog — the
   // delivered-token statement bills by it, and the cockpit never guesses it.
   const [workKind, setWorkKind] = useState<WorkKind | null>(null);
+  // DEV-149: the number a new version is founded with, shown before the click and his to change. On 19.10.2026 the
+  // cockpit founded NEX Inbox 2.0.0 for a brief that proposed 1.10.0 — the Manažér never saw the number.
+  const [versionNumber, setVersionNumber] = useState(proposal?.version_number ?? "");
   // Háčiky musia bežať PRED skorým návratom nižšie — háčik za podmieneným návratom React zakazuje.
   const growRef = useAutoGrowTextarea(text);
 
@@ -86,6 +92,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
       draft.clear();
       setError(null);
       setWorkKind(null);
+      setVersionNumber(proposal?.version_number ?? "");
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -97,7 +104,9 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   const copy = ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY;
   const edited = text.trim() !== proposal.content.trim();
   const needsKind = proposal.proposed_action === "fast_fix";
-  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null);
+  const needsNumber = proposal.proposed_action === "new_version";
+  const numberOk = !needsNumber || VERSION_NUMBER_RE.test(versionNumber.trim());
+  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null) && numberOk;
 
   async function handleFailure(err: unknown, phrase: string): Promise<void> {
     if (err instanceof ApiError && err.status === 409) {
@@ -119,7 +128,9 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
     setStaleNotice(null);
     setBusy("send");
     try {
-      const vysledok = await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), needsKind ? workKind : null);
+      const vysledok = needsNumber
+        ? await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), null, versionNumber.trim())
+        : await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), needsKind ? workKind : null);
       onProposal(null);
       await onVersion(vysledok.version_id, vysledok.started);
     } catch (err: unknown) {
@@ -187,6 +198,24 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
           <p className="text-xs text-[var(--color-text-muted)]">
             Text si upravil — použije sa tvoje znenie. Pôvodný Dedov text zostáva zapísaný.
           </p>
+        )}
+
+        {needsNumber && (
+          <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+            Číslo verzie
+            <input
+              type="text"
+              value={versionNumber}
+              onChange={(e) => setVersionNumber(e.target.value)}
+              disabled={busy !== null}
+              aria-label="Číslo verzie"
+              aria-invalid={!numberOk}
+              spellCheck={false}
+              autoComplete="off"
+              className="w-28 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-2 py-1 font-mono text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
+            />
+            {!numberOk && <span className="text-[var(--color-state-error-fg)]">v tvare 1.2.3</span>}
+          </label>
         )}
 
         {needsKind && (

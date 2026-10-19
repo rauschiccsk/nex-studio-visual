@@ -546,6 +546,25 @@ class _ZadaniePeekResponse(BaseModel):
     relative_path: str
 
 
+class _NextVersionNumberResponse(BaseModel):
+    version_number: str
+
+
+@router.get("/projects/{project_id}/versions/next-number", response_model=_NextVersionNumberResponse)
+def next_version_number(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> _NextVersionNumberResponse:
+    """The number a new version of the project would get — the cockpit's one rule, asked, not copied (DEV-149).
+
+    The new-version screen computed it itself, the same rule written a second time; on 19.10.2026 both rolled
+    1.9.0 to 2.0.0. **404** — the project does not exist.
+    """
+    authz.assert_project_id_access(db, current_user, project_id)
+    return _NextVersionNumberResponse(version_number=version_service.suggest_next_version_number(db, project_id))
+
+
 @router.get("/projects/{project_id}/zadanie-na-disku", response_model=_ZadaniePeekResponse)
 def peek_zadanie(
     project_id: UUID,

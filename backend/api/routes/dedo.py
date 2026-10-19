@@ -336,6 +336,7 @@ def propose_project_brief(
             project_id=project_id,
             content=body.content,
             proposed_action=body.proposed_action,
+            proposed_version_number=body.proposed_version_number,
         )
     except ProjectProposalNotFound as exc:
         db.rollback()

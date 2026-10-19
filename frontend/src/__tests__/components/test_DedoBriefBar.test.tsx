@@ -49,6 +49,8 @@ function navrh(over: Partial<DedoProjectProposal> = {}): DedoProjectProposal {
     proposed_action: "fast_fix",
     status: "proposed",
     created_at: "2026-09-25T10:00:00Z",
+    proposed_version_number: null,
+    version_number: null,
     ...over,
   };
 }
@@ -185,9 +187,55 @@ describe("Druh práce pri rýchlej oprave (DEV-56)", () => {
   });
 
   it("nová verzia zo zadania sa na druh práce nepýta", () => {
-    vykresli(navrh({ proposed_action: "new_version" }));
+    // DEV-149: a new-version brief always arrives with the number it founds the version with.
+    vykresli(navrh({ proposed_action: "new_version", version_number: "1.10.0" }));
 
     expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Založiť novú verziu/i })).toBeEnabled();
+  });
+});
+
+describe("Číslo novej verzie Manažér vidí pred založením (DEV-149)", () => {
+  // 19.10.2026: zadanie navrhovalo NEX Inbox 1.10.0, kokpit založil 2.0.0 — číslo pred klikom nebolo nikde vidieť.
+  const novaVerzia = (over: Partial<DedoProjectProposal> = {}) =>
+    navrh({ proposed_action: "new_version", proposed_version_number: "1.10.0", version_number: "1.10.0", ...over });
+
+  it("ukáže číslo, s ktorým verzia vznikne, a založí ju s ním", async () => {
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: false });
+    vykresli(novaVerzia());
+
+    expect(screen.getByLabelText("Číslo verzie")).toHaveValue("1.10.0");
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
+
+    await waitFor(() =>
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "1.10.0"),
+    );
+  });
+
+  it("založí ju s číslom, ktoré Manažér zmenil", async () => {
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: false });
+    vykresli(novaVerzia());
+
+    fireEvent.change(screen.getByLabelText("Číslo verzie"), { target: { value: "2.0.0" } });
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
+
+    await waitFor(() =>
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "2.0.0"),
+    );
+  });
+
+  it("s číslom v zlom tvare verziu nezaloží a povie prečo", () => {
+    vykresli(novaVerzia());
+
+    fireEvent.change(screen.getByLabelText("Číslo verzie"), { target: { value: "1.10" } });
+
+    expect(screen.getByRole("button", { name: /Založiť novú verziu/i })).toBeDisabled();
+    expect(screen.getByText("v tvare 1.2.3")).toBeInTheDocument();
+  });
+
+  it("rýchla oprava vlastné číslo neukazuje — určuje ho pravidlo opravy", () => {
+    vykresli(navrh());
+
+    expect(screen.queryByLabelText("Číslo verzie")).not.toBeInTheDocument();
   });
 });

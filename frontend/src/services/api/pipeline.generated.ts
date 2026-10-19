@@ -2141,7 +2141,8 @@ export interface paths {
          * @description Zadanie od Deda, ktoré čaká na rozhodnutie — alebo ``null``, keď žiadne nie je.
          *
          *     Prázdna odpoveď je správna odpoveď, nie chyba: väčšinu času Dedo nič nenavrhuje a stránka projektu
-         *     sa má tváriť presne tak, ako sa tvárila doteraz.
+         *     sa má tváriť presne tak, ako sa tvárila doteraz. DEV-149: pri novej verzii nesie aj číslo, s ktorým
+         *     verzia vznikne — Manažér ho vidí a môže zmeniť skôr, než klikne.
          */
         get: operations["get_dedo_proposal_api_v1_projects__project_id__dedo_proposal_get"];
         put?: never;
@@ -2378,6 +2379,29 @@ export interface paths {
          *     project — enforced by the ownership check below.
          */
         post: operations["create_version_api_v1_projects__project_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/versions/next-number": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Next Version Number
+         * @description The number a new version of the project would get — the cockpit's one rule, asked, not copied (DEV-149).
+         *
+         *     The new-version screen computed it itself, the same rule written a second time; on 19.10.2026 both rolled
+         *     1.9.0 to 2.0.0. **404** — the project does not exist.
+         */
+        get: operations["next_version_number_api_v1_projects__project_id__versions_next_number_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5236,6 +5260,8 @@ export interface components {
              * @description fast_fix | new_version
              */
             proposed_action: string;
+            /** Proposed Version Number */
+            proposed_version_number?: string | null;
         };
         /**
          * DedoProjectProposalRead
@@ -5261,8 +5287,12 @@ export interface components {
             project_id: string;
             /** Proposed Action */
             proposed_action: string;
+            /** Proposed Version Number */
+            proposed_version_number?: string | null;
             /** Status */
             status: string;
+            /** Version Number */
+            version_number?: string | null;
         };
         /**
          * DedoProjectProposalRejectRequest
@@ -5290,6 +5320,8 @@ export interface components {
             proposal_id: string;
             /** Text */
             text: string;
+            /** Version Number */
+            version_number?: string | null;
             /** Work Kind */
             work_kind?: ("fix" | "change" | "gift") | null;
         };
@@ -9371,6 +9403,11 @@ export interface components {
         _NexsharedUpgradeRequest: {
             /** Target Version */
             target_version: string;
+        };
+        /** _NextVersionNumberResponse */
+        _NextVersionNumberResponse: {
+            /** Version Number */
+            version_number: string;
         };
         /**
          * _ReassignRequest
@@ -13548,6 +13585,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    next_version_number_api_v1_projects__project_id__versions_next_number_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["_NextVersionNumberResponse"];
                 };
             };
             /** @description Validation Error */

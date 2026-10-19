@@ -183,12 +183,15 @@ _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
 def suggest_next_version_number(db: Session, project_id: UUID) -> str:
-    """Suggest the next bare-semver version number for ``project_id`` (mirrors the FE ``nextVersionNumber``).
+    """Suggest the next bare-semver version number for ``project_id`` — the ONE place the rule lives (DEV-149).
 
-    Bumps the MINOR of the most recently CREATED version (``0.1.0`` when the project has none), rolling to
-    the next MAJOR at ``.10`` (``1.9.0`` → ``2.0.0``), then bumps the PATCH to skip any already-taken number
-    so a mint never collides on the ``UNIQUE(project_id, version_number)`` pair. Falls back to a patch bump of
-    the latest when its number is not parseable semver."""
+    Bumps the MINOR of the most recently CREATED version (``0.1.0`` when the project has none) — ``1.9.0`` →
+    ``1.10.0``. A new version changes how the product behaves, and the MAJOR number changes only when the product
+    becomes something else (KB ``ICC_STANDARDS.md`` §13). Until 19.10.2026 the minor rolled to the next major at
+    ``.10``: Dedo proposed NEX Inbox 1.10.0 and the cockpit founded 2.0.0. Then bumps the PATCH to skip any
+    already-taken number so a mint never collides on the ``UNIQUE(project_id, version_number)`` pair. Falls back to
+    a patch bump of the latest when its number is not parseable semver. The new-version screen asks for this
+    (``GET /projects/{id}/versions/next-number``) instead of computing its own."""
     latest = db.execute(
         select(Version).where(Version.project_id == project_id).order_by(Version.created_at.desc()).limit(1)
     ).scalar_one_or_none()
@@ -201,7 +204,7 @@ def suggest_next_version_number(db: Session, project_id: UUID) -> str:
             candidate = f"{latest.version_number}.1"
         else:
             maj, minor = int(m.group(1)), int(m.group(2))
-            candidate = f"{maj + 1}.0.0" if minor + 1 >= 10 else f"{maj}.{minor + 1}.0"
+            candidate = f"{maj}.{minor + 1}.0"
 
     # Skip any already-taken number (a manually-created draft may already sit on the computed next).
     guard = 0
@@ -450,18 +453,28 @@ def version_number_lock_reason(db: Session, version_id: UUID) -> Optional[str]:
         raise ValueError(f"Version {version_id} not found")
     version_number, slug = row
 
+    zaznam = db.execute(select(PipelineState.id).where(PipelineState.version_id == version_id)).first()
+    if zaznam is not None:
+        return "Číslo verzie sa už nedá zmeniť — stavba tejto verzie sa začala a agent sa na to číslo odvoláva."
+
     _, abs_path = _zadanie_paths(slug, version_number)
-    if abs_path.parent.is_dir():
+    if abs_path.parent.is_dir() and not _only_the_founding_zadanie(abs_path):
         return (
             f"Číslo verzie sa už nedá zmeniť — podľa neho sa volá priečinok s dokumentmi "
             f"(docs/specs/versions/v{version_number}/) a ten už existuje. Premenovaním by hotová "
             "práca ostala ležať pod starým číslom."
         )
-
-    zaznam = db.execute(select(PipelineState.id).where(PipelineState.version_id == version_id)).first()
-    if zaznam is not None:
-        return "Číslo verzie sa už nedá zmeniť — stavba tejto verzie sa začala a agent sa na to číslo odvoláva."
     return None
+
+
+def _only_the_founding_zadanie(zadanie: Path) -> bool:
+    """Whether the version's folder holds nothing but the Zadanie written when it was founded (DEV-149).
+
+    Founding a version from a brief writes ``customer-requirements.md`` at once, so the number locked in the very
+    second the version existed — 19.10.2026 NEX Inbox 2.0.0 could not be renamed to the 1.10.0 it should have been.
+    That one file moves along with a rename (:func:`update`); anything else in the folder, or an empty folder, is
+    work that stays locked."""
+    return [entry.name for entry in zadanie.parent.iterdir()] == [zadanie.name]
 
 
 def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
@@ -525,6 +538,7 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
             raise ValueError(
                 f"Version with project_id={version.project_id} and version_number={new_version_number!r} already exists"
             )
+        _move_founding_zadanie(db, version, new_version_number)
 
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
@@ -532,6 +546,23 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
 
     db.flush()
     return version
+
+
+def _move_founding_zadanie(db: Session, version: Version, new_version_number: str) -> None:
+    """Carry the Zadanie written at founding to the folder of the new number (DEV-149) — the only thing a version
+    whose number may still change can have on disk. Refuses when the new folder already exists: it is somebody's."""
+    slug = db.execute(select(Project.slug).where(Project.id == version.project_id)).scalar_one()
+    _, old = _zadanie_paths(slug, version.version_number)
+    if not old.parent.is_dir():
+        return
+    _, new = _zadanie_paths(slug, new_version_number)
+    if new.parent.exists():
+        raise ValueError(
+            f"Číslo verzie sa nedá zmeniť na {new_version_number} — priečinok "
+            f"docs/specs/versions/v{new_version_number}/ už existuje a zadanie by ho prepísalo."
+        )
+    new.parent.parent.mkdir(parents=True, exist_ok=True)
+    old.parent.rename(new.parent)
 
 
 def release(db: Session, version_id: UUID) -> Version:

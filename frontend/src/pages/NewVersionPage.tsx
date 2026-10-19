@@ -18,6 +18,7 @@ import {
   writeZadanie,
   updateVersion,
   peekZadanieOnDisk,
+  getNextVersionNumberApi,
 } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -33,24 +34,6 @@ import type { Version, VersionUpdate } from "@/types/version";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Suggest the next version number. Stored WITHOUT a leading "v": the canonical format is bare
-// semver (the post-scaffold seeds the first version as "0.1.0"), and the orchestrator's spec-tree
-// path helper prepends the "v" itself (docs/specs/versions/v<version_number>/…) — so a stored "v"
-// would double it. The first version produced by the v2 pipeline is v0.1.0 (design §4.3 / DEPLOY-9).
-function nextVersionNumber(versions: Version[]): string {
-  if (versions.length === 0) return "0.1.0";
-  const last = [...versions].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  )[0];
-  if (!last) return "0.1.0";
-  // Accept an optional leading "v" + an optional patch segment (semver or the older major.minor).
-  const m = last.version_number.match(/^v?(\d+)\.(\d+)(?:\.(\d+))?$/);
-  if (!m || !m[1] || !m[2]) return "";
-  const maj = parseInt(m[1]);
-  const min = parseInt(m[2]);
-  const nextMin = min + 1;
-  return nextMin >= 10 ? `${maj + 1}.0.0` : `${maj}.${nextMin}.0`;
-}
 
 // ─── Input style ──────────────────────────────────────────────────────────────
 
@@ -77,6 +60,7 @@ export default function NewVersionPage() {
 
   const [versionNumber, setVersionNumber] = useState("");
   const [versionManual, setVersionManual] = useState(false);
+  const versionManualRef = useRef(false);
   const [name, setName] = useState("");
   const [targetDate, setTargetDate] = useState("");
   // DEV-50: a new version is new work unless the Manažér says it fixes an error in code we delivered.
@@ -151,10 +135,15 @@ export default function NewVersionPage() {
           .catch((err: unknown) => {
             if (!cancelled) setGitError(humanizeApiError(err, "Overenie neuložených zmien projektu zlyhalo"));
           });
+        // DEV-149: the number comes from the cockpit's one rule — this screen used to compute it itself, and both
+        // rolled 1.9.0 to 2.0.0. A number the Manažér already typed is kept (read through the ref: the answer
+        // arrives after this effect ran).
+        getNextVersionNumberApi(found.id)
+          .then((next) => { if (!cancelled && !versionManualRef.current) setVersionNumber(next.version_number); })
+          .catch(() => {});
         return listVersions(found.id).then((vs) => {
           if (cancelled) return;
           setPrevVersions(vs);
-          if (!versionManual) setVersionNumber(nextVersionNumber(vs));
         });
       })
       .catch(() => { if (!cancelled) setLoadError("Nepodarilo sa načítať projekt."); });
@@ -528,6 +517,7 @@ export default function NewVersionPage() {
                   onChange={(e) => {
                     setVersionNumber(e.target.value);
                     setVersionManual(true);
+                    versionManualRef.current = true;
                     if (errors.versionNumber) setErrors((er) => ({ ...er, versionNumber: "" }));
                   }}
                   className={`${inputCls} font-mono disabled:opacity-60 ${errors.versionNumber ? "border-[var(--color-state-error-bg)]" : ""}`}

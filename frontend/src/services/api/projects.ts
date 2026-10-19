@@ -267,6 +267,10 @@ export interface DedoProjectProposal {
   proposed_action: string;
   status: string;
   created_at: string;
+  /** DEV-149 — the number Dedo proposed for a new version, if he did. */
+  proposed_version_number: string | null;
+  /** DEV-149 — the number the new version is founded with unless the Manažér changes it; `null` for a fast fix. */
+  version_number: string | null;
 }
 
 export interface DedoProjectProposalSent {
@@ -291,12 +295,15 @@ export function sendProjectDedoProposalApi(
   proposalId: string,
   text: string,
   workKind: WorkKind | null = null,
+  versionNumber: string | null = null,
 ): Promise<DedoProjectProposalSent> {
   // DEV-56: a brief that starts a fast fix carries the Manažér's work kind (the server refuses it without one).
+  // DEV-149: a new version is founded with the number he had on screen.
   return api.post<DedoProjectProposalSent>(`/projects/${projectId}/dedo-proposal/send`, {
     proposal_id: proposalId,
     text,
     work_kind: workKind,
+    ...(versionNumber ? { version_number: versionNumber } : {}),
   });
 }
 

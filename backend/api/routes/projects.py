@@ -39,7 +39,6 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
-from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
@@ -1656,14 +1655,20 @@ def get_dedo_proposal(
     project_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_shu_or_above),
-) -> DedoProjectProposal | None:
+) -> DedoProjectProposalRead | None:
     """Zadanie od Deda, ktoré čaká na rozhodnutie — alebo ``null``, keď žiadne nie je.
 
     Prázdna odpoveď je správna odpoveď, nie chyba: väčšinu času Dedo nič nenavrhuje a stránka projektu
-    sa má tváriť presne tak, ako sa tvárila doteraz.
+    sa má tváriť presne tak, ako sa tvárila doteraz. DEV-149: pri novej verzii nesie aj číslo, s ktorým
+    verzia vznikne — Manažér ho vidí a môže zmeniť skôr, než klikne.
     """
     authz.assert_project_id_access(db, current_user, project_id)
-    return dedo_proposal_service.open_for_project(db, project_id)
+    proposal = dedo_proposal_service.open_for_project(db, project_id)
+    if proposal is None:
+        return None
+    return DedoProjectProposalRead.model_validate(proposal).model_copy(
+        update={"version_number": dedo_proposal_service.founding_number(db, proposal)}
+    )
 
 
 @router.post("/{project_id}/dedo-proposal/send", response_model=DedoProjectProposalSendResponse)
@@ -1707,7 +1712,8 @@ async def send_dedo_proposal(
                 db,
                 project_id,
                 VersionCreate(
-                    version_number=version_service.suggest_next_version_number(db, project_id),
+                    # DEV-149: the number the Manažér had on screen — Dedo's proposed one or the suggestion.
+                    version_number=payload.version_number or dedo_proposal_service.founding_number(db, proposal),
                     name="Nová verzia",
                     description=payload.text,
                 ),

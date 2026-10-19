@@ -52,6 +52,8 @@ class DedoProjectProposal(Base, UUIDMixin, TimestampMixin):
     )
     content = Column(Text, nullable=False)
     proposed_action = Column(String(16), nullable=False)
+    #: DEV-149 — the version number Dedo proposes for a new version; ``None`` lets the cockpit suggest it.
+    proposed_version_number = Column(String(50), nullable=True)
     status = Column(String(16), nullable=False, server_default=PROPOSED)
     #: Kto o návrhu rozhodol. Prázdne, kým je otvorený — a prázdne aj pri ``superseded``, lebo vtedy
     #: nerozhodol nikto.

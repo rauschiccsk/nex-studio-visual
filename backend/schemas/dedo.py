@@ -85,6 +85,9 @@ class DedoProjectProposalCreate(BaseModel):
     #: Overuje sa proti :data:`~backend.db.models.dedo_proposal.PROJECT_PROPOSAL_ACTIONS` v službe (409),
     #: aby povolená množina žila na JEDNOM mieste vedľa zapisovateľa.
     proposed_action: str = Field(min_length=1, description="fast_fix | new_version")
+    #: DEV-149 — the version number Dedo proposes for ``new_version``; without it the cockpit suggests one. On
+    #: 19.10.2026 the number stood only in the text, the cockpit could not read it and founded 2.0.0 for 1.10.0.
+    proposed_version_number: Optional[str] = Field(default=None, min_length=1, max_length=50)
 
 
 class DedoProjectProposalRead(BaseModel):
@@ -98,6 +101,10 @@ class DedoProjectProposalRead(BaseModel):
     proposed_action: str
     status: str
     created_at: datetime
+    proposed_version_number: Optional[str] = None
+    #: DEV-149 — the number ``new_version`` will found the version with unless the Manažér changes it: Dedo's
+    #: proposed number, else the cockpit's suggestion. ``None`` for a fast fix (its number follows the fix rule).
+    version_number: Optional[str] = None
 
 
 class DedoProjectProposalSendRequest(BaseModel):
@@ -112,6 +119,9 @@ class DedoProjectProposalSendRequest(BaseModel):
     #: DEV-56 — pri zadaní rýchlej opravy: oprava chyby v dodanom kóde (``fix``) alebo zmena (``change``).
     #: Pre rýchlu opravu povinné (bez neho 400 s vetou prečo); pri novej verzii sa nečíta.
     work_kind: Optional[WorkKind] = None
+    #: DEV-149 — the number the Manažér founds the new version with, as he had it on screen; without it the
+    #: number shown to him (:attr:`DedoProjectProposalRead.version_number`). Not read for a fast fix.
+    version_number: Optional[str] = Field(default=None, min_length=1, max_length=50)
 
 
 class DedoProjectProposalRejectRequest(BaseModel):

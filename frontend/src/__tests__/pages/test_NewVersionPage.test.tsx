@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
@@ -33,6 +33,7 @@ const {
   updateVersionMock,
   peekZadanieOnDiskMock,
   postPipelineActionApiMock,
+  getNextVersionNumberApiMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   listProjectsApiMock: vi.fn(),
@@ -47,6 +48,7 @@ const {
   updateVersionMock: vi.fn(),
   peekZadanieOnDiskMock: vi.fn(),
   postPipelineActionApiMock: vi.fn(),
+  getNextVersionNumberApiMock: vi.fn(),
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -68,6 +70,7 @@ vi.mock("@/services/api/versions", () => ({
   writeZadanie: writeZadanieMock,
   updateVersion: updateVersionMock,
   peekZadanieOnDisk: peekZadanieOnDiskMock,
+  getNextVersionNumberApi: getNextVersionNumberApiMock,
 }));
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: postPipelineActionApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
@@ -146,6 +149,8 @@ beforeEach(() => {
   discardGitApiMock.mockResolvedValue({ ok: true });
   // Nahliadnutie na disk je súčasťou zakladania — predvolene tam nič nie je (bežný prípad).
   peekZadanieOnDiskMock.mockResolvedValue({ content: "", relative_path: "" });
+  // DEV-149: the number comes from the cockpit — for an empty project that is 0.1.0.
+  getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.1.0" });
 });
 
 async function renderPage() {
@@ -508,5 +513,32 @@ describe("NewVersionPage — druh práce (DEV-50)", () => {
 
     await waitFor(() => expect(createVersionMock).toHaveBeenCalled());
     expect(createVersionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ work_kind: "fix" }));
+  });
+});
+
+describe("NewVersionPage — the number comes from the cockpit's one rule (DEV-149)", () => {
+  it("after 1.9.0 it offers what the cockpit says, 1.10.0 — the screen no longer rolls to 2.0.0 on its own", async () => {
+    listVersionsMock.mockResolvedValue([{ ...version, version_number: "1.9.0" }]);
+    getNextVersionNumberApiMock.mockResolvedValue({ version_number: "1.10.0" });
+
+    await renderPage();
+
+    await waitFor(() => expect(screen.getByPlaceholderText("0.1.0")).toHaveValue("1.10.0"));
+    expect(getNextVersionNumberApiMock).toHaveBeenCalledWith(project.id);
+  });
+
+  it("keeps a number the Manažér typed before the cockpit answered", async () => {
+    let answer: (value: { version_number: string }) => void = () => {};
+    getNextVersionNumberApiMock.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+
+    await renderPage();
+    await waitFor(() => expect(getNextVersionNumberApiMock).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("0.1.0"), { target: { value: "3.0.0" } });
+    // The cockpit's answer is processed first — a check before it would pass whatever the screen does with it.
+    await act(async () => {
+      answer({ version_number: "1.10.0" });
+    });
+
+    expect(screen.getByPlaceholderText("0.1.0")).toHaveValue("3.0.0");
   });
 });

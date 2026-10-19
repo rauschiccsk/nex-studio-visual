@@ -24,6 +24,11 @@ export function listVersions(projectId: string): Promise<Version[]> {
   return api.get<Version[]>(`/projects/${projectId}/versions`);
 }
 
+/** DEV-149 — the number a new version of the project would get; the cockpit's one rule, asked rather than copied. */
+export function getNextVersionNumberApi(projectId: string): Promise<{ version_number: string }> {
+  return api.get<{ version_number: string }>(`/projects/${projectId}/versions/next-number`);
+}
+
 /** Fetch a single version by its UUID. */
 export function getVersion(id: string): Promise<Version> {
   return api.get<Version>(`/versions/${id}`);
