@@ -1289,6 +1289,8 @@ export function registerFixtures(): void {
     content: "",
     relative_path: "docs/specs/versions/v1.8.0/ZADANIE.md",
   });
+  // DEV-149: the new-version screen asks the cockpit for the number instead of computing it.
+  answer("get", "/api/v1/projects/{project_id}/versions/next-number", { version_number: "1.8.0" });
   // DEV-73: NEX Inbox as it stood 12.10.2026 — an issued fix, an issued version a newer rate would count higher, a
   // version to issue, a fast fix waiting for its work kind, a version still in build.
   const issued = (amount: string, kind: "fix" | "change") => ({
