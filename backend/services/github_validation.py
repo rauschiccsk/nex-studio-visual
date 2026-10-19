@@ -84,6 +84,18 @@ def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:
 
     ``"online"`` / ``"offline"``, or ``None`` when no such runner is registered (yet). Any answer but 200 raises:
     a status that could not be read is not the same as "offline", and the caller must not wait on a guess."""
+    runner = _runner(repo_full, label, timeout=timeout)
+    return runner.get("status") if runner else None
+
+
+def runner_busy(repo_full: str, label: str, *, timeout: float) -> bool:
+    """Whether the self-hosted runner ``label`` of ``repo_full`` is running a job now (DEV-145) — recreating it would
+    kill that job. Raises like :func:`runner_status` when GitHub cannot be asked."""
+    runner = _runner(repo_full, label, timeout=timeout)
+    return bool(runner and runner.get("busy"))
+
+
+def _runner(repo_full: str, label: str, *, timeout: float) -> dict | None:
     response = httpx.get(
         f"{GITHUB_API_BASE}/repos/{repo_full}/actions/runners",
         headers=github_headers(),
@@ -96,8 +108,25 @@ def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:
         )
     for runner in response.json().get("runners") or []:
         if runner.get("name") == label:
-            return runner.get("status")
+            return runner
     return None
+
+
+def runner_registration_token(repo_full: str, *, timeout: float) -> str:
+    """A registration token (valid one hour) for a self-hosted runner of ``repo_full`` (DEV-145).
+
+    Any answer but 201 raises; the error never carries the response body, so a token can never end up in a log."""
+    response = httpx.post(
+        f"{GITHUB_API_BASE}/repos/{repo_full}/actions/runners/registration-token",
+        headers=github_headers(),
+        timeout=timeout,
+    )
+    if response.status_code != 201:
+        raise RuntimeError(
+            f"GitHub API returned unexpected status {response.status_code} for a runner registration token "
+            f"of '{repo_full}'"
+        )
+    return response.json()["token"]
 
 
 def github_headers() -> dict[str, str]:

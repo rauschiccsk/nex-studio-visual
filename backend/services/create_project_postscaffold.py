@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance, github_validation
+from backend.services import build_provenance, ci_runner, github_validation
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +44,8 @@ SMOKE_FULL_TIMEOUT = 600  # 10 min — full smoke incl up + health
 CICD_TIMEOUT = 60
 BRANCH_PROTECTION_TIMEOUT = 30
 
-# Containerized self-hosted CI runner (Director 2026-07-16). The backend runs INSIDE a container and cannot
-# install a HOST systemd runner (no systemctl/sudo/host runner dir) like the 13 legacy ones — so it runs the
-# runner as a Docker container via the mounted docker.sock. See :func:`_provision_ci_runner` for the full why.
-# The tag is only where the runner STARTS: it updates itself from there, exactly like the host systemd runners
-# (ICCINT-165). Until 03.10.2026 this pin came with ``DISABLE_AUTO_UPDATE=true`` and a comment claiming it was
-# "the same version as the host runners" — true only until they updated themselves to 2.337.0. On 24.09.2026
-# GitHub refused 2.335.1 ("is deprecated and cannot receive messages") and every container runner went into a
-# register → refused → deregister → restart loop for nine days. A version that may not update is a failure
-# scheduled for GitHub's next release; bumping the number here would only reschedule it.
-CI_RUNNER_IMAGE = "myoung34/github-runner:2.335.1"
-#: The command the runner container runs — GitHub's own ``run.sh``, not the image's default
-#: ``./bin/Runner.Listener run --startuptype service`` (ICCINT-165). On an update the listener exits and a
-#: detached updater swaps ``bin``; with the default command that exit ends the container, Docker restarts it and
-#: kills the updater halfway (measured 03.10.2026: ``bin`` gone, ``No such file or directory`` on every start —
-#: a new restart loop). ``run.sh`` waits for ``update.finished`` and re-launches the listener in the SAME
-#: container; measured 2.335.1 → 2.337.0 with zero container restarts, still listening after a restart.
-CI_RUNNER_COMMAND = "./run.sh"
-#: Where a container runner keeps its checkout — the SAME path in the container and on the host (ICCINT-66).
-#: Anything the CI mounts out of the repository depends on those two agreeing.
-CI_RUNNER_WORKDIR_ROOT = "/opt/ci-work"
-CI_RUNNER_PROVISION_TIMEOUT = 300  # a cold `docker run` may pull the runner image first
+# The project's CI runner is a pair — a runner with a Docker daemon of its own — described by
+# templates/ci-runner/docker-compose.yml and started by :mod:`backend.services.ci_runner` (DEV-145).
 #: DEV-38: how long founding waits for the new runner to be online on GitHub before pushing ``ci.yml`` (a cold
 #: start pulls the image, then registers — Career Asistent took ~6 s), how often it asks, and the per-ask cap.
 CI_RUNNER_ONLINE_WAIT = 120
@@ -75,7 +56,6 @@ CI_RUNNER_NEVER_ONLINE = (
 )
 CI_RUNNER_CANNOT_ASK = "Nepodarilo sa overiť, či je vykonávač kontrol prihlásený na GitHube — prvá kontrola môže čakať."
 CI_RUNNER_NOT_STARTED = "Vykonávač kontrol sa nepodarilo spustiť — kontroly počkajú, kým ho niekto spustí."
-CI_RUNNER_TEARDOWN_TIMEOUT = 60
 
 
 # --- CR-V2-005 archetype surface composition --------------------------------
@@ -941,99 +921,14 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
 
 
 def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> None:
-    """Auto-provision a containerized self-hosted GitHub Actions runner for the new repo (Director 2026-07-16).
+    """Start the project's CI runner — paired with a Docker daemon of its own, never the server's live one (DEV-145).
 
-    Closes the "CI pushed but no runner → every job queues forever" gap: :func:`_wire_cicd_workflow` pushes a
-    ci.yml whose jobs ``runs-on: andros-ubuntu-<slug>`` (self-hosted), but nothing registered such a runner.
-    The 13 legacy runners are HOST systemd services; the NEX Studio backend runs INSIDE a container with no
-    ``systemctl`` / ``sudo`` / host runner dir, so it cannot install one that way. It CAN, via the mounted
-    ``/var/run/docker.sock``, run the runner as a Docker container — the only zero-touch path from the cockpit.
-
-    ``myoung34/github-runner`` self-registers from the backend's GH PAT and bundles the docker CLI; the host
-    docker.sock is mounted in so the CI's ``docker compose build`` + service-container jobs execute against the
-    host daemon exactly like the systemd runners do. Persistent + self-healing (``--restart unless-stopped``).
-
-    Best-effort: any failure is logged, never raised (the Manažér can register a runner manually — the pushed
-    ci.yml still stands). Idempotent: skips when a runner container for this slug already exists. The PAT is
-    passed to ``docker`` via the child ENV (``-e ACCESS_TOKEN`` name-only), never on argv, so it never lands in
-    ``ps`` / logs.
-    """
+    Closes the "CI pushed but no runner → every job queues forever" gap (Director 2026-07-16):
+    :func:`_wire_cicd_workflow` pushes a ci.yml whose jobs ``runs-on: andros-ubuntu-<slug>``. Raises when the runner
+    cannot be started; :func:`_start_ci_runner` says so in the founding warnings."""
     from backend.services.template_bootstrap import _repo_from_url
 
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if not token:
-        logger.warning("CI runner provisioning SKIPPED — no GITHUB_TOKEN/GH_TOKEN in env (slug=%s)", slug)
-        return
-
-    repo_full = _repo_from_url(repo_url, slug, default_owner=github_org)  # owner/repo
-    container = f"nex-ci-runner-{slug}"
-    label = f"andros-ubuntu-{slug}"
-
-    # Idempotent — a runner container for this slug already present (running or stopped) → leave it.
-    existing = subprocess.run(
-        ["docker", "ps", "-aq", "-f", f"name=^{container}$"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if existing.returncode == 0 and existing.stdout.strip():
-        logger.info("CI runner provisioning SKIPPED — container %s already exists (slug=%s)", container, slug)
-        return
-
-    # Pass the PAT via the child ENV (``-e ACCESS_TOKEN`` name-only) so it is NEVER on argv (ps/logs).
-    child_env = {**os.environ, "ACCESS_TOKEN": token}
-    run = subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            container,
-            "--restart",
-            "unless-stopped",
-            "-e",
-            "ACCESS_TOKEN",
-            "-e",
-            f"REPO_URL=https://github.com/{repo_full}",
-            "-e",
-            "RUNNER_SCOPE=repo",
-            "-e",
-            f"RUNNER_NAME={label}",
-            "-e",
-            f"LABELS={label}",
-            # No ``DISABLE_AUTO_UPDATE`` (ICCINT-165): the runner must keep itself current — see CI_RUNNER_IMAGE.
-            # ICCINT-66: the work dir must be the SAME PATH inside the runner and on the host.
-            #
-            # CI runs inside this container but executes docker through the HOST's socket, so a compose bind
-            # mount like ``./deployment/db`` is resolved by the host daemon — against a path the host does not
-            # have. Docker does not fail on a missing bind source: it SILENTLY CREATES AN EMPTY DIRECTORY and
-            # mounts that. The container then gets an empty ``/docker-entrypoint-initdb.d``, its init script
-            # never runs, and the only symptom is a test failure that makes no sense ("database does not
-            # exist") in a repository where the file is plainly present. nex-productcatalogs chased that for a
-            # day; the give-away was a root-owned empty ``deployment/db`` on the host, stamped with the CI run.
-            #
-            # Identical paths on both sides make the host resolve the REAL checkout. Under ``/opt`` because
-            # that is where ICC keeps its things — the image's default ``/_work`` would litter the host root.
-            "-e",
-            f"RUNNER_WORKDIR={CI_RUNNER_WORKDIR_ROOT}/{slug}",
-            "-v",
-            "/var/run/docker.sock:/var/run/docker.sock",
-            "-v",
-            f"{CI_RUNNER_WORKDIR_ROOT}/{slug}:{CI_RUNNER_WORKDIR_ROOT}/{slug}",
-            CI_RUNNER_IMAGE,
-            CI_RUNNER_COMMAND,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=CI_RUNNER_PROVISION_TIMEOUT,
-        check=False,
-        env=child_env,
-    )
-    if run.returncode != 0:
-        logger.warning("CI runner provisioning FAILED (slug=%s): %s", slug, run.stderr.strip())
-        return
-    logger.info("CI runner container provisioned (slug=%s, label=%s)", slug, label)
+    ci_runner.provision(slug, _repo_from_url(repo_url, slug, default_owner=github_org))
 
 
 def _start_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> str | None:
@@ -1081,27 +976,6 @@ def _wait_for_ci_runner(
         if time.monotonic() >= deadline:
             return CI_RUNNER_NEVER_ONLINE.format(wait=wait)
         time.sleep(poll)
-
-
-def deprovision_ci_runner(slug: str) -> None:
-    """Best-effort teardown of the containerized CI runner for a deleted project (Director 2026-07-16).
-
-    Removes the ``nex-ci-runner-<slug>`` container (``docker rm -f``); GitHub then shows the runner offline
-    (reclaimed by a same-named ``--replace`` re-provision on re-create). Never raises — mirrors the UAT / KB /
-    RAG teardowns in the delete route. A no-op when no such container exists (project predates this feature or
-    had CI disabled)."""
-    container = f"nex-ci-runner-{slug}"
-    result = subprocess.run(
-        ["docker", "rm", "-f", container],
-        capture_output=True,
-        text=True,
-        timeout=CI_RUNNER_TEARDOWN_TIMEOUT,
-        check=False,
-    )
-    if result.returncode != 0:
-        logger.info("CI runner teardown — nothing removed for slug=%s (%s)", slug, result.stderr.strip())
-        return
-    logger.info("CI runner container removed (slug=%s)", slug)
 
 
 def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:

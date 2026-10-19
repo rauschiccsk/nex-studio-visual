@@ -1447,12 +1447,12 @@ def delete_project(
         if not ok:
             logger.warning("UAT teardown failed for deleted project %r (uat_slug=%r): %s", slug, uat_slug, detail)
 
-    # CI runner teardown — orphan prevention (Director 2026-07-16). A deleted project's containerized
-    # self-hosted runner (nex-ci-runner-<slug>) would otherwise linger; remove it. Best-effort, never
-    # raises, never undoes the committed delete — mirrors the UAT teardown above.
-    from backend.services.create_project_postscaffold import deprovision_ci_runner
+    # CI runner teardown — orphan prevention (Director 2026-07-16). A deleted project's runner and its own Docker
+    # daemon (DEV-145) would otherwise linger; remove them. Best-effort, never raises, never undoes the committed
+    # delete — mirrors the UAT teardown above.
+    from backend.services import ci_runner
 
-    deprovision_ci_runner(slug)
+    ci_runner.deprovision(slug)
 
     # DEV-109: the project's preview — container vizual-<slug> and the route its labels give Traefik — would
     # otherwise keep serving a deleted project's frontend. Best-effort and logged, like every cleanup around it.

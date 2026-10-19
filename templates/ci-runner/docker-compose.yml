@@ -1,0 +1,114 @@
+# The CI runner of one project, paired with a Docker daemon of its own (ICCINT-261, DEV-145).
+#
+# Why. Until 19.10.2026 every CI runner on ANDROS drove the server's LIVE Docker, next to the customers'
+# installations. On 15.10.2026 GitHub cancelled a NEX Manager CI job mid-test; its database kept running for four
+# days, open on the server's network, until the nightly backup check found it. On a shared Docker nothing says which
+# job a container belongs to, so nothing can be cleaned up safely after a job — and any job could stop or delete a
+# customer's database. Director 19.10.2026: "Súhlasím s návrhom na oddelený docker."
+#
+# How. Service `docker` is the runner's own daemon (docker:dind); a job never sees the live Docker. The runner shares
+# its network namespace, so a port a test publishes (`-p 5432`) is on the job's localhost and not on the server's
+# network. The work dir is the same path in both (ICCINT-66: a bind mount is resolved by the daemon that starts the
+# container). The cleanup hook empties the runner's own daemon at the start and at the end of every job.
+#
+# The ONLY description of the pair (Director 19.10.2026: "Súhlasím"): the cockpit starts it for its projects
+# (backend/services/ci_runner.py) and Dedo's nastroje/ci_bezec.sh starts the cockpit's own runner from this file.
+#
+# Everything the containers get is IN this file or in the environment of `docker compose` — nothing is mounted from a
+# file next to it. The cockpit runs compose from inside its own container, where a path next to this file does not
+# exist on the host, and Docker would silently mount an empty directory in its place.
+#
+# Registration: the one-hour registration token goes only to a one-off `run --rm runner true`; the stored registration
+# then lives in volume runner-data, so no key stays in the runner's configuration.
+#
+# What the tests read matches the old runners on the server: Ubuntu 24.04 with git 2.43, an ordinary user (not root)
+# and the git identity ICC CI. On 19.10.2026 eight cockpit tests failed without it; Director: "Súhlasím".
+name: nex-ci-${SLUG:?SLUG is required}
+
+services:
+  docker:
+    image: docker:29.1.3-dind
+    container_name: nex-ci-docker-${SLUG}
+    hostname: nex-ci-docker-${SLUG}
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      # A socket in a shared volume only — no network access to this daemon.
+      - --host=unix:///run/ci-docker/docker.sock
+      # Address ranges of its own: CI networks must not overlap the office network (192.168.55.0/24) or the live Docker.
+      - --bip=10.230.0.1/24
+      - --default-address-pool=base=10.231.0.0/16,size=24
+      # The socket belongs to the docker group of user runner in the runner image (GID 500), else the runner may not use it.
+      - --group=500
+    volumes:
+      - docker-data:/var/lib/docker
+      - docker-socket:/run/ci-docker
+      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+    healthcheck:
+      test: ["CMD", "docker", "-H", "unix:///run/ci-docker/docker.sock", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  runner:
+    # The version GitHub asks for today; a newer one the runner fetches itself (run.sh below) — the tag is only where
+    # it STARTS. On 24.09.2026 GitHub refused 2.335.1 and runners that were not allowed to update went into a nine-day
+    # restart loop (ICCINT-165); on 19.10.2026 a runner whose update failed was never sent a job again.
+    image: myoung34/github-runner:2.337.0-ubuntu-noble
+    container_name: nex-ci-runner-${SLUG}
+    restart: unless-stopped
+    # run.sh, not the image's default command: on an update it waits for the swap of bin and relaunches the listener
+    # in the SAME container. With the default one the container ends, Docker restarts it halfway through the swap and
+    # the runner is left without bin (03.10.2026) or on the old version (19.10.2026).
+    command: ["./run.sh"]
+    network_mode: service:docker
+    depends_on:
+      docker:
+        condition: service_healthy
+    labels:
+      # Fingerprint of this file and the cleanup hook (ci_runner.template_fingerprint): a runner started from an
+      # older template is recognised, and `up` recreates it because the label is part of its configuration.
+      icc.ci-runner.template: ${CI_RUNNER_TEMPLATE:?CI_RUNNER_TEMPLATE is required}
+    environment:
+      RUNNER_TOKEN:
+      REPO_URL: ${REPO_URL:?REPO_URL is required}
+      RUNNER_SCOPE: repo
+      RUNNER_NAME: andros-ubuntu-${SLUG}
+      LABELS: andros-ubuntu-${SLUG}
+      RUNNER_WORKDIR: /opt/ci-work/${SLUG}
+      CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner-data
+      DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+      UNSET_CONFIG_VARS: "true"
+      RUN_AS_ROOT: "false"
+      DOCKER_HOST: unix:///run/ci-docker/docker.sock
+      CI_DOCKER_NAME: nex-ci-docker-${SLUG}
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /ci-hooks/cleanup.sh
+      ACTIONS_RUNNER_HOOK_JOB_COMPLETED: /ci-hooks/cleanup.sh
+    volumes:
+      - runner-data:/runner-data
+      - docker-socket:/run/ci-docker
+      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+    configs:
+      - source: cleanup-hook
+        target: /ci-hooks/cleanup.sh
+        mode: 0555
+      - source: git-identity
+        target: /home/runner/.gitconfig
+        mode: 0444
+
+configs:
+  # cleanup.sh next to this file, handed over by whoever runs compose (ci_runner.compose_env).
+  cleanup-hook:
+    environment: CI_CLEANUP_HOOK
+  git-identity:
+    content: |
+      [user]
+      	name = ICC CI
+      	email = ci@icc.sk
+
+volumes:
+  docker-data:
+  docker-socket:
+  runner-data:

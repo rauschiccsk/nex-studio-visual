@@ -35,6 +35,7 @@ SHELLING_MODULES = {
     "build_db",
     "build_provenance",
     "build_sandbox",
+    "ci_runner",
     "ci_runs",
     "ci_status",
     "ci_watch",
