@@ -25,6 +25,11 @@
 # and the git identity ICC CI. On 19.10.2026 eight cockpit tests failed without it; Director: "Súhlasím".
 name: nex-ci-${SLUG:?SLUG is required}
 
+# The version GitHub asks for today; a newer one the runner fetches itself (run.sh below) — the tag is only where it
+# STARTS. On 24.09.2026 GitHub refused 2.335.1 and runners that were not allowed to update went into a nine-day restart
+# loop (ICCINT-165); on 19.10.2026 a runner whose update failed was never sent a job again.
+x-runner-image: &runner-image myoung34/github-runner:2.337.0-ubuntu-noble
+
 services:
   docker:
     image: docker:29.1.3-dind
@@ -52,11 +57,21 @@ services:
       timeout: 5s
       retries: 24
 
+  # Hands the work dir over to user runner before the runner starts — on every `up`. A runner started the old way ran
+  # as root and left root-owned files there; on 19.10.2026 the converted runners of nex-websites and career-asistent
+  # failed their first job on them ("Access to the path …/PipelineFolder.json is denied"). The image's own start only
+  # takes over the top of the work dir.
+  workdir:
+    image: *runner-image
+    user: root
+    entrypoint: ["chown", "-R", "runner", "/opt/ci-work/${SLUG}"]
+    network_mode: none
+    restart: "no"
+    volumes:
+      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+
   runner:
-    # The version GitHub asks for today; a newer one the runner fetches itself (run.sh below) — the tag is only where
-    # it STARTS. On 24.09.2026 GitHub refused 2.335.1 and runners that were not allowed to update went into a nine-day
-    # restart loop (ICCINT-165); on 19.10.2026 a runner whose update failed was never sent a job again.
-    image: myoung34/github-runner:2.337.0-ubuntu-noble
+    image: *runner-image
     container_name: nex-ci-runner-${SLUG}
     restart: unless-stopped
     # run.sh, not the image's default command: on an update it waits for the swap of bin and relaunches the listener
@@ -67,6 +82,8 @@ services:
     depends_on:
       docker:
         condition: service_healthy
+      workdir:
+        condition: service_completed_successfully
     labels:
       # Fingerprint of this file and the cleanup hook (ci_runner.template_fingerprint): a runner started from an
       # older template is recognised, and `up` recreates it because the label is part of its configuration.

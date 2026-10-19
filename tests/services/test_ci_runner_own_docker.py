@@ -130,6 +130,19 @@ def test_the_work_dir_is_the_same_path_in_the_runner_and_its_daemon(template: di
     assert f"{workdir}:{workdir}" in runner["volumes"] and f"{workdir}:{workdir}" in daemon["volumes"]
 
 
+def test_the_work_dir_is_handed_to_the_runner_user_before_the_runner_starts(template: dict) -> None:
+    """A runner started the old way ran as root and left root-owned files in the work dir; the image's own start takes
+    over only its top. On 19.10.2026 the converted runners of nex-websites and career-asistent failed their first job
+    on them ("Access to the path …/PipelineFolder.json is denied")."""
+    workdir, runner = template["services"]["workdir"], template["services"]["runner"]
+    path = runner["environment"]["RUNNER_WORKDIR"]
+    assert workdir["image"] == runner["image"], "the runner image is the one that knows user runner"
+    assert workdir["user"] == "root"
+    assert workdir["entrypoint"] == ["chown", "-R", "runner", path]
+    assert workdir["volumes"] == [f"{path}:{path}"] and workdir["network_mode"] == "none"
+    assert runner["depends_on"]["workdir"] == {"condition": "service_completed_successfully"}
+
+
 def test_the_runner_survives_its_own_update(template: dict) -> None:
     """ICCINT-165: with the image's default command an update ends the container, Docker restarts it halfway through
     the swap of ``bin`` and the runner is left without it (03.10.2026) or on a version GitHub no longer serves
