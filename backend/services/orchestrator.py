@@ -6842,7 +6842,7 @@ async def _ci_status_for_head(
         stav, detail = ci_status.verdikt(rows)
         if stav == "red":
             return stav, detail
-        pending = [r for r in rows if r.get("status") != "completed"]
+        pending = ci_status.bezi(rows)
         if not pending or tries_left <= 0:
             break
         if on_wait is not None and not announced:
@@ -6860,7 +6860,7 @@ async def _ci_status_for_head(
     # ICCINT-129: verdikt vynáša ci_status.verdikt — to isté pravidlo, podľa ktorého sa riadi
     # obrazovka. Brána k nemu pridáva len to, čo je JEJ: že už čakala, a ako dlho.
     stav, detail = ci_status.verdikt(rows)
-    pending = [r for r in rows if r.get("status") != "completed"]
+    pending = ci_status.bezi(rows)
     missing = ci_status.chybajuce_behy_znacky(rows, release_tag, tag_workflows) if release_tag else []
     if stav != "red" and missing:
         # DEV-51: the run the tag starts never showed up — say so; the older green runs are not its answer.

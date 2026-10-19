@@ -67,14 +67,58 @@ def pomenuj_beh(row: dict) -> str:
     return f"postup {postup}, beh {cislo}" if postup else f"beh {cislo}"
 
 
+def _workflow_on_ref(row: dict) -> tuple:
+    """Which runs replace each other: one workflow on one ref — a branch, or the version tag a push carried (DEV-51).
+    A run without a workflow name cannot be matched to its workflow, so it never replaces another one."""
+    workflow = str(row.get("workflowName") or "").strip()
+    return (workflow, str(row.get("headBranch") or "")) if workflow else ("", "", id(row))
+
+
+def counted_runs(rows: list[dict]) -> list[dict]:
+    """The runs that speak for the commit — the newest run of each workflow on each ref (DEV-146).
+
+    19.10.2026 the first runs of NEX Websites and Career Asistent on a new CI runner failed because of the runner;
+    newer runs of the same workflow on the same commits passed, yet every failed run kept the commit red and the
+    deploy blocked. A run that a newer run of its workflow on its ref overtook no longer counts. Newer = higher
+    ``databaseId`` — GitHub numbers runs as it creates them, and a re-run keeps its number and reports its newest
+    attempt. Only a run that says something about the code overtakes: one still going, or one that passed or failed.
+    A cancelled newer run does not — else cancelling a re-run would turn a red into an ``unknown`` that does not
+    block. The order of ``rows`` is kept."""
+    newest: dict[tuple, dict] = {}
+    for row in rows:
+        key = _workflow_on_ref(row)
+        if key not in newest or _rank(row) > _rank(newest[key]):
+            newest[key] = row
+    return [row for row in rows if newest[_workflow_on_ref(row)] is row]
+
+
+def _rank(row: dict) -> tuple[bool, int]:
+    """Runs that say something about the code first, then the newest (:func:`counted_runs`)."""
+    says = row.get("status") != "completed" or row.get("conclusion") in CI_CONCLUSIONS_OK | CI_CONCLUSIONS_RED
+    return says, int(row.get("databaseId") or 0)
+
+
+def _overtaken_failures(rows: list[dict]) -> list[tuple[dict, dict]]:
+    """Failed runs a newer run of their workflow on their ref overtook — ``(failed, newer)`` (DEV-146)."""
+    newest = {_workflow_on_ref(row): row for row in counted_runs(rows)}
+    return [
+        (row, newest[_workflow_on_ref(row)])
+        for row in rows
+        if newest[_workflow_on_ref(row)] is not row
+        and row.get("status") == "completed"
+        and row.get("conclusion") in CI_CONCLUSIONS_RED
+    ]
+
+
 def bezi(rows: list[dict]) -> list[dict]:
-    """Behy, ktoré ešte nedobehli — o kóde zatiaľ nehovoria nič."""
-    return [r for r in rows if r.get("status") != "completed"]
+    """Behy, ktoré ešte nedobehli — o kóde zatiaľ nehovoria nič. Len tie, ktoré sa rátajú (:func:`counted_runs`)."""
+    return [r for r in counted_runs(rows) if r.get("status") != "completed"]
 
 
 def prvy_zlyhany(rows: list[dict]) -> Optional[dict]:
-    """Prvý DOKONČENÝ beh, ktorý zlyhal. Poradie v zozname nič neznamená, takže ktorýkoľvek je odpoveď."""
-    for row in rows:
+    """Prvý DOKONČENÝ beh, ktorý zlyhal a rátá sa (:func:`counted_runs`). Poradie v zozname nič neznamená, takže
+    ktorýkoľvek je odpoveď."""
+    for row in counted_runs(rows):
         if row.get("status") == "completed" and row.get("conclusion") in CI_CONCLUSIONS_RED:
             return row
     return None
@@ -92,21 +136,25 @@ def verdikt(rows: list[dict]) -> tuple[str, str]:
     if zlyhal is not None:
         return "red", f"CI zlyhalo ({pomenuj_beh(zlyhal)}, {zlyhal.get('conclusion')})"
 
-    bezia = [r for r in rows if r.get("status") != "completed"]
+    bezia = bezi(rows)
     if bezia:
         return "unknown", f"CI ešte beží ({', '.join(pomenuj_beh(r) for r in bezia)})"
 
     if not rows:
         return "unknown", "pre tento commit sa zatiaľ neobjavil žiadny beh CI"
 
-    presli = [r for r in rows if r.get("conclusion") in CI_CONCLUSIONS_OK]
+    presli = [r for r in counted_runs(rows) if r.get("conclusion") in CI_CONCLUSIONS_OK]
     if not presli:
         # Všetky behy skončili bez toho, aby o kóde niečo povedali — zrušené, zastarané. Nie je to
         # dôkaz zdravia ani dôkaz poruchy. `unknown` neblokuje, ale musí to POVEDAŤ.
-        zavery = ", ".join(f"{pomenuj_beh(r)}: {r.get('conclusion')}" for r in rows)
+        zavery = ", ".join(f"{pomenuj_beh(r)}: {r.get('conclusion')}" for r in counted_runs(rows))
         return "unknown", f"žiadny beh CI nedal výsledok ({zavery})"
 
-    return "green", f"CI zelené ({', '.join(pomenuj_beh(r) for r in presli)})"
+    prekonane = "".join(
+        f"; starší neúspešný beh {stary.get('databaseId')} prekonal novší beh {novy.get('databaseId')}"
+        for stary, novy in _overtaken_failures(rows)
+    )
+    return "green", f"CI zelené ({', '.join(pomenuj_beh(r) for r in presli)}{prekonane})"
 
 
 def prikaz_na_behy(repo: str, sha: str) -> list[str]:
