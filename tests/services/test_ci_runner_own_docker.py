@@ -160,6 +160,7 @@ def test_the_runner_reads_like_the_old_runners_on_the_server(template: dict) -> 
     assert runner["image"].startswith("myoung34/github-runner:") and runner["image"].endswith("-ubuntu-noble")
     assert runner["environment"]["RUN_AS_ROOT"] == "false"
     assert "--group=500" in daemon["command"], "user runner's docker group (GID 500) must own the socket"
+    assert "--feature=containerd-snapshotter=false" in daemon["command"], "images stored like on the server (overlay2)"
     identity_at = {c["source"]: c["target"] for c in runner["configs"]}["git-identity"]
     assert identity_at == "/home/runner/.gitconfig"
     identity = configparser.ConfigParser()

@@ -47,6 +47,10 @@ services:
       - --default-address-pool=base=10.231.0.0/16,size=24
       # The socket belongs to the docker group of user runner in the runner image (GID 500), else the runner may not use it.
       - --group=500
+      # Images stored the classic way (overlay2), like the server's Docker. A fresh Docker 29 stores them through
+      # containerd, and there several services built into one image at once collide: on 19.10.2026 career-asistent's
+      # build failed with "image …-backend:latest: already exists" — worker, migrate and backend share that image.
+      - --feature=containerd-snapshotter=false
     volumes:
       - docker-data:/var/lib/docker
       - docker-socket:/run/ci-docker
