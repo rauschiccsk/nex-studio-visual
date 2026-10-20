@@ -2479,6 +2479,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/ci-runner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ci Runner
+         * @description Whether the project's CI runs on its own runner on ANDROS, and which of its jobs run elsewhere.
+         */
+        get: operations["get_ci_runner_api_v1_projects__slug__ci_runner_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/ci-runner/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Project Ci Runner
+         * @description Start (or renew) the project's runner as founding does. Accepted only where the tab offers the button; the
+         *     start itself runs after the answer and the tab follows it with ``GET``.
+         */
+        post: operations["start_project_ci_runner_api_v1_projects__slug__ci_runner_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/ci-runs": {
         parameters: {
             query?: never;
@@ -4470,6 +4511,18 @@ export interface components {
             new_password: string;
         };
         /**
+         * CiJobElsewhereRead
+         * @description A job whose ``runs-on`` does not name the project's runner.
+         */
+        CiJobElsewhereRead: {
+            /** Job */
+            job: string;
+            /** Runs On */
+            runs_on: string;
+            /** Workflow */
+            workflow: string;
+        };
+        /**
          * CiMainFailing
          * @description DEV-85 — a workflow whose newest finished run on the main branch is red.
          */
@@ -4574,6 +4627,34 @@ export interface components {
             version_id: string;
             /** Version Number */
             version_number: string;
+        };
+        /**
+         * CiRunnerRead
+         * @description The project's runner as the Manažér reads it; ``action`` is the button, absent when there is nothing to do.
+         */
+        CiRunnerRead: {
+            /** Action */
+            action?: string | null;
+            /** Github Status */
+            github_status?: string | null;
+            /** Healthy */
+            healthy: boolean;
+            /** Jobs Elsewhere */
+            jobs_elsewhere: components["schemas"]["CiJobElsewhereRead"][];
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /** Repo */
+            repo?: string | null;
+            /** Starting */
+            starting: boolean;
+            /** State */
+            state?: string | null;
+            /** Summary */
+            summary: string;
+            /** Unreadable Workflows */
+            unreadable_workflows: string[];
         };
         /** CiRunsRead */
         CiRunsRead: {
@@ -13711,6 +13792,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CiMainRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ci_runner_api_v1_projects__slug__ci_runner_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiRunnerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_project_ci_runner_api_v1_projects__slug__ci_runner_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiRunnerRead"];
                 };
             };
             /** @description Validation Error */

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { fmtDeployTime } from "@/components/deploy/version";
+import CiRunnerPanel from "@/components/repozitar/CiRunnerPanel";
 import { choices, duration, filterRuns, NO_FILTER, shownCount, type RunFilter } from "@/lib/ciRuns";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { getCiRuns, type CiRun, type CiRuns } from "@/services/api/ciRuns";
@@ -73,6 +74,8 @@ export default function RepozitarPage() {
   const [data, setData] = useState<CiRuns | null>(null);
   const [error, setError] = useState<HumanError | null>(null);
   const [filter, setFilter] = useState<RunFilter>(NO_FILTER);
+  // DEV-158: „Obnoviť“ refreshes the runner panel too; the runs also refresh on their own schedule.
+  const [refreshes, setRefreshes] = useState(0);
 
   const load = useCallback(() => {
     if (!slug) return Promise.resolve();
@@ -137,7 +140,10 @@ export default function RepozitarPage() {
       <div className="mb-1 flex items-center justify-between gap-2">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Repozitár</h1>
         <button
-          onClick={() => void load()}
+          onClick={() => {
+            void load();
+            setRefreshes((n) => n + 1);
+          }}
           title="Obnoviť"
           className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] pointer-coarse:min-h-11"
         >
@@ -150,6 +156,8 @@ export default function RepozitarPage() {
         GitHubu{data?.repo ? ` (${data.repo})` : ""}. Obnovujú sa samy každých {refreshMs / 1000} s
         {data?.fetched_at ? `, naposledy ${fmtDeployTime(data.fetched_at)}` : ""}.
       </p>
+
+      <CiRunnerPanel slug={slug} refreshKey={refreshes} />
 
       {error && (
         <p

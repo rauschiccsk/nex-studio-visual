@@ -55,6 +55,7 @@ SHELLING_MODULES = {
     "port_registry",
     "predeploy_backup",
     "project_adoption",
+    "project_ci_runner",
     "project_files",
     "remote_instance",
     "source_language",
@@ -70,41 +71,71 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _sync_functions_that_wait(module: str) -> set[str]:
-    """Synchrónne funkcie modulu, ktoré (aj cez suseda v tom istom module) spúšťajú proces."""
-    path = BACKEND / "services" / f"{module}.py"
-    if not path.exists():
-        return set()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    local: dict[str, tuple[bool, set[str], bool]] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    """Synchrónne funkcie modulu, ktoré spúšťajú proces — samy, cez suseda v tom istom module, alebo cez funkciu
+    iného modulu zo zoznamu (``ci_runner.state()``).
+
+    DEV-158: susedia sa najprv hľadali len v tom istom module. ``project_ci_runner.overview`` čaká na Docker cez
+    ``ci_runner.state`` — keď som ho naschvál zavolal priamo z ``async`` dverí, stráž ostala zelená."""
+    return _waiting_functions().get(module, set())
+
+
+_WAITING: dict[str, set[str]] = {}
+
+
+def _waiting_functions() -> dict[str, set[str]]:
+    """Pre každý modul zo zoznamu jeho čakajúce synchrónne funkcie — šírené cez volania, kým sa množina ustáli."""
+    if _WAITING:
+        return _WAITING
+    functions: dict[tuple[str, str], tuple[bool, set[tuple[str, str]], bool]] = {}
+    for module in SHELLING_MODULES:
+        path = BACKEND / "services" / f"{module}.py"
+        if not path.exists():
             continue
-        calls: set[str] = set()
-        waits = False
-        for call in ast.walk(node):
-            if not isinstance(call, ast.Call):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            func = call.func
-            short = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-            full = (
-                f"{func.value.id}.{func.attr}"
-                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
-                else short
-            )
-            if short:
-                calls.add(short)
-            if full in {"subprocess.run", "subprocess.check_output", "subprocess.call", "subprocess.Popen"}:
-                waits = True
-        local[node.name] = (isinstance(node, ast.FunctionDef), calls, waits)
+            calls: set[tuple[str, str]] = set()
+            waits = False
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                func = call.func
+                if isinstance(func, ast.Name):
+                    calls.add((module, func.id))
+                elif isinstance(func, ast.Attribute):
+                    owner = func.value.id if isinstance(func.value, ast.Name) else None
+                    if owner == "subprocess" and func.attr in {"run", "check_output", "call", "Popen"}:
+                        waits = True
+                    # ``ci_runner.state()`` is the module's function; ``self.x()`` or ``obj.x()`` stays a neighbour.
+                    calls.add((owner, func.attr) if owner in SHELLING_MODULES else (module, func.attr))
+            functions[(module, node.name)] = (isinstance(node, ast.FunctionDef), calls, waits)
 
     changed = True
-    while changed:  # rozšír „čaká“ cez volania v rámci modulu, kým sa množina ustáli
+    while changed:  # rozšír „čaká“ cez volania, kým sa množina ustáli
         changed = False
-        for name, (is_sync, calls, waits) in list(local.items()):
-            if not waits and any(local.get(c, (False, set(), False))[2] for c in calls):
-                local[name] = (is_sync, calls, True)
+        for key, (is_sync, calls, waits) in list(functions.items()):
+            if not waits and any(functions.get(c, (False, set(), False))[2] for c in calls):
+                functions[key] = (is_sync, calls, True)
                 changed = True
-    return {name for name, (is_sync, _calls, waits) in local.items() if is_sync and waits}
+    for (module, name), (is_sync, _calls, waits) in functions.items():
+        if is_sync and waits:
+            _WAITING.setdefault(module, set()).add(name)
+    return _WAITING
+
+
+def _calls_on_the_loop(node: ast.AsyncFunctionDef):
+    """The calls the ``async`` function makes itself. A nested ``def`` or ``lambda`` runs where it is handed —
+    ``asyncio.to_thread(_provision)`` in ``deploy._default_deploy_runner`` — so its body is not on the loop (DEV-158:
+    following waits across modules showed that function's ``_provision`` as an offender it is not)."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(current, ast.Call):
+            yield current
+        stack.extend(ast.iter_child_nodes(current))
 
 
 def _offenders() -> list[str]:
@@ -120,7 +151,7 @@ def _offenders() -> list[str]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.AsyncFunctionDef):
                 continue
-            for call in ast.walk(node):
+            for call in _calls_on_the_loop(node):
                 func = getattr(call, "func", None)
                 if not (isinstance(call, ast.Call) and isinstance(func, ast.Attribute)):
                     continue
@@ -161,6 +192,12 @@ def test_the_scan_actually_finds_such_a_call() -> None:
     assert "spin_up" in _sync_functions_that_wait("vizual_sandbox"), (
         "prehľadávanie nerozpozná ani tú funkciu, ktorá kokpit reálne položila"
     )
+
+
+def test_the_scan_follows_a_wait_into_another_module() -> None:
+    """DEV-158: ``project_ci_runner.overview`` asks Docker through ``ci_runner.state`` — a wait one module away. Called
+    straight from the ``async`` route on purpose, the scan stayed green while it looked only inside one module."""
+    assert {"overview", "run_start"} <= _sync_functions_that_wait("project_ci_runner")
 
 
 def test_the_scan_looks_everywhere_a_process_is_started() -> None:

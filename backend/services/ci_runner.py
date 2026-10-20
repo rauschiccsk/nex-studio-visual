@@ -43,6 +43,11 @@ def runner_container(slug: str) -> str:
     return f"nex-ci-runner-{slug}"
 
 
+def runner_label(slug: str) -> str:
+    """The name and only label the project's runner registers under on GitHub — what its jobs' ``runs-on`` names."""
+    return f"andros-ubuntu-{slug}"
+
+
 def compose_project(slug: str) -> str:
     return f"nex-ci-{slug}"
 

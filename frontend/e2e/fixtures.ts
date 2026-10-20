@@ -972,6 +972,28 @@ export function registerFixtures(): void {
   });
   // DEV-84: the repository tab — a red proof with its failed step, a run with its task and where it runs, one running.
   answer("get", "/api/v1/projects/{slug}/ci-runs", CI_RUNS);
+  // DEV-158: NEX Inbox as on 20.10.2026 — taken over, no runner of its own, every job on GitHub's machines.
+  answer("get", "/api/v1/projects/{slug}/ci-runner", {
+    label: "andros-ubuntu-nex-inbox",
+    repo: "rauschiccsk/nex-inbox",
+    state: "none",
+    github_status: null,
+    starting: false,
+    healthy: false,
+    summary: "Projekt nemá vlastný vykonávač kontrol na ANDROSe.",
+    action: "Spustiť vykonávač kontrol",
+    note: "Vykonávač kontrol sa do 120 s neprihlásil na GitHube — prvá kontrola počká, kým sa prihlási.",
+    jobs_elsewhere: [
+      ...["lint", "drift-check", "test", "build", "chrome109", "smb-blackhole"].map((job) => ({
+        workflow: "ci.yml",
+        job,
+        runs_on: "ubuntu-latest",
+      })),
+      { workflow: "release-smoke.yml", job: "smoke", runs_on: "ubuntu-latest" },
+      { workflow: "release-smoke.yml", job: "gate", runs_on: "ubuntu-latest" },
+    ],
+    unreadable_workflows: [],
+  });
   // DEV-86: NS Code — a few folders and files of NEX Inbox, one file with a long line, a search with hits.
   answer("get", "/api/v1/projects/{slug}/code/files", {
     head: "d626301458a1b2c3d4e5f60718293a4b5c6d7e8f",

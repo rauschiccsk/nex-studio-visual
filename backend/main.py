@@ -14,6 +14,7 @@ from backend.api.routes.agent_terminal import router as agent_terminal_router
 from backend.api.routes.auth import router as auth_router
 from backend.api.routes.backlog import router as backlog_router
 from backend.api.routes.bugs import router as bugs_router
+from backend.api.routes.ci_runner import router as ci_runner_router
 from backend.api.routes.ci_runs import router as ci_runs_router
 from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.customers import router as customers_router
@@ -424,6 +425,7 @@ app.include_router(user_agent_settings_router, prefix="/api/v1/user-agent-settin
 app.include_router(user_layout_router, prefix="/api/v1/user-layout")
 app.include_router(user_notes_router, prefix="/api/v1/notes")
 app.include_router(ci_runs_router, prefix="/api/v1")
+app.include_router(ci_runner_router, prefix="/api/v1")
 app.include_router(ns_code_router, prefix="/api/v1")
 app.include_router(poradca_router, prefix="/api/v1/poradca")
 app.include_router(agent_terminal_router, prefix="/api/v1/agent-terminal")

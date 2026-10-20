@@ -13,6 +13,11 @@ import RepozitarPage from "@/pages/RepozitarPage";
 import { getCiRuns, type CiRun, type CiRuns } from "@/services/api/ciRuns";
 
 vi.mock("@/services/api/ciRuns", () => ({ getCiRuns: vi.fn() }));
+// DEV-158: the runner panel on this tab has tests of its own; here it only waits.
+vi.mock("@/services/api/ciRunner", () => ({
+  getCiRunner: vi.fn(() => new Promise(() => undefined)),
+  startCiRunner: vi.fn(),
+}));
 
 const context = {
   selectedProject: { slug: "nex-inbox", name: "NEX Inbox" } as { slug: string; name: string } | null,

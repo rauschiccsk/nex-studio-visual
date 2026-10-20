@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None, *, projects: Callable[[], list[tuple[str
 
     failed = 0
     for slug, repo_full in chosen:
-        label = f"andros-ubuntu-{slug}"
+        label = ci_runner.runner_label(slug)
         try:
             if github_validation.runner_busy(repo_full, label, timeout=ci_runner.GITHUB_TIMEOUT):
                 print(f"{slug}: práve robí úlohu CI — nechaný tak; prevod spusti znovu po jej skončení")

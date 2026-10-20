@@ -493,7 +493,7 @@ def run_post_scaffold_steps(
                 # The ci.yml runs on ``andros-ubuntu-<slug>`` (self-hosted) — without that runner every job queues
                 # forever (the nex-shopify gap, Director 2026-07-16). DEV-38: the runner FIRST, online on GitHub,
                 # and only then ci.yml — a first run queued before its runner existed waited minutes, or a day.
-                ("spustenie vykonávača kontrol", lambda: _start_ci_runner(slug, repo_url, github_org=github_org)),
+                ("spustenie vykonávača kontrol", lambda: start_ci_runner(slug, repo_url, github_org=github_org)),
                 ("nastavenie automatickej kontroly (CI)", lambda: _wire_cicd_workflow(target_path, slug)),
                 ("nastavenie kontroly pred uložením", lambda: _wire_precommit_hook(target_path)),
             ]
@@ -925,14 +925,16 @@ def _provision_ci_runner(slug: str, repo_url: str | None, *, github_org: str | N
 
     Closes the "CI pushed but no runner → every job queues forever" gap (Director 2026-07-16):
     :func:`_wire_cicd_workflow` pushes a ci.yml whose jobs ``runs-on: andros-ubuntu-<slug>``. Raises when the runner
-    cannot be started; :func:`_start_ci_runner` says so in the founding warnings."""
+    cannot be started; :func:`start_ci_runner` says so in the founding warnings."""
     from backend.services.template_bootstrap import _repo_from_url
 
     ci_runner.provision(slug, _repo_from_url(repo_url, slug, default_owner=github_org))
 
 
-def _start_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> str | None:
+def start_ci_runner(slug: str, repo_url: str | None, *, github_org: str | None = None) -> str | None:
     """Start the project's runner and wait until GitHub reports it online — BEFORE ``ci.yml`` is pushed (DEV-38).
+
+    DEV-158: the Manažér starts the runner of a project that has none the same way, from the repository tab.
 
     Career Asistent (09.10.2026): ``ci.yml`` went up first, GitHub queued the first run at 10:04:42Z, the runner
     listened from 10:04:47Z and the job started only at 10:09:26Z; dedo-home's first run never started and was
@@ -963,7 +965,7 @@ def _wait_for_ci_runner(
     from backend.services.template_bootstrap import _repo_from_url
 
     repo_full = _repo_from_url(repo_url, slug, default_owner=github_org)
-    label = f"andros-ubuntu-{slug}"
+    label = ci_runner.runner_label(slug)
     deadline = time.monotonic() + wait
     while True:
         try:
