@@ -18,6 +18,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.project_ci_watch import ProjectCiWatch
+from backend.db.models.project_type_change import ProjectTypeChange
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.uat_check import UatCheck
@@ -49,6 +50,7 @@ __all__ = [
     "Project",
     "ProjectAssignment",
     "ProjectCiWatch",
+    "ProjectTypeChange",
     "DeliveredAuthorship",
     "UatCheck",
     "UserLayout",

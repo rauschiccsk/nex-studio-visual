@@ -82,6 +82,7 @@ from backend.services import (
 )
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
+from backend.services import project_surfaces as project_surfaces_service
 from backend.services import system_setting as system_setting_service
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
@@ -641,6 +642,8 @@ def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
         **NEW_PROJECT_PRESETS,
         branch_protection_available=available,
         branch_protection_note=None if available else BRANCH_PROTECTION_NOTE,
+        web_available=project_surfaces_service.WEB_PROJECTS_AVAILABLE,
+        web_note=None if project_surfaces_service.WEB_PROJECTS_AVAILABLE else project_surfaces_service.WEB_NOT_YET,
     )
 
 
@@ -964,6 +967,13 @@ def create_project(
       stays dangling (documented known-item; manual cleanup on the
       GitHub side).
     """
+    # DEV-160: a Web project's second frontend is not known to every phase yet — founding one would give a project the
+    # cockpit cannot build, preview, verify or deploy. DEV-164 opens it (project_surfaces.WEB_PROJECTS_AVAILABLE).
+    if payload.type == project_surfaces_service.WEB and not project_surfaces_service.WEB_PROJECTS_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=project_surfaces_service.WEB_NOT_YET
+        )
+
     # Pre-creation validation (ports).
     _validate_ports(db, payload)
 

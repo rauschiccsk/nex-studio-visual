@@ -181,7 +181,7 @@ class TestGetAllAllocatedPorts:
 
     def test_empty_when_no_projects(self, db_session):
         result = get_all_allocated_ports(db_session)
-        assert result == {"backend": [], "frontend": [], "db": []}
+        assert result == {"backend": [], "frontend": [], "db": [], "web": []}
 
     def test_returns_allocated_ports(self, db_session):
         _make_project(db_session, backend_port=10100, frontend_port=10101, db_port=10102)

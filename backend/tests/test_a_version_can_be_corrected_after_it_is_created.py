@@ -44,7 +44,7 @@ def _seed(db_session, tmp_path, monkeypatch, *, slug: str) -> Version:
         created_by=owner.id,
         name=f"projekt-{slug}",
         slug=slug,
-        type="web",
+        type="standard",
         auth_mode="password",
         description="projekt na overenie úprav verzie",
         backend_port=10960,

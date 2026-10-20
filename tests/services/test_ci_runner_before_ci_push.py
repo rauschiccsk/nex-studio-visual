@@ -38,7 +38,6 @@ def _run_chain(tmp_path: Path, order: list[str], *, runner_side_effect=None, wai
         return _f
 
     with (
-        patch.object(mod, "_compose_archetype_surfaces", _rec("surfaces")),
         patch.object(mod, "_run_smoke_test", _rec("smoke")),
         patch.object(mod, "_seed_release_smoke_test", _rec("release-smoke")),
         patch.object(mod, "_commit_and_push_scaffold_finalisation", _rec("push-scaffold")),
@@ -63,7 +62,7 @@ def test_the_runner_is_online_before_ci_yml_is_pushed(tmp_path: Path) -> None:
     order: list[str] = []
     warnings = _run_chain(tmp_path, order)
 
-    assert order == ["surfaces", "smoke", "release-smoke", "push-scaffold", "runner", "wait-runner", "push-ci", "hook"]
+    assert order == ["smoke", "release-smoke", "push-scaffold", "runner", "wait-runner", "push-ci", "hook"]
     assert warnings == []
 
 

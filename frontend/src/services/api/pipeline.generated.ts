@@ -2339,6 +2339,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/surfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project Surfaces
+         * @description The project's frontends — folder, service, port, login and address of each.
+         */
+        get: operations["get_project_surfaces_api_v1_projects__project_id__surfaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/versions": {
         parameters: {
             query?: never;
@@ -2402,6 +2422,31 @@ export interface paths {
         get: operations["next_version_number_api_v1_projects__project_id__versions_next_number_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/web-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Web Switch
+         * @description What switching the project to Web would give it, or why it cannot — nothing changes. A host that cannot be
+         *     asked about the web's port is a refusal, never a guess (port_registry answers ``unknown``).
+         */
+        get: operations["preview_web_switch_api_v1_projects__project_id__web_switch_get"];
+        put?: never;
+        /**
+         * Switch To Web
+         * @description Switch the project to Web — accepted exactly when the preview allows it; the change is kept.
+         */
+        post: operations["switch_to_web_api_v1_projects__project_id__web_switch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7729,6 +7774,13 @@ export interface components {
             full_smoke: boolean;
             /** Private Network */
             private_network: boolean;
+            /**
+             * Web Available
+             * @default false
+             */
+            web_available: boolean;
+            /** Web Note */
+            web_note?: string | null;
         };
         /** ProjectPlaneTicketsRead */
         ProjectPlaneTicketsRead: {
@@ -7828,6 +7880,8 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Web Port */
+            web_port?: number | null;
         };
         /**
          * ProjectSpecContent
@@ -8273,6 +8327,26 @@ export interface components {
             title: string;
             /** Tokens */
             tokens: number;
+        };
+        /**
+         * SurfaceRead
+         * @description One frontend of a project (``backend.services.project_surfaces.Surface``).
+         */
+        SurfaceRead: {
+            /** Address Suffix */
+            address_suffix: string;
+            /** Directory */
+            directory: string;
+            /** Label */
+            label: string;
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+            /** Port */
+            port?: number | null;
+            /** Service */
+            service: string;
         };
         /**
          * SystemSettingRead
@@ -9299,6 +9373,20 @@ export interface components {
             state: "running" | "stopped" | "missing" | "not_needed";
             /** Url */
             url?: string | null;
+        };
+        /**
+         * WebSwitchRead
+         * @description What switching the project to Web gives it — or the one reason it cannot (``refusal``).
+         */
+        WebSwitchRead: {
+            /** Allowed */
+            allowed: boolean;
+            /** Refusal */
+            refusal?: string | null;
+            /** Surfaces */
+            surfaces: components["schemas"]["SurfaceRead"][];
+            /** Web Port */
+            web_port?: number | null;
         };
         /** WorkKindRead */
         WorkKindRead: {
@@ -13613,6 +13701,37 @@ export interface operations {
             };
         };
     };
+    get_project_surfaces_api_v1_projects__project_id__surfaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SurfaceRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_versions_api_v1_projects__project_id__versions_get: {
         parameters: {
             query?: never;
@@ -13697,6 +13816,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_NextVersionNumberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_web_switch_api_v1_projects__project_id__web_switch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSwitchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_to_web_api_v1_projects__project_id__web_switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSwitchRead"];
                 };
             };
             /** @description Validation Error */

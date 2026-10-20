@@ -449,7 +449,6 @@ def test_post_scaffold_never_raises_on_step_failure(tmp_path: Path, caplog: pyte
     still created and the Manažér can finish CI/smoke manually."""
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")
     with (
-        patch.object(mod, "_compose_archetype_surfaces"),
         patch.object(mod, "_run_smoke_test"),
         patch.object(mod, "_seed_release_smoke_test"),
         patch.object(mod, "_commit_and_push_scaffold_finalisation"),

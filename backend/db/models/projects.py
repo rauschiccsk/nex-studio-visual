@@ -42,6 +42,9 @@ class Project(Base, UUIDMixin, TimestampMixin):
     backend_port = Column(Integer, nullable=True)
     frontend_port = Column(Integer, nullable=True)
     db_port = Column(Integer, nullable=True)
+    # DEV-160: the port of the public web (``web/``) of a Web project — the second frontend. Set exactly when the type
+    # is ``web`` (ck_projects_web_port); the frontends themselves are derived in backend.services.project_surfaces.
+    web_port = Column(Integer, nullable=True)
     repo_url = Column(String(255), nullable=True)
     source_path = Column(Text, nullable=True)
     # ICCINT-51: projekt prevzatý (``--adopt``), nie založený kokpitom. Do DEV-47 podľa neho engine vynechával
@@ -123,9 +126,14 @@ class Project(Base, UUIDMixin, TimestampMixin):
                     (backend_port IS NULL OR frontend_port IS NULL OR backend_port <> frontend_port)
                 AND (backend_port IS NULL OR db_port IS NULL OR backend_port <> db_port)
                 AND (frontend_port IS NULL OR db_port IS NULL OR frontend_port <> db_port)
+                AND (web_port IS NULL OR backend_port IS NULL OR web_port <> backend_port)
+                AND (web_port IS NULL OR frontend_port IS NULL OR web_port <> frontend_port)
+                AND (web_port IS NULL OR db_port IS NULL OR web_port <> db_port)
             """,
             name="ck_projects_ports_distinct",
         ),
+        # DEV-160: a Web project has its web's port, any other has none.
+        CheckConstraint("(type = 'web') = (web_port IS NOT NULL)", name="ck_projects_web_port"),
     )
 
     # Inverse side of Version.project (defined in backend/db/models/versions.py).

@@ -106,10 +106,12 @@ class TestProjectModel:
             db_session.flush()
         db_session.rollback()
 
-    @pytest.mark.parametrize("type_value", ["standard", "web"])
-    def test_valid_types(self, db_session, type_value):
-        """All valid type values must be accepted."""
-        project = _make_project(db_session, type=type_value)
+    @pytest.mark.parametrize(
+        ("type_value", "ports"), [("standard", {}), ("web", {"frontend_port": 14961, "web_port": 14965})]
+    )
+    def test_valid_types(self, db_session, type_value, ports):
+        """All valid type values must be accepted — a Web project with its web's port (DEV-160)."""
+        project = _make_project(db_session, type=type_value, **ports)
         db_session.add(project)
         db_session.flush()
         assert project.type == type_value

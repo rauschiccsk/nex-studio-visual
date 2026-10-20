@@ -158,6 +158,10 @@ class ProjectCreatePresets(BaseModel):
     #: ``github_private_branch_protection``); the form then greys the option out and shows the note.
     branch_protection_available: bool
     branch_protection_note: Optional[str] = None
+    #: DEV-160: ``False`` until the cockpit can build, preview, verify and deploy a Web project's second frontend;
+    #: the form then greys „Web“ out and shows the note. The create route refuses ``type=web`` by the same rule.
+    web_available: bool = False
+    web_note: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
@@ -391,6 +395,8 @@ class ProjectRead(BaseModel):
     backend_port: Optional[int] = None
     frontend_port: Optional[int] = None
     db_port: Optional[int] = None
+    #: DEV-160: the public web's port of a Web project (``None`` for any other).
+    web_port: Optional[int] = None
     repo_url: Optional[str] = Field(default=None, max_length=255)
     source_path: Optional[str] = None
     kb_path: Optional[str] = None

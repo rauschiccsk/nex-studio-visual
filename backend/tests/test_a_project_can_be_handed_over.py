@@ -49,7 +49,7 @@ def _project(db_session, owner: User) -> Project:
         created_by=owner.id,
         name="presun-test",
         slug=f"presun-{uuid.uuid4().hex[:8]}",
-        type="web",
+        type="standard",
         auth_mode="password",
         description="projekt na overenie presunu",
         backend_port=10800,

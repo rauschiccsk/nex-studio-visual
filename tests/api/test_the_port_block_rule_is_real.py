@@ -42,7 +42,7 @@ def _seed(db_session, *, backend_port: int) -> Project:
         id=uuid.uuid4(),
         name="blok-test",
         slug=f"blok-test-{uuid.uuid4().hex[:8]}",
-        type="web",
+        type="standard",
         auth_mode="password",
         description="projekt na overenie rozloženia portov",
         backend_port=backend_port,

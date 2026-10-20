@@ -33,6 +33,7 @@ from backend.api.routes.plane_tickets import router as plane_tickets_router
 from backend.api.routes.poradca import router as poradca_router
 from backend.api.routes.project_files import router as project_files_router
 from backend.api.routes.project_specs import router as project_specs_router
+from backend.api.routes.project_surfaces import router as project_surfaces_router
 from backend.api.routes.projects import router as projects_router
 from backend.api.routes.rag import router as rag_router
 from backend.api.routes.release_notes import router as release_notes_router
@@ -390,6 +391,7 @@ app.include_router(auth_router, prefix="/api/v1/auth")
 app.include_router(users_router, prefix="/api/v1/users")
 app.include_router(user_sessions_router, prefix="/api/v1/user-sessions")
 app.include_router(projects_router, prefix="/api/v1/projects")
+app.include_router(project_surfaces_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1/knowledge")
 app.include_router(project_specs_router, prefix="/api/v1/project-specs")
 app.include_router(rag_router, prefix="/api/v1/rag")

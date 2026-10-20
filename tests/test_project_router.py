@@ -32,6 +32,7 @@ from fastapi.testclient import TestClient
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.api.routes.projects import router as projects_router
 from backend.db.models.foundation import User
+from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
@@ -164,7 +165,7 @@ class TestProjectRouter:
             creator.id,
             name="Alpha",
             slug="alpha",
-            type="web",
+            type="standard",
             auth_mode="token",
         )
         resp = router_client.post("/api/v1/projects", json=payload)
@@ -172,7 +173,7 @@ class TestProjectRouter:
         body = resp.json()
         assert body["name"] == "Alpha"
         assert body["slug"] == "alpha"
-        assert body["type"] == "web"
+        assert body["type"] == "standard"
         assert body["auth_mode"] == "token"
         assert body["status"] == "active"
         assert body["guardian_enabled"] is False
@@ -288,15 +289,27 @@ class TestProjectRouter:
         assert body["total"] >= 1
         assert all(item["status"] == "archived" for item in body["items"])
 
-    def test_list_filter_by_type(self, router_client, creator):
+    def test_list_filter_by_type(self, router_client, creator, db_session):
         router_client.post(
             "/api/v1/projects",
             json=_payload(creator.id, type="standard"),
         ).raise_for_status()
-        router_client.post(
-            "/api/v1/projects",
-            json=_payload(creator.id, type="web"),
-        ).raise_for_status()
+        # DEV-160: a Web project cannot be founded through the API yet — it is put into the table with its web port.
+        db_session.add(
+            Project(
+                name=f"Web {uuid.uuid4().hex[:6]}",
+                slug=f"web-{uuid.uuid4().hex[:6]}",
+                type="web",
+                auth_mode="password",
+                description="",
+                created_by=creator.id,
+                backend_port=14980,
+                frontend_port=14981,
+                db_port=14982,
+                web_port=14985,
+            )
+        )
+        db_session.flush()
 
         resp = router_client.get(
             "/api/v1/projects",

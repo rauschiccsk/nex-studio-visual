@@ -58,28 +58,6 @@ CI_RUNNER_CANNOT_ASK = "Nepodarilo sa overiť, či je vykonávač kontrol prihl�
 CI_RUNNER_NOT_STARTED = "Vykonávač kontrol sa nepodarilo spustiť — kontroly počkajú, kým ho niekto spustí."
 
 
-# --- CR-V2-005 archetype surface composition --------------------------------
-# A project archetype is a preset SURFACE COMPOSITION (design §4.2): a project
-# is one backend + one-or-more frontend surfaces. ``standard`` and ``web`` are
-# the only archetypes shipped in v2.0.0 (Mobil is a deferred future round,
-# §8 Open #1). The per-archetype surface plan below is the single source of
-# truth the scaffold composes:
-#
-#   * ``standard`` → backend + ONE app-frontend surface (today's shape).
-#   * ``web``      → backend + an admin-frontend surface + a public-site
-#     surface (a managed/monitored site whose admin-FE configures the site and
-#     shows its metrics — the SECOND frontend surface). nex-shared supplies the
-#     cross-surface web-platform solutions.
-#
-# Both archetypes additionally pick a login flavour from ``auth_mode``
-# (``password`` = username+password login like NEX Studio / ``token`` =
-# token-launch like NEX Inbox) wired onto the backend + each frontend surface.
-_ARCHETYPE_SURFACES: dict[str, tuple[str, ...]] = {
-    "standard": ("app-frontend",),
-    "web": ("admin-frontend", "public-site"),
-}
-
-
 # --- CR-V2-018 v2 two-agent charter provisioning ----------------------------
 class ProvisioningError(RuntimeError):
     """v2 agent-charter provisioning failed. Unlike the best-effort post-scaffold seeds this is a HARD
@@ -446,7 +424,7 @@ def run_post_scaffold_steps(
     enable_branch_protection: bool,
     github_org: str | None = None,
 ) -> list[str]:
-    """Orchestrate archetype surface composition + K-004 (smoke) + K-005 (CI/CD) + branch protection.
+    """Orchestrate K-004 (smoke) + K-005 (CI/CD) + branch protection.
 
     Best-effort — every step caught + logged as warning. Žiadny step nezdvíha
     HTTPException; partial success je acceptable (Manažér can finish manually).
@@ -474,10 +452,6 @@ def run_post_scaffold_steps(
     steps: list[tuple[str, Callable[[], str | None]]] = []
     if target_path and target_path.is_dir():
         steps += [
-            (
-                "príprava štruktúry projektu",
-                lambda: _compose_archetype_surfaces(target_path, slug, project_type=project_type, auth_mode=auth_mode),
-            ),
             ("overovací (smoke) test", lambda: _run_smoke_test(target_path, slug, full=full_smoke)),
             ("príprava testu pre vydanie", lambda: _seed_release_smoke_test(target_path, slug)),
             # Commit + push the v2-shape normalisation (and archetype/smoke seeds) BEFORE the CI commit so
@@ -532,60 +506,6 @@ def run_post_scaffold_steps(
             break
 
     return warnings
-
-
-def _compose_archetype_surfaces(target: Path, slug: str, *, project_type: str, auth_mode: str) -> None:
-    """CR-V2-005: compose the per-archetype SURFACE plan onto the scaffolded project.
-
-    Standard = backend + a single app-FE surface (today's shape); Web = backend + an admin-FE surface +
-    a public-site surface (the second FE surface). Both pick the login flavour from ``auth_mode``
-    (``password``-login / ``token``-launch) for the backend + every surface.
-
-    Best-effort and idempotent: the plan is recorded into ``.nex-archetype.json`` at the project root so
-    the downstream scaffolder / engine knows which surfaces + login flavour to materialise. The detailed
-    per-surface frontend trees are produced by the project scaffolder (init.sh ``--variant``); this step
-    is the archetype CONTRACT, not the file-by-file emitter — keeping the surface plan in one place avoids
-    a second source of truth diverging.
-
-    Web commerce add-on (cart / checkout / payments + bidirectional IS-integration) is DEFERRED
-    (OQ-11, §7 Open #11): NO commerce/cart/checkout/payment artifact is emitted here. The recorded plan
-    carries an explicit, documented ``commerce`` extension seam (always ``false`` / ``deferred`` in
-    v2.0.0) so the future commerce design round has a defined attachment point without any code today.
-    """
-    surfaces = _ARCHETYPE_SURFACES.get(project_type)
-    if surfaces is None:
-        # Unknown/deferred archetype (e.g. a future ``mobil``) — never guess a composition.
-        logger.warning(
-            "Archetype surface composition SKIPPED — unknown project type %r (slug=%s)",
-            project_type,
-            slug,
-        )
-        return
-
-    plan = {
-        "type": project_type,
-        "auth_mode": auth_mode,
-        "surfaces": [{"name": name, "kind": "frontend", "auth_mode": auth_mode} for name in surfaces],
-        "backend": {"auth_mode": auth_mode},
-        # DEFERRED extension seam (OQ-11): the Web commerce add-on attaches here in a future design
-        # round. v2.0.0 emits NO commerce code — this is a documented placeholder, never enabled.
-        "commerce": {"enabled": False, "status": "deferred"},
-    }
-
-    dest = target / ".nex-archetype.json"
-    try:
-        dest.write_text(json.dumps(plan, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    except OSError as exc:
-        logger.warning("Archetype surface plan write failed (slug=%s): %s", slug, exc)
-        return
-
-    logger.info(
-        "Archetype surfaces composed (slug=%s, type=%s, auth_mode=%s, surfaces=%s)",
-        slug,
-        project_type,
-        auth_mode,
-        ",".join(surfaces),
-    )
 
 
 def _compose_backend_published_port(compose_file: Path) -> int | None:

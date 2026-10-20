@@ -108,7 +108,7 @@ class TestProjectService:
         payload = ProjectCreate(
             name=f"Defaulted-{suffix}",
             slug=f"defaulted-{suffix}",
-            type="web",
+            type="standard",
             auth_mode="token",
             description="no overrides",
             created_by=user.id,
@@ -116,7 +116,7 @@ class TestProjectService:
         created = service.create(db_session, payload)
         assert created.status == "active"
         assert created.guardian_enabled is False
-        assert created.type == "web"
+        assert created.type == "standard"
         assert created.auth_mode == "token"
 
     def test_create_source_and_kb_path_default_to_convention(self, db_session):
@@ -326,7 +326,21 @@ class TestProjectService:
         """``list_projects(type=...)`` returns only matching projects."""
         user = _make_user(db_session)
         service.create(db_session, _payload(user.id, type="standard"))
-        web = service.create(db_session, _payload(user.id, type="web"))
+        # DEV-160: a Web project needs its web's port, which founding cannot give yet — it is put into the table.
+        web = Project(
+            name=f"Web {uuid.uuid4().hex[:6]}",
+            slug=f"web-{uuid.uuid4().hex[:6]}",
+            type="web",
+            auth_mode="password",
+            description="",
+            created_by=user.id,
+            backend_port=14970,
+            frontend_port=14971,
+            db_port=14972,
+            web_port=14975,
+        )
+        db_session.add(web)
+        db_session.flush()
 
         web_rows = service.list_projects(db_session, type="web")
         assert all(p.type == "web" for p in web_rows)

@@ -816,6 +816,11 @@ export function registerFixtures(): void {
     full_smoke: true,
     custom_development_enabled: false,
     private_network: false,
+    // DEV-160: Web stays closed, with the reason under it, until the cockpit can build a second frontend.
+    web_available: false,
+    web_note:
+      "Projekt s webom a administráciou kokpit ešte nevie postaviť ani nasadiť — učí sa to po krokoch a voľba Web " +
+      "sa sprístupní, keď bude hotový posledný z nich.",
   });
   answerUntyped<AdoptableCandidate[]>("get", "/api/v1/projects/adoptable", [
     { slug: "nex-ledger", source_path: "/opt/projects/nex-ledger", name: "NEX Ledger" },

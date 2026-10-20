@@ -79,7 +79,16 @@ logger = logging.getLogger(__name__)
 PORT_RANGE_MIN = 10100
 PORT_RANGE_MAX = 14999
 PORT_BLOCK_SIZE = 10
-PORT_TYPES = ("backend", "frontend", "db")
+#: Every port column of a project, by port type — the ONE list the registry reads. DEV-160 added ``web``, the public
+#: web of a Web project; a port column missing here would be invisible to every collision check below
+#: (stráž tests/test_web_project_surfaces.py compares it with the model).
+PROJECT_PORT_COLUMNS = {
+    "backend": Project.backend_port,
+    "frontend": Project.frontend_port,
+    "db": Project.db_port,
+    "web": Project.web_port,
+}
+PORT_TYPES = tuple(PROJECT_PORT_COLUMNS)
 
 #: Wall-clock budget for one ``docker ps`` call. Generous enough for a busy
 #: daemon, short enough that the new-project form never feels stuck: the
@@ -342,13 +351,7 @@ class PortAvailability:
 
 def _project_holding_port(db: Session, port: int, project_id: str | None) -> str | None:
     """Return the name of another project occupying *port*, or ``None``."""
-    stmt = select(Project.name).where(
-        or_(
-            Project.backend_port == port,
-            Project.frontend_port == port,
-            Project.db_port == port,
-        )
-    )
+    stmt = select(Project.name).where(or_(*(column == port for column in PROJECT_PORT_COLUMNS.values())))
     if project_id is not None:
         pid = UUID(project_id) if isinstance(project_id, str) else project_id
         stmt = stmt.where(Project.id != pid)
@@ -568,7 +571,7 @@ def suggest_next_port(db: Session, port_type: str) -> int:
     db:
         Active SQLAlchemy session.
     port_type:
-        One of ``"backend"``, ``"frontend"``, or ``"db"``.
+        One of :data:`PORT_TYPES`.
 
     Returns
     -------
@@ -607,54 +610,20 @@ def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
     Returns
     -------
     dict
-        Keys: ``"backend"``, ``"frontend"``, ``"db"``.
+        Keys: every port type of :data:`PROJECT_PORT_COLUMNS`.
         Values: sorted list of ports currently in use for that type.
     """
-    stmt = select(
-        Project.backend_port,
-        Project.frontend_port,
-        Project.db_port,
-    )
-    rows = db.execute(stmt).all()
-
-    result: dict[str, list[int]] = {
-        "backend": [],
-        "frontend": [],
-        "db": [],
+    rows = db.execute(select(*PROJECT_PORT_COLUMNS.values())).all()
+    return {
+        port_type: sorted(row[i] for row in rows if row[i] is not None)
+        for i, port_type in enumerate(PROJECT_PORT_COLUMNS)
     }
-
-    for backend_port, frontend_port, db_port in rows:
-        if backend_port is not None:
-            result["backend"].append(backend_port)
-        if frontend_port is not None:
-            result["frontend"].append(frontend_port)
-        if db_port is not None:
-            result["db"].append(db_port)
-
-    for key in result:
-        result[key].sort()
-
-    return result
 
 
 def _get_all_used_ports(db: Session) -> set[int]:
     """Collect every port number currently allocated across all projects."""
-    stmt = select(
-        Project.backend_port,
-        Project.frontend_port,
-        Project.db_port,
-    )
-    rows = db.execute(stmt).all()
-
-    used: set[int] = set()
-    for backend_port, frontend_port, db_port in rows:
-        if backend_port is not None:
-            used.add(backend_port)
-        if frontend_port is not None:
-            used.add(frontend_port)
-        if db_port is not None:
-            used.add(db_port)
-    return used
+    rows = db.execute(select(*PROJECT_PORT_COLUMNS.values())).all()
+    return {port for row in rows for port in row if port is not None}
 
 
 @dataclass(frozen=True)

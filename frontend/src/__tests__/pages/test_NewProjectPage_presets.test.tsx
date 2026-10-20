@@ -161,3 +161,45 @@ describe("DEV-42 — „Prístup len zo súkromnej siete“ when founding a proj
   });
 });
 
+describe("DEV-160 — „Web“ is offered only once the cockpit can build its second frontend", () => {
+  const WEB_NOTE =
+    "Projekt s webom a administráciou kokpit ešte nevie postaviť ani nasadiť — učí sa to po krokoch a voľba Web " +
+    "sa sprístupní, keď bude hotový posledný z nich.";
+  const web = () => screen.getByRole("button", { name: /^Web/ });
+
+  it("is greyed out with the reason while the cockpit cannot build it, and a project is founded Štandardný", async () => {
+    api.getProjectCreatePresetsApi.mockResolvedValue({ ...presets(false), web_available: false, web_note: WEB_NOTE });
+    renderForm();
+
+    expect(await screen.findByText(WEB_NOTE)).toBeInTheDocument();
+    expect(web()).toBeDisabled();
+    fireEvent.click(web());
+    fireEvent.change(screen.getByPlaceholderText("NEX Ledger"), { target: { value: "Career Asistent" } });
+    fireEvent.click(screen.getByRole("button", { name: /Vytvoriť projekt/ }));
+
+    await waitFor(() => expect(api.createProjectApi).toHaveBeenCalledTimes(1));
+    expect(api.createProjectApi.mock.calls[0]![0]).toMatchObject({ type: "standard" });
+  });
+
+  it("is not offered before the cockpit has answered, nor when it cannot be asked", async () => {
+    api.getProjectCreatePresetsApi.mockRejectedValue(new Error("503"));
+    renderForm();
+
+    await screen.findByText(/Predvolené možnosti sa nepodarilo načítať/);
+    expect(web()).toBeDisabled();
+  });
+
+  it("can be chosen once the cockpit says it can build it", async () => {
+    api.getProjectCreatePresetsApi.mockResolvedValue({ ...presets(false), web_available: true, web_note: null });
+    renderForm();
+    await waitFor(() => expect(web()).toBeEnabled());
+
+    fireEvent.click(web());
+    fireEvent.change(screen.getByPlaceholderText("NEX Ledger"), { target: { value: "Career Asistent" } });
+    fireEvent.click(screen.getByRole("button", { name: /Vytvoriť projekt/ }));
+
+    await waitFor(() => expect(api.createProjectApi).toHaveBeenCalledTimes(1));
+    expect(api.createProjectApi.mock.calls[0]![0]).toMatchObject({ type: "web" });
+    expect(screen.queryByText(WEB_NOTE)).not.toBeInTheDocument();
+  });
+});

@@ -22,6 +22,7 @@ from backend.api.routes.projects import router as projects_router
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
+from backend.services import project_surfaces
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 
 # KB-ghost follow-up (docs/specs/kb-ghost-followup.md Fix A): this module lives
@@ -334,11 +335,11 @@ class TestInvalidType:
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
 
-    def test_valid_web_accepted(self, router_client, creator):
-        """'web' is a valid type."""
+    def test_web_is_refused_until_the_cockpit_can_build_it(self, router_client, creator):
+        """'web' is a valid type, but founding one waits for DEV-164 — the refusal says why (DEV-160)."""
         payload = _payload(creator.id, type="web")
         resp = router_client.post("/api/v1/projects", json=payload)
-        assert resp.status_code == 201
+        assert (resp.status_code, resp.json()["detail"]) == (422, project_surfaces.WEB_NOT_YET)
 
     def test_valid_token_auth_mode_accepted(self, router_client, creator):
         """'token' is a valid auth_mode."""

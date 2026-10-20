@@ -93,6 +93,10 @@ export default function NewProjectPage() {
   const [protectionAvailable, setProtectionAvailable] = useState(true);
   const [protectionNote, setProtectionNote] = useState<string>("");
   const [presetsNote, setPresetsNote] = useState<string>("");
+  // DEV-160: „Web“ (administration + public web) is offered only once the cockpit can build, preview, verify and
+  // deploy its second frontend — the backend says so with the presets; until it answers, it is not offered.
+  const [webAvailable, setWebAvailable] = useState(false);
+  const [webNote, setWebNote] = useState<string>("");
   function touchOption<T>(set: (v: T) => void) {
     return (v: T) => {
       optionsTouched.current = true;
@@ -149,6 +153,8 @@ export default function NewProjectPage() {
         if (cancelled) return;
         setProtectionAvailable(p.branch_protection_available);
         setProtectionNote(p.branch_protection_note ?? "");
+        setWebAvailable(p.web_available ?? false);
+        setWebNote(p.web_note ?? "");
         if (optionsTouched.current) return;
         setEnableCicd(p.enable_cicd);
         setFullSmoke(p.full_smoke);
@@ -334,7 +340,8 @@ export default function NewProjectPage() {
                 <button
                   type="button"
                   onClick={() => setType("web")}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
+                  disabled={!webAvailable}
+                  className={`p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     type === "web"
                       ? "border-primary-500 bg-primary-500/10 text-primary-400"
                       : "border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
@@ -347,6 +354,7 @@ export default function NewProjectPage() {
                   <div className="text-[10px] opacity-70 mt-0.5">Backend + admin + verejná stránka</div>
                 </button>
               </div>
+              {!webAvailable && webNote && <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">{webNote}</p>}
             </div>
 
             {/* Auth mode (CR-V2-005, design §4.2): MANDATORY — shapes the project's auth structure. */}
