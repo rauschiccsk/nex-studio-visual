@@ -28,6 +28,7 @@ const {
   listUsersApiMock,
   listVersionsMock,
   getVersionMock,
+  getNextVersionNumberApiMock,
   startFastFixApiMock,
   getProjectDedoProposalApiMock,
   setSelectedProjectMock,
@@ -44,6 +45,7 @@ const {
   listUsersApiMock: vi.fn(),
   listVersionsMock: vi.fn(),
   getVersionMock: vi.fn(),
+  getNextVersionNumberApiMock: vi.fn(),
   startFastFixApiMock: vi.fn(),
   getProjectDedoProposalApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
@@ -82,7 +84,11 @@ vi.mock("@/services/api/projects", () => ({
   getProjectDedoProposalApi: getProjectDedoProposalApiMock,
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
-vi.mock("@/services/api/versions", () => ({ listVersions: listVersionsMock, getVersion: getVersionMock }));
+vi.mock("@/services/api/versions", () => ({
+  listVersions: listVersionsMock,
+  getVersion: getVersionMock,
+  getNextVersionNumberApi: getNextVersionNumberApiMock,
+}));
 vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: startFastFixApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -146,6 +152,7 @@ beforeEach(() => {
   deleteProjectApiMock.mockResolvedValue(undefined);
   listVersionsMock.mockResolvedValue([baseVersion]);
   getVersionMock.mockResolvedValue(patchVersion);
+  getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.7.0" });
   startFastFixApiMock.mockResolvedValue({ version_id: "v2", board: { state: null, recent_messages: [] } });
   // Bežný stav: Dedo nič nenavrhol. Stránka sa má vtedy tváriť presne tak, ako sa tvárila doteraz.
   getProjectDedoProposalApiMock.mockResolvedValue(null);
@@ -586,5 +593,26 @@ describe("ProjectDetailPage — príchod zo zastaveného nasadenia (DEV-57)", ()
     } finally {
       Element.prototype.scrollIntoView = original;
     }
+  });
+});
+
+describe("ProjectDetailPage — the next version's number comes from the cockpit (DEV-149)", () => {
+  it("offers the number the cockpit gives, not one the page works out itself", async () => {
+    // 0.7.0 is taken, so the cockpit skips it — the page alone would offer 0.7.0 after v0.6.0.
+    getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.7.1" });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Pridať verziu 0.7.1" })).toBeInTheDocument();
+    expect(getNextVersionNumberApiMock).toHaveBeenCalledWith("p1");
+  });
+
+  it("⚠️ the page loads even when the number cannot be asked for, and the button says so in plain words", async () => {
+    getNextVersionNumberApiMock.mockRejectedValue(new Error("boom"));
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Pridať ďalšiu verziu" })).toBeInTheDocument();
+    expect(screen.queryByText("Nepodarilo sa načítať projekt.")).not.toBeInTheDocument();
   });
 });

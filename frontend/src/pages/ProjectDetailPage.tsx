@@ -14,7 +14,7 @@ import {
   type ProjectAssignmentRead,
 } from "@/services/api/projects";
 import { listUsersApi } from "@/services/api/users";
-import { listVersions } from "@/services/api/versions";
+import { getNextVersionNumberApi, listVersions } from "@/services/api/versions";
 import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
 import { FROM_UAT_LABEL, fastFixFromUat, forgetFastFixOrigin } from "@/lib/fastFixHandoff";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
@@ -123,6 +123,8 @@ export default function ProjectDetailPage() {
   const location = useLocation();
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
+  // DEV-149: the number the next version gets is the cockpit's rule, asked for — never worked out here.
+  const [nextNumber, setNextNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -270,6 +272,11 @@ export default function ProjectDetailPage() {
           Promise.resolve()
             .then(() => getProjectDedoProposalApi(found.id))
             .then((p) => { if (!cancelled) setDedoProposal(p); })
+            .catch(() => undefined),
+          // Same here: without the number the button still adds a version, it only cannot name it.
+          Promise.resolve()
+            .then(() => getNextVersionNumberApi(found.id))
+            .then((r) => { if (!cancelled) setNextNumber(r.version_number); })
             .catch(() => undefined),
         ]);
       })
@@ -590,24 +597,15 @@ export default function ProjectDetailPage() {
               />
             ))}
             {/* Hint for next version */}
-            {(() => {
-              const last = versions[0];
-              const match = last?.version_number.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
-              const nextLabel = (match && match[1] && match[2])
-                ? `${match[1]}.${parseInt(match[2]) + 1}.0`
-                : "ďalšiu verziu";
-              return (
-                <button
-                  onClick={() => navigate(`/projects/${slug}/versions/new`)}
-                  className="w-full rounded-xl border border-dashed border-[var(--color-border-default)] p-4 flex items-center gap-3 text-[var(--color-text-muted)] text-sm cursor-pointer hover:border-[var(--color-border-strong)] transition-colors"
-                >
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Pridať verziu {nextLabel}
-                </button>
-              );
-            })()}
+            <button
+              onClick={() => navigate(`/projects/${slug}/versions/new`)}
+              className="w-full rounded-xl border border-dashed border-[var(--color-border-default)] p-4 flex items-center gap-3 text-[var(--color-text-muted)] text-sm cursor-pointer hover:border-[var(--color-border-strong)] transition-colors"
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              {nextNumber ? `Pridať verziu ${nextNumber}` : "Pridať ďalšiu verziu"}
+            </button>
           </>
         )}
       </div>
