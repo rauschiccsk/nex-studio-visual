@@ -12,6 +12,7 @@
 #   SMOKE_OVERRIDE      path to the ephemeral isolation override (container_name + ports stripped)
 #   SMOKE_BACKEND       the backend service name (where Python + the app live)
 #   SMOKE_FRONTEND      the frontend service name (may be empty)
+#   SMOKE_FRONTENDS     every frontend service, space-separated — a Web project: "frontend web" (DEV-163)
 #   SMOKE_BACKEND_PORT  the backend CONTAINER port the app listens on
 #
 # CONTRACT (the engine enforces ALL of these — CR-V2-051):
@@ -132,6 +133,11 @@ ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
 #     fail "SAFETY: read_only preset ALLOWED a write (cat redirection) — must be rejected"
 #   fi
 #   ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1)); NEGATIVE_ASSERTIONS_RUN=$((NEGATIVE_ASSERTIONS_RUN + 1))
+
+# ── A Web project (DEV-163): every frontend signs in its own way. ──────────────────────────────────────────────
+# Prove both, each as a FEATURE assertion: the administration by username (POST /api/v1/auth/login), the public
+# web by e-mail — register (POST /api/v1/web/auth/register), sign in (POST /api/v1/web/auth/login), ask who
+# (GET /api/v1/web/auth/me). And as a NEGATIVE assertion: an administration route refuses the web's token.
 
 emit_sentinels
 [ "${ASSERTIONS_RUN}" -gt 0 ]

@@ -14,7 +14,8 @@ Web má vlastné CI `.github/workflows/web.yml`. Pri každej obrazovke v Návrhu
   takto. Minimálnu dĺžku hesla určuje `web/src/config/settings.ts`, backend ju kontroluje sám; e-mail je jedinečný
   bez ohľadu na veľkosť písmen.
 - Verejnosť má vlastnú tabuľku, nie rolu medzi zamestnancami. **Token webu neotvorí volanie administrácie a naopak** —
-  bezpečnostný invariant v `safety_properties` s negatívnou skúškou v `release_smoke_test.sh`.
+  bezpečnostný invariant v `safety_properties` s negatívnou skúškou v `release_smoke_test.sh`; ten overí aj
+  prihlásenie do každého frontendu jeho spôsobom (kostra skriptu ukazuje ako, `SMOKE_FRONTENDS` ich menuje).
 - Obnova hesla a potvrdenie e-mailu len keď ich žiada Zadanie (potrebujú poštový server projektu).
 
 Aktualizácie sú len v administrácii. `docker-compose.yml` má službu `frontend` aj `web` (z `web/`, nginx so `/api` na

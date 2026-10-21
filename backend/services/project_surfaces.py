@@ -74,10 +74,16 @@ def surfaces_of(project: Project) -> tuple[Surface, ...]:
     return _surfaces(project.type, project.auth_mode, project.frontend_port, project.web_port)
 
 
+def surfaces_of_type(project_type: str) -> tuple[Surface, ...]:
+    """The frontends a project of *project_type* has, without its ports — what a step that knows only the type
+    (the scaffold, the smoke check of a build) walks."""
+    return _surfaces(project_type, USERNAME, None, None)
+
+
 def frontend_directories(project_type: str) -> tuple[str, ...]:
     """The directories of the frontends a project of *project_type* has — what the scaffold builds and every
     per-frontend step (CI, the pre-commit check, nex-shared) walks. Ports and login do not change them."""
-    return tuple(surface.directory for surface in _surfaces(project_type, USERNAME, None, None))
+    return tuple(surface.directory for surface in surfaces_of_type(project_type))
 
 
 def _surfaces(

@@ -7572,15 +7572,25 @@ async def _run_app_starts_smoke(
     # Frontend reachable — the frontend nginx has no Python, so probe it FROM the backend over the isolated
     # project network by service name (no host ports; the override stripped them). A 404 at ``/`` still
     # means "serving" (<500). This catches a frontend that built but never serves.
-    fe_role = roles["frontend"]
-    if fe_role is not None and roles["backend"] is not None:
+    # DEV-163: every frontend of the project — a Web project's public web too (its role is keyed by its name).
+    fe_roles = [roles["frontend"], *(service for role, service in roles.items() if role not in _CORE_ROLES)]
+    if roles["backend"] is not None:
         services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
-        fe_ports = _frontend_ports(services.get(fe_role) or {})
-        fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_ports, host=fe_role, path="/")
-        if not fe_ready:
-            why = await _smoke_service_logs(base, [fe_role], states)
-            return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}{why}"
+        for fe_role in (r for r in fe_roles if r is not None):
+            fe_ports = _frontend_ports(services.get(fe_role) or {})
+            fe_ready, fe_last = await _await_http_ready(base, roles["backend"], fe_ports, host=fe_role, path="/")
+            if not fe_ready:
+                why = await _smoke_service_logs(base, [fe_role], states)
+                return (
+                    False,
+                    f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}{why}",
+                )
     return True, _APP_RESPONDS
+
+
+#: The roles :func:`uat_provisioner.identify_service_roles` names; any other key of a smoke stack's roles is a further
+#: frontend (DEV-163).
+_CORE_ROLES = ("backend", "frontend", "db")
 
 
 # gate-g-hardening GAP 1 (B) + CR-V2-051 risk floor: ``release_smoke_test.sh`` MUST print three sentinels —
@@ -7806,6 +7816,10 @@ async def _run_release_acceptance(
         "SMOKE_OVERRIDE": str(stack.override),
         "SMOKE_BACKEND": stack.roles["backend"] or "",
         "SMOKE_FRONTEND": stack.roles["frontend"] or "",
+        # DEV-163: every frontend service, space-separated (a Web project: the administration and the web).
+        "SMOKE_FRONTENDS": " ".join(
+            s for s in (stack.roles["frontend"], *(v for k, v in stack.roles.items() if k not in _CORE_ROLES)) if s
+        ),
         # Director 2026-07-20: default to the ICC container port 8000 (image EXPOSE 8000 / healthcheck /
         # BACKEND_URL all use it) when the compose publishes NO host ports — NEVER emit an empty port, which
         # made the smoke's boot-floor probe :80 → connection refused → 0 asserts run (release-acceptance
@@ -8093,11 +8107,38 @@ def _smoke_compose_target(
         logger.info("smoke SKIPPED (slug=%s) — no docker-compose.yml", project_slug)
         return compose, {}, (True, "SKIPPED — no docker-compose.yml")
     services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+    # DEV-163: a Web project has a service for every frontend (the charter's contract: `frontend` and `web`). One
+    # that is missing is said by its name before anything is built — the web would otherwise be skipped silently.
+    surfaces = _project_frontends(project_slug)
+    if len(surfaces) > 1:
+        for surface in surfaces:
+            if surface.service not in services:
+                logger.warning(
+                    "smoke FAIL (slug=%s) — no %r service for the %s", project_slug, surface.service, surface.label
+                )
+                return (
+                    compose,
+                    uat_provisioner.identify_service_roles(services),
+                    (
+                        False,
+                        f"docker-compose.yml nemá službu `{surface.service}` — {surface.label} "
+                        f"(`{surface.directory}/`) sa nedá spustiť ani overiť",
+                    ),
+                )
     roles = uat_provisioner.identify_service_roles(services)
     if roles["backend"] is not None and roles["frontend"] is None:
         logger.warning("smoke FAIL (slug=%s) — backend web app has no frontend service", project_slug)
         return compose, roles, (False, "compose has a backend web app but no frontend service")
+    # Every further frontend is a role of its own, keyed by its name — the boot check asks each one and none of them
+    # is reported as "still running, not judged".
+    for surface in surfaces[1:]:
+        roles[surface.name] = surface.service
     return compose, roles, None
+
+
+def _project_frontends(project_slug: str) -> tuple[project_surfaces.Surface, ...]:
+    """DEV-163: the project's frontends, by its type as the cockpit keeps it — the main one first."""
+    return project_surfaces.surfaces_of_type(claude_agent._project_type(project_slug) or project_surfaces.STANDARD)
 
 
 async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]:
@@ -8149,7 +8190,8 @@ def _boot_pass_detail(stack: _SmokeStack, states: dict[str, tuple[str, int]]) ->
     of this — the containers still running, whose result this check does NOT judge. When there is nothing extra
     to report it stays exactly as short as it was: no noise where there is no news."""
     known = {role for role in stack.roles.values() if role}
-    answered = [svc for svc in (stack.roles.get("backend"), stack.roles.get("frontend")) if svc]
+    further = [svc for role, svc in stack.roles.items() if role not in _CORE_ROLES and svc]
+    answered = [svc for svc in (stack.roles.get("backend"), stack.roles.get("frontend"), *further) if svc]
     finished = sorted(s for s, (st, code) in states.items() if st == "exited" and not code)
     # A long-running service is expected to be up; anything ELSE still running is a one-shot mid-flight.
     unfinished = sorted(s for s, (st, _c) in states.items() if st == "running" and s not in known)
