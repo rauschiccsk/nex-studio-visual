@@ -84,6 +84,14 @@ LOGIN_WORDS = {
 }
 
 
+#: DEV-171 — Poradca read the ports as the installations' addresses and advised telling people a wrong address: the
+#: ports serve a run of the project's own compose on ANDROS; UAT and PROD publish none and are reached by address.
+PORTS_ARE_LOCAL = (
+    "Porty platia pri spustení projektu priamo na ANDROSe (jeho docker-compose.yml); nasadené inštalácie (UAT, PROD) "
+    "porty nepublikujú — kokpit ich sprístupní na adresách nižšie."
+)
+
+
 def describe(project: Project) -> str:
     """The project's type, its frontends and its ports in one sentence — as the cockpit holds them (DEV-171: Poradca
     judged a Web project's Specification without knowing it was one, nor the port the cockpit gave its web)."""
@@ -97,7 +105,7 @@ def describe(project: Project) -> str:
     )
     return (
         f"Typ projektu: {TYPE_WORDS.get(project.type, project.type)}. Frontendy — {frontends}. "
-        f"Backend port {port(project.backend_port)}, databáza {port(project.db_port)}."
+        f"Backend port {port(project.backend_port)}, databáza {port(project.db_port)}. {PORTS_ARE_LOCAL}"
     )
 
 

@@ -1508,6 +1508,23 @@ def _frontend_urls(main_url: str, project: Project) -> list[dict[str, str]]:
     return [{"label": s.label, "url": f"{scheme}://{name}{s.address_suffix}.{zone}"} for s in surfaces]
 
 
+def installation_addresses(db: Session, project: Project) -> list[str]:
+    """DEV-171 — where each customer's UAT and PROD installation of *project* is reached, every frontend by its own
+    address: the links of the deploy matrix (:func:`_instance_url`, :func:`_frontend_urls`), deployed or not yet. An
+    installation publishes no ports — Poradca, given only the ports, told a person a wrong address."""
+    from backend.services import customer as customer_service
+
+    surfaces = project_surfaces.surfaces_of(project)
+    lines = []
+    for customer in customer_service.list_customers(db, project.id):
+        for environment in ("uat", "prod"):
+            main_url = _instance_url(customer, environment, project)
+            links = _frontend_urls(main_url, project) or [{"label": surfaces[0].label, "url": main_url}]
+            addresses = ", ".join(f"{link['label']} {link['url']}" for link in links)
+            lines.append(f"{environment.upper()} {customer.name}: {addresses}")
+    return lines
+
+
 def _prod_url(customer_slug: str, app: str, *, private: bool = False) -> str:
     """The public URL for a PROD instance — the clean ``https://<customer>-<app>.isnex.eu`` host (§2).
 

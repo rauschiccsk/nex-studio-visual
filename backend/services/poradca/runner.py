@@ -313,8 +313,15 @@ def _model_and_effort(db: Session, user_id: UUID) -> tuple[str, str]:
 
 def scope_line(db: Session, project: Project, version_id: Optional[UUID]) -> str:
     """What we are talking about — the context line Poradca receives with every question: the project, the version
-    with its phase, and (DEV-171) the project's type, frontends and ports."""
-    return _topic(db, project, version_id) + "\n" + project_surfaces.describe(project)
+    with its phase, and (DEV-171) the project's type, frontends and ports and the addresses of its installations."""
+    from backend.services import deploy
+
+    addresses = deploy.installation_addresses(db, project)
+    if addresses:
+        where = "Adresy inštalácií (kokpit ich dá pri nasadení):\n" + "\n".join(f"- {line}" for line in addresses)
+    else:
+        where = "Adresy inštalácií: projekt zatiaľ nemá zákazníka — adresy vzniknú, keď ho kokpitu pridáš."
+    return _topic(db, project, version_id) + "\n" + project_surfaces.describe(project) + "\n" + where
 
 
 def _topic(db: Session, project: Project, version_id: Optional[UUID]) -> str:

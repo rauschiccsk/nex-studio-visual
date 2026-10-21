@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 
+from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.services import create_project_postscaffold as postscaffold
@@ -22,7 +23,7 @@ REAL_CHARTER = runner._charter_text
 WEB_RULES = (postscaffold.NEX_STUDIO_TEMPLATES / "web-project-charter.md").read_text(encoding="utf-8")
 
 
-def _project(db, project_type: str, auth_mode: str = "password") -> Project:
+def _project(db, project_type: str, auth_mode: str = "password", customer: str | None = "ICC") -> Project:
     name = f"u-{uuid.uuid4().hex[:8]}"
     owner = User(username=name, email=f"{name}@example.com", password_hash="x", role="ri", is_active=True)
     db.add(owner)
@@ -38,10 +39,20 @@ def _project(db, project_type: str, auth_mode: str = "password") -> Project:
         frontend_port=10251,
         db_port=10252,
         web_port=10255 if project_type == "web" else None,
+        private_network=True,
     )
     db.add(project)
     db.flush()
+    if customer:
+        db.add(Customer(project_id=project.id, name=customer, slug=customer.lower()))
+        db.flush()
     return project
+
+
+PORTS_NOTE = (
+    " Porty platia pri spustení projektu priamo na ANDROSe (jeho docker-compose.yml); nasadené inštalácie (UAT, "
+    "PROD) porty nepublikujú — kokpit ich sprístupní na adresách nižšie."
+)
 
 
 # --- the context line ---------------------------------------------------------------------------------------------
@@ -51,12 +62,16 @@ def test_the_context_names_a_web_projects_type_frontends_and_ports(db_session):
     project = _project(db_session, "web")
 
     line = runner.scope_line(db_session, project, None)
+    app = project.slug  # no "nex-" to strip
 
     assert line == (
         f"Projekt Career Asistent ({project.slug}) — otázka sa týka celého projektu.\n"
         "Typ projektu: Web (administrácia a verejný web). Frontendy — Administrácia: priečinok frontend/, služba "
         "frontend, prihlásenie menom a heslom, port 10251; Web: priečinok web/, služba web, prihlásenie e-mailom a "
-        "heslom, registrácia, port 10255. Backend port 10250, databáza 10252."
+        "heslom, registrácia, port 10255. Backend port 10250, databáza 10252." + PORTS_NOTE + "\n"
+        "Adresy inštalácií (kokpit ich dá pri nasadení):\n"
+        f"- UAT ICC: Administrácia https://uat-icc-{app}-admin.int.isnex.eu, Web https://uat-icc-{app}.int.isnex.eu\n"
+        f"- PROD ICC: Administrácia https://icc-{app}-admin.int.isnex.eu, Web https://icc-{app}.int.isnex.eu"
     )
 
 
@@ -65,9 +80,22 @@ def test_the_context_names_a_standard_projects_one_frontend(db_session):
 
     line = runner.scope_line(db_session, project, None)
 
-    assert line.splitlines()[1] == (
+    assert line.splitlines()[1:] == [
         "Typ projektu: Štandardný. Frontendy — Aplikácia: priečinok frontend/, služba frontend, spúšťa ho NEX "
-        "Manager tokenom, port 10251. Backend port 10250, databáza 10252."
+        "Manager tokenom, port 10251. Backend port 10250, databáza 10252." + PORTS_NOTE,
+        "Adresy inštalácií (kokpit ich dá pri nasadení):",
+        f"- UAT ICC: Aplikácia https://uat-icc-{project.slug}.int.isnex.eu",
+        f"- PROD ICC: Aplikácia https://icc-{project.slug}.int.isnex.eu",
+    ]
+
+
+def test_a_project_without_a_customer_says_its_installations_have_no_address_yet(db_session):
+    project = _project(db_session, "web", customer=None)
+
+    line = runner.scope_line(db_session, project, None)
+
+    assert line.splitlines()[-1] == (
+        "Adresy inštalácií: projekt zatiaľ nemá zákazníka — adresy vzniknú, keď ho kokpitu pridáš."
     )
 
 
@@ -87,6 +115,7 @@ def test_poradca_has_a_procedure_for_judging_a_phase_before_it_is_approved():
     base = runner._CHARTER.read_text(encoding="utf-8")
 
     assert "## 6. Keď posudzuješ výstup fázy pred schválením" in base
+    assert "Porty sú len na spustenie projektu priamo na ANDROSe" in base
 
 
 async def test_a_project_switched_to_web_gives_its_open_conversation_the_web_rules(world, monkeypatch):  # noqa: F811

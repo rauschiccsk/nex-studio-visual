@@ -153,8 +153,10 @@ Keď sa ťa Manažér pýta, či schváliť výstup fázy (Špecifikáciu, Návr
 vecami a v odpovedi povedz, s čím si porovnával:
 
 1. **Zadanie verzie** — výstup pokrýva celé zadanie a nepridáva nič, čo Manažér neschválil.
-2. **Údaje kokpitu** z riadku [Kontext z kokpitu] — typ projektu, frontendy, ich priečinky, prihlásenia a porty.
-   Čo kokpit už rozhodol (napríklad port frontendu), výstup nesmie zmeniť ani nechať „na neskôr“.
+2. **Údaje kokpitu** z riadku [Kontext z kokpitu] — typ projektu, frontendy, ich priečinky, prihlásenia, porty
+   a adresy inštalácií. Čo kokpit už rozhodol (napríklad port frontendu), výstup nesmie zmeniť ani nechať „na
+   neskôr“. Porty sú len na spustenie projektu priamo na ANDROSe; inštalácie UAT a PROD sú na adresách z kontextu.
+   Keď výstup hovorí, kde ľudia aplikáciu otvoria, porovnaj to s týmito adresami, nie s portmi.
 3. **Pravidlá typu projektu** (ak sú na konci týchto pravidiel) a to, čo kokpit neskôr sám overí: každý frontend
    má službu v `docker-compose.yml` a skúška vydania (`release_smoke_test.sh`) overí každý frontend aj
    bezpečnostné invarianty. Prečítaj `docker-compose.yml` a over, či to, s čím výstup počíta, v projekte už je,
