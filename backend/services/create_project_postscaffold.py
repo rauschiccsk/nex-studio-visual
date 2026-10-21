@@ -77,6 +77,30 @@ _V2_AGENTS: dict[str, tuple[str, str]] = {
 _AGENT_SHARED_BASE = "agent-shared-base.md"
 _UNIVERSAL_CLAUDE_MD = "project-claude-md.md"
 _CHARTER_SEP = "\n\n---\n\n"
+#: DEV-165: what a Web project's agents read on top — both role charters get the first, the project's root CLAUDE.md
+#: the second (its table of frontends). A Štandardný project's files stay byte-for-byte as they were.
+_WEB_CHARTER_ADDENDUM = "web-project-charter.md"
+_WEB_CLAUDE_MD_ADDENDUM = "web-project-claude-md.md"
+
+
+def _is_web(project_type: str) -> bool:
+    return project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project_type)
+
+
+def role_charter_text(base_text: str, role_template: Path, project_type: str) -> str:
+    """A role's charter as the project gets it: the shared base, the role's template and — in a Web project — the
+    Web addendum (DEV-165)."""
+    text = base_text + _CHARTER_SEP + role_template.read_text(encoding="utf-8")
+    if _is_web(project_type):
+        text = text.rstrip() + _CHARTER_SEP + (NEX_STUDIO_TEMPLATES / _WEB_CHARTER_ADDENDUM).read_text(encoding="utf-8")
+    return text
+
+
+def web_claude_md_section() -> str:
+    """The table of a Web project's frontends, appended to its root CLAUDE.md (DEV-165)."""
+    return (NEX_STUDIO_TEMPLATES / _WEB_CLAUDE_MD_ADDENDUM).read_text(encoding="utf-8")
+
+
 #: v1-era charter dirs the v1 ``init.sh`` still emits but the v2 two-agent engine never reads (it reads
 #: ONLY ``.claude/agents/{ai-agent,auditor}/CLAUDE.md``) — removed so a v2 project is clean v2 shape.
 _V1_AGENT_DIRS = ("designer", "implementer", "customer")
@@ -149,7 +173,7 @@ def _sync_skills(claude_dir: Path) -> int:
     return changed
 
 
-def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
+def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: str = project_surfaces.STANDARD) -> int:
     """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
 
     Chartu píše :func:`provision_v2_agent_charters` RAZ, pri založení projektu, a engine ju pri každom
@@ -169,6 +193,8 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
 
     Best-effort: chýbajúci projekt, chýbajúca šablóna ani zlyhaný zápis nesmú zhodiť stavbu. Agent by
     v najhoršom prípade bežal podľa starších pravidiel, čo je presne dnešný stav — nie zhoršenie.
+
+    DEV-165: ``project_type`` rozhoduje o dodatku Web projektu — volajúci ho berie z kokpitu (``Project.type``).
     """
     claude_dir = project_root / ".claude"
     if not project_root.is_dir() or not claude_dir.is_dir():
@@ -185,7 +211,7 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
         role_charter = claude_dir / "agents" / role_slug / "CLAUDE.md"
         if not charter_tpl.is_file() or not role_charter.parent.is_dir():
             continue
-        wanted = base_text + _CHARTER_SEP + charter_tpl.read_text(encoding="utf-8")
+        wanted = role_charter_text(base_text, charter_tpl, project_type)
         try:
             if role_charter.is_file() and role_charter.read_text(encoding="utf-8") == wanted:
                 continue  # už sedí — nezapisujeme, nech sa nemení čas úpravy zbytočne
@@ -204,7 +230,14 @@ def refresh_v2_agent_charters(project_root: Path, slug: str) -> int:
     return refreshed
 
 
-def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str, *, adopted: bool) -> None:
+def provision_v2_agent_charters(
+    project_root: Path,
+    slug: str,
+    project_name: str,
+    *,
+    adopted: bool,
+    project_type: str = project_surfaces.STANDARD,
+) -> None:
     """Write the v2 two-agent ``Pravidlá agenta`` charters into the freshly-scaffolded project and
     normalise it to v2 shape. HARD requirement (raises :class:`ProvisioningError` on failure).
 
@@ -271,7 +304,7 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
                 _preserve_before_overwrite(role_dir / "CLAUDE.md", slug=slug)
                 _preserve_before_overwrite(role_dir / "settings.json", slug=slug)
             (role_dir / "CLAUDE.md").write_text(
-                base_text + _CHARTER_SEP + charter_tpl.read_text(encoding="utf-8"),
+                role_charter_text(base_text, charter_tpl, project_type),
                 encoding="utf-8",
             )
             (role_dir / "settings.json").write_text(
@@ -300,6 +333,8 @@ def provision_v2_agent_charters(project_root: Path, slug: str, project_name: str
     # adopted one it silently destroyed hand-written rules. The v2 charter still lands, so the project
     # is normalised either way — the previous file simply survives beside it.
     universal_text = universal_tpl.read_text(encoding="utf-8").replace("{{PROJECT_NAME}}", project_name)
+    if _is_web(project_type):
+        universal_text = universal_text.rstrip("\n") + "\n" + web_claude_md_section()
     existing_charter = project_root / "CLAUDE.md"
     try:
         if adopted:

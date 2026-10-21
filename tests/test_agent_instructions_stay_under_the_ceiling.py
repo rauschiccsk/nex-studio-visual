@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from backend.services import create_project_postscaffold
@@ -30,10 +31,12 @@ from backend.services.poradca import runner as poradca_runner
 CEILING = 37_000
 
 
-def _scaffold(tmp_path: Path) -> Path:
-    root = tmp_path / "projekt"
+def _scaffold(tmp_path: Path, project_type: str) -> Path:
+    root = tmp_path / project_type / "projekt"
     (root / ".claude").mkdir(parents=True)
-    create_project_postscaffold.provision_v2_agent_charters(root, "projekt", "Projekt", adopted=False)
+    create_project_postscaffold.provision_v2_agent_charters(
+        root, "projekt", "Projekt", adopted=False, project_type=project_type
+    )
     return root
 
 
@@ -46,10 +49,14 @@ def _skill_listing(root: Path) -> str:
     return "\n".join(lines)
 
 
-def instruction_texts(tmp_path: Path) -> dict[str, list[str]]:
+#: DEV-165: every kind of project the cockpit founds is measured — a Web project's agents read the Web addendum too.
+PROJECT_TYPES = ("standard", "web")
+
+
+def instruction_texts(tmp_path: Path, project_type: str = "standard") -> dict[str, list[str]]:
     """Per agent, the texts it reads at every turn: its charter, the project's root ``CLAUDE.md`` and the listing
     of the project's skills."""
-    root = _scaffold(tmp_path)
+    root = _scaffold(tmp_path, project_type)
     project_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
     skills = _skill_listing(root)
     texts = {
@@ -60,8 +67,9 @@ def instruction_texts(tmp_path: Path) -> dict[str, list[str]]:
     return texts
 
 
-def test_every_agent_reads_less_than_the_ceiling(tmp_path):
-    sizes = {agent: sum(len(t) for t in parts) for agent, parts in instruction_texts(tmp_path).items()}
+@pytest.mark.parametrize("project_type", PROJECT_TYPES)
+def test_every_agent_reads_less_than_the_ceiling(tmp_path, project_type):
+    sizes = {agent: sum(len(t) for t in parts) for agent, parts in instruction_texts(tmp_path, project_type).items()}
 
     over = {agent: size for agent, size in sizes.items() if size > CEILING}
     assert over == {}, (

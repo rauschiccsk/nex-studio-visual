@@ -1114,7 +1114,11 @@ def create_project(
         db.flush()
         try:
             provision_v2_agent_charters(
-                PROJECTS_ROOT / project.slug, project.slug, project.name, adopted=not scaffolded_here
+                PROJECTS_ROOT / project.slug,
+                project.slug,
+                project.name,
+                adopted=not scaffolded_here,
+                project_type=project.type,
             )
         except ProvisioningError as exc:
             db.rollback()

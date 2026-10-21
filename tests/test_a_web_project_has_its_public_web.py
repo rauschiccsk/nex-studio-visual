@@ -477,6 +477,7 @@ def test_the_switch_gives_the_workspace_its_web_its_ci_and_the_new_check_in_one_
     assert changed == [
         ".githooks/pre-commit",
         ".github/workflows/web.yml",
+        "CLAUDE.md",
         "web/package.json",
         "web/vite.config.ts",
     ]
@@ -599,6 +600,7 @@ def test_a_switch_that_did_not_finish_is_finished_without_building_the_web_again
     assert sorted(_git(ws, "show", "--name-only", "--format=", "HEAD").split()) == [
         ".githooks/pre-commit",
         ".github/workflows/web.yml",
+        "CLAUDE.md",
     ]
     assert _git(origin, "rev-parse", "main") == _git(ws, "rev-parse", "HEAD")
 

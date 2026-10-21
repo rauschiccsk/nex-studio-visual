@@ -214,14 +214,31 @@ def _refresh_rules(project_slug: str) -> None:
     The refresh writes only what differs and never commits — the project's HEAD does not move, so neither the
     verified commit nor the Nasadiť button is affected. Best effort: a refresh failure is logged and the turn runs
     on the rules already in the project, which is exactly the situation before DEV-47."""
-    from backend.services import create_project_postscaffold  # local import — keeps the CLI primitive light
+    from backend.services import create_project_postscaffold, project_surfaces  # local — keeps the CLI primitive light
 
     try:
-        create_project_postscaffold.refresh_v2_agent_charters(PROJECTS_ROOT / project_slug, project_slug)
+        # DEV-165: a Web project's charters carry the Web addendum — the type is the cockpit's, never guessed from
+        # the workspace. A project the cockpit has no row for cannot be Web (only the cockpit makes one), so it is
+        # refreshed as Štandardný; a database that cannot be asked raises, and the turn keeps the rules it has.
+        project_type = _project_type(project_slug) or project_surfaces.STANDARD
+        create_project_postscaffold.refresh_v2_agent_charters(
+            PROJECTS_ROOT / project_slug, project_slug, project_type=project_type
+        )
     except Exception:  # noqa: BLE001 — a stale rule set must never cost the turn
         logger.warning(
             "agent rules refresh failed for slug=%s — the turn runs on the rules it has", project_slug, exc_info=True
         )
+
+
+def _project_type(project_slug: str) -> Optional[str]:
+    """The project's type as the cockpit keeps it (``projects.type``), or None when there is no such project."""
+    from sqlalchemy import select
+
+    from backend.db.models.projects import Project
+    from backend.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        return db.execute(select(Project.type).where(Project.slug == project_slug)).scalar_one_or_none()
 
 
 #: Per-event callback type for streaming mode. Receives each parsed stream-json

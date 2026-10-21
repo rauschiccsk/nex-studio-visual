@@ -31,7 +31,8 @@ class WebWorkspaceError(RuntimeError):
 
 def add_web(db: Session, project: Project) -> list[str]:
     """Write the public web into *project*'s workspace — ``web/`` from the template, its CI when the project has CI,
-    the pre-commit check for every frontend — and commit + push them as one change.
+    the pre-commit check for every frontend, the table of frontends in ``CLAUDE.md`` — and commit + push them as one
+    change. The agents' charters get the Web addendum at their next session, from the switched type (DEV-165).
 
     Raises :class:`WebWorkspaceError` when ``web/`` cannot be built; nothing stays behind then. Returns the Slovak
     sentences of what finished only partly (a commit or a push that did not go through) — reported, never raised."""
@@ -61,6 +62,13 @@ def add_web(db: Session, project: Project) -> list[str]:
             raise WebWorkspaceError(str(exc)) from exc
 
     candidates = [WEB_DIRECTORY]
+    # DEV-165: the project's root CLAUDE.md names both frontends — the same table a founded Web project gets.
+    claude_md = target / "CLAUDE.md"
+    section = postscaffold.web_claude_md_section()
+    text = claude_md.read_text(encoding="utf-8")
+    if section.strip() not in text:
+        claude_md.write_text(text.rstrip("\n") + "\n" + section, encoding="utf-8")
+    candidates.append("CLAUDE.md")
     # The web's CI goes only where CI runs at all — a project founded without CI gets none here either.
     if (target / ".github" / "workflows" / "ci.yml").is_file():
         postscaffold.write_web_workflow(target, project.slug)

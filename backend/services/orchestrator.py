@@ -74,6 +74,7 @@ from backend.services import (
     host_docker_guard,
     predeploy_backup,
     preview_switch,
+    project_surfaces,
     public_route,
     release_note_writer,
     smoke_scratch,
@@ -1115,6 +1116,24 @@ class OrchestratorError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+def _surfaces_for_version(db: Session, version_id: uuid.UUID) -> tuple[project_surfaces.Surface, ...]:
+    """DEV-165: the frontends of the version's project — what the briefs name and the Auditor compares. Every phase
+    reads them from the one model (``project_surfaces``), never from a hardcoded ``frontend/``."""
+    project = db.execute(
+        select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+    if project is None:
+        raise OrchestratorError(f"Version not found: {version_id}")
+    return project_surfaces.surfaces_of(project)
+
+
+def _frontend_dirs_text(surfaces: tuple[project_surfaces.Surface, ...]) -> str:
+    """``frontend/`` — or, with more frontends, each with what it is: ``frontend/` (Administrácia), `web/` (Web)``."""
+    if len(surfaces) == 1:
+        return f"`{surfaces[0].directory}/`"
+    return ", ".join(f"`{s.directory}/` ({s.label})" for s in surfaces)
+
+
 def _project_slug_for_version(db: Session, version_id: uuid.UUID) -> str:
     slug = db.execute(
         select(Project.slug).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
@@ -1719,6 +1738,16 @@ def database_schema_missing(version_number: str, slug: str) -> str:
 _PREVIEW_HELPER_REL = "frontend/src/preview/isPreview.ts"
 
 
+def _vizual_preview_rule_others(surfaces: tuple[project_surfaces.Surface, ...]) -> str:
+    """DEV-165: every further frontend (a Web project's web/) has the same harness from the template — said once."""
+    return "".join(
+        f"   - {s.label} `{s.directory}/` má ten istý harness (`{s.directory}/src/preview/`) — platí preň to isté "
+        f"a jeho odpovede doplň do `{s.directory}/src/preview/handlers.ts`;\n"
+        for s in surfaces
+        if s.directory != "frontend"
+    )
+
+
 def _vizual_preview_rule(project_root: Path) -> str:
     """DEV-2: item 3 of the Vizuál brief — the preview harness, said as what the project really has.
 
@@ -1813,9 +1842,15 @@ def _vizual_directive(
         if manager_request is None
         else f"4. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
     )
+    surfaces = _surfaces_for_version(db, version_id)
+    where = (
+        "VÝHRADNE vo FRONTENDE (adresár `frontend/`)"
+        if len(surfaces) == 1
+        else f"VÝHRADNE vo FRONTENDOCH ({_frontend_dirs_text(surfaces)}) — každú obrazovku v tom, ktorému patrí"
+    )
     return (
         "Fáza VIZUÁLNA KONZULTÁCIA — staviaš a dolaďuješ ŽIVÝ vizuál aplikácie spolu s Manažérom. Pracuješ "
-        "VÝHRADNE vo FRONTENDE (adresár `frontend/`): reálne obrazovky, rozloženie a navigácia, vizuál-first "
+        f"{where}: reálne obrazovky, rozloženie a navigácia, vizuál-first "
         "(ako Delphi — najprv formuláre/obrazovky). REÁLNY backend teraz NErobíš (to je fáza Programovanie).\n"
         f"1. Pre kontext si prečítaj schválenú Špecifikáciu `{spec_rel}` a Návrh `{design_rel}` — nech "
         "obrazovky sedia so zámerom projektu.\n"
@@ -1823,6 +1858,7 @@ def _vizual_directive(
         "konzistentnému vzhľadu naprieč aplikáciami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
         + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+        + _vizual_preview_rule_others(surfaces)
         + task_line
         + "5. Výsledok iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ho cez HMR premietne < 1 s aj bez commitu). "
         "Počas Vizuálu môže byť takýchto drobných úprav veľa; všetky sa spoločne uložia JEDNÝM commitom až keď "
@@ -1935,13 +1971,14 @@ def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
     version_number = version.version_number if version is not None else "0.1.0"
     spec_rel = _priprava_spec_rel(version_number)
     design_rel = _navrh_design_doc_rel(version_number)
+    live = _frontend_dirs_text(_surfaces_for_version(db, version_id)) if version is not None else "`frontend/`"
     return (
         "Manažér práve SCHVÁLIL vizuál. Než sa zapečatí, premietni dohodnuté z fázy Vizuál späť do "
         "dokumentácie — aby dokumenty a schválené obrazovky hovorili to isté.\n\n"
         "PREČÍTAJ:\n"
         f"  1. `{spec_rel}` — Špecifikácia\n"
         f"  2. `{design_rel}` — Návrh\n"
-        "  3. celý rozhovor fázy Vizuál (máš ho v tejto session) a živý stav `frontend/`\n\n"
+        f"  3. celý rozhovor fázy Vizuál (máš ho v tejto session) a živý stav {live}\n\n"
         "ČO UROB:\n"
         "• Každú vec, na ktorej ste sa vo Vizuáli dohodli a v dokumentoch nie je, **doplň** — do Špecifikácie "
         "to, čo aplikácia má robiť, do Návrhu to, ako je to riešené. Píš rovnakým jazykom a štruktúrou ako zvyšok "
@@ -2603,10 +2640,14 @@ def _verifikacia_directive(
     coverage_brief = _release_coverage_brief(db, version_id)
     # v4.0.23: the fidelity-to-Vizuál check — only when a Vizuál was approved (its FE commit recorded).
     _vizual_sha = db.execute(select(Version.vizual_approved_sha).where(Version.id == version_id)).scalar_one_or_none()
+    # DEV-165: every frontend of the project — a Web project's web/ is compared too (asked only when there is a Vizuál).
+    _frontend_paths = (
+        " ".join(f"{s.directory}/" for s in _surfaces_for_version(db, version_id)) if _vizual_sha else "frontend/"
+    )
     vizual_block = (
         (
             "2b. VERNOSŤ VIZUÁLU (POVINNÉ — Manažér schválil vizuál aplikácie): to, čo schválil vo Vizuáli, sa "
-            f"MUSÍ aj dodať. Sprav `git diff {_vizual_sha} -- frontend/` a over, že žiadna schválená "
+            f"MUSÍ aj dodať. Sprav `git diff {_vizual_sha} -- {_frontend_paths}` a over, že žiadna schválená "
             "obrazovka nebola vizuálne PREROBENÁ — žiadny vypadnutý panel, zmenený layout / počet stĺpcov, "
             "iná paleta ani vymenené komponenty. Programovanie smie dorobiť dáta a logiku, NIE meniť "
             "schválený vzhľad/rozloženie. Prerobená schválená obrazovka = FAIL (do `proposed_fix`: vráť "
