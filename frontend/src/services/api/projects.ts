@@ -49,7 +49,7 @@ interface NexsharedChangelogEntry {
 }
 
 /** One frontend's nex-shared — a Web project has two: Administrácia (frontend/) and Web (web/) (DEV-161). */
-export interface NexsharedFrontend {
+interface NexsharedFrontend {
   directory: string;
   label: string;
   current: string | null;
