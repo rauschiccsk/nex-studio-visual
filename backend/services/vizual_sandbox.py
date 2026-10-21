@@ -141,7 +141,18 @@ def _validate_project_slug(slug: str) -> None:
         raise ValueError(f"vizual sandbox: refusing unsafe project slug {slug!r}")
 
 
-def _resolve_frontend_path(slug: str, frontend_path: Optional[str]) -> Path:
+#: DEV-162: the frontend every project has; a Web project's second one (``web``) gets a preview of its own.
+MAIN_FRONTEND = "frontend"
+_DIRECTORY_RE = re.compile(r"^[a-z][a-z0-9]*$")
+
+
+def _validate_directory(directory: str) -> None:
+    """A frontend directory is one plain word — it becomes part of a container name, a host name and a bind path."""
+    if not isinstance(directory, str) or not _DIRECTORY_RE.match(directory):
+        raise ValueError(f"vizual sandbox: refusing frontend directory {directory!r}")
+
+
+def _resolve_frontend_path(slug: str, frontend_path: Optional[str], directory: str = MAIN_FRONTEND) -> Path:
     """Resolve + containment-assert the host ``frontend/`` dir for ``slug``.
 
     The real API is slug-based (``/opt/projects/<slug>/frontend``); ``frontend_path`` is an explicit
@@ -149,7 +160,8 @@ def _resolve_frontend_path(slug: str, frontend_path: Optional[str]) -> Path:
     the RESOLVED (symlink-followed) path must stay strictly UNDER :data:`PROJECTS_ROOT`, so even a symlink
     or a future layout change can never point the rw bind mount outside the projects tree.
     """
-    fe = Path(frontend_path) if frontend_path else (PROJECTS_ROOT / slug / "frontend")
+    _validate_directory(directory)
+    fe = Path(frontend_path) if frontend_path else (PROJECTS_ROOT / slug / directory)
     real = Path(os.path.realpath(fe))
     if not str(real).startswith(str(Path(os.path.realpath(PROJECTS_ROOT))) + os.sep):
         raise ValueError(f"vizual sandbox: refusing frontend path {fe} — resolves outside {PROJECTS_ROOT}")
@@ -163,31 +175,35 @@ def _resolve_frontend_path(slug: str, frontend_path: Optional[str]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def container_name(slug: str) -> str:
-    """The sandbox container / Traefik router id for ``slug`` (``vizual-<slug>``)."""
-    return f"{_CONTAINER_PREFIX}{slug}"
+def container_name(slug: str, directory: str = MAIN_FRONTEND) -> str:
+    """The sandbox container / Traefik router id — ``vizual-<slug>`` for ``frontend/``, ``vizual<dir>-<slug>`` for a
+    further frontend (DEV-162: ``vizualweb-<slug>``). The directory sits in the PREFIX, never after the slug: a slug
+    may end in ``-web`` itself, and ``vizual-<slug>-web`` could then be another project's main preview."""
+    _validate_directory(directory)
+    prefix = _CONTAINER_PREFIX if directory == MAIN_FRONTEND else f"vizual{directory}-"
+    return f"{prefix}{slug}"
 
 
-def public_host(slug: str, *, private: bool = False) -> str:
+def public_host(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> str:
     """The vhost Traefik routes to the sandbox — ``vizual-<slug>.isnex.eu``, or ``vizual-<slug>.int.isnex.eu`` for a
-    project reachable only from the private network (DEV-42)."""
-    return f"{_CONTAINER_PREFIX}{slug}.{domain_suffix(private)}"
+    project reachable only from the private network (DEV-42); a further frontend's in its own name (DEV-162)."""
+    return f"{container_name(slug, directory)}.{domain_suffix(private)}"
 
 
-def public_url(slug: str, *, private: bool = False) -> str:
+def public_url(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> str:
     """The URL of the sandbox (``https://vizual-<slug>.isnex.eu`` or its private-zone twin)."""
-    return f"{_PUBLIC_SCHEME}://{public_host(slug, private=private)}"
+    return f"{_PUBLIC_SCHEME}://{public_host(slug, private=private, directory=directory)}"
 
 
-def _traefik_labels(slug: str, *, private: bool = False) -> list[str]:
+def _traefik_labels(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> list[str]:
     """The Traefik labels routing ``Host(vizual-<slug>.isnex.eu)`` → the internal Vite port.
 
     Exact pattern of :func:`backend.services.uat_provisioner.frontend_traefik_labels` (cleartext ``web``
     entrypoint on ``nex-proxy-net``; TLS is terminated upstream). No websocket label is needed — Traefik
     forwards the HMR WebSocket upgrade for the matched router by default.
     """
-    name = container_name(slug)
-    host = public_host(slug, private=private)
+    name = container_name(slug, directory)
+    host = public_host(slug, private=private, directory=directory)
     return [
         "traefik.enable=true",
         f"traefik.docker.network={PROXY_NETWORK}",
@@ -265,7 +281,7 @@ def _git_exclude_override(frontend_host_path: Path) -> None:
         if not info_dir.is_dir():
             return
         exclude = info_dir / "exclude"
-        pattern = f"frontend/{_OVERRIDE_CONTAINER_NAME}"
+        pattern = f"{frontend_host_path.name}/{_OVERRIDE_CONTAINER_NAME}"
         existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
         if pattern not in existing.split():
             with exclude.open("a", encoding="utf-8") as fh:
@@ -314,7 +330,9 @@ def _release_notes_mount(frontend_host_path: Path) -> list[str]:
     return ["--mount", f"type=bind,source={resolved},target={RELEASE_NOTES_IN_SANDBOX},readonly"]
 
 
-def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False) -> list[str]:
+def build_run_argv(
+    *, slug: str, frontend_host_path: Path, private: bool = False, directory: str = MAIN_FRONTEND
+) -> list[str]:
     """Compose the EXACT ``docker run`` argv for the sandbox (every option is load-bearing).
 
     The bind mounts are the project ``frontend/`` (rw — HMR must see host edits) and, read-only, its release
@@ -324,8 +342,8 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
     ``/var/run/docker.sock``, NO ``/opt/customers``, NO ``/opt/uat``, NO ``/opt/infra``, NO credentials
     store, NO knowledge mount, NO extra network. The sandbox can reach only ``nex-proxy-net``.
     """
-    name = container_name(slug)
-    host = public_host(slug, private=private)
+    name = container_name(slug, directory)
+    host = public_host(slug, private=private, directory=directory)
     argv: list[str] = [
         "docker",
         "run",
@@ -339,7 +357,7 @@ def build_run_argv(*, slug: str, frontend_host_path: Path, private: bool = False
         "--network",
         PROXY_NETWORK,
     ]
-    for label in _traefik_labels(slug, private=private):
+    for label in _traefik_labels(slug, private=private, directory=directory):
         argv += ["--label", label]
     for scratch in _VITE_SCRATCH_DIRS:
         # Writable RAM scratch shadowing Vite's node_modules cache/temp — keeps the host node_modules
@@ -480,7 +498,9 @@ def _ensure_node_modules(frontend_host_path: Path, *, slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def spin_up(slug: str, frontend_path: Optional[str] = None, *, private: bool = False) -> str:
+def spin_up(
+    slug: str, frontend_path: Optional[str] = None, *, private: bool = False, directory: str = MAIN_FRONTEND
+) -> str:
     """Start (idempotently) an isolated Vite dev-server sandbox for ``slug`` and return its public URL.
 
     Starts container ``vizual-<slug>`` for ``/opt/projects/<slug>/frontend`` (or the explicit
@@ -496,14 +516,14 @@ def spin_up(slug: str, frontend_path: Optional[str] = None, *, private: bool = F
         RuntimeError: node_modules install failed, or the container died immediately after start.
     """
     _validate_project_slug(slug)
-    frontend_host_path = _resolve_frontend_path(slug, frontend_path)
-    name = container_name(slug)
+    frontend_host_path = _resolve_frontend_path(slug, frontend_path, directory)
+    name = container_name(slug, directory)
 
-    host = public_host(slug, private=private)
+    host = public_host(slug, private=private, directory=directory)
     state = _inspect_state(name)
     if state["running"] and _running_public_host(name) == host:
         logger.info("vizual sandbox: %s already running — reusing", name)
-        return public_url(slug, private=private)
+        return public_url(slug, private=private, directory=directory)
     if state["exists"]:
         # A stopped/crashed leftover, or one still answering under the other zone's name (DEV-42: a preview of a
         # private project must not keep its public name) — recreate clean.
@@ -512,7 +532,7 @@ def spin_up(slug: str, frontend_path: Optional[str] = None, *, private: bool = F
     _ensure_node_modules(frontend_host_path, slug=slug)
     _write_override_config(frontend_host_path)
 
-    argv = build_run_argv(slug=slug, frontend_host_path=frontend_host_path, private=private)
+    argv = build_run_argv(slug=slug, frontend_host_path=frontend_host_path, private=private, directory=directory)
     logger.info("vizual sandbox: starting %s for %s", name, frontend_host_path)
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=_DOCKER_CALL_TIMEOUT)
@@ -526,19 +546,19 @@ def spin_up(slug: str, frontend_path: Optional[str] = None, *, private: bool = F
     # (Vite finished booting) is the caller's poll — the cockpit shows a "sandbox is starting" state.
     if not _inspect_state(name)["running"]:
         raise RuntimeError(f"vizual sandbox: container {name} exited immediately after start")
-    return public_url(slug, private=private)
+    return public_url(slug, private=private, directory=directory)
 
 
-def teardown(slug: str, frontend_path: Optional[str] = None) -> None:
+def teardown(slug: str, frontend_path: Optional[str] = None, *, directory: str = MAIN_FRONTEND) -> None:
     """``docker rm -f vizual-<slug>`` + delete the generated override — leaves the project tree clean.
 
     No error if the container/file is absent. Never raises. ``frontend_path`` mirrors :func:`spin_up`'s
     escape hatch; the real API resolves the default ``/opt/projects/<slug>/frontend`` layout.
     """
     _validate_project_slug(slug)
-    _force_remove(container_name(slug))
+    _force_remove(container_name(slug, directory))
     try:
-        fe = Path(frontend_path) if frontend_path else (PROJECTS_ROOT / slug / "frontend")
+        fe = Path(frontend_path) if frontend_path else (PROJECTS_ROOT / slug / directory)
         (fe / _OVERRIDE_CONTAINER_NAME).unlink(missing_ok=True)
     except OSError:
         pass
@@ -566,7 +586,7 @@ def _stopped_reason(name: str) -> Optional[str]:
     return errors[-1][:_REASON_MAX] if errors else None
 
 
-def preview_state(slug: str, *, private: bool = False) -> dict:
+def preview_state(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> dict:
     """DEV-127: ``{"state": "running" | "stopped" | "missing", "url": str | None, "reason": str | None}``.
 
     ``stopped`` carries the last error line the preview left, so the cockpit can say WHY it is not running —
@@ -574,17 +594,17 @@ def preview_state(slug: str, *, private: bool = False) -> dict:
     cockpit kept offering „Schváliť vizuál" for seventeen days.
     """
     _validate_project_slug(slug)
-    name = container_name(slug)
+    name = container_name(slug, directory)
     seen = _inspect_state(name)
     if seen["running"]:
-        return {"state": "running", "url": public_url(slug, private=private), "reason": None}
+        return {"state": "running", "url": public_url(slug, private=private, directory=directory), "reason": None}
     if seen["exists"]:
         return {"state": "stopped", "url": None, "reason": _stopped_reason(name)}
     return {"state": "missing", "url": None, "reason": None}
 
 
-def status(slug: str, *, private: bool = False) -> dict:
-    """Return ``{"running": bool, "url": str | None}`` for the sandbox of ``slug``."""
+def status(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> dict:
+    """Return ``{"running": bool, "url": str | None}`` for the sandbox of ``slug`` (its ``directory`` frontend)."""
     _validate_project_slug(slug)
-    running = _inspect_state(container_name(slug))["running"]
-    return {"running": running, "url": public_url(slug, private=private) if running else None}
+    running = _inspect_state(container_name(slug, directory))["running"]
+    return {"running": running, "url": public_url(slug, private=private, directory=directory) if running else None}

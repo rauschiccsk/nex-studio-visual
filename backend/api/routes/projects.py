@@ -1389,6 +1389,8 @@ def delete_project(
     repo_url = project.repo_url
     source_path = project.source_path  # capture before delete for workspace cleanup (CR-V2-027)
     uat_slug = project.uat_slug  # capture before delete for UAT teardown (v0.9.0 Phase 3 CR-2)
+    # DEV-162: every frontend has its own Vizuál preview — captured before the row is gone.
+    preview_directories = tuple(s.directory for s in project_surfaces_service.surfaces_of(project))
 
     # CR-V2-027: a project graduates to PROD on its first successful prod deploy; from then on it can
     # only be archived, never hard-deleted (the deploy audit trail + any live customers must survive).
@@ -1441,12 +1443,18 @@ def delete_project(
 
     # DEV-109: the project's preview — container vizual-<slug> and the route its labels give Traefik — would
     # otherwise keep serving a deleted project's frontend. Best-effort and logged, like every cleanup around it.
-    try:
-        vizual_sandbox.teardown(slug)
-        if vizual_sandbox.status(slug)["running"]:
-            logger.warning("Preview %s still runs after deleting project %r", vizual_sandbox.container_name(slug), slug)
-    except ValueError as exc:
-        logger.warning("Preview cleanup skipped for deleted project %r: %s", slug, exc)
+    # DEV-162: the preview of every frontend of the project — a Web project's web has one of its own.
+    for directory in preview_directories:
+        try:
+            vizual_sandbox.teardown(slug, directory=directory)
+            if vizual_sandbox.status(slug, directory=directory)["running"]:
+                logger.warning(
+                    "Preview %s still runs after deleting project %r",
+                    vizual_sandbox.container_name(slug, directory),
+                    slug,
+                )
+        except ValueError as exc:
+            logger.warning("Preview cleanup skipped for deleted project %r: %s", slug, exc)
 
     # KB cleanup — best-effort. A failure here does not undo the DB
     # delete (that has already committed); we log and return 204 so

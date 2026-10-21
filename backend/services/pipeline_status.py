@@ -475,6 +475,8 @@ class VizualCheckItem(BaseModel):
     action: str = Field(min_length=1, max_length=1000)
     #: What he should see.
     expected: str = Field(min_length=1, max_length=1000)
+    #: DEV-162: the frontend the screen is in — its directory (``web`` in a Web project); empty = the first one.
+    frontend: str = Field(default="", max_length=40)
 
 
 class VizualChecklist(BaseModel):

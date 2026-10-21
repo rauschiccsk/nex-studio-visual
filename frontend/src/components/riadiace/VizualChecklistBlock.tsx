@@ -46,7 +46,9 @@ export default function VizualChecklistBlock({ versionId, seq, checklist }: Prop
                 className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--color-accent-primary)]"
               />
               <div className={done ? "opacity-60" : ""}>
-                <span className="font-semibold">{item.screen}</span> — {item.action}{" "}
+                <span className="font-semibold">{item.screen}</span>
+                {item.frontend && <span className="text-[var(--color-text-muted)]"> ({item.frontend})</span>} —{" "}
+                {item.action}{" "}
                 <span className="text-[var(--color-text-secondary)]">→ {item.expected}</span>
                 {item.url && (
                   <>

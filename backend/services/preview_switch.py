@@ -95,9 +95,9 @@ def _allowed(code: str, start: int, end: int) -> bool:
     return bool(_ASSIGN_BEFORE.search(before) and _ASSIGN_AFTER.match(after))
 
 
-def _app_files(root: Path) -> list[Path]:
-    """The frontend source outside tests, and the build config."""
-    src = root / FRONTEND_SRC
+def _app_files(root: Path, directory: str = FRONTEND_SRC.parent.as_posix()) -> list[Path]:
+    """One frontend's source outside tests, and its build config."""
+    src = root / directory / FRONTEND_SRC.name
     files: list[Path] = []
     if src.is_dir():
         files += [
@@ -105,7 +105,7 @@ def _app_files(root: Path) -> list[Path]:
             for p in src.rglob("*")
             if p.suffix in SOURCE_SUFFIXES and p.is_file() and not _is_test(p.relative_to(src))
         ]
-    frontend = root / FRONTEND_SRC.parent
+    frontend = root / directory
     if frontend.is_dir():
         files += [
             p
@@ -115,15 +115,15 @@ def _app_files(root: Path) -> list[Path]:
     return sorted(files)
 
 
-def find(project_root: Path) -> list[PreviewDecision]:
-    """Every use of ``VITE_PREVIEW`` in the app's frontend source and build config the rule does not allow, ordered
-    by path.
+def find(project_root: Path, directories: tuple[str, ...] = (FRONTEND_SRC.parent.as_posix(),)) -> list[PreviewDecision]:
+    """Every use of ``VITE_PREVIEW`` in the source and build config of every frontend in *directories* (a Web project:
+    ``frontend/`` and ``web/`` — DEV-162) the rule does not allow, ordered by path.
 
     ``[]`` when there is neither — nothing there decides about a preview. A file that cannot be read is a finding
     itself: an unchecked file is not a checked one."""
     root = Path(project_root)
     found: list[PreviewDecision] = []
-    for path in _app_files(root):
+    for path in sorted(p for directory in directories for p in _app_files(root, directory)):
         rel = path.relative_to(root).as_posix()
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

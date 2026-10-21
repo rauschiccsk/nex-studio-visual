@@ -26,8 +26,9 @@ interface Props {
 
 const STRIP =
   "flex flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)]";
-const BUTTON =
-  "ml-auto inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1 font-medium transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50 pointer-coarse:min-h-11";
+const LINK =
+  "inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1 font-medium transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50 pointer-coarse:min-h-11";
+const BUTTON = `ml-auto ${LINK}`;
 
 export default function ZivyNahladBar({ board, preview = null, restarting = false, error = "", onRestart }: Props) {
   if (board?.state?.current_stage !== "vizual") return null;
@@ -47,6 +48,25 @@ export default function ZivyNahladBar({ board, preview = null, restarting = fals
     );
   }
   const url = (preview?.state === "running" ? preview.url : null) ?? board.vizual_url ?? null;
+  // DEV-162: a Web project has a preview for each frontend — one link each, named the way the Manažér knows them.
+  const frontends = preview?.state === "running" ? (preview.frontends ?? []) : [];
+  if (frontends.length > 1) {
+    return (
+      <div role="status" aria-label="Živý náhľad" className={STRIP}>
+        <span>Živé náhľady aplikácie bežia — otvor ich vedľa tohto rozhovoru a skúšaj podľa návodu.</span>
+        <span className="ml-auto flex flex-wrap gap-2">
+          {frontends.map((frontend) =>
+            frontend.url ? (
+              <a key={frontend.directory} href={frontend.url} target="_blank" rel="noreferrer" className={LINK}>
+                <ExternalLink className="h-3.5 w-3.5" />
+                Otvoriť: {frontend.label}
+              </a>
+            ) : null,
+          )}
+        </span>
+      </div>
+    );
+  }
   return (
     <div role="status" aria-label="Živý náhľad" className={STRIP}>
       {url ? (

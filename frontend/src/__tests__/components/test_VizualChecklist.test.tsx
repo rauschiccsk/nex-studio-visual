@@ -180,3 +180,30 @@ describe("DEV-36 — the list of what to check in the Vizuál", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
+
+describe("VizualChecklist — a Web project (DEV-162)", () => {
+  it("names the frontend each screen is in and links to that frontend's preview", () => {
+    const WEB = "https://vizualweb-kariera.isnex.eu";
+    const both: VizualChecklist = {
+      round: "first",
+      items: [
+        { screen: "Registrácia", action: "Vyplň e-mail.", expected: "Účet vznikne.", url: `${WEB}/register`, frontend: "Web" },
+        { screen: "Prehľad", action: "Pozri karty.", expected: "Tri karty.", url: `${URL}/`, frontend: "Administrácia" },
+      ],
+      not_verifiable: [],
+    };
+    render(
+      <ConversationThread
+        versionId="v-web"
+        messages={[note(7, "Vizuál je pripravený", { phase: "vizual", vizual_checklist: both })]}
+        activity={[]}
+        working={false}
+      />,
+    );
+
+    expect(screen.getByText("(Web)")).toBeInTheDocument();
+    expect(screen.getByText("(Administrácia)")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: "Otvoriť obrazovku" }).map((link) => link.getAttribute("href"));
+    expect(links).toEqual([`${WEB}/register`, `${URL}/`]);
+  });
+});

@@ -161,7 +161,7 @@ async def test_a_clean_fold_moves_the_build_on(db_session, monkeypatch) -> None:
         return []
 
     monkeypatch.setattr(orchestrator, "_writeback_vizual_to_docs", _bez_rozporu)
-    monkeypatch.setattr(orchestrator, "_commit_vizual_changes", lambda root: None)
+    monkeypatch.setattr(orchestrator, "_commit_vizual_changes", lambda root, directories=(): None)
     monkeypatch.setattr(orchestrator, "_docs_changed_in_head", lambda root: [])
     monkeypatch.setattr(orchestrator, "_repo_head", lambda root: None)
 

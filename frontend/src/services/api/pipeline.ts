@@ -123,6 +123,8 @@ interface VizualCheck {
   expected: string;
   /** A direct link to the screen in the preview; null when it cannot be opened directly. */
   url?: string | null;
+  /** DEV-162: the frontend the screen is in (Administrácia / Web) — only in a project with more than one. */
+  frontend?: string | null;
 }
 
 export interface VizualChecklist {

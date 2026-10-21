@@ -9328,6 +9328,8 @@ export interface components {
             action: string;
             /** Expected */
             expected: string;
+            /** Frontend */
+            frontend?: string | null;
             /** Screen */
             screen: string;
             /** Url */
@@ -9352,10 +9354,33 @@ export interface components {
             seq: number;
         };
         /**
+         * VizualFrontendPreviewRead
+         * @description DEV-162: the live preview of one frontend of a Web project.
+         */
+        VizualFrontendPreviewRead: {
+            /** Directory */
+            directory: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "stopped" | "missing";
+            /** Url */
+            url?: string | null;
+        };
+        /**
          * VizualPreviewRead
          * @description DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed.
          */
         VizualPreviewRead: {
+            /** Frontends */
+            frontends?: components["schemas"]["VizualFrontendPreviewRead"][];
             /**
              * Needed
              * @description False outside the Vizuál step and when the AI's mockup is the preview.

@@ -199,6 +199,8 @@ class VizualCheckRead(BaseModel):
     action: str
     expected: str
     url: Optional[str] = None
+    #: DEV-162: the frontend the screen is in, by its name (Administrácia / Web) — only when there is more than one.
+    frontend: Optional[str] = None
 
 
 class VizualChecklistRead(BaseModel):
@@ -225,6 +227,17 @@ class DatabaseSchemaRead(BaseModel):
     approver_role: str
 
 
+class VizualFrontendPreviewRead(BaseModel):
+    """DEV-162: the live preview of one frontend of a Web project."""
+
+    name: str
+    label: str
+    directory: str
+    state: Literal["running", "stopped", "missing"]
+    url: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class VizualPreviewRead(BaseModel):
     """DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed."""
 
@@ -232,6 +245,8 @@ class VizualPreviewRead(BaseModel):
     state: Literal["running", "stopped", "missing", "not_needed"]
     url: Optional[str] = None
     reason: Optional[str] = Field(default=None, description="The last error line a stopped preview left.")
+    #: DEV-162: each frontend's preview when the project has more than one (a Web project); empty otherwise.
+    frontends: list[VizualFrontendPreviewRead] = Field(default_factory=list)
 
 
 class PipelineBoardRead(BaseModel):

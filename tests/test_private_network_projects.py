@@ -286,7 +286,7 @@ def test_the_preview_of_a_private_project_is_named_in_the_private_zone(tmp_path)
 def _preview(monkeypatch, tmp_path, *, running_host):
     calls: list = []
     state = {"running": running_host is not None}
-    monkeypatch.setattr(vizual_sandbox, "_resolve_frontend_path", lambda slug, fp: tmp_path)
+    monkeypatch.setattr(vizual_sandbox, "_resolve_frontend_path", lambda slug, fp, directory="frontend": tmp_path)
     monkeypatch.setattr(
         vizual_sandbox, "_inspect_state", lambda name: {"exists": state["running"] or bool(calls), "running": True}
     )

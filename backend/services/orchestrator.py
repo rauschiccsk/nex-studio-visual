@@ -107,6 +107,7 @@ from backend.services.pipeline_status import (
     TaskPlanEpic,
     TaskPlanFeat,
     TaskPlanSkeleton,
+    VizualCheckItem,
     VizualChecklist,
     extract_report_body,
     extract_task_plan_json,
@@ -1127,6 +1128,12 @@ def _surfaces_for_version(db: Session, version_id: uuid.UUID) -> tuple[project_s
     return project_surfaces.surfaces_of(project)
 
 
+def _preview_of(surface: project_surfaces.Surface) -> dict[str, str]:
+    """DEV-162: how the sandbox is told which frontend — nothing for the main ``frontend/`` (every project's preview is
+    called exactly as before), ``directory`` for a further one (a Web project's ``web/``)."""
+    return {} if surface.directory == "frontend" else {"directory": surface.directory}
+
+
 def _frontend_dirs_text(surfaces: tuple[project_surfaces.Surface, ...]) -> str:
     """``frontend/`` — or, with more frontends, each with what it is: ``frontend/` (Administrácia), `web/` (Web)``."""
     if len(surfaces) == 1:
@@ -1866,14 +1873,16 @@ def _vizual_directive(
         "NEROB backendovú logiku ani dátové modely — to je Programovanie. Ak je požiadavka naozaj "
         "nejednoznačná, nastav `kind=question`, opýtaj sa PRÁVE JEDNU vec a ZASTAV; inak kolo UZAVRI "
         "`kind=done`.\n"
-        + _vizual_checklist_rule(first_draft=manager_request is None, mockup=False)
+        + _vizual_checklist_rule(first_draft=manager_request is None, mockup=False, surfaces=surfaces)
         + SOURCE_IN_ENGLISH_RULE
         + "\n"
         + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
 
 
-def _vizual_checklist_rule(*, first_draft: bool, mockup: bool) -> str:
+def _vizual_checklist_rule(
+    *, first_draft: bool, mockup: bool, surfaces: tuple[project_surfaces.Surface, ...] = ()
+) -> str:
     """The Vizuál brief's request for the list of what the Manažér should check (DEV-36).
 
     Director 09.10.2026: „Po vyhotovení vizuálu pred tým linkom na samotný vizual pomohlo by mi krátky popis čo
@@ -1894,7 +1903,16 @@ def _vizual_checklist_rule(*, first_draft: bool, mockup: bool) -> str:
         "6. KONTROLNÝ ZOZNAM (povinný): do stavového výstupu pridaj pole `vizual_checklist` — čo má Manažér vo "
         f"Vizuáli skontrolovať, odvodené zo Špecifikácie: {scope}. Pole `items` (aspoň 1, najviac ~10, stručne): "
         f"`screen` (obrazovka, ako ju volá Manažér), {path}, `action` (čo tam urobiť) a `expected` (čo má "
-        "vidieť). Pole `not_verifiable` (zoznam viet): čo verzia mení, ale na obrazovkách s ukážkovými dátami sa "
+        "vidieť)"
+        + (
+            # DEV-162: each frontend has its own preview — the link goes to the one the screen is in.
+            ", `frontend` (priečinok frontendu, v ktorom obrazovka je: "
+            + " alebo ".join(f"`{s.directory}`" for s in surfaces)
+            + ")"
+            if len(surfaces) > 1
+            else ""
+        )
+        + ". Pole `not_verifiable` (zoznam viet): čo verzia mení, ale na obrazovkách s ukážkovými dátami sa "
         "to ukázať nedá (napr. e-maily, opakovanie, časovače) — overí sa až pri Programovaní a Verifikácii.\n"
     )
 
@@ -5532,7 +5550,7 @@ def _tell_manager_the_note_is_not_committed(db: Session, version_id: uuid.UUID, 
     )
 
 
-def _commit_vizual_changes(project_root: Path) -> None:
+def _commit_vizual_changes(project_root: Path, directories: tuple[str, ...] = ("frontend",)) -> None:
     """Squash the whole Vizuál session into ONE commit at approval (#3, Director 2026-07-13).
 
     The Vizuál round no longer commits each change — :func:`_vizual_directive` tells the AI to only WRITE the
@@ -5551,7 +5569,8 @@ def _commit_vizual_changes(project_root: Path) -> None:
     # Only pathspecs that EXIST are passed. ``git add`` fails the whole call on one unmatched pathspec, so
     # naming ``docs`` in a project that has none would stage nothing and silently kill the squash itself —
     # the screens would stop being committed at all. Caught by the existing squash test.
-    paths = [name for name in ("frontend", "docs") if (project_root / name).is_dir()]
+    # DEV-162: every frontend of the project — a Web project's web/ screens are signed with the administration's.
+    paths = [name for name in (*directories, "docs") if (project_root / name).is_dir()]
     if not paths or not _git_ok(project_root, ["add", "-A", "--", *paths]):
         return
     _git_ok(
@@ -8555,7 +8574,7 @@ async def _complete_vizual_signoff(
         return await _settle_vizual_conflict(db, state, conflicts)
 
     vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-    _commit_vizual_changes(vizual_root)
+    _commit_vizual_changes(vizual_root, tuple(s.directory for s in _surfaces_for_version(db, version_id)))
 
     # ICCINT-29 / §2.5: dokumenty sa práve zmenili, takže predbežná previerka je znovu na rade — ZÚŽENÁ na
     # to, čo pribudlo. Prezerať celú Špecifikáciu druhýkrát by platilo za už posúdené; prídavok je tá časť,
@@ -10587,7 +10606,10 @@ async def _floor_preview_decisions(
     :func:`_latest_verifikacia_fix_scope` hands the AI Agent the places and the right shape. Its own verdict
     message, not a note: :func:`_verifikacia_passed` reads the latest verdict, so a PASS left standing would sign
     off however hard the settle blocks the state (the same reason as the CI floor)."""
-    found = preview_switch.find(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+    found = preview_switch.find(
+        claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id),
+        tuple(s.directory for s in _surfaces_for_version(db, version_id)),
+    )
     if not found:
         return False
     floored = _record_message(
@@ -12691,19 +12713,34 @@ def _vizual_check_url(base_url: str, path: str) -> Optional[str]:
     return base_url.rstrip("/") + path
 
 
-def _vizual_checklist_payload(checklist: VizualChecklist, base_url: str, round_: str) -> dict[str, Any]:
-    """The list as the Manažér sees it: the engine-made link instead of the agent's raw path (DEV-36)."""
+def _vizual_checklist_payload(
+    checklist: VizualChecklist,
+    urls: dict[str, str],
+    round_: str,
+    surfaces: tuple[project_surfaces.Surface, ...] = (),
+) -> dict[str, Any]:
+    """The list as the Manažér sees it: the engine-made link instead of the agent's raw path (DEV-36).
+
+    DEV-162: an item says which frontend it is in (``frontend`` — its directory; empty = the first one), so its link
+    goes to that frontend's preview and, with more than one frontend, it carries the frontend's name."""
+    main = next(iter(urls))
+    labels = {s.directory: s.label for s in surfaces}
+
+    def _item(item: VizualCheckItem) -> dict[str, Any]:
+        directory = item.frontend if item.frontend in urls else main
+        shown = {
+            "screen": item.screen,
+            "action": item.action,
+            "expected": item.expected,
+            "url": _vizual_check_url(urls[directory], item.path),
+        }
+        if len(urls) > 1:
+            shown["frontend"] = labels.get(directory, directory)
+        return shown
+
     return {
         "round": round_,
-        "items": [
-            {
-                "screen": item.screen,
-                "action": item.action,
-                "expected": item.expected,
-                "url": _vizual_check_url(base_url, item.path),
-            }
-            for item in checklist.items
-        ],
+        "items": [_item(item) for item in checklist.items],
         "not_verifiable": list(checklist.not_verifiable),
     }
 
@@ -12785,22 +12822,40 @@ VIZUAL_PREVIEW_DOWN = (
 async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     """DEV-127: the live preview a Manažér walks in the Vizuál step, as it really is.
 
-    ``{"needed": bool, "state": "running" | "stopped" | "missing" | "not_needed", "url", "reason"}``. Not needed
-    outside the Vizuál step and when the AI's self-contained mockup is the preview (served by the cockpit itself).
-    Docker is asked off the event loop (ICCINT-74).
+    ``{"needed": bool, "state": "running" | "stopped" | "missing" | "not_needed", "url", "reason", "frontends"}``.
+    Not needed outside the Vizuál step and when the AI's self-contained mockup is the preview (served by the cockpit
+    itself). Docker is asked off the event loop (ICCINT-74).
+
+    DEV-162: every frontend has a preview of its own (a Web project: Administrácia and Web). ``frontends`` lists each
+    with its state and address; the top-level fields speak for all of them — ``running`` only when every preview
+    runs, the first one's address, and the first reason a preview is down, named by its frontend.
     """
     state = _get_state(db, version_id)
     if state is None or state.current_stage != "vizual" or has_vizual_mockup(db, version_id):
         return {"needed": False, "state": "not_needed", "url": None, "reason": None}
     from backend.services import vizual_sandbox
 
-    found = await run_blocking(
-        vizual_sandbox.preview_state,
-        _project_slug_for_version(db, version_id),
-        private=_project_private_network(db, version_id),
-        cap=VIZUAL_PREVIEW_STATE_CAP,
-    )
-    return {"needed": True, **found}
+    slug = _project_slug_for_version(db, version_id)
+    private = _project_private_network(db, version_id)
+    surfaces = _surfaces_for_version(db, version_id)
+    frontends = []
+    for surface in surfaces:
+        found = await run_blocking(
+            vizual_sandbox.preview_state,
+            slug,
+            private=private,
+            **_preview_of(surface),
+            cap=VIZUAL_PREVIEW_STATE_CAP,
+        )
+        frontends.append({"name": surface.name, "label": surface.label, "directory": surface.directory, **found})
+    down = [f for f in frontends if f["state"] != "running"]
+    overall = "running" if not down else ("stopped" if any(f["state"] == "stopped" for f in down) else "missing")
+    reason = next((f["reason"] for f in down if f["reason"]), None)
+    if reason and len(frontends) > 1:
+        reason = f"{next(f['label'] for f in down if f['reason'])}: {reason}"
+    found = {"needed": True, "state": overall, "url": frontends[0]["url"], "reason": reason}
+    # A project with one frontend reads exactly as before; only more than one lists them.
+    return {**found, "frontends": frontends} if len(frontends) > 1 else found
 
 
 async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
@@ -12808,6 +12863,7 @@ async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
 
     Only in the Vizuál step and only for a live preview (a mockup needs no container). ``spin_up`` removes a
     stopped leftover and creates the preview anew; it runs off the event loop like every spin-up (ICCINT-74).
+    DEV-162: every frontend whose preview is down is started; one that runs is left alone.
     Raises :class:`OrchestratorError` with a sentence for the Manažér when it cannot start.
     """
     now = await vizual_preview(db, version_id)
@@ -12818,19 +12874,27 @@ async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     from backend.services import vizual_sandbox
 
     slug = _project_slug_for_version(db, version_id)
-    try:
-        await run_blocking(
-            vizual_sandbox.spin_up, slug, private=_project_private_network(db, version_id), cap=VIZUAL_SPINUP_CAP
-        )
-    except BlockingWorkTimedOut:
-        return {**await vizual_preview(db, version_id), "reason": "Náhľad sa ešte spúšťa — skús to o chvíľu znova."}
-    except Exception as exc:  # noqa: BLE001 — said to the Manažér as a sentence, never a crash
-        logger.exception("vizual preview restart failed for %s", slug)
-        after = await vizual_preview(db, version_id)
-        raise OrchestratorError(
-            "Živý náhľad sa nepodarilo spustiť"
-            + (f": {after['reason']}" if after.get("reason") else f" ({type(exc).__name__}).")
-        ) from exc
+    running = {f["directory"] for f in now.get("frontends", []) if f["state"] == "running"}
+    for surface in _surfaces_for_version(db, version_id):
+        if surface.directory in running:
+            continue
+        try:
+            await run_blocking(
+                vizual_sandbox.spin_up,
+                slug,
+                private=_project_private_network(db, version_id),
+                **_preview_of(surface),
+                cap=VIZUAL_SPINUP_CAP,
+            )
+        except BlockingWorkTimedOut:
+            return {**await vizual_preview(db, version_id), "reason": "Náhľad sa ešte spúšťa — skús to o chvíľu znova."}
+        except Exception as exc:  # noqa: BLE001 — said to the Manažér as a sentence, never a crash
+            logger.exception("vizual preview restart failed for %s (%s)", slug, surface.directory)
+            after = await vizual_preview(db, version_id)
+            raise OrchestratorError(
+                "Živý náhľad sa nepodarilo spustiť"
+                + (f": {after['reason']}" if after.get("reason") else f" ({type(exc).__name__}).")
+            ) from exc
     return await vizual_preview(db, version_id)
 
 
@@ -12896,8 +12960,12 @@ async def _run_vizual_round(
     # backend and NO login) via a same-origin backend route — NOT the auth-gated live FE Vite scaffold (a new
     # project's FE is behind ProtectedRoute→login and the sandbox has no backend/token → a dead login screen).
     url: str
+    # DEV-162: the address of every frontend's preview, by directory — the first one is ``url``.
+    surfaces = _surfaces_for_version(db, version_id)
+    urls: dict[str, str] = {}
     if mockup_rel is not None:
         url = f"/api/v1/pipeline/{version_id}/vizual-mockup"
+        urls = {surfaces[0].directory: url}
     else:
         # Lazy, module-level-style reference (avoids an import cycle at orchestrator load; the ``docker``-heavy
         # sandbox module stays out of the hot import path). Referenced as ``vizual_sandbox.spin_up`` — a module
@@ -12909,13 +12977,16 @@ async def _run_vizual_round(
             # ``npm install`` (strop 600 s) a dva dockerové príkazy (po 60 s). Zavolaná odtiaľto priamo
             # držala celý server 07.09.2026 tak dlho, že Manažér nenačítal v kokpite vôbec nič — bez
             # jedinej chyby v protokole, len s hromadou zaseknutých kontrol zdravia.
-            url = await run_blocking(
-                vizual_sandbox.spin_up,
-                slug,
-                # DEV-42: a project reachable only from the private network previews in the private zone too.
-                private=_project_private_network(db, version_id),
-                cap=VIZUAL_SPINUP_CAP,
-            )
+            for surface in surfaces:
+                urls[surface.directory] = await run_blocking(
+                    vizual_sandbox.spin_up,
+                    slug,
+                    # DEV-42: a project reachable only from the private network previews in the private zone too.
+                    private=_project_private_network(db, version_id),
+                    **_preview_of(surface),
+                    cap=VIZUAL_SPINUP_CAP,
+                )
+            url = urls[surfaces[0].directory]
         except Exception as exc:  # noqa: BLE001 — a sandbox failure must NEVER crash the pipeline; settle honestly.
             # Vypršanie stropu NIE JE to isté ako zlyhanie (ICCINT-74): práca vo vlákne beží ďalej a náhľad
             # sa ešte môže rozbehnúť. Manažérovi sa to preto hovorí inak — inak by sa ponáhľal spúšťať niečo,
@@ -12960,8 +13031,15 @@ async def _run_vizual_round(
             return
         content = f"Vizuál je pripravený — otvor si ho: {url}"
         payload: dict[str, Any] = {"phase": "vizual", "vizual_url": url}
+        if len(urls) > 1:
+            # DEV-162: each frontend's preview by the name the Manažér knows it.
+            labels = {s.directory: s.label for s in surfaces}
+            content = "Vizuál je pripravený — otvor si ho: " + ", ".join(
+                f"{labels[directory]} {address}" for directory, address in urls.items()
+            )
+            payload["vizual_urls"] = [{"label": labels[d], "url": address} for d, address in urls.items()]
         if checklist is not None:
-            payload["vizual_checklist"] = _vizual_checklist_payload(checklist, url, "first")
+            payload["vizual_checklist"] = _vizual_checklist_payload(checklist, urls, "first", surfaces)
         elif expected:
             content += f"\n\n{_VIZUAL_CHECKLIST_GONE}"
             payload["vizual_checklist_missing"] = True
@@ -13093,7 +13171,7 @@ async def _run_vizual_round(
                 else f"Zmena je vo Vizuáli. {_VIZUAL_CHECKLIST_GONE}"
             ),
             payload=(
-                {"phase": "vizual", "vizual_checklist": _vizual_checklist_payload(checklist, url, "change")}
+                {"phase": "vizual", "vizual_checklist": _vizual_checklist_payload(checklist, urls, "change", surfaces)}
                 if checklist is not None
                 else {"phase": "vizual", "vizual_checklist_missing": True}
             ),

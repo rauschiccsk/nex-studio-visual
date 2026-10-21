@@ -74,3 +74,35 @@ describe("ZivyNahladBar (DEV-120)", () => {
     expect(screen.getByRole("link", { name: "Otvoriť živý náhľad" })).toHaveAttribute("href", "https://vizual-nex-manager.isnex.eu");
   });
 });
+
+describe("ZivyNahladBar — a Web project (DEV-162)", () => {
+  const admin = {
+    name: "admin",
+    label: "Administrácia",
+    directory: "frontend",
+    state: "running" as const,
+    url: "https://vizual-kariera.isnex.eu",
+    reason: null,
+  };
+  const web = { ...admin, name: "web", label: "Web", directory: "web", url: "https://vizualweb-kariera.isnex.eu" };
+  const both: VizualPreview = { needed: true, state: "running", url: admin.url, reason: null, frontends: [admin, web] };
+
+  it("opens each frontend's preview by its name", () => {
+    render(<ZivyNahladBar board={board("vizual", admin.url)} preview={both} />);
+
+    const links = screen.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]);
+    expect(links).toEqual([
+      ["Otvoriť: Administrácia", "https://vizual-kariera.isnex.eu"],
+      ["Otvoriť: Web", "https://vizualweb-kariera.isnex.eu"],
+    ]);
+  });
+
+  it("a web preview that is down stops both links and says which one", () => {
+    const down = { ...web, state: "stopped" as const, url: null, reason: "Error: port 5173 is in use" };
+    const webDown: VizualPreview = { ...both, state: "stopped", reason: "Web: Error: port 5173 is in use", frontends: [admin, down] };
+    render(<ZivyNahladBar board={board("vizual", admin.url)} preview={webDown} onRestart={vi.fn()} />);
+
+    expect(screen.getByText("Živý náhľad nebeží — Web: Error: port 5173 is in use")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});
