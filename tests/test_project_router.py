@@ -1210,8 +1210,10 @@ def test_discard_never_removes_an_adopted_workspace(tmp_path, monkeypatch, caplo
 
 
 def test_chown_workspace_invokes_chown(monkeypatch):
-    """v4.0.44: the workspace is chowned to 1000:1000 so the non-root Vizuál sandbox can operate on it."""
-    from backend.api.routes import projects as projects_module
+    """v4.0.44: the workspace is chowned to 1000:1000 so the non-root Vizuál sandbox can operate on it.
+
+    DEV-161: the helper moved to ``backend.services.workspace_owner`` — the switch to Web chowns the new web/ too."""
+    from backend.services import workspace_owner
 
     calls: list[list[str]] = []
 
@@ -1223,23 +1225,23 @@ def test_chown_workspace_invokes_chown(monkeypatch):
         calls.append(argv)
         return _Ok()
 
-    monkeypatch.setattr(projects_module.subprocess, "run", _fake_run)
-    projects_module._chown_workspace("/opt/projects/demo")
+    monkeypatch.setattr(workspace_owner.subprocess, "run", _fake_run)
+    workspace_owner.chown_workspace("/opt/projects/demo")
 
     assert calls == [["chown", "-R", "1000:1000", "/opt/projects/demo"]]
 
 
 def test_chown_workspace_is_best_effort(monkeypatch):
     """A chown failure (non-zero exit OR OSError) is logged, never raised — it must not abort a create."""
-    from backend.api.routes import projects as projects_module
+    from backend.services import workspace_owner
 
     # empty path → no-op, no subprocess call
-    projects_module._chown_workspace(None)
-    projects_module._chown_workspace("")
+    workspace_owner.chown_workspace(None)
+    workspace_owner.chown_workspace("")
 
     def _boom(argv, **_kwargs):
         raise OSError("chown: not permitted")
 
-    monkeypatch.setattr(projects_module.subprocess, "run", _boom)
+    monkeypatch.setattr(workspace_owner.subprocess, "run", _boom)
     # must not raise
-    projects_module._chown_workspace("/opt/projects/demo")
+    workspace_owner.chown_workspace("/opt/projects/demo")

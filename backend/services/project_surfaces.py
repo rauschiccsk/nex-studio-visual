@@ -46,6 +46,8 @@ WEB_NOT_YET = (
 #: The web's port is this slot of the project's port block (backend = +0, frontend = +1, db = +2). The project
 #: template reserves +3 … +5 and uses none of them; +5 is the slot it names for a second web surface.
 WEB_PORT_OFFSET = 5
+#: The public web's directory in a Web project (DEV-161: built from the template's ``web-skeleton/``).
+WEB_DIRECTORY = "web"
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,12 @@ def surfaces_of(project: Project) -> tuple[Surface, ...]:
     return _surfaces(project.type, project.auth_mode, project.frontend_port, project.web_port)
 
 
+def frontend_directories(project_type: str) -> tuple[str, ...]:
+    """The directories of the frontends a project of *project_type* has — what the scaffold builds and every
+    per-frontend step (CI, the pre-commit check, nex-shared) walks. Ports and login do not change them."""
+    return tuple(surface.directory for surface in _surfaces(project_type, USERNAME, None, None))
+
+
 def _surfaces(
     project_type: str, auth_mode: str, frontend_port: Optional[int], web_port: Optional[int]
 ) -> tuple[Surface, ...]:
@@ -89,7 +97,7 @@ def _surfaces(
             Surface(
                 name="web",
                 label="Web",
-                directory="web",
+                directory=WEB_DIRECTORY,
                 service="web",
                 port=web_port,
                 login=EMAIL,
@@ -141,6 +149,9 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
         )
     if project.backend_port is None:
         return refused("Projekt nemá pridelený blok portov, z ktorého by web dostal port.")
+    if _agent_at_work(db, project):
+        # DEV-161: the switch writes into the workspace the agent is working in.
+        return refused("Na projekte práve pracuje agent — prepnúť ho na Web sa dá, až keď stavba zastaví.")
 
     port = project.backend_port + WEB_PORT_OFFSET
     try:
@@ -157,6 +168,22 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
     return WebSwitch(
         refusal=None, web_port=port, surfaces=_surfaces(WEB, project.auth_mode, project.frontend_port, port)
     )
+
+
+def _agent_at_work(db: Session, project: Project) -> bool:
+    """Is an agent working on any version of *project* right now?"""
+    from sqlalchemy import select
+
+    from backend.db.models.pipeline import PipelineState
+    from backend.db.models.versions import Version
+
+    working = db.execute(
+        select(PipelineState.id)
+        .join(Version, Version.id == PipelineState.version_id)
+        .where(Version.project_id == project.id, PipelineState.status == "agent_working")
+        .limit(1)
+    ).first()
+    return working is not None
 
 
 def switch_to_web(db: Session, project: Project, *, changed_by: uuid.UUID) -> WebSwitch:

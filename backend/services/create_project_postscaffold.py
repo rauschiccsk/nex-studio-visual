@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance, ci_runner, github_validation
+from backend.services import build_provenance, ci_runner, github_validation, project_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
 NEX_STUDIO_TEMPLATES = NEX_STUDIO_ROOT / "templates"
 CICD_TEMPLATE = NEX_STUDIO_TEMPLATES / "github-actions-workflow.yml"
+#: DEV-161: the public web's own CI (``.github/workflows/web.yml``) — a Web project's web/ checked like frontend/.
+WEB_WORKFLOW_TEMPLATE = NEX_STUDIO_TEMPLATES / "github-actions-web-workflow.yml"
+WEB_WORKFLOW = Path(".github") / "workflows" / "web.yml"
 #: The ruff / type-check pre-commit hook (blocks a commit that CI Lint would reject) — copied into
 #: each new project's ``.githooks/`` and activated via ``core.hooksPath`` at scaffold time (v4.0.29).
 PRECOMMIT_HOOK_TEMPLATE = NEX_STUDIO_TEMPLATES / "pre-commit-hook.sh"
@@ -469,8 +472,12 @@ def run_post_scaffold_steps(
                 # and only then ci.yml — a first run queued before its runner existed waited minutes, or a day.
                 ("spustenie vykonávača kontrol", lambda: start_ci_runner(slug, repo_url, github_org=github_org)),
                 ("nastavenie automatickej kontroly (CI)", lambda: _wire_cicd_workflow(target_path, slug)),
-                ("nastavenie kontroly pred uložením", lambda: _wire_precommit_hook(target_path)),
             ]
+            if project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project_type):
+                steps.append(
+                    ("nastavenie automatickej kontroly webu (CI)", lambda: _wire_web_workflow(target_path, slug))
+                )
+            steps.append(("nastavenie kontroly pred uložením", lambda: _wire_precommit_hook(target_path)))
     else:
         logger.warning("Skipping K-004 smoke test — target %r not a directory", target)
         warnings.append("Projekt nemá na disku priečinok, takže sa nepripravila jeho štruktúra ani overovacie testy.")
@@ -712,17 +719,13 @@ def _seed_ci_render_helper(target: Path, slug: str) -> None:
     logger.info("ci_render_dotenv.py seeded (slug=%s)", slug)
 
 
-def _wire_precommit_hook(target: Path) -> None:
-    """Install + activate the ruff / type-check pre-commit hook in a new project (v4.0.29).
-
-    Blocks locally any commit that the CI Lint stage would reject, so the AI Agent can never push
-    known-red code (the root of the recurring 'CI / lint Failed' on generated projects). Copies the
-    hook template to ``.githooks/pre-commit`` (executable), tracks it in the repo, and points the
-    workdir clone at it via ``git config core.hooksPath .githooks``. Best-effort: a missing template
-    or a git failure is logged, never raised (mirrors :func:`_wire_cicd_workflow`)."""
+def write_precommit_hook(target: Path) -> bool:
+    """Write the pre-commit hook into ``.githooks/pre-commit`` and activate it for the workdir clone — nothing is
+    committed. The hook checks every frontend of the project (DEV-161), so the same file serves a Web project and,
+    after the switch to Web, refreshes the one an older project has. False when the template is missing."""
     if not PRECOMMIT_HOOK_TEMPLATE.is_file():
         logger.warning("pre-commit hook wire-up SKIPPED — template missing at %s", PRECOMMIT_HOOK_TEMPLATE)
-        return
+        return False
 
     hooks_dir = target / ".githooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -738,6 +741,84 @@ def _wire_precommit_hook(target: Path) -> None:
         timeout=CICD_TIMEOUT,
         check=False,
     )
+    return True
+
+
+def write_web_workflow(target: Path, slug: str) -> bool:
+    """DEV-161: render the public web's CI into ``.github/workflows/web.yml`` (``runs-on: andros-ubuntu-<slug>``) —
+    nothing is committed. Never overwrites a workflow the project already has. False when nothing was written."""
+    if not WEB_WORKFLOW_TEMPLATE.is_file():
+        logger.warning("web CI wire-up SKIPPED — template missing at %s", WEB_WORKFLOW_TEMPLATE)
+        return False
+    workflow = target / WEB_WORKFLOW
+    if workflow.is_file():
+        logger.info("web CI SKIPPED — %s already exists (slug=%s)", WEB_WORKFLOW, slug)
+        return False
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text(WEB_WORKFLOW_TEMPLATE.read_text(encoding="utf-8").replace("{{PROJECT_SLUG}}", slug), "utf-8")
+    return True
+
+
+def commit_and_push(target: Path, paths: list[str], message: str, slug: str, *, scaffold: bool = False) -> str | None:
+    """Commit exactly *paths* and push the checked-out branch. Returns None when both went through, else the Slovak
+    sentence the Manažér reads (what is done and what is left) — a failure is reported, never raised.
+
+    Only *paths* go into the commit (``--only``): anything else that happens to be staged stays out of it. The branch
+    is read, never assumed to be ``main`` (DEV-96).
+
+    ``scaffold=True`` commits template output the way init.sh's own first commit does — before any pre-commit check
+    (``--no-verify``; the post-commit version stamp still runs): the check type-checks a frontend with its installed
+    packages, and a frontend that has just been copied from the template has none yet, so it would refuse code the
+    template's own tests already verified."""
+    commit = ["commit", "-m", message, "--only"]
+    if scaffold:
+        commit.append("--no-verify")
+    for args in (["add", "--", *paths], [*commit, "--", *paths]):
+        result = subprocess.run(
+            ["git", "-C", str(target), *args], capture_output=True, text=True, timeout=CICD_TIMEOUT, check=False
+        )
+        if result.returncode != 0:
+            logger.warning("git %s failed (slug=%s): %s", args[0], slug, result.stderr.strip()[:300])
+            return "Zmena sa v priečinku projektu nepodarila uložiť do gitu — treba ju uložiť ručne."
+    branch = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    ).stdout.strip()
+    if not branch or branch == "HEAD":
+        return "Zmena je uložená v gite projektu, ale projekt nestojí na žiadnej vetve — na GitHub sa neodoslala."
+    push = subprocess.run(
+        ["git", "-C", str(target), "push", "origin", f"HEAD:refs/heads/{branch}"],
+        capture_output=True,
+        text=True,
+        timeout=CICD_TIMEOUT,
+        check=False,
+    )
+    if push.returncode != 0:
+        logger.warning("git push failed (slug=%s): %s", slug, push.stderr.strip()[:300])
+        return "Zmena je uložená v gite projektu, ale na GitHub sa neodoslala — odošle sa s ďalším odoslaním."
+    return None
+
+
+def _wire_web_workflow(target: Path, slug: str) -> str | None:
+    """DEV-161: the founding step of a Web project's web CI — render ``web.yml``, commit + push."""
+    if not write_web_workflow(target, slug):
+        return None
+    return commit_and_push(target, [str(WEB_WORKFLOW)], "feat(ci): CI of the public web (web/) from NEX Studio", slug)
+
+
+def _wire_precommit_hook(target: Path) -> None:
+    """Install + activate the ruff / type-check pre-commit hook in a new project (v4.0.29).
+
+    Blocks locally any commit that the CI Lint stage would reject, so the AI Agent can never push
+    known-red code (the root of the recurring 'CI / lint Failed' on generated projects). Copies the
+    hook template to ``.githooks/pre-commit`` (executable), tracks it in the repo, and points the
+    workdir clone at it via ``git config core.hooksPath .githooks``. Best-effort: a missing template
+    or a git failure is logged, never raised (mirrors :func:`_wire_cicd_workflow`)."""
+    if not write_precommit_hook(target):
+        return
     subprocess.run(
         ["git", "-C", str(target), "add", ".githooks/pre-commit"],
         capture_output=True,

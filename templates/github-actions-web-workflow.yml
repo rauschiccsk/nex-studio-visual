@@ -1,0 +1,64 @@
+# CI of the public web — a Web project's second frontend in web/ (DEV-161).
+#
+# A Web project has two frontends: the administration in frontend/ (checked by ci.yml like every project's frontend)
+# and the public web in web/. This workflow runs the same checks on web/ that ci.yml runs on frontend/ — type-check,
+# lint, vitest — plus the production build, on the project's own runner. It is its own file so a Štandardný project's
+# ci.yml stays exactly as it was, and a project switched to Web gets it without its ci.yml being edited.
+#
+# `{{PROJECT_SLUG}}` is substituted by NEX Studio (_wire_web_workflow / the switch to Web) → `runs-on:
+# andros-ubuntu-<slug>` (ICC D-009: all CI on self-hosted runners).
+
+name: Web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# DEV-130: a newer commit stops the older run of the same branch (see ci.yml).
+concurrency:
+  group: web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          # DEV-130: no `cache: npm` — on our own runner npm's cache lives on its disk.
+
+      - name: Install web deps
+        run: cd web && npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Web type-check + lint
+        run: |
+          cd web
+          npm run type-check
+          npm run lint
+
+  test:
+    runs-on: andros-ubuntu-{{PROJECT_SLUG}}
+    needs: lint
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install web deps
+        run: cd web && npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Web vitest
+        run: cd web && npm test -- --run
+
+      - name: Web production build
+        run: cd web && npm run build

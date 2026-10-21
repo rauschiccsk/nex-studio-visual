@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -79,6 +78,7 @@ from backend.services import (
     project_memory,
     uat_provisioner,
     vizual_sandbox,
+    workspace_owner,
 )
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
@@ -405,42 +405,6 @@ def _discard_orphaned_workspace(source_path: str | None, slug: str, *, scaffolde
             source_path,
             exc,
         )
-
-
-# The standard owner for a project workspace: uid:gid 1000:1000 — the host user, matching every existing
-# tree under ``/opt/projects`` AND the Vizuál sandbox's ``SANDBOX_USER``. It is NOT the backend's own uid:
-# the backend container runs as root (0:0), so a freshly scaffolded workspace lands root-owned. That breaks
-# any NON-root tooling that later operates on it — most concretely the Vizuál live-preview sandbox, which
-# runs ``npm install`` as uid 1000 and cannot write ``node_modules`` into a root-owned ``frontend/`` (v4.0.44).
-_WORKSPACE_OWNER = "1000:1000"
-
-
-def _chown_workspace(source_path: str | None) -> None:
-    """Best-effort ``chown -R 1000:1000`` of a freshly created project workspace.
-
-    The backend runs as root, so it creates the workspace root-owned; align it with ``/opt/projects``
-    convention + the Vizuál sandbox uid so non-root tooling can operate on it. Logged, NEVER raises — a
-    chown failure must not abort (or roll back) an otherwise successful create. root + the agent keep
-    working afterwards (root bypasses ownership)."""
-    if not source_path:
-        return
-    try:
-        result = subprocess.run(
-            ["chown", "-R", _WORKSPACE_OWNER, source_path],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "workspace chown to %s failed for %s: %s",
-                _WORKSPACE_OWNER,
-                source_path,
-                (result.stderr or "").strip(),
-            )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("workspace chown to %s errored for %s: %s", _WORKSPACE_OWNER, source_path, exc)
 
 
 @router.get("", response_model=PaginatedResponse[ProjectRead])
@@ -788,9 +752,14 @@ def get_nexshared_status(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
     authz.authorize_project(current_user, project)
+    surfaces = project_surfaces_service.surfaces_of(project)
     if not project.source_path:
-        return {"current": None, "latest": None, "behind": 0, "up_to_date": False, "changelog": []}
-    return nexshared_service.status_for_source(project.source_path)
+        return {"current": None, "latest": None, "behind": 0, "up_to_date": False, "changelog": [], "frontends": []}
+    status_ = nexshared_service.status_for_source(project.source_path, directories=tuple(s.directory for s in surfaces))
+    # DEV-161: each frontend by the name the Manažér knows it (Administrácia / Web), not by its directory.
+    labels = {s.directory: s.label for s in surfaces}
+    status_["frontends"] = [{**f, "label": labels[f["directory"]]} for f in status_["frontends"]]
+    return status_
 
 
 class _NexsharedUpgradeRequest(BaseModel):
@@ -804,8 +773,8 @@ def upgrade_nexshared(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Opt-in bump (#3): rewrite the app's ``frontend/package.json`` nex-shared pin to
-    ``target_version`` + commit it, so the new version's build (and its Vizuál preview) run on
+    """Opt-in bump (#3): rewrite the app's nex-shared pin to ``target_version`` in every frontend (``frontend/``,
+    and ``web/`` in a Web project — DEV-161) + commit it, so the new version's build (and its Vizuál preview) run on
     the chosen nex-shared. The Manažér decides per version; nothing happens without this call."""
     try:
         project = project_service.get_by_id(db, project_id)
@@ -814,7 +783,8 @@ def upgrade_nexshared(
     authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
-    if not nexshared_service.upgrade_source_pin(project.source_path, payload.target_version):
+    directories = project_surfaces_service.frontend_directories(project.type)
+    if not nexshared_service.upgrade_source_pin(project.source_path, payload.target_version, directories=directories):
         # Since the lockfile step exists, this covers far more than a bad pin: npm unreachable, the
         # resolver failing, or the lockfile not actually reaching the target. Saying "neplatná verzia"
         # for a network blip sent the Manager looking for a typo that was not there.
@@ -826,7 +796,9 @@ def upgrade_nexshared(
                 "Skús to znova; ak to potrvá, over dostupnosť GitHubu."
             ),
         )
-    committed = nexshared_service.commit_pin_upgrade(project.source_path, payload.target_version)
+    committed = nexshared_service.commit_pin_upgrade(
+        project.source_path, payload.target_version, directories=directories
+    )
     return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
 
 
@@ -1246,7 +1218,7 @@ def create_project(
         # Align the freshly scaffolded (root-owned) workspace with the 1000:1000 convention so the
         # non-root Vizuál sandbox can operate on it. Last step of scaffolding, so it covers everything
         # init.sh + charter provisioning + post-scaffold wrote. Best-effort (never aborts the create).
-        _chown_workspace(project.source_path)
+        workspace_owner.chown_workspace(project.source_path)
 
         # ICCINT-88: zapíš to k projektu, nie len do odpovede. Dialóg zakladania po úspechu odchádza
         # na stránku projektu, takže odpoveď zanikne skôr, než ju stihne niekto prečítať — a správa,

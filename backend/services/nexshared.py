@@ -13,6 +13,10 @@ with ``npm ci`` (``frontend/Dockerfile``, the generated CI workflow), which obey
 ``frontend/package-lock.json`` and ignores a manifest pin that disagrees with it. So
 the cockpit reports the version the lockfile resolves (:func:`effective_version`) — the
 one that actually builds — and an upgrade is only done when BOTH files moved.
+
+EVERY FRONTEND (DEV-161): a Web project has two — the administration in ``frontend/`` and the public web in
+``web/`` — each with its own pin. The status names each one and the oldest decides how far behind the app is; an
+upgrade moves all of them or none, so the two never build on different kits by accident.
 """
 
 from __future__ import annotations
@@ -72,14 +76,18 @@ def parse_lock_version(package_lock_text: str) -> Optional[str]:
     return version if isinstance(version, str) and _SEMVER.match(version) else None
 
 
-def effective_version(source_path: str) -> Optional[str]:
-    """The nex-shared version the app ACTUALLY builds with, from ``frontend/package-lock.json``.
+#: The frontend directory of every project — a Web project adds ``web/`` (callers pass the project's directories).
+DEFAULT_DIRECTORIES: tuple[str, ...] = ("frontend",)
+
+
+def effective_version(source_path: str, directory: str = "frontend") -> Optional[str]:
+    """The nex-shared version the app ACTUALLY builds with, from ``<directory>/package-lock.json``.
 
     NOT the package.json pin (see the module note): the two disagree after any manual bump, and
     reporting the pin would show one version while building another. A missing / unreadable
     lockfile yields None — offer nothing, never a false number.
     """
-    lock = Path(source_path) / "frontend" / "package-lock.json"
+    lock = Path(source_path) / directory / "package-lock.json"
     try:
         text = lock.read_text(encoding="utf-8")
     except OSError:
@@ -162,6 +170,7 @@ def fetch_changelog(url: str = CHANGELOG_RAW_URL, *, timeout: int = 15) -> str:
 def status_for_source(
     source_path: str,
     *,
+    directories: tuple[str, ...] = DEFAULT_DIRECTORIES,
     tags: Optional[list[str]] = None,
     changelog_text: Optional[str] = None,
 ) -> dict:
@@ -174,8 +183,13 @@ def status_for_source(
     the raw CHANGELOG.md are fetched. Returns ``{current, latest, behind, up_to_date, changelog}``
     — ``current``/``latest`` may be None (no lockfile / no reachable tags → offer nothing, never a
     false prompt); ``changelog`` = the "Čo prinesie" sections in ``(current, latest]``.
+
+    ``frontends`` names the version of each of *directories*; ``current`` is the OLDEST of them (the app is as far
+    behind as its most outdated frontend) and None when any of them builds with no readable lockfile.
     """
-    current = effective_version(source_path)
+    frontends = [{"directory": d, "current": effective_version(source_path, d)} for d in directories]
+    versions = [f["current"] for f in frontends]
+    current = None if None in versions or not versions else min(versions, key=_key)
     all_tags = tags if tags is not None else list_remote_tags()
     latest = pick_latest(all_tags)
     behind = count_behind(current, all_tags)
@@ -189,6 +203,7 @@ def status_for_source(
         "behind": behind,
         "up_to_date": bool(current) and behind == 0,
         "changelog": changelog,
+        "frontends": frontends,
     }
 
 
@@ -245,28 +260,53 @@ def resolve_lockfile(frontend_dir: Path, spec: str, *, timeout: int = 300) -> bo
     return proc.returncode == 0
 
 
-def upgrade_source_pin(source_path: str, target_version: str) -> bool:
-    """Bump the app's nex-shared to ``target_version`` — manifest AND lockfile.
+def upgrade_source_pin(
+    source_path: str, target_version: str, *, directories: tuple[str, ...] = DEFAULT_DIRECTORIES
+) -> bool:
+    """Bump the app's nex-shared to ``target_version`` — manifest AND lockfile of every frontend in *directories*.
 
-    Rewrites ``frontend/package.json``, re-resolves ``frontend/package-lock.json``
-    (:func:`resolve_lockfile`), then VERIFIES the lockfile really resolves to the target.
-    All three must hold: builds install from the lockfile, so a manifest-only bump would
-    build the old version while the cockpit reported the new one.
+    Rewrites ``<dir>/package.json``, re-resolves ``<dir>/package-lock.json`` (:func:`resolve_lockfile`), then
+    VERIFIES the lockfile really resolves to the target. All three must hold: builds install from the lockfile, so a
+    manifest-only bump would build the old version while the cockpit reported the new one.
 
-    Returns False when there is nothing to rewrite (no pin / bad target / missing file) or
-    the lockfile did not follow — and in that case restores the files it touched, so a
-    failed upgrade leaves no half-applied state behind. Does NOT commit — the caller
-    decides (see :func:`commit_pin_upgrade`).
+    All frontends or none: when any of them does not follow, every file touched so far is restored, so a failed
+    upgrade leaves no half-applied state behind — and never two frontends on two kits. Returns False when there is
+    nothing to rewrite (no pin / bad target / missing file) or a lockfile did not follow. Does NOT commit — the
+    caller decides (see :func:`commit_pin_upgrade`).
     """
-    frontend = Path(source_path) / "frontend"
+    undo: list[tuple[Path, Optional[str]]] = []
+    for directory in directories:
+        touched = _upgrade_directory(source_path, directory, target_version)
+        if touched is None:
+            _restore(undo)
+            return False
+        undo.extend(touched)
+    return bool(directories)
+
+
+def _restore(undo: list[tuple[Path, Optional[str]]]) -> None:
+    """Put back the files an upgrade touched: the original text, or no file where there was none."""
+    for path, original in reversed(undo):
+        if original is not None:
+            path.write_text(original, encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+
+
+def _upgrade_directory(
+    source_path: str, directory: str, target_version: str
+) -> Optional[list[tuple[Path, Optional[str]]]]:
+    """Upgrade one frontend. Returns what it touched (path, original text) for a later undo, or None — and then the
+    directory is already restored."""
+    frontend = Path(source_path) / directory
     pkg = frontend / "package.json"
     lock = frontend / "package-lock.json"
     if not pkg.is_file():
-        return False
+        return None
     original_pkg = pkg.read_text(encoding="utf-8")
     rewritten = rewrite_pin(original_pkg, target_version)
     if rewritten is None:
-        return False
+        return None
     # Snapshot the lockfile so a failed re-resolve can be undone. None = there was none, and in
     # that case a failed attempt REMOVES whatever npm generated: leaving a brand-new several-hundred-
     # kilobyte lockfile behind after an upgrade that reported failure is the same half-applied state
@@ -275,21 +315,24 @@ def upgrade_source_pin(source_path: str, target_version: str) -> bool:
     try:
         original_lock = lock.read_text(encoding="utf-8") if lock.is_file() else None
     except OSError:
-        return False
+        return None
 
     pkg.write_text(rewritten, encoding="utf-8")
+    touched: list[tuple[Path, Optional[str]]] = [(pkg, original_pkg), (lock, original_lock)]
     spec = f"{_GIT_DEP_PREFIX}{target_version}"
-    if resolve_lockfile(frontend, spec) and effective_version(source_path) == target_version:
-        return True
-    pkg.write_text(original_pkg, encoding="utf-8")
-    if original_lock is not None:
-        lock.write_text(original_lock, encoding="utf-8")
-    elif lock.is_file():
-        lock.unlink(missing_ok=True)
-    return False
+    if resolve_lockfile(frontend, spec) and effective_version(source_path, directory) == target_version:
+        return touched
+    _restore(touched)
+    return None
 
 
-def commit_pin_upgrade(source_path: str, target_version: str, *, timeout: int = 30) -> bool:
+def commit_pin_upgrade(
+    source_path: str,
+    target_version: str,
+    *,
+    directories: tuple[str, ...] = DEFAULT_DIRECTORIES,
+    timeout: int = 30,
+) -> bool:
     """Stage + commit the pin bump so it is durable + lands in the new version's build.
 
     Stages the lockfile alongside the manifest — ``npm ci`` reads the LOCKFILE, so a commit
@@ -300,7 +343,12 @@ def commit_pin_upgrade(source_path: str, target_version: str, *, timeout: int = 
     if not (root / ".git").is_dir():
         return False
     # Only existing paths — `git add` fails the whole call on a pathspec that matches nothing.
-    paths = [p for p in ("frontend/package.json", "frontend/package-lock.json") if (root / p).is_file()]
+    paths = [
+        f"{d}/{name}"
+        for d in directories
+        for name in ("package.json", "package-lock.json")
+        if (root / d / name).is_file()
+    ]
     if not paths:
         return False
     try:

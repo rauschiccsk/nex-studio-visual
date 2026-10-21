@@ -2298,8 +2298,8 @@ export interface paths {
         put?: never;
         /**
          * Upgrade Nexshared
-         * @description Opt-in bump (#3): rewrite the app's ``frontend/package.json`` nex-shared pin to
-         *     ``target_version`` + commit it, so the new version's build (and its Vizuál preview) run on
+         * @description Opt-in bump (#3): rewrite the app's nex-shared pin to ``target_version`` in every frontend (``frontend/``,
+         *     and ``web/`` in a Web project — DEV-161) + commit it, so the new version's build (and its Vizuál preview) run on
          *     the chosen nex-shared. The Manažér decides per version; nothing happens without this call.
          */
         post: operations["upgrade_nexshared_api_v1_projects__project_id__nexshared_upgrade_post"];
@@ -9385,6 +9385,11 @@ export interface components {
             refusal?: string | null;
             /** Surfaces */
             surfaces: components["schemas"]["SurfaceRead"][];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
             /** Web Port */
             web_port?: number | null;
         };

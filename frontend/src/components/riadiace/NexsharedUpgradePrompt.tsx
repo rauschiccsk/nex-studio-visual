@@ -53,6 +53,21 @@ export function NexsharedUpgradePrompt({
           </span>
         </div>
 
+        {/* DEV-161: a Web project builds two frontends — each one's version, and both move together. */}
+        {status.frontends.length > 1 && (
+          <div className="space-y-1">
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[var(--color-text-secondary)]">
+              {status.frontends.map((frontend) => (
+                <li key={frontend.directory}>
+                  {frontend.label}{" "}
+                  <span className="font-mono text-[var(--color-text-primary)]">v{frontend.current ?? "?"}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-[var(--color-text-muted)]">Povýšenie zmení všetky naraz.</p>
+          </div>
+        )}
+
         {/* "Čo prinesie" — the changelog delta */}
         {status.changelog.length > 0 && (
           <div className="space-y-1.5">

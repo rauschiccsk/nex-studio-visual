@@ -48,13 +48,21 @@ interface NexsharedChangelogEntry {
   body: string;
 }
 
-/** nex-shared upgrade status for the auto-notify prompt (#3). */
+/** One frontend's nex-shared — a Web project has two: Administrácia (frontend/) and Web (web/) (DEV-161). */
+export interface NexsharedFrontend {
+  directory: string;
+  label: string;
+  current: string | null;
+}
+
+/** nex-shared upgrade status for the auto-notify prompt (#3). `current` is the oldest of `frontends`. */
 export interface NexsharedStatus {
   current: string | null;
   latest: string | null;
   behind: number;
   up_to_date: boolean;
   changelog: NexsharedChangelogEntry[];
+  frontends: NexsharedFrontend[];
 }
 
 /** The app's pinned nex-shared vs the latest published tag + the changelog delta. */
@@ -62,7 +70,7 @@ export function getNexsharedStatusApi(projectId: string): Promise<NexsharedStatu
   return api.get<NexsharedStatus>(`/projects/${projectId}/nexshared-status`);
 }
 
-/** Opt-in bump: rewrite the app's nex-shared pin to `targetVersion` + commit it. */
+/** Opt-in bump: rewrite the nex-shared pin of every frontend of the app to `targetVersion` + commit it. */
 export function upgradeNexsharedApi(
   projectId: string,
   targetVersion: string,

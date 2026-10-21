@@ -136,6 +136,7 @@ const behindNexshared: NexsharedStatus = {
   behind: 1,
   up_to_date: false,
   changelog: [{ version: "0.19.0", body: "Nové tokeny." }],
+  frontends: [{ directory: "frontend", label: "Aplikácia", current: "0.18.0" }],
 };
 
 beforeEach(() => {

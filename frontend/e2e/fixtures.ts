@@ -806,6 +806,7 @@ export function registerFixtures(): void {
     behind: 1,
     up_to_date: false,
     changelog: [{ version: "v0.20.0", body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu." }],
+    frontends: [{ directory: "frontend", label: "Aplikácia", current: "v0.19.0" }],
   });
   answer("get", "/api/v1/projects/ports/suggest-block", { base: 9300, block_size: 3, warnings: [] });
   answer("get", "/api/v1/projects/create-presets", {

@@ -65,6 +65,8 @@ SHELLING_MODULES = {
     "uat_provisioner",
     "verified_build",
     "vizual_sandbox",
+    "web_workspace",
+    "workspace_owner",
 }
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]

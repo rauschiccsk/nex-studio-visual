@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
+from backend.services import project_surfaces
 from backend.services import system_setting as system_setting_service
 
 logger = logging.getLogger(__name__)
@@ -229,6 +230,10 @@ def invoke_init_script(
         project.source_path,
         "--init-target",  # create the target dir if it doesn't exist
     ]
+    # DEV-161: a Web project gets its public web in web/ too (the template's web-skeleton/); every other type is
+    # scaffolded exactly as before.
+    if project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project.type):
+        args.append("--web")
     if dry_run:
         args.append("--dry-run")
     # NO `--no-coordinator` here. The v1 Koordinátor role is retired (CR-V2-005), and on 2026-07-27
@@ -310,6 +315,62 @@ def invoke_init_script(
         init_script=str(script),
         stdout_tail=stdout_tail,
     )
+
+
+def add_web_skeleton(db: Session, project: Project) -> None:
+    """DEV-161: give an EXISTING project its public web — ``web/`` built by the same template step that builds it for a
+    new Web project (``init.sh --add-web``), so a switched project and a founded one get the same web.
+
+    Writes ``web/`` only and commits nothing (the caller commits it with the rest of the switch). Raises
+    :class:`TemplateBootstrapError` with the Slovak reason the Manažér reads when the web cannot be built."""
+    init_script_path = system_setting_service.get_str(db, "template_init_script_path")
+    if not init_script_path or not Path(init_script_path).is_file():
+        raise TemplateBootstrapError(
+            "Kokpit nemá šablónu projektu (v Nastaveniach → Systém chýba cesta k inicializačnému skriptu), "
+            "z ktorej by postavil web."
+        )
+    if not project.source_path or not (Path(project.source_path) / "CLAUDE.md").is_file():
+        raise TemplateBootstrapError("Projekt nemá na disku svoj priečinok, do ktorého by sa web pridal.")
+    port_base = _port_base_from_backend(project.backend_port)
+    if port_base is None:
+        raise TemplateBootstrapError("Projekt nemá pridelený blok portov.")
+
+    args = [
+        init_script_path,
+        "--name",
+        project.name,
+        "--slug",
+        project.slug,
+        "--description",
+        project.description or "",
+        "--port-base",
+        str(port_base),
+        "--repo",
+        _repo_from_url(project.repo_url, project.slug, default_owner=resolve_github_org(db)),
+        "--variant",
+        "general",
+        "--target",
+        project.source_path,
+        "--add-web",
+    ]
+    timeout = system_setting_service.get_int(db, "template_init_timeout_seconds")
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise TemplateBootstrapError(f"Pridanie webu nedobehlo do {timeout} s.") from exc
+    except OSError as exc:
+        raise TemplateBootstrapError(f"Šablónu projektu sa nepodarilo spustiť: {exc}") from exc
+    if result.returncode != 0:
+        logger.error(
+            "init.sh --add-web exit=%d for slug=%s\nstdout:\n%s\nstderr:\n%s",
+            result.returncode,
+            project.slug,
+            result.stdout,
+            result.stderr,
+        )
+        reason = (result.stderr.strip().splitlines() or ["bez výpisu"])[-1]
+        raise TemplateBootstrapError(f"Web sa do projektu nepodarilo pridať: {reason}")
+    logger.info("init.sh --add-web succeeded for slug=%s", project.slug)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,11 @@
 # Pre-commit hook — bootstrapped by NEX Studio Create Project (K-005).
 # Blocks the commit if the local Lint checks fail, so a build we already know CI will
 # reject never gets pushed (mirrors the CI `lint` stage: ruff format --check + ruff check
-# on the backend, type-check on the frontend).
+# on the backend, type-check + eslint on every frontend).
+#
+# A frontend is a top-level directory with its own package.json and vite.config.ts — frontend/ in every project,
+# web/ too in a Web project (DEV-161: administration + public web). The rule finds them, so a frontend added later is
+# checked without this hook being edited.
 #
 # Installed + activated by the scaffold (`git config core.hooksPath .githooks`).
 # Skips docs-only commits (nothing lint-relevant staged).
@@ -17,11 +21,16 @@ STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 [[ -z "${STAGED}" ]] && exit 0
 
 NEEDS_BACKEND=0
-NEEDS_FRONTEND=0
+FRONTENDS=()
 while IFS= read -r path; do
     case "${path}" in
         backend/*) NEEDS_BACKEND=1 ;;
-        frontend/*) NEEDS_FRONTEND=1 ;;
+        */*)
+            dir="${path%%/*}"
+            if [[ -f "${dir}/package.json" && -f "${dir}/vite.config.ts" && " ${FRONTENDS[*]} " != *" ${dir} "* ]]; then
+                FRONTENDS+=("${dir}")
+            fi
+            ;;
     esac
 done <<< "${STAGED}"
 
@@ -48,22 +57,22 @@ if [[ "${NEEDS_BACKEND}" == "1" && -f backend/pyproject.toml ]]; then
     fi
 fi
 
-if [[ "${NEEDS_FRONTEND}" == "1" && -f frontend/package.json ]]; then
-    echo "pre-commit: frontend — type-check"
-    ( cd frontend && npm run type-check ) \
-        || { echo "❌ frontend type-check FAILED"; exit 1; }
+for fe in "${FRONTENDS[@]}"; do
+    echo "pre-commit: ${fe} — type-check"
+    ( cd "${fe}" && npm run type-check ) \
+        || { echo "❌ ${fe} type-check FAILED"; exit 1; }
     # ESLint runs here because the CI this hook exists to MIRROR makes `npm run lint` a hard gate
     # (templates/github-actions-workflow.yml). Without it the hook announced "Lint checks passed"
     # having run no linter at all, and the developer first heard about it from a red CI minutes later
     # — the precise failure this hook is for. Skipped, with a reason, when the project defines no
     # `lint` script: silence would be the same lie in the other direction.
-    if ( cd frontend && node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)" ) 2>/dev/null; then
-        echo "pre-commit: frontend — eslint"
-        ( cd frontend && npm run lint ) \
-            || { echo "❌ frontend eslint FAILED — CI gates on this too"; exit 1; }
+    if ( cd "${fe}" && node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)" ) 2>/dev/null; then
+        echo "pre-commit: ${fe} — eslint"
+        ( cd "${fe}" && npm run lint ) \
+            || { echo "❌ ${fe} eslint FAILED — CI gates on this too"; exit 1; }
     else
-        echo "pre-commit: frontend — eslint SKIPPED (no 'lint' script in frontend/package.json)"
+        echo "pre-commit: ${fe} — eslint SKIPPED (no 'lint' script in ${fe}/package.json)"
     fi
-fi
+done
 
 echo "pre-commit: ✓ all checks passed"

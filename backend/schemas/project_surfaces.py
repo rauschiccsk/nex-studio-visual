@@ -28,3 +28,5 @@ class WebSwitchRead(BaseModel):
     refusal: Optional[str] = None
     web_port: Optional[int] = None
     surfaces: list[SurfaceRead]
+    #: DEV-161: after a switch — what finished only partly in the project's workspace (Slovak, for the Manažér).
+    warnings: list[str] = []

@@ -7,14 +7,17 @@ from dataclasses import asdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
+from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.schemas.project_surfaces import SurfaceRead, WebSwitchRead
-from backend.services import project_surfaces
+from backend.services import project_surfaces, web_workspace
+from backend.services.workspace_owner import chown_workspace
 
 router = APIRouter(tags=["Project Surfaces"])
 
@@ -59,9 +62,20 @@ def switch_to_web(
 ) -> WebSwitchRead:
     """Switch the project to Web — accepted exactly when the preview allows it; the change is kept."""
     project = authz.assert_project_id_access(db, current_user, project_id)
+    # DEV-161: one switch per project at a time — a second click waits here and then reads „už je Web“.
+    db.execute(select(Project).where(Project.id == project.id).with_for_update())
+    # The table is switched (inside a savepoint, not yet committed) before the workspace gets its web: a web that
+    # cannot be built rolls the switch back, and a web that was built is never left behind a project the table still
+    # calls Štandardný.
+    switch = db.begin_nested()
     try:
         done = project_surfaces.switch_to_web(db, project, changed_by=current_user.id)
-    except ValueError as exc:
+        warnings = web_workspace.add_web(db, project)
+    except (ValueError, web_workspace.WebWorkspaceError) as exc:
+        switch.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    switch.commit()
     db.commit()
-    return _read(done)
+    # The backend runs as root; the new web/ joins the workspace convention like everything a founding writes.
+    chown_workspace(project.source_path)
+    return _read(done).model_copy(update={"warnings": warnings})

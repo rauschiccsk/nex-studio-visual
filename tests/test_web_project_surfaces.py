@@ -20,7 +20,7 @@ from backend.db.models.foundation import User
 from backend.db.models.project_type_change import ProjectTypeChange
 from backend.db.models.projects import Project
 from backend.main import app
-from backend.services import port_registry
+from backend.services import port_registry, web_workspace
 from backend.services import project_surfaces as ps
 
 BASE = 14900
@@ -200,10 +200,12 @@ def test_the_preview_shows_both_frontends_and_changes_nothing(client, db_session
     assert db_session.execute(select(ProjectTypeChange)).first() is None
 
 
-def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_session, web_open):
+def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_session, web_open, monkeypatch):
     owner = _user(db_session)
     project = _project(db_session, owner)
     _as(db_session, owner)
+    # DEV-161: what the switch writes into the workspace has its own tests (test_a_web_project_has_its_public_web).
+    monkeypatch.setattr(web_workspace, "add_web", lambda _db, _project: [])
 
     answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
 
