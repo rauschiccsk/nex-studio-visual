@@ -471,7 +471,7 @@ async def test_a_failed_start_leaves_nothing_behind(tmp_path, monkeypatch) -> No
     with pytest.raises(build_db.BuildDatabaseUnavailable) as exc:
         await build_db.start(plan)
     assert plan.image in str(exc.value)
-    assert ("docker", "rm", "-f", plan.container) in calls
+    assert ("docker", "rm", "-f", "-v", plan.container) in calls
     assert ("docker", "network", "rm", plan.network) in calls
 
 
@@ -592,7 +592,7 @@ async def test_the_label_actually_gets_swept_and_not_merely_stamped(monkeypatch)
     assert ("docker", "network", "ls", "-q", "--filter", f"label={build_db.OWNER_LABEL}") in calls
     # …and both kinds of leftover are actually removed, the containers before the networks (a network with a
     # live endpoint on it cannot be removed).
-    assert calls.index(("docker", "rm", "-f", "cafe2")) < calls.index(("docker", "network", "rm", "net1"))
+    assert calls.index(("docker", "rm", "-f", "-v", "cafe2")) < calls.index(("docker", "network", "rm", "net1"))
 
 
 async def test_a_sweep_with_nothing_to_sweep_is_silent_and_cheap(monkeypatch) -> None:

@@ -325,7 +325,7 @@ def test_a_runner_started_the_old_way_is_replaced_by_the_pair(monkeypatch: pytes
     ci_runner.provision("nex-demo", "rauschiccsk/nex-demo")
 
     assert _compose_calls(calls) == [
-        "token=no docker rm -f nex-ci-runner-nex-demo",
+        "token=no docker rm -f -v nex-ci-runner-nex-demo",
         "token=yes docker compose --file TEMPLATE run --rm --no-TTY runner true",
         "token=no docker compose --file TEMPLATE up -d --wait",
     ]
@@ -404,7 +404,7 @@ def test_deleting_a_project_removes_a_runner_started_the_old_way(monkeypatch: py
     ci_runner.deprovision("nex-demo")
 
     assert _compose_calls(calls) == [
-        "token=no docker rm -f nex-ci-runner-nex-demo",
+        "token=no docker rm -f -v nex-ci-runner-nex-demo",
         "token=no docker compose --project-name nex-ci-nex-demo down --volumes",
     ]
 

@@ -1272,7 +1272,7 @@ async def test_the_database_and_its_network_die_with_the_turn(monkeypatch, docke
     started = _control(docker_calls, "docker", "run")
     container = started[started.index("--name") + 1]
     network = started[started.index("--network") + 1]
-    assert ("docker", "rm", "-f", container) in docker_calls
+    assert ("docker", "rm", "-f", "-v", container) in docker_calls
     assert ("docker", "network", "rm", network) in docker_calls
 
 
@@ -1288,7 +1288,7 @@ async def test_a_cancelled_dispatch_takes_its_database_with_it(monkeypatch, dock
             project_slug="acme", claude_session_id=uuid4(), prompt="p", stage="programovanie"
         )
     started = _control(docker_calls, "docker", "run")
-    assert ("docker", "rm", "-f", started[started.index("--name") + 1]) in docker_calls
+    assert ("docker", "rm", "-f", "-v", started[started.index("--name") + 1]) in docker_calls
     assert ("docker", "network", "rm", started[started.index("--network") + 1]) in docker_calls
 
 
@@ -1323,7 +1323,7 @@ async def test_a_failure_between_the_database_and_the_container_leaks_neither(mo
 
     mock_exec.assert_not_called()  # no turn ever ran…
     started = _control(docker_calls, "docker", "run")  # …but the database HAD been started
-    assert ("docker", "rm", "-f", started[started.index("--name") + 1]) in docker_calls
+    assert ("docker", "rm", "-f", "-v", started[started.index("--name") + 1]) in docker_calls
     assert ("docker", "network", "rm", started[started.index("--network") + 1]) in docker_calls
 
 

@@ -445,10 +445,11 @@ def _running_public_host(name: str) -> Optional[str]:
 
 
 def _force_remove(name: str) -> None:
-    """``docker rm -f <name>`` — idempotent, never raises (a missing container is a no-op success)."""
+    """``docker rm -f -v <name>`` — with its unnamed volumes (DEV-172); idempotent, never raises (a missing container is
+    a no-op success)."""
     try:
         subprocess.run(
-            ["docker", "rm", "-f", name],
+            ["docker", "rm", "-f", "-v", name],
             capture_output=True,
             text=True,
             timeout=_DOCKER_CALL_TIMEOUT,

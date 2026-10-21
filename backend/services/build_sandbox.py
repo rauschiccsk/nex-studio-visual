@@ -950,6 +950,7 @@ async def reap_container(name: str) -> None:
             "docker",
             "rm",
             "-f",
+            "-v",  # DEV-172: with its unnamed volumes — an image that declares VOLUME leaves one otherwise
             name,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,

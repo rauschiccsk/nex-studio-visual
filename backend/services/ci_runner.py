@@ -105,7 +105,7 @@ def provision(slug: str, repo_full: str) -> None:
     current = state(slug)
     env = compose_env(slug, repo_full)
     if current == LEGACY:
-        _docker(["docker", "rm", "-f", runner_container(slug)], timeout=DOCKER_TIMEOUT)
+        _docker(["docker", "rm", "-f", "-v", runner_container(slug)], timeout=DOCKER_TIMEOUT)
         logger.info("CI runner of %s started the old way (live Docker socket) removed", slug)
     if current != CURRENT:
         token = github_validation.runner_registration_token(repo_full, timeout=GITHUB_TIMEOUT)
@@ -122,7 +122,7 @@ def deprovision(slug: str) -> None:
     ``/``, so no compose file in the working directory joins in."""
     try:
         if state(slug) == LEGACY:
-            _docker(["docker", "rm", "-f", runner_container(slug)], timeout=DOCKER_TIMEOUT)
+            _docker(["docker", "rm", "-f", "-v", runner_container(slug)], timeout=DOCKER_TIMEOUT)
         _docker(["docker", "compose", "--project-name", compose_project(slug), "down", "--volumes"], cwd="/")
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         logger.warning("CI runner of deleted project %s not removed: %s", slug, exc)

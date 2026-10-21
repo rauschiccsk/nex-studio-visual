@@ -622,8 +622,9 @@ def container_run_argv(plan: BuildDatabase) -> list[str]:
       * ``--network`` the per-build network and ``--network-alias`` the project's own service name, so the
         ``DATABASE_URL`` reads exactly like the project's own compose URL;
       * **no published port** — nothing outside that one network can reach this database, not even the host;
-      * no volume — the data lives in the container's writable layer and dies with it, so a build's test
-        data can never survive into the next build;
+      * no volume of ours — but the postgres image declares ``VOLUME /var/lib/postgresql/data``, so Docker gives
+        the container an unnamed one anyway; it is removed with the container (``--rm``, :func:`release` and
+        :func:`reap_orphans` remove with ``-v``, DEV-172), so a build's test data never survives into the next build;
       * ``POSTGRES_PASSWORD`` passed BY VALUE, which is the deliberate exception to
         :mod:`build_sandbox`'s by-name rule and is argued at :func:`build_sandbox.build_run_argv`.
 
@@ -771,7 +772,7 @@ async def release(plan: Optional[BuildDatabase]) -> None:
     """
     if plan is None:
         return
-    await _docker("docker", "rm", "-f", plan.container, timeout=30)
+    await _docker("docker", "rm", "-f", "-v", plan.container, timeout=30)
     for attempt in range(_NETWORK_RM_ATTEMPTS):
         code, detail = await _docker("docker", "network", "rm", plan.network, timeout=30)
         if code == 0 or "not found" in detail.lower() or "no such network" in detail.lower():
@@ -810,7 +811,7 @@ async def reap_orphans() -> int:
     code, out = await _docker("docker", "ps", "-aq", "--filter", label, timeout=30)
     containers = out.split() if code == 0 else []
     for container in containers:
-        rm_code, _ = await _docker("docker", "rm", "-f", container, timeout=30)
+        rm_code, _ = await _docker("docker", "rm", "-f", "-v", container, timeout=30)
         removed += 1 if rm_code == 0 else 0
 
     code, out = await _docker("docker", "network", "ls", "-q", "--filter", label, timeout=30)
