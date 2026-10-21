@@ -122,7 +122,7 @@ def world(db_session, tmp_path, monkeypatch):
     monkeypatch.setattr(build_db, "create_fenced_network", _noop)
     monkeypatch.setattr(build_db, "remove_network", _noop)
     monkeypatch.setattr(build_sandbox, "reap_container", _noop)
-    monkeypatch.setattr(runner, "_charter_text", lambda: "charta")
+    monkeypatch.setattr(runner, "_charter_text", lambda project_type: "charta")
 
     script = tmp_path / "fake_claude.py"
     script.write_text(FAKE_CLAUDE)
@@ -447,7 +447,7 @@ async def test_a_changed_charter_reaches_a_running_conversation_once(world, monk
     await _ask(world, "Druhá otázka")
     assert calls[1].charter_text is None and "charta" not in calls[1].prompt  # unchanged → nothing repeated
 
-    monkeypatch.setattr(runner, "_charter_text", lambda: "charta v2 — pokyn len keď niečo chýba")
+    monkeypatch.setattr(runner, "_charter_text", lambda project_type: "charta v2 — pokyn len keď niečo chýba")
     await _ask(world, "Tretia otázka")
     assert calls[2].charter_text is None  # on --resume an appended charter would be ignored
     assert "charta v2 — pokyn len keď niečo chýba" in calls[2].prompt

@@ -51,7 +51,8 @@ from backend.db.models.poradca import (
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.services import build_db, build_sandbox, system_setting, usage_ledger
+from backend.services import build_db, build_sandbox, project_surfaces, system_setting, usage_ledger
+from backend.services import create_project_postscaffold as postscaffold
 from backend.services.claude_agent import UsageMetadata, _usage_from
 from backend.services.poradca import attachments, sandbox
 from backend.services.poradca.context import known_secret_values
@@ -278,8 +279,21 @@ async def _kill(entry: _Running) -> None:
         await build_sandbox.reap_container(entry.container)
 
 
-def _charter_text() -> str:
-    return _CHARTER.read_text(encoding="utf-8")
+#: DEV-171 — what Poradca reads before the rules of the project's type, which are written for the build agents.
+TYPE_RULES_INTRO = (
+    "## Pravidlá typu projektu\n\nTieto pravidlá dostávajú agenti stavby tohto projektu. Výstup ich fázy posudzuj aj "
+    "podľa nich (časť 6)."
+)
+
+
+def _charter_text(project_type: str) -> str:
+    """Poradca's rules — and in a project of a type with rules of its own (Web), the rules its build agents read, from
+    the same file (DEV-171)."""
+    text = _CHARTER.read_text(encoding="utf-8")
+    rules = postscaffold.project_type_rules(project_type)
+    if not rules:
+        return text
+    return text.rstrip() + "\n\n---\n\n" + TYPE_RULES_INTRO + "\n\n" + rules
 
 
 def _charter_sha(text: str) -> str:
@@ -298,7 +312,12 @@ def _model_and_effort(db: Session, user_id: UUID) -> tuple[str, str]:
 
 
 def scope_line(db: Session, project: Project, version_id: Optional[UUID]) -> str:
-    """What we are talking about — the context line Poradca receives with every question."""
+    """What we are talking about — the context line Poradca receives with every question: the project, the version
+    with its phase, and (DEV-171) the project's type, frontends and ports."""
+    return _topic(db, project, version_id) + "\n" + project_surfaces.describe(project)
+
+
+def _topic(db: Session, project: Project, version_id: Optional[UUID]) -> str:
     if version_id is None:
         return f"Projekt {project.name} ({project.slug}) — otázka sa týka celého projektu."
     version = db.get(Version, version_id)
@@ -355,13 +374,16 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
     acquired = False
     transcript, before, launched_at = None, None, None
     secret_filter = SecretFilter()
-    charter = _charter_text()
-    charter_sha = _charter_sha(charter)
+    charter, charter_sha = "", ""
     charter_refresh = False
     try:
         with SessionLocal() as db:
             conversation = db.get(PoradcaConversation, conversation_id)
             project = db.get(Project, conversation.project_id)
+            # DEV-171: the rules follow the project's type — a project switched to Web gives its conversation the
+            # Web rules at its next question (the sha differs, DEV-30).
+            charter = _charter_text(project.type)
+            charter_sha = _charter_sha(charter)
             user = db.get(User, user_id)
             limit = max_concurrent(db)
             scope = scope_line(db, project, conversation.version_id)

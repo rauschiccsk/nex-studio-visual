@@ -75,6 +75,32 @@ def surfaces_of(project: Project) -> tuple[Surface, ...]:
     return _surfaces(project.type, project.auth_mode, project.frontend_port, project.web_port)
 
 
+#: DEV-171 — a project's type and sign-ins as a person (or Poradca) reads them.
+TYPE_WORDS = {STANDARD: "Štandardný", WEB: "Web (administrácia a verejný web)"}
+LOGIN_WORDS = {
+    USERNAME: "prihlásenie menom a heslom",
+    EMAIL: "prihlásenie e-mailom a heslom, registrácia",
+    TOKEN: "spúšťa ho NEX Manager tokenom",
+}
+
+
+def describe(project: Project) -> str:
+    """The project's type, its frontends and its ports in one sentence — as the cockpit holds them (DEV-171: Poradca
+    judged a Web project's Specification without knowing it was one, nor the port the cockpit gave its web)."""
+
+    def port(number: Optional[int]) -> str:
+        return str(number) if number is not None else "nepridelený"
+
+    frontends = "; ".join(
+        f"{s.label}: priečinok {s.directory}/, služba {s.service}, {LOGIN_WORDS[s.login]}, port {port(s.port)}"
+        for s in surfaces_of(project)
+    )
+    return (
+        f"Typ projektu: {TYPE_WORDS.get(project.type, project.type)}. Frontendy — {frontends}. "
+        f"Backend port {port(project.backend_port)}, databáza {port(project.db_port)}."
+    )
+
+
 def surfaces_of_type(project_type: str) -> tuple[Surface, ...]:
     """The frontends a project of *project_type* has, without its ports — what a step that knows only the type
     (the scaffold, the smoke check of a build) walks."""

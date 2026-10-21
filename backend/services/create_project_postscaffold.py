@@ -89,12 +89,21 @@ def _is_web(project_type: str) -> bool:
     return project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project_type)
 
 
+def project_type_rules(project_type: str) -> str:
+    """The rules a project of *project_type* adds to the charters — the Web addendum in a Web project, else nothing.
+    The build agents (DEV-165) and Poradca (DEV-171) read them from here, so they never judge by different rules."""
+    if not _is_web(project_type):
+        return ""
+    return (NEX_STUDIO_TEMPLATES / _WEB_CHARTER_ADDENDUM).read_text(encoding="utf-8")
+
+
 def role_charter_text(base_text: str, role_template: Path, project_type: str) -> str:
     """A role's charter as the project gets it: the shared base, the role's template and — in a Web project — the
     Web addendum (DEV-165)."""
     text = base_text + _CHARTER_SEP + role_template.read_text(encoding="utf-8")
-    if _is_web(project_type):
-        text = text.rstrip() + _CHARTER_SEP + (NEX_STUDIO_TEMPLATES / _WEB_CHARTER_ADDENDUM).read_text(encoding="utf-8")
+    rules = project_type_rules(project_type)
+    if rules:
+        text = text.rstrip() + _CHARTER_SEP + rules
     return text
 
 

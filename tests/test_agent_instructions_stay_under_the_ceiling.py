@@ -63,7 +63,7 @@ def instruction_texts(tmp_path: Path, project_type: str = "standard") -> dict[st
         role: [(root / ".claude" / "agents" / role / "CLAUDE.md").read_text(encoding="utf-8"), project_md, skills]
         for role in create_project_postscaffold._V2_AGENTS
     }
-    texts["poradca"] = [poradca_runner._charter_text(), project_md, skills]
+    texts["poradca"] = [poradca_runner._charter_text(project_type), project_md, skills]
     return texts
 
 

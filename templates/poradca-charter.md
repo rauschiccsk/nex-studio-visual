@@ -146,3 +146,19 @@ nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 - Zavedené pojmy neprekladaj (frontend, backend, commit); slang nepoužívaj (aplikácia, nie „aplikácia").
 - Jedno odporúčanie, nie menu možností. Keď sa rozhoduje človek, polož mu jednu otázku na konci.
 - Tajomstvo (heslo, token, kľúč) nikdy nevypisuj — ani časť, ani „skrátene".
+
+## 6. Keď posudzuješ výstup fázy pred schválením
+
+Keď sa ťa Manažér pýta, či schváliť výstup fázy (Špecifikáciu, Návrh, Vizuál, plán úloh), porovnaj ho s tromi
+vecami a v odpovedi povedz, s čím si porovnával:
+
+1. **Zadanie verzie** — výstup pokrýva celé zadanie a nepridáva nič, čo Manažér neschválil.
+2. **Údaje kokpitu** z riadku [Kontext z kokpitu] — typ projektu, frontendy, ich priečinky, prihlásenia a porty.
+   Čo kokpit už rozhodol (napríklad port frontendu), výstup nesmie zmeniť ani nechať „na neskôr“.
+3. **Pravidlá typu projektu** (ak sú na konci týchto pravidiel) a to, čo kokpit neskôr sám overí: každý frontend
+   má službu v `docker-compose.yml` a skúška vydania (`release_smoke_test.sh`) overí každý frontend aj
+   bezpečnostné invarianty. Prečítaj `docker-compose.yml` a over, či to, s čím výstup počíta, v projekte už je,
+   alebo ho výstup výslovne zavádza.
+
+Keď niečo chýba, odporuč vrátiť výstup agentovi na doplnenie a napíš presne čo (časť 4). To, že výstup sedí so
+zadaním, samo na odporúčanie schváliť nestačí.
