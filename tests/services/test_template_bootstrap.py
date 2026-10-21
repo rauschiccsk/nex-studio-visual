@@ -332,23 +332,18 @@ def test_push_and_verify_handles_readonly_target_gracefully(tmp_path: Path) -> N
 
 # ─── CR-NS-013 — HTTPS push via gh credential helper ─────────────────────────
 
-from backend.services import template_bootstrap  # noqa: E402
+from backend.services import git_push, template_bootstrap  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _neutralize_gh(monkeypatch):
     """Keep the real-git tests hermetic — never invoke the real ``gh`` binary.
 
-    ``push_and_verify`` now runs ``gh auth setup-git`` before pushing; the
-    real-git fixtures push to a local bare repo and don't need it, so stub it
-    to a success no-op. The dedicated ordering test below re-patches it with
-    its own recorder.
+    ``push_and_verify`` pushes through :mod:`backend.services.git_push`, which runs ``gh auth setup-git`` first; the
+    real-git fixtures push to a local bare repo and don't need it, so it is a no-op here. That the sign-in comes before
+    every push is asked in ``tests/test_every_push_signs_in_first.py``.
     """
-    monkeypatch.setattr(
-        template_bootstrap,
-        "_run_gh",
-        lambda args, *, timeout=60: subprocess.CompletedProcess(args=["gh", *args], returncode=0, stdout="", stderr=""),
-    )
+    monkeypatch.setattr(git_push, "wire_credentials", lambda *, timeout: None)
 
 
 def test_push_uses_https_origin_by_default(monkeypatch):
@@ -361,8 +356,6 @@ def test_push_uses_https_origin_by_default(monkeypatch):
         if args[0] == "remote" and args[1] in ("add", "set-url"):
             captured["url"] = args[-1]
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-        if args[0] == "push":
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
         if args == ["rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="abc123def456\n", stderr="")
         if args[:2] == ["ls-remote", "origin"]:
@@ -370,6 +363,9 @@ def test_push_uses_https_origin_by_default(monkeypatch):
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(template_bootstrap, "_run_git", fake_git)
+    monkeypatch.setattr(
+        git_push, "push", lambda root, *args, timeout: subprocess.CompletedProcess(["git", "push"], 0, "", "")
+    )
     monkeypatch.setattr(template_bootstrap.Path, "is_dir", lambda self: True)
 
     push_and_verify(target="/tmp/proj", repo_full_name="rauschiccsk/test-proj", remote_url=None)
@@ -378,12 +374,11 @@ def test_push_uses_https_origin_by_default(monkeypatch):
     assert not captured["url"].startswith("git@")
 
 
-def test_gh_auth_setup_git_runs_before_push(monkeypatch):
-    """``gh auth setup-git`` is invoked before the first ``git push``."""
-    calls: list[tuple[str, tuple[str, ...]]] = []
+def test_the_founding_pushes_through_the_one_push_that_signs_in(monkeypatch):
+    """DEV-161: the founding's push goes through :func:`git_push.push`, which signs in to GitHub first."""
+    pushes: list[tuple[str, tuple[str, ...]]] = []
 
     def fake_git(args, *, cwd, timeout=60):
-        calls.append(("git", tuple(args)))
         if args[:2] == ["remote", "get-url"]:
             return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="")
         if args == ["rev-parse", "HEAD"]:
@@ -392,19 +387,17 @@ def test_gh_auth_setup_git_runs_before_push(monkeypatch):
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="abc\tHEAD\n", stderr="")
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    def fake_gh(args, *, timeout=60):
-        calls.append(("gh", tuple(args)))
-        return subprocess.CompletedProcess(args=["gh", *args], returncode=0, stdout="", stderr="")
+    def fake_push(root, *args, timeout):
+        pushes.append((str(root), args))
+        return subprocess.CompletedProcess(["git", "push", *args], 0, "", "")
 
     monkeypatch.setattr(template_bootstrap, "_run_git", fake_git)
-    monkeypatch.setattr(template_bootstrap, "_run_gh", fake_gh)
+    monkeypatch.setattr(git_push, "push", fake_push)
     monkeypatch.setattr(template_bootstrap.Path, "is_dir", lambda self: True)
 
     push_and_verify(target="/tmp/proj", repo_full_name="rauschiccsk/test", remote_url=None)
 
-    gh_idx = next(i for i, c in enumerate(calls) if c == ("gh", ("auth", "setup-git")))
-    push_idx = next(i for i, c in enumerate(calls) if c[0] == "git" and c[1] and c[1][0] == "push")
-    assert gh_idx < push_idx
+    assert pushes == [("/tmp/proj", ("-u", "origin", "main"))]
 
 
 # ─── Regression: the cockpit's argv must stay valid for the REAL init.sh ─────

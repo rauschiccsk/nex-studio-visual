@@ -71,6 +71,7 @@ from backend.services import (
     deploy_progress,
     failure_framing,
     fast_fix,
+    git_push,
     host_docker_guard,
     predeploy_backup,
     preview_switch,
@@ -5281,32 +5282,18 @@ def _push_branch(project_root: Path) -> tuple[bool, Optional[str], Optional[str]
     A checkout without ``.git`` or without ``origin`` has nothing to publish to: ``(False, None, None)`` — not a
     failure. A detached HEAD or a refused push is: ``(False, branch, reason)``. The branch is READ, never assumed
     to be ``main`` — pushing to the wrong branch is worse than not pushing."""
-    import subprocess
-
     if not (project_root / ".git").is_dir():
         return False, None, None
     if _git_publish(project_root, ["remote", "get-url", "origin"])[0] != 0:
         return False, None, None
 
-    # Wire the HTTPS credential helper before pushing, exactly as
-    # :func:`template_bootstrap.push_and_verify` does at project creation. That call writes the helper into
-    # the CONTAINER's global gitconfig, which is lost on every recreate — so without repeating it here a
-    # push would start failing on credentials the first time a container was recreated without a project
-    # being created in it. Idempotent; a non-zero exit is non-fatal (the push below surfaces the real
-    # error, and the container has no ssh binary so HTTPS+gh is the only authenticated path).
-    try:
-        subprocess.run(
-            ["gh", "auth", "setup-git"], capture_output=True, text=True, timeout=_GIT_PUSH_TIMEOUT, check=False
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-
     branch_rc, branch, _ = _git_publish(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
     if branch_rc != 0 or not branch or branch == "HEAD":
         return False, None, BRANCH_NOT_NAMED
-    rc, _, err = _git_publish(project_root, ["push", "origin", f"HEAD:refs/heads/{branch}"])
-    if rc != 0:
-        return False, branch, err or "git push skončil chybou"
+    # DEV-161: signs in to GitHub first — the helper is lost with every recreate of the container.
+    pushed = git_push.push(project_root, "origin", f"HEAD:refs/heads/{branch}", timeout=_GIT_PUSH_TIMEOUT)
+    if pushed.returncode != 0:
+        return False, branch, pushed.stderr.strip() or "git push skončil chybou"
     return True, branch, None
 
 
@@ -5351,13 +5338,13 @@ def _push_release_artifacts(project_root: Path, version_number: str) -> bool:
     # ``--force`` on the TAG ref only (never the branch): _git_tag_version re-anchors the tag with ``-f`` on a
     # FAIL→fix→re-PASS, so the remote tag must be allowed to move with it or the two disagree about which
     # commit was verified.
-    rc, _, err = _git_publish(project_root, ["push", "--force", "origin", f"refs/tags/{tag}"])
-    if rc != 0:
+    pushed_tag = git_push.push(project_root, "--force", "origin", f"refs/tags/{tag}", timeout=_GIT_PUSH_TIMEOUT)
+    if pushed_tag.returncode != 0:
         logger.warning(
             "verified tag %s NOT pushed: %s — the release commit is on the remote but the tag that names it "
             "is not, so the release is not reproducible from origin",
             tag,
-            err,
+            pushed_tag.stderr.strip(),
         )
         return False
 

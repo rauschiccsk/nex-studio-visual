@@ -15,6 +15,22 @@ from unittest.mock import patch
 import pytest
 
 from backend.services import create_project_postscaffold as mod
+from backend.services import git_push
+
+
+@pytest.fixture(autouse=True)
+def pushes(monkeypatch) -> list[tuple[Path, tuple[str, ...]]]:
+    """DEV-161: every push goes through :func:`git_push.push` (it signs in to GitHub first) — here it only writes down
+    what it was asked, so no test reaches the real ``gh`` or git's network."""
+    asked: list[tuple[Path, tuple[str, ...]]] = []
+
+    def _push(root, *args, timeout):
+        asked.append((Path(root), args))
+        return subprocess.CompletedProcess(["git", "push", *args], 0, "", "")
+
+    monkeypatch.setattr(git_push, "push", _push)
+    return asked
+
 
 # Note: `_enable_log_propagation` autouse fixture moved do tests/services/conftest.py
 # (CR-030 cleanup batch 2026-05-26 Návrh #1 — shared across service tests).
@@ -197,7 +213,7 @@ def test_cicd_template_missing(tmp_path: Path, caplog: pytest.LogCaptureFixture)
     assert any("template missing" in r.message for r in caplog.records)
 
 
-def test_cicd_copies_template_and_pushes(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_cicd_copies_template_and_pushes(tmp_path: Path, caplog: pytest.LogCaptureFixture, pushes) -> None:
     """Happy path: template exists → copied + commit + push (mocked git)."""
     target = tmp_path / "project"
     target.mkdir()
@@ -216,11 +232,11 @@ def test_cicd_copies_template_and_pushes(tmp_path: Path, caplog: pytest.LogCaptu
 
     # Verify ci.yml was copied
     assert (target / ".github" / "workflows" / "ci.yml").is_file()
-    # Verify git add/commit/push were called
+    # Verify git add/commit were called and the commit was pushed (through the push that signs in)
     git_calls = [c.args[0] for c in ps.run.call_args_list if c.args[0][0] == "git"]
     assert any("add" in call for call in git_calls)
     assert any("commit" in call for call in git_calls)
-    assert any("push" in call for call in git_calls)
+    assert pushes == [(target, ("origin", "main"))]
 
 
 def test_cicd_idempotent_when_ci_yml_exists(
@@ -249,20 +265,19 @@ def test_cicd_idempotent_when_ci_yml_exists(
 def test_cicd_push_failure_logged_not_raised(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Push fails → warning, commit stays local, no exception."""
     target = tmp_path / "project"
     target.mkdir()
     template = tmp_path / "ci-template.yml"
     template.write_text("name: CI\n")
-
-    def side_effect(args, **kwargs):
-        if "push" in args:
-            return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="push failed")
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(
+        git_push, "push", lambda root, *args, timeout: subprocess.CompletedProcess(args, 1, "", "push failed")
+    )
 
     with patch.object(mod, "CICD_TEMPLATE", template), patch.object(mod, "subprocess") as ps:
-        ps.run.side_effect = side_effect
+        ps.run.return_value = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
         with caplog.at_level("WARNING", logger="backend.services.create_project_postscaffold"):
             mod._wire_cicd_workflow(target, "test-proj")
 
@@ -402,7 +417,7 @@ def test_orchestrator_skips_all_when_target_invalid(
     assert any("not a directory" in r.message for r in caplog.records)
 
 
-def test_orchestrator_dispatches_all_three(tmp_path: Path) -> None:
+def test_orchestrator_dispatches_all_three(tmp_path: Path, pushes) -> None:
     """Happy path: smoke + CI/CD + branch protection all dispatched per flags."""
     target = tmp_path / "project"
     target.mkdir()
@@ -437,8 +452,8 @@ def test_orchestrator_dispatches_all_three(tmp_path: Path) -> None:
     cmds = [c.args[0] for c in ps.run.call_args_list]
     # Smoke
     assert ["docker", "compose", "build"] in cmds
-    # CI/CD
-    assert any("git" in cmd[0] and "push" in cmd for cmd in cmds)
+    # CI/CD — pushed through the push that signs in
+    assert (target, ("origin", "main")) in pushes
     # Branch protection (gh api)
     assert any(cmd[0] == "gh" and cmd[1] == "api" for cmd in cmds)
 

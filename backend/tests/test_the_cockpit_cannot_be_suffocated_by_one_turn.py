@@ -44,6 +44,7 @@ SHELLING_MODULES = {
     "database_schema",
     "delivered_tokens",
     "delivery_statement",
+    "git_push",
     "git_state",
     "host_docker_guard",
     "instance_adoption",

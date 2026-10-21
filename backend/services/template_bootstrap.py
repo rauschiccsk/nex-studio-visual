@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.services import project_surfaces
+from backend.services import git_push, project_surfaces
 from backend.services import system_setting as system_setting_service
 
 logger = logging.getLogger(__name__)
@@ -389,17 +389,6 @@ def _run_git(args: list[str], *, cwd: str, timeout: int = 60) -> subprocess.Comp
     )
 
 
-def _run_gh(args: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess:
-    """Run a ``gh`` CLI command. Captures stdout+stderr; returns CompletedProcess."""
-    return subprocess.run(
-        ["gh", *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
-
-
 def push_and_verify(
     *,
     target: str,
@@ -444,27 +433,15 @@ def push_and_verify(
             f"git remote add/set-url failed (exit {result.returncode}): {result.stderr.strip()}"
         )
 
-    # Step 1b: wire the HTTPS credential helper so `git push` authenticates via
-    # the gh token. The backend container has no ``ssh`` binary, so the default
-    # origin URL is HTTPS (see ``final_url``); ``gh auth setup-git`` is
-    # idempotent and sets ``credential.https://github.com.helper``. A non-zero
-    # exit is non-fatal — the push below surfaces the real error if credentials
-    # are genuinely missing.
-    gh_setup = _run_gh(["auth", "setup-git"], timeout=timeout)
-    if gh_setup.returncode != 0:
-        logger.warning(
-            "gh auth setup-git returned %d (continuing; push will surface any credential error): %s",
-            gh_setup.returncode,
-            gh_setup.stderr.strip(),
-        )
-
     # Step 2: Push (with retry on transient failure)
     push_attempts = 0
     max_attempts = push_retry_attempts + 1
     last_err = ""
     while push_attempts < max_attempts:
         push_attempts += 1
-        result = _run_git(["push", "-u", "origin", "main"], cwd=target, timeout=timeout)
+        # The push signs in through the gh credential helper (git_push wires it — the backend container has no
+        # ``ssh`` binary, so the default origin URL is HTTPS, see ``final_url``).
+        result = git_push.push(target_path, "-u", "origin", "main", timeout=timeout)
         if result.returncode == 0:
             logger.info(
                 "git push -u origin main succeeded on attempt %d/%d (repo=%s)",

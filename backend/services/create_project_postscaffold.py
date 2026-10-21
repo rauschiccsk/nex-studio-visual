@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance, ci_runner, github_validation, project_surfaces
+from backend.services import build_provenance, ci_runner, git_push, github_validation, project_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -825,13 +825,7 @@ def commit_and_push(target: Path, paths: list[str], message: str, slug: str, *, 
     ).stdout.strip()
     if not branch or branch == "HEAD":
         return "Zmena je uložená v gite projektu, ale projekt nestojí na žiadnej vetve — na GitHub sa neodoslala."
-    push = subprocess.run(
-        ["git", "-C", str(target), "push", "origin", f"HEAD:refs/heads/{branch}"],
-        capture_output=True,
-        text=True,
-        timeout=CICD_TIMEOUT,
-        check=False,
-    )
+    push = git_push.push(target, "origin", f"HEAD:refs/heads/{branch}", timeout=CICD_TIMEOUT)
     if push.returncode != 0:
         logger.warning("git push failed (slug=%s): %s", slug, push.stderr.strip()[:300])
         return "Zmena je uložená v gite projektu, ale na GitHub sa neodoslala — odošle sa s ďalším odoslaním."
@@ -939,13 +933,7 @@ def _wire_cicd_workflow(target: Path, slug: str) -> None:
         )
         return
 
-    push_result = subprocess.run(
-        ["git", "-C", str(target), "push", "origin", "main"],
-        capture_output=True,
-        text=True,
-        timeout=CICD_TIMEOUT,
-        check=False,
-    )
+    push_result = git_push.push(target, "origin", "main", timeout=CICD_TIMEOUT)
     if push_result.returncode != 0:
         logger.warning(
             "K-005 git push failed (slug=%s): %s — CI committed locally, push deferred",
@@ -1060,13 +1048,7 @@ def _commit_and_push_scaffold_finalisation(target: Path, slug: str) -> None:
         logger.warning("scaffold finalise git commit failed (slug=%s): %s", slug, commit_result.stderr.strip())
         return
 
-    push_result = subprocess.run(
-        ["git", "-C", str(target), "push", "origin", "main"],
-        capture_output=True,
-        text=True,
-        timeout=CICD_TIMEOUT,
-        check=False,
-    )
+    push_result = git_push.push(target, "origin", "main", timeout=CICD_TIMEOUT)
     if push_result.returncode != 0:
         logger.warning(
             "scaffold finalise git push failed (slug=%s): %s — committed locally, push deferred",
