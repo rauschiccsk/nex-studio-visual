@@ -547,6 +547,10 @@ export default function ProjectDetailPage() {
               }
               // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
               listVersions(project.id).then(setVersions).catch(() => undefined);
+              // DEV-169: the number offered next moves past the version just founded.
+              getNextVersionNumberApi(project.id)
+                .then((r) => setNextNumber(r.version_number))
+                .catch(() => undefined);
             }}
           />
         </div>

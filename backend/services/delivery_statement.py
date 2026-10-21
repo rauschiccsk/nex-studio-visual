@@ -158,18 +158,18 @@ def base_plan(db: Session, version: Version) -> list[BaseStep]:
 
     DEV-65: Verifikácia reads the version's range from an ``async`` round; the plan is read there and resolved by
     :func:`resolve_base` off the main loop, so no git command waits on it (ICCINT-74)."""
-    from backend.services.deploy import _semver_sort_key
+    from backend.services.version import number_order_key
 
-    mine = _semver_sort_key(version.version_number)
+    mine = number_order_key(version.version_number)
     earlier = sorted(
         (
             v
             for v in db.execute(select(Version).where(Version.project_id == version.project_id)).scalars()
             if v.id != version.id
-            and _semver_sort_key(v.version_number) < mine
+            and number_order_key(v.version_number) < mine
             and version_service.build_finished(db, v)
         ),
-        key=lambda v: _semver_sort_key(v.version_number),
+        key=lambda v: number_order_key(v.version_number),
         reverse=True,
     )
     steps: list[BaseStep] = []
@@ -500,11 +500,11 @@ def billing_rows(db: Session, project: Project, repo: Path) -> list[BillingRow]:
     """DEV-73 — every version of a project for invoicing, the newest first: its statement as it would be issued now
     and the valid one, if any. 12.10.2026 the statement of only the selected version was visible and the versions
     between 1.5.0 and 1.7.1 looked lost although nothing was."""
-    from backend.services.deploy import _semver_sort_key
+    from backend.services.version import number_order_key
 
     versions = sorted(
         db.execute(select(Version).where(Version.project_id == project.id)).scalars(),
-        key=lambda v: _semver_sort_key(v.version_number),
+        key=lambda v: number_order_key(v.version_number),
         reverse=True,
     )
     flows = dict(

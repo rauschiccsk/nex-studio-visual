@@ -37,8 +37,8 @@ Management and §4.0 Version Lifecycle Rules, and
       any EPIC or BUG still references it. This task does not ship a
       :func:`delete` helper; the router handles 409 via a dedicated code
       path in a follow-up task.
-    * :func:`list_versions` orders by ``version_number DESC`` per
-      DESIGN.md §2.6 ``GET /projects/{id}/versions`` and attaches three
+    * :func:`list_versions` puts the newest version number first (by number, :func:`number_order_key` —
+      DEV-169) per DESIGN.md §2.6 ``GET /projects/{id}/versions`` and attaches three
       aggregate counts (``epic_count``, ``epics_done``, ``bug_count``)
       to each returned ORM instance so
       :class:`~backend.schemas.version.VersionRead` can serialise them
@@ -84,12 +84,12 @@ _PROJECTS_ROOT = Path("/opt/projects")
 
 
 def list_versions(db: Session, project_id: UUID) -> list[Version]:
-    """Return every version for ``project_id``, ordered by ``version_number DESC``.
+    """Return every version for ``project_id``, the newest version number first.
 
     Matches the DESIGN.md §2.6 contract for ``GET
     /projects/{id}/versions``: the most-recently-numbered release sits
-    at the top of the list (strings are compared lexicographically —
-    callers are expected to use zero-padded semver where this matters).
+    at the top of the list. Numbers are compared as numbers (:func:`number_order_key`, DEV-169) — compared as
+    text, Career Asistent's v1.0.0 stood above 1.1.0 and NEX Inbox's 1.10.0 below 1.5.0.
 
     Each returned :class:`Version` instance carries three transient
     aggregate attributes populated from correlated subqueries:
@@ -122,11 +122,7 @@ def list_versions(db: Session, project_id: UUID) -> list[Version]:
     )
     bug_count_col = select(func.count(Bug.id)).where(Bug.version_id == Version.id).correlate(Version).scalar_subquery()
 
-    stmt = (
-        select(Version, epic_count_col, epics_done_col, bug_count_col)
-        .where(Version.project_id == project_id)
-        .order_by(Version.version_number.desc())
-    )
+    stmt = select(Version, epic_count_col, epics_done_col, bug_count_col).where(Version.project_id == project_id)
 
     result: list[Version] = []
     for version, epic_count, epics_done, bug_count in db.execute(stmt).all():
@@ -134,7 +130,18 @@ def list_versions(db: Session, project_id: UUID) -> list[Version]:
         version.epics_done = int(epics_done or 0)
         version.bug_count = int(bug_count or 0)
         result.append(version)
-    return result
+    return sorted(result, key=lambda version: number_order_key(version.version_number), reverse=True)
+
+
+def number_order_key(version_number: str) -> tuple[int, ...]:
+    """Where a version number stands among the project's versions — compared as numbers, the ``v`` of the first PROD
+    version (``deploy.FIRST_PROD_VERSION``) ignored: ``'v1.2.0'`` and ``'1.2.0'`` → ``(1, 2, 0)``; ``1.10.0`` after
+    ``1.9.0``. A part that is not a number counts as 0, so an odd label never breaks a list.
+
+    The one order of versions in the cockpit (DEV-169): ``tests/test_versions_are_ordered_by_their_number.py`` refuses
+    a database ``order_by`` on ``version_number``, which compares text (Director 21.10.2026: „poradie nejako
+    nesedí“)."""
+    return tuple(int(part) if part.isdigit() else 0 for part in version_number.lstrip("vV").split("."))
 
 
 def get_by_id(db: Session, version_id: UUID) -> Version:

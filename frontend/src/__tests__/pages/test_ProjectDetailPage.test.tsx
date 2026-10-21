@@ -31,6 +31,7 @@ const {
   getNextVersionNumberApiMock,
   startFastFixApiMock,
   getProjectDedoProposalApiMock,
+  sendProjectDedoProposalApiMock,
   setSelectedProjectMock,
   setSelectedVersionMock,
   authStateMock,
@@ -48,6 +49,7 @@ const {
   getNextVersionNumberApiMock: vi.fn(),
   startFastFixApiMock: vi.fn(),
   getProjectDedoProposalApiMock: vi.fn(),
+  sendProjectDedoProposalApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
   setSelectedVersionMock: vi.fn(),
   authStateMock: { user: { role: "ri", username: "admin", id: "u-admin" } as { role: string; username: string; id: string } | null },
@@ -82,6 +84,7 @@ vi.mock("@/services/api/projects", () => ({
   // ICCINT-152: stránka sa pýta, či Dedo nepripravil zadanie. Chýbajúca atrapa nie je „o jeden dopyt
   // menej“ — volanie `undefined` vyhodí chybu SYNCHRÓNNE a zhodí celé načítanie projektu.
   getProjectDedoProposalApi: getProjectDedoProposalApiMock,
+  sendProjectDedoProposalApi: sendProjectDedoProposalApiMock,
   // DEV-164: the panel „Projekt s webom“ asks whether the project can switch to Web; it stays empty until it hears
   // back, so a question that never answers keeps it out of what these tests measure.
   getWebSwitchApi: vi.fn(() => new Promise(() => {})),
@@ -618,5 +621,39 @@ describe("ProjectDetailPage — the next version's number comes from the cockpit
 
     expect(await screen.findByRole("button", { name: "Pridať ďalšiu verziu" })).toBeInTheDocument();
     expect(screen.queryByText("Nepodarilo sa načítať projekt.")).not.toBeInTheDocument();
+  });
+
+  it("after a version is founded from Dedo's brief, the page offers the number after it (DEV-169)", async () => {
+    // 21.10.2026 Career Asistent 1.1.0 was founded from Dedo's brief and the page went on offering
+    // „Pridať verziu 1.1.0“ — the list was read again, the number was not.
+    getProjectDedoProposalApiMock.mockResolvedValue({
+      id: "n-1",
+      project_id: "p1",
+      content: "Kandidátska časť na verejnom webe.",
+      proposed_action: "new_version",
+      status: "proposed",
+      created_at: "2026-10-21T15:06:34Z",
+      proposed_version_number: "1.1.0",
+      version_number: "1.1.0",
+    });
+    getNextVersionNumberApiMock
+      .mockResolvedValueOnce({ version_number: "1.1.0" })
+      .mockResolvedValue({ version_number: "1.2.0" });
+    sendProjectDedoProposalApiMock.mockResolvedValue({ version_id: "v9", started: false });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+    await screen.findByRole("button", { name: "Pridať verziu 1.1.0" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Založiť novú verziu" }));
+
+    expect(await screen.findByRole("button", { name: "Pridať verziu 1.2.0" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pridať verziu 1.1.0" })).not.toBeInTheDocument();
+    expect(sendProjectDedoProposalApiMock).toHaveBeenCalledWith(
+      "p1",
+      "n-1",
+      "Kandidátska časť na verejnom webe.",
+      null,
+      "1.1.0",
+    );
   });
 });

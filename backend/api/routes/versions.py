@@ -9,7 +9,7 @@ is mounted with the bare ``/api/v1`` prefix in :mod:`backend.main` rather
 than a single resource prefix:
 
 * ``GET    /projects/{project_id}/versions`` → list every version of a
-  project, ordered by ``version_number DESC`` (DESIGN.md §2.6 ``GET
+  project, the newest version number first, compared as numbers (DESIGN.md §2.6 ``GET
   /projects/{id}/versions``). Each row carries the
   ``epic_count`` / ``epics_done`` / ``bug_count`` aggregates that drive
   the ``VersionsPage`` UI cards. Authenticated users only.
@@ -135,8 +135,8 @@ def list_versions(
 ) -> list[VersionRead]:
     """Return every version belonging to ``project_id``.
 
-    Results are ordered by ``version_number DESC`` (most recent release
-    first) and each row carries the ``epic_count`` / ``epics_done`` /
+    Results put the newest version number first, compared as numbers
+    (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done`` /
     ``bug_count`` aggregates the ``VersionsPage`` UI cards consume —
     see DESIGN.md §2.6 ``GET /projects/{id}/versions``.
 

@@ -2370,8 +2370,8 @@ export interface paths {
          * List Versions
          * @description Return every version belonging to ``project_id``.
          *
-         *     Results are ordered by ``version_number DESC`` (most recent release
-         *     first) and each row carries the ``epic_count`` / ``epics_done`` /
+         *     Results put the newest version number first, compared as numbers
+         *     (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done`` /
          *     ``bug_count`` aggregates the ``VersionsPage`` UI cards consume —
          *     see DESIGN.md §2.6 ``GET /projects/{id}/versions``.
          *

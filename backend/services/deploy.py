@@ -97,6 +97,7 @@ from backend.services import (
     project_surfaces,
     uat_provisioner,
 )
+from backend.services.version import number_order_key
 
 # The terminal pipeline stage = "Hotovo" = a version is VERIFIED (design §3.1,
 # CR-V2-014: reaching ``done`` means *verified*, not *deployed*). Only a verified
@@ -354,13 +355,6 @@ def project_had_prod_deploy(db: Session, project_id: UUID) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _semver_sort_key(version_number: str) -> tuple[int, ...]:
-    """A v-prefix-agnostic numeric sort key: ``'v1.2.0'`` and ``'1.2.0'`` → ``(1, 2, 0)``. A non-numeric part
-    sorts as 0 (never crash on an odd label). Used so the deploy dropdown defaults to the genuinely newest
-    verified version regardless of a mixed ``v``/no-``v`` version_number (Director obs 2026-07-11)."""
-    return tuple(int(p) if p.isdigit() else 0 for p in version_number.lstrip("vV").split("."))
-
-
 def _is_pre_release(version_number: str) -> bool:
     """Je to ešte vývojové číslo, teda pod 1.0.0? (ICCINT-151)
 
@@ -371,7 +365,7 @@ def _is_pre_release(version_number: str) -> bool:
     Prázdne alebo nečitateľné číslo sa berie ako vývojové: to je pôvodné správanie a mení sa len
     tam, kde je číslo jasne 1.0.0 alebo vyššie.
     """
-    return _semver_sort_key(version_number)[0] < 1
+    return number_order_key(version_number)[0] < 1
 
 
 def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
@@ -393,7 +387,6 @@ def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
         select(Version.id, Version.version_number)
         .join(PipelineState, PipelineState.version_id == Version.id)
         .where(Version.project_id == project_id, PipelineState.current_stage == VERIFIED_STAGE)
-        .order_by(Version.version_number.desc())
     ).all()
     if not rows:
         return []
@@ -403,7 +396,7 @@ def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
     # Sort SEMANTICALLY, not by the SQL string order: version_number mixes 'v1.0.0' (the graduated first-PROD)
     # and '1.1.0', so a string desc put the OLDER 'v1.0.0' first ('v' > '1' in ASCII) and the Nasadiť dropdown
     # (verified_versions[0]) defaulted to an OLD version → accidental old-version deploy risk on UAT + PROD.
-    return sorted(verified, key=_semver_sort_key, reverse=True)
+    return sorted(verified, key=number_order_key, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +556,7 @@ def deployability(
     if not rows:
         return {"cause": DEPLOY_CAUSE_NONE_FINISHED, **none_implicated}
 
-    candidates = sorted(rows, key=lambda row: _semver_sort_key(row[1]), reverse=True)
+    candidates = sorted(rows, key=lambda row: number_order_key(row[1]), reverse=True)
     head = _repo_head(claude_agent.PROJECTS_ROOT / project.slug)  # read HEAD ONCE per project (batch)
 
     for version_id, version_number, stage, status, is_regate in candidates:

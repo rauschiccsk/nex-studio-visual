@@ -55,6 +55,7 @@ from backend.services.pipeline_metrics import (
     aggregate_usage_by_phase,
 )
 from backend.services.usage_ledger import UsagePart, parts_from_usage_payload
+from backend.services.version import number_order_key
 
 logger = logging.getLogger(__name__)
 
@@ -736,10 +737,10 @@ def compute_project_metrics(db: Session, project: Project) -> ProjectCostsRead:
     # `coefficient_minutes_per_mtok is None`, and two sources for one fact is how they drift apart.
     wages_configured = _wages_configured(db)
 
-    versions = (
-        db.execute(select(Version).where(Version.project_id == project.id).order_by(Version.version_number.asc()))
-        .scalars()
-        .all()
+    # DEV-169: oldest number first — the cumulative totals add the versions up in the order of their numbers.
+    versions = sorted(
+        db.execute(select(Version).where(Version.project_id == project.id)).scalars().all(),
+        key=lambda version: number_order_key(version.version_number),
     )
 
     cumulative_grand = UsageTotals()
