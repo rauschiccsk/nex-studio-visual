@@ -5265,11 +5265,13 @@ def _git_publish(project_root: Path, args: list[str]) -> tuple[int, str, str]:
         return 1, "", str(exc)
 
 
-#: DEV-96 — the brief's rule; the charter says the same for a session that has read it.
+#: DEV-96 — the brief's rule; the charter says the same for a session that has read it. DEV-173: the agent sends
+#: nothing — its permissions forbid ``git push`` and the old rule told it to push its red proofs all the same.
 PUSH_RULE = (
-    "Hlavnú vetvu na GitHub odošle kokpit hneď po tejto úlohe — sám ju neodosielaj. Bočnú vetvu pošli na GitHub "
-    "len pre červený dôkaz; jej výsledok nie je výsledok verzie. Predmet commitu červeného dôkazu začína "
-    f"`{ci_runs.PROOF_MARK}` — podľa toho ho kokpit ukáže ako dôkaz, nie ako chybu (DEV-105)."
+    "Na GitHub nič neodosielaj — hlavnú vetvu odošle kokpit hneď po tejto úlohe. Červený dôkaz commitni na bočnú "
+    f"vetvu s predmetom, ktorý začína `{ci_runs.PROOF_MARK}`, a vráť sa na hlavnú vetvu; po úlohe ju na GitHub "
+    "odošle a kontroly na nej spustí kokpit. Jej výsledok nie je výsledok verzie a kokpit ho ukáže ako dôkaz, nie "
+    "ako chybu (DEV-105)."
 )
 
 #: DEV-96 — why a branch did not reach ``origin``, in the words the manager reads.
@@ -5364,7 +5366,82 @@ async def _push_after_task(project_root: Path) -> Optional[str]:
         pushed, _branch, why = await run_blocking(_push_branch, project_root, cap=GIT_PUSH_CAP)
     except BlockingWorkTimedOut:
         return f"odoslanie neskončilo do {GIT_PUSH_CAP} s"
-    return None if pushed or why is None else why
+    if not pushed:
+        return why
+    try:
+        problems = await run_blocking(_push_proof_branches, project_root, cap=GIT_PUSH_CAP)
+    except BlockingWorkTimedOut:
+        return f"odoslanie červeného dôkazu neskončilo do {GIT_PUSH_CAP} s"
+    return "; ".join(problems) or None
+
+
+def _push_proof_branches(project_root: Path) -> list[str]:
+    """DEV-173 — the red proofs the agent left on side branches go to GitHub, and the project's hand-startable CI
+    starts on each, by the cockpit: the agent's permissions forbid ``git push`` (and from DEV-179 its token cannot
+    write). A side branch counts when its newest commit's subject starts with :data:`ci_runs.PROOF_MARK`; one GitHub
+    already has at that commit is left alone, so a proof is sent and its CI started once. Returns why something did not
+    go, in the manager's words."""
+    if _git_publish(project_root, ["remote", "get-url", "origin"])[0] != 0:
+        return []
+    current = _git_publish(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])[1]
+    rc, listing, _ = _git_publish(
+        project_root, ["for-each-ref", "refs/heads", "--format=%(refname:short)%09%(objectname)%09%(subject)"]
+    )
+    if rc != 0:
+        return []
+    problems: list[str] = []
+    for row in listing.splitlines():
+        branch, sha, subject = (row.split("\t", 2) + ["", ""])[:3]
+        if branch == current or not subject.lower().startswith(ci_runs.PROOF_MARK):
+            continue
+        if _git_publish(project_root, ["rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"])[1] == sha:
+            continue
+        pushed = git_push.push(
+            project_root, "origin", f"refs/heads/{branch}:refs/heads/{branch}", timeout=_GIT_PUSH_TIMEOUT
+        )
+        if pushed.returncode != 0:
+            reason = pushed.stderr.strip() or "git push skončil chybou"
+            problems.append(f"červený dôkaz na vetve {branch} sa na GitHub nedostal: {reason}")
+            continue
+        for workflow in _dispatchable_workflows(project_root):
+            why = _start_ci(project_root, workflow, branch)
+            if why:
+                problems.append(f"kontroly {workflow} na vetve {branch} sa nespustili: {why}")
+    return problems
+
+
+def _dispatchable_workflows(project_root: Path) -> list[str]:
+    """The project's workflows that can be started by hand (``workflow_dispatch``) — on a side branch CI runs only so,
+    on push it runs on the main branch alone (``templates/github-actions-workflow.yml``)."""
+    found = []
+    for path in sorted((project_root / ".github" / "workflows").glob("*.y*ml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        triggers = data.get("on", data.get(True)) if isinstance(data, dict) else None  # YAML 1.1 reads ``on`` as True
+        if triggers == "workflow_dispatch" or (isinstance(triggers, (dict, list)) and "workflow_dispatch" in triggers):
+            found.append(path.name)
+    return found
+
+
+def _start_ci(project_root: Path, workflow: str, branch: str) -> Optional[str]:
+    """``gh workflow run`` of the project's *workflow* on *branch* — ``None``, or why it did not start."""
+    rc, url, _ = _git_publish(project_root, ["remote", "get-url", "origin"])
+    repo = _repo_full_from_remote(url) if rc == 0 else None
+    if repo is None:
+        return "repozitár projektu na GitHube sa nedá určiť"
+    try:
+        done = subprocess.run(
+            ["gh", "workflow", "run", workflow, "--ref", branch, "-R", repo],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_PUSH_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc)
+    return None if done.returncode == 0 else (done.stderr.strip() or "gh workflow run skončil chybou")
 
 
 def _apply_customer_note_to_fix_epic(db: Session, version_id: uuid.UUID) -> bool:

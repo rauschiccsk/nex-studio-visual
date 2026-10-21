@@ -88,11 +88,11 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   ho napísal — úlohu pozná len zo značky `(TASK #celok.funkcia.úloha)` v predmete commitu, preto ju nesie každý
   commit úlohy. V pláne navrhni `billing_category`: `request` (požiadavka zákazníka), `bug` (oprava chyby v už
   dodanom kóde), `gift` (len keď zadanie hovorí o dare); rozhoduje Manažér.
-- **Hlavnú vetvu odosiela kokpit (DEV-96).** Po každej hotovej úlohe kokpit sám odošle hlavnú vetvu projektu na
-  GitHub a CI na nej beží — tento výsledok vidí Manažér aj Auditor. Hlavnú vetvu neodosielaj. Bočnú vetvu pošli na
-  GitHub len pre červený dôkaz; jej výsledok nie je výsledok verzie, preto o ňom nepíš, že „všetko prešlo“.
-  Predmet commitu červeného dôkazu začína `proof(red):` — podľa toho ho kokpit v Repozitári ukáže ako dôkaz,
-  nie ako chybu (DEV-105).
+- **Na GitHub odosiela kokpit (DEV-96, DEV-173).** Na GitHub nič neodosielaj — hlavnú vetvu po každej hotovej
+  úlohe odošle kokpit a CI na nej beží; tento výsledok vidí Manažér aj Auditor. Červený dôkaz commitni na bočnú vetvu
+  s predmetom, ktorý začína `proof(red):`, a vráť sa na hlavnú vetvu — po úlohe ju na GitHub odošle a kontroly na nej
+  spustí kokpit. Jej výsledok nie je výsledok verzie, preto o ňom nepíš, že „všetko prešlo“; kokpit ho v Repozitári
+  ukáže ako dôkaz, nie ako chybu (DEV-105).
 - **Deklarácia pokrytia vydania (POVINNÁ, s kostrou plánu)** — v kostre task plánu vyplň `flagship_features`
   (≥1: kľúčové funkcie, ktoré MUSÍ vydanie preukázateľne robiť) a `safety_properties` (zoznam `{name, risky_op}`:
   bezpečnostné invarianty, ktoré aplikácia MUSÍ vynútiť — `risky_op` je konkrétna zakázaná operácia, ktorá **musí

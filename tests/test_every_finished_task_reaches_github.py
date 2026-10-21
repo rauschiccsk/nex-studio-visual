@@ -252,8 +252,9 @@ def test_every_task_brief_says_the_cockpit_pushes(flow):
 def test_the_charter_says_the_cockpit_pushes():
     charter = (Path(__file__).resolve().parents[1] / "templates" / "ai-agent-charter.md").read_text(encoding="utf-8")
 
-    assert "Hlavnú vetvu odosiela kokpit (DEV-96)." in charter
-    assert "Hlavnú vetvu neodosielaj." in charter
+    # DEV-173 (Director 21.10.2026: „Súhlasím“): the agent sends nothing — neither the main branch nor a red proof.
+    assert "Na GitHub odosiela kokpit (DEV-96, DEV-173)." in charter
+    assert "Na GitHub nič neodosielaj" in charter
 
 
 # ── the build line ──────────────────────────────────────────────────────────────────────────────────────────────
