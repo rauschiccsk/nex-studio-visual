@@ -74,19 +74,31 @@ def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -
     )
 
 
-def working_tree_status(source_path: str, *, paths: Sequence[str] = (), timeout: int = 30) -> dict:
+def working_tree_status(
+    source_path: str, *, paths: Sequence[str] = (), exclude: Sequence[str] = (), timeout: int = 30
+) -> dict:
     """Return the project's working-tree cleanliness for the founding preflight.
 
     ``{clean, dirty_count, files: [{code, path}], truncated}`` from ``git status
     --porcelain``. ``clean`` is the gate the New-Version flow checks: founding is
     allowed only when ``clean`` is true. *paths* limits the answer to those paths (DEV-164: the switch to Web asks only
-    about the files it writes); empty = the whole workspace.
+    about the files it writes); empty = the whole workspace. *exclude* (git pathspec globs) leaves paths out —
+    DEV-174: the files the cockpit writes itself (``workspace_owner.COCKPIT_WRITES``).
 
     Raises:
         ValueError: the source path is missing / not a git repo, or ``git`` failed.
     """
     root = _project_root(source_path)
-    proc = _run(root, ["status", "--porcelain", *(["--", *paths] if paths else [])], timeout=timeout)
+    args = ["status", "--porcelain"]
+    if exclude:
+        args += [
+            "--",
+            *(paths or ["."]),
+            *(f":(glob,exclude){pattern}" for pattern in exclude),
+        ]
+    elif paths:
+        args += ["--", *paths]
+    proc = _run(root, args, timeout=timeout)
     if proc.returncode != 0:
         raise ValueError("git status zlyhal")
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]

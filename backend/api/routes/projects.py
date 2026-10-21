@@ -828,7 +828,8 @@ def get_git_status(
         # every project whose workspace is not a checkout.
         return {"clean": True, "dirty_count": 0, "files": [], "truncated": False, "not_a_repo": True}
     try:
-        return git_state_service.working_tree_status(project.source_path)
+        # DEV-174: the cockpit's own files (agents' rules and skills, the task plan) are not the Manažér's unsaved work.
+        return git_state_service.working_tree_status(project.source_path, exclude=workspace_owner.COCKPIT_WRITES)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

@@ -14,6 +14,17 @@ logger = logging.getLogger(__name__)
 # runs ``npm install`` as uid 1000 and cannot write ``node_modules`` into a root-owned ``frontend/`` (v4.0.44).
 _WORKSPACE_OWNER = "1000:1000"
 
+#: DEV-174 — what the cockpit itself writes into a project's workspace and never commits there: the agents' rules
+#: and skills (refreshed before every new session, DEV-47 — HEAD must not move) and each version's task plan, written
+#: from the database (``orchestrator._write_task_plan_doc``). As git pathspec globs. The agent's own permissions
+#: forbid editing ``.claude/agents`` and ``.claude/skills``, so no work of the agent can be there; the check of
+#: unsaved changes leaves these out, or the Manažér is asked to save or throw away files that were never his.
+COCKPIT_WRITES: tuple[str, ...] = (
+    ".claude/agents/**",
+    ".claude/skills/**",
+    "docs/specs/versions/*/spec/task-plan.md",
+)
+
 
 def chown_workspace(source_path: str | None) -> None:
     """Best-effort ``chown -R 1000:1000`` of a freshly created project workspace.
