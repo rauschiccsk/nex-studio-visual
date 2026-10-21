@@ -27,6 +27,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
 import type { WorkKind } from "@/lib/workKind";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
+import WebSwitchPanel from "@/components/project/WebSwitchPanel";
 import type { ProjectRead, UserRead } from "@/types";
 import type { Version } from "@/types/version";
 import { mayOperateProject } from "@/services/permissions";
@@ -514,6 +515,15 @@ export default function ProjectDetailPage() {
         canEdit={mayOperateProject(user, project.created_by)}
         onSaved={setProject}
       />
+
+      {/* DEV-164: a Štandardný project can become a Web project (administration + public web); a Web one names both. */}
+      {mayOperateProject(user, project.created_by) && (project.type === "standard" || project.type === "web") && (
+        <WebSwitchPanel
+          projectId={project.id}
+          isWeb={project.type === "web"}
+          onSwitched={() => void getProjectApi(project.id).then(setProject)}
+        />
+      )}
 
       {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
           žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz.

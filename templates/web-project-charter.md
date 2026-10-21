@@ -19,4 +19,4 @@ Web má vlastné CI `.github/workflows/web.yml`. Pri každej obrazovke v Návrhu
 - Obnova hesla a potvrdenie e-mailu len keď ich žiada Zadanie (potrebujú poštový server projektu).
 
 Aktualizácie sú len v administrácii. `docker-compose.yml` má službu `frontend` aj `web` (z `web/`, nginx so `/api` na
-backend).
+backend). V `.env.example` adresu webu označ `# @public-url`, adresu administrácie `# @public-url-admin`.

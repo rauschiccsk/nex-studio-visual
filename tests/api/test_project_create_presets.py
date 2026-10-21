@@ -16,7 +16,6 @@ from __future__ import annotations
 import pytest
 
 from backend.services import github_validation as github_validation_service
-from backend.services import project_surfaces
 from backend.services import system_setting as system_setting_service
 from tests.api.test_project_create_validation import _payload, creator, router_client  # noqa: F401
 
@@ -48,9 +47,9 @@ def test_the_form_starts_with_ci_and_the_full_check_on(router_client, db_session
             f"{REFUSED} (treba GitHub Pro). Keď sa plán zmení, zapni ju v Nastavenia → GitHub → "
             "„Ochrana vetvy pri súkromnom repozitári“."
         ),
-        # DEV-160: Web stays closed, with the reason, until the cockpit can build its second frontend.
-        "web_available": False,
-        "web_note": project_surfaces.WEB_NOT_YET,
+        # DEV-164: Web is open — the cockpit builds, previews, verifies and deploys its second frontend.
+        "web_available": True,
+        "web_note": None,
     }
 
 

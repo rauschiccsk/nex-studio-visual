@@ -175,14 +175,29 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
             .map((r) => (
               <li key={r.customer_id} className="flex flex-wrap items-center gap-x-2">
                 <span className="font-medium text-[var(--color-text-primary)]">{r.customer_name}:</span>
-                <a
-                  href={r.uat_url ?? undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-primary-400 hover:text-primary-300 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-                >
-                  <ExternalLink className="h-3 w-3" aria-hidden /> UAT
-                </a>
+                {(r.uat_urls ?? []).length === 0 ? (
+                  <a
+                    href={r.uat_url ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-primary-400 hover:text-primary-300 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                  >
+                    <ExternalLink className="h-3 w-3" aria-hidden /> UAT
+                  </a>
+                ) : (
+                  // DEV-164: a Web project — the administration and the web each have their address.
+                  (r.uat_urls ?? []).map((link) => (
+                    <a
+                      key={link.url}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-primary-400 hover:text-primary-300 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                    >
+                      <ExternalLink className="h-3 w-3" aria-hidden /> {link.label}
+                    </a>
+                  ))
+                )}
                 {login.get(r.customer_id) && <span>prihlásenie: {login.get(r.customer_id)}</span>}
               </li>
             ))}

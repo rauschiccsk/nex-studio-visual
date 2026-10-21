@@ -94,6 +94,7 @@ from backend.services import (
     deploy_progress,
     launch_pairing,
     private_access,
+    project_surfaces,
     uat_provisioner,
 )
 
@@ -808,6 +809,9 @@ def build_matrix(
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.
                 "uat_url": _instance_url(customer, "uat", project) if uat_version else None,
                 "prod_url": _instance_url(customer, "prod", project) if prod_version else None,
+                # DEV-164: a Web project's installation has an address for every frontend.
+                "uat_urls": _frontend_urls(_instance_url(customer, "uat", project), project) if uat_version else [],
+                "prod_urls": _frontend_urls(_instance_url(customer, "prod", project), project) if prod_version else [],
             }
         )
 
@@ -1497,6 +1501,18 @@ def _instance_url(customer: Customer, environment: str, project: Project) -> str
     if environment == "prod":
         return _prod_url(base, app, private=private)
     return _url_for_instance_slug(f"{base}-{app}", private=private)
+
+
+def _frontend_urls(main_url: str, project: Project) -> list[dict[str, str]]:
+    """DEV-164: ``[{label, url}]`` for every frontend of a Web project's installation — the address suffix goes after
+    the installation's name (``https://uat-k-app-admin.isnex.eu`` beside ``https://uat-k-app.isnex.eu``). Empty for a
+    project with one frontend: its one link is ``main_url``."""
+    surfaces = project_surfaces.surfaces_of(project)
+    if len(surfaces) < 2:
+        return []
+    scheme, rest = main_url.split("://", 1)
+    name, zone = rest.split(".", 1)
+    return [{"label": s.label, "url": f"{scheme}://{name}{s.address_suffix}.{zone}"} for s in surfaces]
 
 
 def _prod_url(customer_slug: str, app: str, *, private: bool = False) -> str:

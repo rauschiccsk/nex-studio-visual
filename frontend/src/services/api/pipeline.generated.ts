@@ -5818,6 +5818,11 @@ export interface components {
              */
             prod_url?: string | null;
             /**
+             * Prod Urls
+             * @description DEV-164: a Web project's PROD link for every frontend; empty otherwise.
+             */
+            prod_urls?: components["schemas"]["FrontendLinkRead"][];
+            /**
              * Prod Version
              * @description Currently deployed PROD version (None = never).
              */
@@ -5850,6 +5855,11 @@ export interface components {
              * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.
              */
             uat_url?: string | null;
+            /**
+             * Uat Urls
+             * @description DEV-164: a Web project's UAT link for every frontend (Administrácia, Web); empty otherwise.
+             */
+            uat_urls?: components["schemas"]["FrontendLinkRead"][];
             /**
              * Uat Version
              * @description Currently deployed UAT version (None = never).
@@ -6348,6 +6358,16 @@ export interface components {
              * @description Updated feat title.
              */
             title?: string | null;
+        };
+        /**
+         * FrontendLinkRead
+         * @description DEV-164: one frontend's link of an installation — by the name the Manažér knows it.
+         */
+        FrontendLinkRead: {
+            /** Label */
+            label: string;
+            /** Url */
+            url: string;
         };
         /**
          * GitHubRepoNotFoundError

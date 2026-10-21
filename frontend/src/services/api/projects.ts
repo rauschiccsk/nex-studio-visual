@@ -21,6 +21,18 @@ export function createProjectApi(data: ProjectCreate): Promise<ProjectRead> {
   return api.post<ProjectRead>("/projects", data);
 }
 
+/** DEV-164: what switching the project to Web would give it — its frontends and the web's port — or why it cannot. */
+export type WebSwitch = components["schemas"]["WebSwitchRead"];
+
+export function getWebSwitchApi(projectId: string): Promise<WebSwitch> {
+  return api.get<WebSwitch>(`/projects/${projectId}/web-switch`);
+}
+
+/** Switch the project to Web: its workspace gets the public web (web/), its CI and checks; the change is kept. */
+export function switchToWebApi(projectId: string): Promise<WebSwitch> {
+  return api.post<WebSwitch>(`/projects/${projectId}/web-switch`);
+}
+
 export function getProjectApi(projectId: string): Promise<ProjectRead> {
   return api.get<ProjectRead>(`/projects/${projectId}`);
 }

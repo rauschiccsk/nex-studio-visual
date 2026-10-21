@@ -6625,31 +6625,53 @@ async def _verify_uat_serves(
     # does not). nginx ships no Python, so it cannot probe itself.
     fe_role = roles["frontend"]
     if fe_role is not None:
-        fe_ports = _frontend_ports(services[fe_role])
         # DEV-102: names and the address come from the one naming rule — a private project (DEV-42) lives in the
         # private zone; the check once built the public address itself and failed Career Asistent's good deploy.
         name_base, public_host = uat_provisioner._instance_naming(
             environment, uat_slug, customer_slug, app, private=private
         )
-        fe_host = f"{name_base}-{fe_role}"
-        fe_ready, fe_last = await _await_http_ready(base, be_role, fe_ports, host=fe_host, path="/", env=env_ciela)
-        if not fe_ready:
-            return False, f"frontend '{fe_role}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
+        # DEV-164: every frontend of the project with its own address — a Web project's web on the main one, its
+        # administration on ``…-admin``; one frontend is the installation's frontend on its address, as before.
+        surfaces = project_surfaces.surfaces_of_slug(project_slug)
+        frontends = (
+            [
+                (surface.service, fe_public)
+                for surface, _router, fe_public in uat_provisioner.frontend_routes(name_base, public_host, surfaces)
+                if surface.service in services
+            ]
+            if len(surfaces) > 1
+            else [(fe_role, public_host)]
+        )
+        for fe_service, _fe_public in frontends:
+            fe_ports = _frontend_ports(services[fe_service])
+            fe_host = f"{name_base}-{fe_service}"
+            fe_ready, fe_last = await _await_http_ready(base, be_role, fe_ports, host=fe_host, path="/", env=env_ciela)
+            if not fe_ready:
+                return False, f"frontend '{fe_service}' not serving within {ACCEPTANCE_SMOKE_READY_TIMEOUT}s: {fe_last}"
         # The checks above prove the app serves IN-network; they do NOT prove the PUBLIC Traefik route works.
         # The andros-payables outage (2026-07-10): healthy containers, but a poisoned Host() label left no route
         # for the real domain → 404 at the public URL, while the cockpit reported "✓ Nasadené". Probe the route
         # the internet actually uses — from the app's own container (on nex-proxy-net), hit Traefik with the
         # public Host header — so a broken public route is a real deploy FAILURE, not a false success.
         if (deploy_host or "").strip():
-            # DEV-68: an installation on another machine is asked at its own addresses, the way its users open them.
+            # DEV-68: an installation on another machine is asked at its own addresses, the way its users open them
+            # (every router of the installation — a Web project's both addresses).
             public_host, route_state, route_last = await _verify_remote_public_route(uat_compose)
+            checked = [(public_host, route_state, route_last)]
         else:
-            route_state, route_last = await _verify_public_route(base, be_role, public_host)
-        if route_state == "down":
-            return False, (
-                f"aplikácia beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: {route_last}"
-            )
-        if route_state == "skip":
+            checked = []
+            for _fe_service, fe_public in frontends:
+                route_state, route_last = await _verify_public_route(base, be_role, fe_public)
+                checked.append((fe_public, route_state, route_last))
+        for public_host, route_state, route_last in checked:
+            if route_state == "down":
+                return False, (
+                    f"aplikácia beží, ale verejná adresa {public_host} nie je dostupná — smerovanie zlyhalo: "
+                    f"{route_last}"
+                )
+        skipped = [(h, last) for h, state, last in checked if state == "skip"]
+        if skipped:
+            public_host, route_last = skipped[0]
             # Audit P1 (2026-07-12): "couldn't verify the public route" is NOT clean success — it is the SAME
             # condition as a real ingress outage (Traefik renamed / not on nex-proxy-net / transient DNS), the
             # exact blindspot the probe closes. On PROD (customer-facing) FAIL-CLOSED — a public route we cannot

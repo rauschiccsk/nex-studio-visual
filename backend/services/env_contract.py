@@ -12,7 +12,8 @@ The app says it in its own ``.env.example``, in a comment of the block right abo
 * ``# @customer: „text for the manager“`` — the manager enters the value for each customer;
 * ``# @customer-secret: „text“`` — the same, but a secret: kept in the credentials store, never shown back;
 * ``required`` after the marker (``# @customer required: „…“``) — no deploy without a value;
-* ``# @public-url`` — the cockpit writes the installation's public address.
+* ``# @public-url`` — the cockpit writes the installation's public address (in a Web project: the web's).
+* ``# @public-url-admin`` — a Web project's administration address (``…-admin``; DEV-164).
 
 The text is in quotes because it is shown to a person (the cockpit's language rule: Slovak only in displayed text).
 """
@@ -27,8 +28,15 @@ from typing import Mapping, Sequence
 CUSTOMER = "customer"
 CUSTOMER_SECRET = "customer_secret"
 PUBLIC_URL = "public_url"
+#: DEV-164: a Web project's administration has an address of its own (``…-admin``); ``@public-url`` is the web's.
+PUBLIC_URL_ADMIN = "public_url_admin"
 
-_KINDS = {"customer": CUSTOMER, "customer-secret": CUSTOMER_SECRET, "public-url": PUBLIC_URL}
+_KINDS = {
+    "customer": CUSTOMER,
+    "customer-secret": CUSTOMER_SECRET,
+    "public-url": PUBLIC_URL,
+    "public-url-admin": PUBLIC_URL_ADMIN,
+}
 
 #: ``# @<word> [required][: text]`` — any ``# @word`` is a marker, so a misspelt one is reported, not ignored.
 _MARKER = re.compile(r"^#\s*@([\w-]+)(?:\s+(required))?\s*(?::\s*(.*?))?\s*$")
@@ -69,6 +77,10 @@ class Contract:
     @property
     def public_url_keys(self) -> set[str]:
         return {s.key for s in self.of_kind(PUBLIC_URL)}
+
+    @property
+    def public_url_admin_keys(self) -> set[str]:
+        return {s.key for s in self.of_kind(PUBLIC_URL_ADMIN)}
 
 
 def _label(raw: str | None, key: str) -> str:

@@ -150,10 +150,21 @@ def test_the_database_refuses_a_web_port_that_does_not_fit_the_type(db_session, 
             _project(db_session, owner, project_type=project_type, web_port=web_port)
 
 
-# --- Web is closed until every phase knows it -------------------------------------------------------------------------
+# --- Web was closed until every phase knew it (DEV-164 opened it) ----------------------------------------------------
 
 
-def test_web_cannot_be_founded_yet_and_the_form_says_why(client, db_session):
+def test_web_is_open_to_the_manazer_now():
+    """DEV-164: founding, Vizuál, Verifikácia and deploy know the second frontend — the gate is open."""
+    assert ps.WEB_PROJECTS_AVAILABLE is True
+
+
+@pytest.fixture
+def web_closed(monkeypatch):
+    """The gate closed again — what a phase found wanting would do; the refusal must still say why."""
+    monkeypatch.setattr(ps, "WEB_PROJECTS_AVAILABLE", False)
+
+
+def test_closed_web_cannot_be_founded_and_the_form_says_why(client, db_session, web_closed):
     owner = _user(db_session)
     _as(db_session, owner)
 
@@ -168,7 +179,7 @@ def test_web_cannot_be_founded_yet_and_the_form_says_why(client, db_session):
     assert db_session.execute(select(Project).where(Project.slug == "cas-web")).first() is None
 
 
-def test_web_cannot_be_switched_to_yet(client, db_session):
+def test_closed_web_cannot_be_switched_to(client, db_session, web_closed):
     owner = _user(db_session)
     project = _project(db_session, owner)
     _as(db_session, owner)

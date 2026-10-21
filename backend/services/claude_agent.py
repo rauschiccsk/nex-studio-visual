@@ -232,13 +232,9 @@ def _refresh_rules(project_slug: str) -> None:
 
 def _project_type(project_slug: str) -> Optional[str]:
     """The project's type as the cockpit keeps it (``projects.type``), or None when there is no such project."""
-    from sqlalchemy import select
+    from backend.services import project_surfaces
 
-    from backend.db.models.projects import Project
-    from backend.db.session import SessionLocal
-
-    with SessionLocal() as db:
-        return db.execute(select(Project.type).where(Project.slug == project_slug)).scalar_one_or_none()
+    return project_surfaces.type_of_slug(project_slug)
 
 
 #: Per-event callback type for streaming mode. Receives each parsed stream-json

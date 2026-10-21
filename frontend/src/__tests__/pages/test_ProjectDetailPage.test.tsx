@@ -82,6 +82,10 @@ vi.mock("@/services/api/projects", () => ({
   // ICCINT-152: stránka sa pýta, či Dedo nepripravil zadanie. Chýbajúca atrapa nie je „o jeden dopyt
   // menej“ — volanie `undefined` vyhodí chybu SYNCHRÓNNE a zhodí celé načítanie projektu.
   getProjectDedoProposalApi: getProjectDedoProposalApiMock,
+  // DEV-164: the panel „Projekt s webom“ asks whether the project can switch to Web; it stays empty until it hears
+  // back, so a question that never answers keeps it out of what these tests measure.
+  getWebSwitchApi: vi.fn(() => new Promise(() => {})),
+  switchToWebApi: vi.fn(),
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({

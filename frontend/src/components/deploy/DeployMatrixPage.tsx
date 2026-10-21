@@ -515,6 +515,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const chosen = pickedVersion(row);
                 // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
                 const liveUrl = environment === "uat" ? row.uat_url : row.prod_url;
+                // DEV-164: a Web project's installation has a link for every frontend (Administrácia, Web).
+                const liveUrls = (environment === "uat" ? row.uat_urls : row.prod_urls) ?? [];
                 // Audit #5: the newest attempt failed → flag it so the last-good/empty cell isn't read as green.
                 const lastAttemptFailed =
                   environment === "uat" ? row.uat_last_attempt_failed : row.prod_last_attempt_failed;
@@ -621,7 +623,18 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           ⚠ {w}
                         </div>
                       ))}
-                      {liveUrl && renderLaunchOrOpen(row.customer_id, liveUrl)}
+                      {liveUrl && liveUrls.length === 0 && renderLaunchOrOpen(row.customer_id, liveUrl)}
+                      {liveUrls.map((link) => (
+                        <a
+                          key={link.url}
+                          href={link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline pointer-coarse:min-h-11"
+                        >
+                          <ExternalLink className="h-3 w-3" /> Otvoriť: {link.label}
+                        </a>
+                      ))}
                     </td>
 
                     {/* Nasadiť version picker (verified versions only) */}

@@ -808,6 +808,24 @@ export function registerFixtures(): void {
     changelog: [{ version: "v0.20.0", body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu." }],
     frontends: [{ directory: "frontend", label: "Aplikácia", current: "v0.19.0" }],
   });
+  // DEV-164: the panel „Projekt s webom“ — NEX Inbox signs in by token, so the cockpit names why it cannot switch.
+  answer("get", "/api/v1/projects/{project_id}/web-switch", {
+    allowed: false,
+    refusal: "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom.",
+    web_port: null,
+    surfaces: [
+      {
+        name: "app",
+        label: "Aplikácia",
+        directory: "frontend",
+        service: "frontend",
+        port: PROJECT.frontend_port,
+        login: "token",
+        address_suffix: "",
+      },
+    ],
+    warnings: [],
+  });
   answer("get", "/api/v1/projects/ports/suggest-block", { base: 9300, block_size: 3, warnings: [] });
   answer("get", "/api/v1/projects/create-presets", {
     enable_cicd: true,
@@ -817,11 +835,9 @@ export function registerFixtures(): void {
     full_smoke: true,
     custom_development_enabled: false,
     private_network: false,
-    // DEV-160: Web stays closed, with the reason under it, until the cockpit can build a second frontend.
-    web_available: false,
-    web_note:
-      "Projekt s webom a administráciou kokpit ešte nevie postaviť ani nasadiť — učí sa to po krokoch a voľba Web " +
-      "sa sprístupní, keď bude hotový posledný z nich.",
+    // DEV-164: the cockpit builds and deploys a Web project — the choice is open, with no note under it.
+    web_available: true,
+    web_note: null,
   });
   answerUntyped<AdoptableCandidate[]>("get", "/api/v1/projects/adoptable", [
     { slug: "nex-ledger", source_path: "/opt/projects/nex-ledger", name: "NEX Ledger" },

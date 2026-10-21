@@ -335,8 +335,9 @@ class TestInvalidType:
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 201
 
-    def test_web_is_refused_until_the_cockpit_can_build_it(self, router_client, creator):
-        """'web' is a valid type, but founding one waits for DEV-164 — the refusal says why (DEV-160)."""
+    def test_web_is_refused_while_its_gate_is_closed(self, router_client, creator, monkeypatch):
+        """'web' is a valid type; with the gate closed founding one is refused with the reason (DEV-160, DEV-164)."""
+        monkeypatch.setattr(project_surfaces, "WEB_PROJECTS_AVAILABLE", False)
         payload = _payload(creator.id, type="web")
         resp = router_client.post("/api/v1/projects", json=payload)
         assert (resp.status_code, resp.json()["detail"]) == (422, project_surfaces.WEB_NOT_YET)

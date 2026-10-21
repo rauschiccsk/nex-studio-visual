@@ -118,6 +118,13 @@ class DeployResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class FrontendLinkRead(BaseModel):
+    """DEV-164: one frontend's link of an installation — by the name the Manažér knows it."""
+
+    label: str
+    url: str
+
+
 class DeployMatrixRow(BaseModel):
     """One customer's row in the version × customer matrix (design §3.3).
 
@@ -175,6 +182,14 @@ class DeployMatrixRow(BaseModel):
     prod_url: Optional[str] = Field(
         default=None,
         description="Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.",
+    )
+    uat_urls: list[FrontendLinkRead] = Field(
+        default_factory=list,
+        description="DEV-164: a Web project's UAT link for every frontend (Administrácia, Web); empty otherwise.",
+    )
+    prod_urls: list[FrontendLinkRead] = Field(
+        default_factory=list,
+        description="DEV-164: a Web project's PROD link for every frontend; empty otherwise.",
     )
 
 

@@ -63,7 +63,7 @@ import httpx
 import jinja2
 import yaml
 
-from backend.services import env_contract, remote_instance
+from backend.services import env_contract, project_surfaces, remote_instance
 
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
@@ -944,6 +944,7 @@ def generate_uat_env(
     customer_values: Optional[dict[str, str]] = None,
     public_url_keys: frozenset[str] = frozenset(),
     public_url: Optional[str] = None,
+    public_urls: Optional[dict[str, str]] = None,
 ) -> str:
     """Render the UAT ``.env`` content (detected DB creds + synthetic backend secrets).
 
@@ -1051,6 +1052,10 @@ def generate_uat_env(
             # nothing is minted and the preserved value is the right one — never a synthetic, which would make
             # every identity check fail while looking configured.
             rendered[key_str] = manager_api_key or preserved_secrets.get(key_str) or ""
+            continue
+        if key_str in (public_urls or {}):
+            # DEV-164: a Web project's further address — ``@public-url-admin`` gets the administration's.
+            rendered[key_str] = (public_urls or {})[key_str]
             continue
         if key_str in public_url_keys and public_url:
             # DEV-72: ``@public-url`` — the address the browser opens, the very host the Traefik route carries.
@@ -2058,16 +2063,32 @@ def frontend_traefik_labels(name_base: str, fe_internal_port: int, host: str) ->
     ]
 
 
-def backend_traefik_labels(name_base: str, be_internal_port: int, host: str) -> list[str]:
+def frontend_routes(
+    name_base: str, host: str, surfaces: tuple[project_surfaces.Surface, ...]
+) -> list[tuple[project_surfaces.Surface, str, str]]:
+    """DEV-164: ``(frontend, router id, host)`` for every frontend of a Web project's installation.
+
+    The web takes the installation's own router and main host; the administration its own pair with the frontend's
+    address suffix — ``uat-<customer>-<app>-admin`` beside ``uat-<customer>-<app>`` (one level under the zone, like
+    every installation name). ``host`` is ``<name_base>.<zone>``, so the zone is what follows the first dot."""
+    zone = host.split(".", 1)[1]
+    return [(s, f"{name_base}{s.address_suffix}", f"{name_base}{s.address_suffix}.{zone}") for s in surfaces]
+
+
+def backend_traefik_labels(name_base: str, be_internal_port: int, host: str | list[str]) -> list[str]:
     """The BE service's Traefik labels — the higher-priority ``/api`` PathPrefix split.
 
     ``name_base``/``host`` are per-env (see :func:`frontend_traefik_labels`); the router/service id
-    is ``<name_base>-api``.
+    is ``<name_base>-api``. DEV-164: a Web project's backend answers ``/api`` on the host of every frontend.
     """
+    hosts = [host] if isinstance(host, str) else list(host)
+    rule = (
+        f"Host(`{hosts[0]}`)" if len(hosts) == 1 else "(" + " || ".join(f"Host(`{h}`)" for h in hosts) + ")"
+    ) + " && PathPrefix(`/api`)"
     return [
         "traefik.enable=true",
         f"traefik.docker.network={PROXY_NETWORK}",
-        f"traefik.http.routers.{name_base}-api.rule=Host(`{host}`) && PathPrefix(`/api`)",
+        f"traefik.http.routers.{name_base}-api.rule={rule}",
         f"traefik.http.routers.{name_base}-api.entrypoints=web",
         f"traefik.http.routers.{name_base}-api.priority={BE_ROUTER_PRIORITY}",
         f"traefik.http.services.{name_base}-api.loadbalancer.server.port={be_internal_port}",
@@ -2197,6 +2218,7 @@ def build_uat_compose(
     version: Optional[str] = None,
     preserved_facts: Optional["InstanceFacts"] = None,
     private: bool = False,
+    surfaces: tuple[project_surfaces.Surface, ...] = (),
 ) -> dict[str, Any]:
     """Build the final compose **dict** from the parsed source compose (CR-1), environment-aware.
 
@@ -2313,6 +2335,23 @@ def build_uat_compose(
     vlastne_smerovanie = has_own_routing(preserved_facts)
     if vlastne_smerovanie:
         _prevezmi_smerovanie(services, preserved_facts)
+    elif len(surfaces) > 1:
+        # DEV-164: a Web project — every frontend its own address, the backend's /api on all of them.
+        api_hosts = []
+        for surface, router, fe_host in frontend_routes(name_base, host, surfaces):
+            if surface.service in services:
+                fe_port = detect_internal_port(src_services[surface.service], 80)
+                _add_proxy_network(services[surface.service])
+                services[surface.service]["labels"] = _merge_labels(
+                    services[surface.service].get("labels"), frontend_traefik_labels(router, fe_port, fe_host)
+                )
+            api_hosts.append(fe_host)
+        if be_name and be_name in services:
+            be_port = detect_internal_port(src_services[be_name], 8000)
+            _add_proxy_network(services[be_name])
+            services[be_name]["labels"] = _merge_labels(
+                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, api_hosts)
+            )
     else:
         if fe_name and fe_name in services:
             fe_port = detect_internal_port(src_services[fe_name], 80)
@@ -2545,7 +2584,30 @@ def build_compose_for_instance(
         customer_slug=customer_slug,
         app=app,
         private=private,
+        # DEV-164: the frontends of the project the installation is built from (its directory is the project slug).
+        surfaces=project_surfaces.surfaces_of_slug(project_path.name),
     )
+
+
+def _further_public_urls(
+    contract: "env_contract.Contract",
+    environment: str,
+    uat_slug: str,
+    customer_slug: Optional[str],
+    app: Optional[str],
+    private: bool,
+    project_slug: str,
+) -> dict[str, str]:
+    """DEV-164: ``{variable: address}`` for a Web project's ``@public-url-admin`` — the administration's address.
+    Empty for a project with one frontend: there is no further address to give."""
+    surfaces = project_surfaces.surfaces_of_slug(project_slug)
+    if len(surfaces) < 2 or not contract.public_url_admin_keys:
+        return {}
+    name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+    admin = next(
+        fe_host for surface, _router, fe_host in frontend_routes(name_base, host, surfaces) if surface.name == "admin"
+    )
+    return {key: f"https://{admin}" for key in contract.public_url_admin_keys}
 
 
 # ---------------------------------------------------------------------------
@@ -2792,6 +2854,7 @@ def provision_uat(
         customer_values=customer_values,
         public_url_keys=frozenset(contract.public_url_keys),
         public_url=f"https://{public_host}",
+        public_urls=_further_public_urls(contract, environment, uat_slug, customer_slug, app, private, project_slug),
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for

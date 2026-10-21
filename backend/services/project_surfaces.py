@@ -12,8 +12,8 @@ and its ports decide them:
 * **Web** — the administration in ``frontend/`` (service ``frontend``, address ``…-admin``, name + password) and the
   public web in ``web/`` (service ``web``, the project's main address, e-mail + password), both on the one backend.
 
-Until every phase knows the second frontend (DEV-160 … DEV-164) the Manažér can neither found a Web project nor switch
-one to Web — :data:`WEB_PROJECTS_AVAILABLE`, which DEV-164 opens. Director 20.10.2026 (kroky po jednom): „Súhlasím“.
+Until every phase knew the second frontend (DEV-160 … DEV-164) the Manažér could neither found a Web project nor switch
+one to Web — :data:`WEB_PROJECTS_AVAILABLE`, which DEV-164 opened. Director 20.10.2026 (kroky po jednom): „Súhlasím“.
 """
 
 from __future__ import annotations
@@ -36,8 +36,9 @@ USERNAME = "username"
 EMAIL = "email"
 TOKEN = "token"
 
-#: DEV-164 opens Web projects to the Manažér; until then every phase does not know the second frontend yet.
-WEB_PROJECTS_AVAILABLE = False
+#: DEV-164 opened Web projects to the Manažér: founding, Vizuál, Verifikácia and deploy know the second frontend. The
+#: switch stays so a phase found wanting can close Web again with its reason, without a release of every gate.
+WEB_PROJECTS_AVAILABLE = True
 WEB_NOT_YET = (
     "Projekt s webom a administráciou kokpit ešte nevie postaviť ani nasadiť — učí sa to po krokoch a voľba Web "
     "sa sprístupní, keď bude hotový posledný z nich."
@@ -78,6 +79,23 @@ def surfaces_of_type(project_type: str) -> tuple[Surface, ...]:
     """The frontends a project of *project_type* has, without its ports — what a step that knows only the type
     (the scaffold, the smoke check of a build) walks."""
     return _surfaces(project_type, USERNAME, None, None)
+
+
+def type_of_slug(slug: str) -> Optional[str]:
+    """The project's type as the cockpit keeps it (``projects.type``), or None when there is no such project — for
+    the steps that know a project only by its slug (a build turn, the smoke check, an installation)."""
+    from sqlalchemy import select
+
+    from backend.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        return db.execute(select(Project.type).where(Project.slug == slug)).scalar_one_or_none()
+
+
+def surfaces_of_slug(slug: str) -> tuple[Surface, ...]:
+    """The frontends of the project *slug* by its type; a project the cockpit does not know is Štandardný (only the
+    cockpit makes a Web project)."""
+    return surfaces_of_type(type_of_slug(slug) or STANDARD)
 
 
 def frontend_directories(project_type: str) -> tuple[str, ...]:

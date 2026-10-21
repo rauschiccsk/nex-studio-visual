@@ -53,6 +53,12 @@ export interface DeployResult {
 }
 
 /** One customer's row in the version × customer matrix (design §3.3). */
+/** DEV-164: one frontend's link of an installation, by the name the Manažér knows it. */
+interface FrontendLink {
+  label: string;
+  url: string;
+}
+
 export interface DeployMatrixRow {
   customer_id: string;
   customer_name: string;
@@ -89,6 +95,9 @@ export interface DeployMatrixRow {
   uat_url: string | null;
   /** Link to the customer's live PROD instance (the PROD tab link); null until a PROD deploy. */
   prod_url: string | null;
+  /** DEV-164: a Web project's link for every frontend (Administrácia, Web); empty for one frontend. */
+  uat_urls?: FrontendLink[];
+  prod_urls?: FrontendLink[];
 }
 
 /**
