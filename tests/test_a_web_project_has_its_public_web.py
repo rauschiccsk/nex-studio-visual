@@ -27,7 +27,7 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.main import app
 from backend.services import create_project_postscaffold as postscaffold
-from backend.services import nexshared, port_registry, template_bootstrap
+from backend.services import nexshared, port_registry, template_bootstrap, web_workspace
 from backend.services import project_surfaces as ps
 from backend.services import system_setting as system_setting_service
 
@@ -519,7 +519,7 @@ def test_a_web_that_was_already_there_is_never_removed(client, db_session, tmp_p
     answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
 
     assert answer.status_code == 409
-    assert answer.json()["detail"].startswith("V priečinku projektu sú neuložené zmeny (1)")
+    assert answer.json()["detail"] == _unsaved_in("web/")
     assert (ws / "web" / "mine.ts").read_text() == "// someone's work\n"
 
 
@@ -532,19 +532,110 @@ def _switch(client, db_session, tmp_path, ws: Path, script_body: str = FAKE_ADD_
     return project, client.post(f"/api/v1/projects/{project.id}/web-switch")
 
 
-def test_unsaved_work_in_the_workspace_stops_the_switch_and_is_never_committed(client, db_session, tmp_path, web_open):
-    ws, _origin = _workspace(tmp_path)
+def _unsaved_in(shown: str) -> str:
+    return (
+        f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
+        "projektu, potom prepni projekt na Web."
+    )
+
+
+def test_unsaved_work_elsewhere_neither_stops_the_switch_nor_rides_along(
+    client, db_session, tmp_path, web_open, monkeypatch
+):
+    """Director 21.10.2026 („Áno oprav.“): Career Asistent had 13 unsaved changes — the agents' rules the cockpit
+    refreshes on purpose without a commit, build leftovers — and the switch refused it although the panel said it
+    could. The switch commits only what it writes, so changes anywhere else stay exactly as they were."""
+    ws, origin = _workspace(tmp_path)
     (ws / "frontend" / "half-done.ts").write_text("// unsaved\n")
     _git(ws, "add", "frontend/half-done.ts")
+    (ws / "frontend" / "package.json").write_text('{"refreshed": true}')
+    (ws / "frontend" / "tsconfig.app.tsbuildinfo").write_text("{}")
+    unsaved = {" M frontend/package.json", "?? frontend/tsconfig.app.tsbuildinfo", "A  frontend/half-done.ts"}
+    monkeypatch.setattr("backend.api.routes.project_surfaces.chown_workspace", lambda _path: None)
+    script = _script(tmp_path / "init.sh", FAKE_ADD_WEB)
+    system_setting_service.upsert(db_session, "template_init_script_path", str(script))
+    owner = _user(db_session)
+    project = _project(db_session, owner, source_path=ws)
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+
+    preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+
+    assert (preview["allowed"], preview["refusal"]) == (True, None)
+    assert answer.status_code == 200, answer.text
+    db_session.refresh(project)
+    assert project.type == "web"
+    assert sorted(_git(ws, "show", "--name-only", "--format=", "HEAD").split()) == [
+        ".githooks/pre-commit",
+        ".github/workflows/web.yml",
+        "CLAUDE.md",
+        "web/package.json",
+        "web/vite.config.ts",
+    ]
+    assert _git(origin, "rev-parse", "main") == _git(ws, "rev-parse", "HEAD"), "the switch was not pushed"
+    assert set(_git(ws, "status", "--porcelain", "--untracked-files=all").splitlines()) == unsaved
+
+
+@pytest.mark.parametrize(
+    ("unsaved", "shown"),
+    [
+        ({"CLAUDE.md": "# project\nsomeone's note\n"}, "CLAUDE.md"),
+        ({".github/workflows/web.yml": "name: mine\n"}, ".github/workflows/web.yml"),
+        ({".githooks/pre-commit": "#!/usr/bin/env bash\n# edited\nexit 0\n"}, ".githooks/pre-commit"),
+    ],
+)
+def test_unsaved_work_in_what_the_switch_writes_stops_it_and_the_preview_says_so_first(
+    client, db_session, tmp_path, web_open, unsaved, shown
+):
+    ws, _origin = _workspace(tmp_path)
+    for path, text in unsaved.items():
+        (ws / path).write_text(text)
     head = _git(ws, "rev-parse", "HEAD")
+    script = _script(tmp_path / "init.sh", FAKE_ADD_WEB)
+    system_setting_service.upsert(db_session, "template_init_script_path", str(script))
+    owner = _user(db_session)
+    project = _project(db_session, owner, source_path=ws)
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
 
-    project, answer = _switch(client, db_session, tmp_path, ws)
+    preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
 
-    assert answer.status_code == 409
-    assert "neuložené zmeny (1)" in answer.json()["detail"]
+    assert (preview["allowed"], preview["refusal"]) == (False, _unsaved_in(shown))
+    assert (answer.status_code, answer.json()["detail"]) == (409, _unsaved_in(shown))
     db_session.refresh(project)
     assert project.type == "standard"
     assert _git(ws, "rev-parse", "HEAD") == head and not (ws / "web").exists()
+    assert all((ws / path).read_text() == text for path, text in unsaved.items())
+
+
+def test_the_web_is_not_written_over_unsaved_work_in_what_it_writes_even_when_asked_directly(db_session, tmp_path):
+    ws, _origin = _workspace(tmp_path)
+    (ws / "CLAUDE.md").write_text("# project\nsomeone's note\n")
+    head = _git(ws, "rev-parse", "HEAD")
+    project = _project(db_session, _user(db_session), source_path=ws)
+
+    with pytest.raises(web_workspace.WebWorkspaceError) as refused:
+        web_workspace.add_web(db_session, project)
+
+    assert str(refused.value) == _unsaved_in("CLAUDE.md")
+    assert _git(ws, "rev-parse", "HEAD") == head and not (ws / "web").exists()
+    assert (ws / "CLAUDE.md").read_text() == "# project\nsomeone's note\n"
+
+
+def test_a_workspace_that_is_no_git_repository_is_refused_by_the_preview_as_by_the_switch(
+    client, db_session, tmp_path, web_open
+):
+    (tmp_path / "ws").mkdir()
+    owner = _user(db_session)
+    project = _project(db_session, owner, source_path=tmp_path / "ws")
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+
+    preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+
+    refusal = "Priečinok projektu nie je čitateľný git repozitár, web sa doňho nedá pridať."
+    assert (preview["allowed"], preview["refusal"]) == (False, refusal)
+    assert (answer.status_code, answer.json()["detail"]) == (409, refusal)
 
 
 def test_the_switch_commits_only_its_own_files(tmp_path):

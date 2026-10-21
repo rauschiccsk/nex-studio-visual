@@ -32,6 +32,13 @@ def _no_registry_file(monkeypatch, tmp_path):
     monkeypatch.setattr(port_registry, "PORT_REGISTRY_FILE", tmp_path / "port-registry.yaml")
 
 
+@pytest.fixture(autouse=True)
+def _a_clean_workspace(monkeypatch):
+    """These projects have no workspace; what the switch finds in one is tested with real git repositories in
+    ``test_a_web_project_has_its_public_web.py``."""
+    monkeypatch.setattr(web_workspace, "unsaved_work", lambda _project: None)
+
+
 def _user(db, role="ri") -> User:
     user = User(
         username=f"u_{uuid.uuid4().hex[:6]}", email=f"{uuid.uuid4().hex[:6]}@t.sk", password_hash="x", role=role

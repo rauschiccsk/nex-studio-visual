@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 #: Cap the surfaced file list so a huge dirty tree can't bloat the payload. The
 #: ``dirty_count`` is always the EXACT total; ``truncated`` flags when the list was cut.
@@ -74,18 +74,19 @@ def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -
     )
 
 
-def working_tree_status(source_path: str, *, timeout: int = 30) -> dict:
+def working_tree_status(source_path: str, *, paths: Sequence[str] = (), timeout: int = 30) -> dict:
     """Return the project's working-tree cleanliness for the founding preflight.
 
     ``{clean, dirty_count, files: [{code, path}], truncated}`` from ``git status
     --porcelain``. ``clean`` is the gate the New-Version flow checks: founding is
-    allowed only when ``clean`` is true.
+    allowed only when ``clean`` is true. *paths* limits the answer to those paths (DEV-164: the switch to Web asks only
+    about the files it writes); empty = the whole workspace.
 
     Raises:
         ValueError: the source path is missing / not a git repo, or ``git`` failed.
     """
     root = _project_root(source_path)
-    proc = _run(root, ["status", "--porcelain"], timeout=timeout)
+    proc = _run(root, ["status", "--porcelain", *(["--", *paths] if paths else [])], timeout=timeout)
     if proc.returncode != 0:
         raise ValueError("git status zlyhal")
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]

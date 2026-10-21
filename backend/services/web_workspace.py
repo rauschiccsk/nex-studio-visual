@@ -12,6 +12,7 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,8 @@ from backend.services.project_surfaces import WEB_DIRECTORY
 logger = logging.getLogger(__name__)
 
 COMMIT_MESSAGE = "feat(web): the public web (web/) — sign-in by e-mail, registration — with its CI and pre-commit check"
+CLAUDE_MD = "CLAUDE.md"
+NOT_A_REPOSITORY = "Priečinok projektu nie je čitateľný git repozitár, web sa doňho nedá pridať."
 
 
 class WebWorkspaceError(RuntimeError):
@@ -34,20 +37,14 @@ def add_web(db: Session, project: Project) -> list[str]:
     the pre-commit check for every frontend, the table of frontends in ``CLAUDE.md`` — and commit + push them as one
     change. The agents' charters get the Web addendum at their next session, from the switched type (DEV-165).
 
-    Raises :class:`WebWorkspaceError` when ``web/`` cannot be built; nothing stays behind then. Returns the Slovak
+    Raises :class:`WebWorkspaceError` when what it writes has unsaved changes (:func:`unsaved_work`) or ``web/``
+    cannot be built; nothing stays behind then. Returns the Slovak
     sentences of what finished only partly (a commit or a push that did not go through) — reported, never raised."""
     target = Path(project.source_path or "")
-    # The switch commits its own files only — but work someone left unsaved in the workspace would ride along with
-    # the next build unseen, so the switch waits until the workspace is clean.
-    try:
-        tree = git_state.working_tree_status(str(target))
-    except ValueError as exc:
-        raise WebWorkspaceError("Priečinok projektu nie je čitateľný git repozitár, web sa doňho nedá pridať.") from exc
-    if not tree["clean"]:
-        raise WebWorkspaceError(
-            f"V priečinku projektu sú neuložené zmeny ({tree['dirty_count']}) — najprv ich ulož alebo zahoď, "
-            "potom prepni projekt na Web."
-        )
+    refusal = unsaved_work(project)
+    if refusal:
+        raise WebWorkspaceError(refusal)
+    paths = switch_paths(target)
     web = target / WEB_DIRECTORY
     # A web/ already in git is the result of an earlier switch that did not finish — it is kept, not built again.
     if not _tracked(target, WEB_DIRECTORY):
@@ -61,28 +58,58 @@ def add_web(db: Session, project: Project) -> list[str]:
                 logger.info("removed the partial web/ of slug=%s after a failed add", project.slug)
             raise WebWorkspaceError(str(exc)) from exc
 
-    candidates = [WEB_DIRECTORY]
     # DEV-165: the project's root CLAUDE.md names both frontends — the same table a founded Web project gets.
-    claude_md = target / "CLAUDE.md"
+    claude_md = target / CLAUDE_MD
     section = postscaffold.web_claude_md_section()
     text = claude_md.read_text(encoding="utf-8")
     if section.strip() not in text:
         claude_md.write_text(text.rstrip("\n") + "\n" + section, encoding="utf-8")
-    candidates.append("CLAUDE.md")
-    # The web's CI goes only where CI runs at all — a project founded without CI gets none here either.
-    if (target / ".github" / "workflows" / "ci.yml").is_file():
+    if str(postscaffold.WEB_WORKFLOW) in paths:
         postscaffold.write_web_workflow(target, project.slug)
-        candidates.append(str(postscaffold.WEB_WORKFLOW))
-    # A project that has the pre-commit check gets the version that checks every frontend.
-    if (target / ".githooks" / "pre-commit").is_file() and postscaffold.write_precommit_hook(target):
-        candidates.append(".githooks/pre-commit")
+    if str(postscaffold.PRECOMMIT_HOOK) in paths:
+        postscaffold.write_precommit_hook(target)
 
     # Only what this switch really changed — a retry after an unfinished switch commits just what is still missing.
-    paths = [path for path in candidates if _changed(target, path)]
-    if not paths:
+    changed = [path for path in paths if _changed(target, path)]
+    if not changed:
         return []
-    note = postscaffold.commit_and_push(target, paths, COMMIT_MESSAGE, project.slug, scaffold=True)
+    note = postscaffold.commit_and_push(target, changed, COMMIT_MESSAGE, project.slug, scaffold=True)
     return [note] if note else []
+
+
+def switch_paths(target: Path) -> list[str]:
+    """What the switch writes into the workspace *target* — and so all it commits: the web, the table of frontends in
+    ``CLAUDE.md``, the web's CI where the project has CI at all, the check for every frontend where the project has
+    the pre-commit check."""
+    paths = [WEB_DIRECTORY, CLAUDE_MD]
+    if (target / ".github" / "workflows" / "ci.yml").is_file():
+        paths.append(str(postscaffold.WEB_WORKFLOW))
+    if (target / postscaffold.PRECOMMIT_HOOK).is_file():
+        paths.append(str(postscaffold.PRECOMMIT_HOOK))
+    return paths
+
+
+def unsaved_work(project: Project) -> Optional[str]:
+    """Why the switch has to wait for the workspace — the Slovak sentence the Manažér reads — or ``None``.
+
+    The switch commits exactly :func:`switch_paths`, so an unsaved change there would ride along in its commit and be
+    pushed unseen; it waits for those. Changes anywhere else stay exactly as they were — the agents' rules the cockpit
+    refreshes on purpose without a commit (DEV-47) and build leftovers made every project look unsaved, and Career
+    Asistent's switch was refused although the panel said it could be done (Director 21.10.2026: „Áno oprav.“). The
+    preview asks this too, so the panel never offers a switch that is then refused."""
+    target = Path(project.source_path or "")
+    try:
+        # Raises for a workspace that is missing or no git repository — the switch could not commit there either.
+        tree = git_state.working_tree_status(project.source_path or "", paths=switch_paths(target))
+    except ValueError:
+        return NOT_A_REPOSITORY
+    if tree["clean"]:
+        return None
+    shown = ", ".join(entry["path"] for entry in tree["files"][:5]) + (" …" if tree["dirty_count"] > 5 else "")
+    return (
+        f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
+        "projektu, potom prepni projekt na Web."
+    )
 
 
 def _git(target: Path, *args: str) -> subprocess.CompletedProcess:

@@ -158,7 +158,7 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
     """The preview of switching *project* to Web: the frontends it would have, or the one reason it cannot.
 
     Asks the port registry about the web's port (the cockpit's table, the reservations and the host) — a port that
-    cannot be vouched for is a refusal, not a guess."""
+    cannot be vouched for is a refusal, not a guess — and the workspace about the files the switch writes."""
 
     def refused(reason: str) -> WebSwitch:
         return WebSwitch(refusal=reason, web_port=None, surfaces=surfaces_of(project))
@@ -176,6 +176,12 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
     if _agent_at_work(db, project):
         # DEV-161: the switch writes into the workspace the agent is working in.
         return refused("Na projekte práve pracuje agent — prepnúť ho na Web sa dá, až keď stavba zastaví.")
+    # DEV-164: the switch refuses unsaved changes in the files it writes — the preview says so before the click.
+    from backend.services import web_workspace
+
+    unsaved = web_workspace.unsaved_work(project)
+    if unsaved:
+        return refused(unsaved)
 
     port = project.backend_port + WEB_PORT_OFFSET
     try:

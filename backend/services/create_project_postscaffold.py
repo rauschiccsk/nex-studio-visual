@@ -38,6 +38,8 @@ WEB_WORKFLOW = Path(".github") / "workflows" / "web.yml"
 #: The ruff / type-check pre-commit hook (blocks a commit that CI Lint would reject) — copied into
 #: each new project's ``.githooks/`` and activated via ``core.hooksPath`` at scaffold time (v4.0.29).
 PRECOMMIT_HOOK_TEMPLATE = NEX_STUDIO_TEMPLATES / "pre-commit-hook.sh"
+#: Where the pre-commit check lives in a project — tracked, so it travels with every clone.
+PRECOMMIT_HOOK = Path(".githooks") / "pre-commit"
 # gate-g-hardening GAP 1 (CR-B): the behavioural release-acceptance script the engine runs at gate_g.
 RELEASE_SMOKE_TEMPLATE = NEX_STUDIO_TEMPLATES / "release_smoke_test.sh"
 # CR-R2-3 (#3): the CI `migrate` job's dotenv renderer — shipped alongside ci.yml so the gate can run.
@@ -762,15 +764,14 @@ def write_precommit_hook(target: Path) -> bool:
         logger.warning("pre-commit hook wire-up SKIPPED — template missing at %s", PRECOMMIT_HOOK_TEMPLATE)
         return False
 
-    hooks_dir = target / ".githooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    hook = hooks_dir / "pre-commit"
+    hook = target / PRECOMMIT_HOOK
+    hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text(PRECOMMIT_HOOK_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
     hook.chmod(0o755)
 
     # Activate for the workdir clone (core.hooksPath is per-clone; the file is committed so it travels).
     subprocess.run(
-        ["git", "-C", str(target), "config", "core.hooksPath", ".githooks"],
+        ["git", "-C", str(target), "config", "core.hooksPath", str(PRECOMMIT_HOOK.parent)],
         capture_output=True,
         text=True,
         timeout=CICD_TIMEOUT,
@@ -855,7 +856,7 @@ def _wire_precommit_hook(target: Path) -> None:
     if not write_precommit_hook(target):
         return
     subprocess.run(
-        ["git", "-C", str(target), "add", ".githooks/pre-commit"],
+        ["git", "-C", str(target), "add", str(PRECOMMIT_HOOK)],
         capture_output=True,
         text=True,
         timeout=CICD_TIMEOUT,
