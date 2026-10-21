@@ -860,14 +860,16 @@ class TestTheAgentNeverGetsTheToken:
 
     def test_the_environment_builder_withholds_it(self, monkeypatch):
         monkeypatch.setenv("DEDO_API_TOKEN", _TOKEN)
-        monkeypatch.setenv("GH_TOKEN", "gh-stays")
+        monkeypatch.setenv("GH_TOKEN", "cockpit-writes")
+        monkeypatch.setenv("AGENT_GITHUB_TOKEN", "agent-reads")
 
         env = agent_env({"TERM": "xterm-256color"})
 
         assert "DEDO_API_TOKEN" not in env
         assert _TOKEN not in "".join(env.values())
-        # …while the agent's working tools are untouched: this is a boundary, not a purge.
-        assert env["GH_TOKEN"] == "gh-stays"
+        # …while the agent keeps its working tools: this is a boundary, not a purge. Since DEV-179 its GitHub tool
+        # is the token made to read, never the cockpit's (tests/test_the_agent_gets_a_github_token_that_only_reads.py).
+        assert env["GH_TOKEN"] == "agent-reads"
         assert env["TERM"] == "xterm-256color"
 
     def test_the_headless_build_turn_is_spawned_without_it(self, monkeypatch):

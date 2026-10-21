@@ -260,7 +260,9 @@ _PASSTHROUGH_ENV: tuple[str, ...] = (
     "CLAUDE_CODE_OAUTH_TOKEN",  # Claude MAX subscription auth (ICC never uses the direct Anthropic API)
     "IS_SANDBOX",  # parity with the backend container: how the CLI already runs today
     "DISABLE_AUTOUPDATER",  # parity: the CLI must not self-update mid-turn
-    "GITHUB_TOKEN",  # the agent commits and pushes its own work
+    # DEV-179: by name, so docker copies them from the agent's environment (core.agent_env) — the token made to READ
+    # GitHub, never the cockpit's; the cockpit sends to GitHub itself (DEV-96, DEV-173).
+    "GITHUB_TOKEN",
     "GH_TOKEN",
     "LANG",
     # Charter §3(1) reaches the KB two ways and the file mount only revives one of them: the project's own
@@ -990,6 +992,13 @@ class SandboxStatus:
         }
 
 
+#: DEV-179 — what readiness says when the agent would get no GitHub token at all.
+NO_READING_TOKEN = (
+    "AGENT_GITHUB_TOKEN is not set — the agent gets no GitHub token: it cannot read CI results or fetch from GitHub "
+    "(the cockpit's own token is never handed to it, DEV-179)"
+)
+
+
 def preflight() -> SandboxStatus:
     """Probe the sandbox's hard preconditions (docker CLI, image, auth token, claude binary). Never raises.
 
@@ -1048,6 +1057,8 @@ def preflight() -> SandboxStatus:
             "~/.claude/.credentials.json, so the Claude MAX subscription token in the environment is the "
             "only authentication it has; every sandboxed build turn would start unauthenticated"
         )
+    if not os.environ.get("AGENT_GITHUB_TOKEN", "").strip():
+        problems.append(NO_READING_TOKEN)
     if not os.path.isdir(_CLAUDE_BIN_DIR):
         problems.append(
             f"the claude binary dir {_CLAUDE_BIN_DIR} is missing — the sandbox would start without a usable claude"
