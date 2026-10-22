@@ -52,8 +52,17 @@ def test_a_change_the_selection_cannot_follow_runs_the_whole_suite(path):
 def test_a_change_of_python_code_runs_the_tests_that_run_it():
     cmd, why = bt.command(False, ["backend/services/orchestrator.py", "tests/test_backend_tests_run.py"], [])
 
-    assert cmd[cmd.index("pytest") :] == ["pytest", "--testmon", "-n", "8", "--tb=short", "-q", "--no-cov"]
+    assert cmd[cmd.index("pytest") :] == ["pytest", "--testmon", "--tb=short", "-q", "--no-cov"]
     assert why == "the tests the changed code runs"
+
+
+def test_the_selection_keeps_the_cache_it_needs():
+    """pytest-testmon keeps its record in pytest's cache; ``-p no:cacheprovider`` stopped it with „KeyError: 'lf'“."""
+    cmd, _why = bt.command(
+        False, ["backend/services/standing.py"], ["-p", "no:cacheprovider", "-rf", "-pno:cacheprovider"]
+    )
+
+    assert cmd[cmd.index("pytest") :] == ["pytest", "--testmon", "--tb=short", "-q", "--no-cov", "-rf"]
 
 
 def test_the_gate_runs_every_test_in_parallel_with_the_coverage_floor():

@@ -1,7 +1,7 @@
 """The cockpit's backend tests — the whole suite as the gate, or only the tests a change touches (DEV-184).
 
     poetry run python scripts/backend_tests.py --all   # the gate (CI): every test, in parallel, with the coverage floor
-    poetry run python scripts/backend_tests.py         # a change: the tests that run the changed code
+    poetry run python scripts/backend_tests.py         # a change: the tests that run the changed code (one run)
 
 22.10.2026 every change, one line included, ran the whole suite twice — 15½ minutes on the developer's machine and as
 long again in CI — and the suite grows with every feature. Director: „Neexistuje nejaký rozumný manažment testov, ktorý
@@ -49,8 +49,32 @@ def whole_suite(extra: list[str]) -> list[str]:
     ]
 
 
+#: The selection keeps its record in pytest's cache — a run that switches the cache off stops with an internal error.
+_CACHE_OFF = ("-p", "no:cacheprovider")
+
+
+def without_cache_off(extra: list[str]) -> list[str]:
+    """``extra`` without ``-p no:cacheprovider`` — pytest-testmon needs the cache it switches off (22.10.2026:
+    „INTERNALERROR … KeyError: 'lf'“)."""
+    out: list[str] = []
+    skip = False
+    for i, arg in enumerate(extra):
+        if skip:
+            skip = False
+            continue
+        if arg == _CACHE_OFF[0] and i + 1 < len(extra) and extra[i + 1] == _CACHE_OFF[1]:
+            skip = True
+            continue
+        if arg == f"{_CACHE_OFF[0]}{_CACHE_OFF[1]}":
+            continue
+        out.append(arg)
+    return out
+
+
 def selection(extra: list[str]) -> list[str]:
-    return [sys.executable, "-m", "pytest", "--testmon", "-n", str(WORKERS), "--tb=short", "-q", "--no-cov", *extra]
+    """One run, as pytest-testmon supports it: under ``-n`` with no record yet it ran NO test and passed (22.10.2026) —
+    the first run in a checkout runs everything once and keeps the record, the next ones only what a change touches."""
+    return [sys.executable, "-m", "pytest", "--testmon", "--tb=short", "-q", "--no-cov", *without_cache_off(extra)]
 
 
 def changed_paths(root: Path = ROOT) -> list[str]:
