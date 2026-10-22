@@ -108,3 +108,82 @@ def test_a_check_the_source_gave_is_kept(tmp_path, environment):
     for name in ("db", "backend"):
         assert services[name]["healthcheck"] == source[name]["healthcheck"]
     assert "healthcheck" not in services["frontend"], "a long-lived service without a check got one invented"
+
+
+# ── an installation made before: its next deploy ─────────────────────────────────────────────────────────────────
+# 19.10.2026 the live check failed: the switch-off was only in the render of a NEW installation, and a deploy of an
+# existing one only raises the version (``version_bump_from_text`` — „Nič iné sa nemení“). Seven one-shot containers on
+# ANDROS and two on MAGER stayed „unhealthy“. Now the deploy switches the inherited check off there too and says so.
+
+SAID = (
+    "Jednorazové kroky alembic-init, migrate už po skončení nebudú hlásiť „unhealthy“ — kokpit im vypol kontrolu "
+    "zdravia zdedenú z obrazu."
+)
+
+
+def _deploy(tmp_path, version=None):
+    kwargs = {"version": version} if version else {}
+    return P.provision_uat(
+        "nex-inbox", "mager", projects_root=tmp_path / "projects", uat_root=tmp_path / "uat", **kwargs
+    )
+
+
+def _as_made_before(compose_path) -> None:
+    """The installation as a cockpit before 4.51.0 wrote it — its one-shot steps without a check of their own."""
+    text = compose_path.read_text()
+    header = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
+    data = yaml.safe_load(text)
+    for name in ("alembic-init", "migrate"):
+        data["services"][name].pop("healthcheck")
+    compose_path.write_text(header + yaml.safe_dump(data, sort_keys=False))  # the cockpit's own header stays
+
+
+def test_an_installation_made_before_gets_the_check_off_at_its_next_deploy_and_is_told(tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "_docker_image_exists", lambda image: True)
+    _make_project(tmp_path, "nex-inbox", COMPOSE)
+    first = _deploy(tmp_path)
+    _as_made_before(first.compose_path)
+
+    result = _deploy(tmp_path, version="1.1.0")
+
+    services = yaml.safe_load(result.compose_path.read_text())["services"]
+    assert {n: services[n].get("healthcheck") for n in ("alembic-init", "migrate")} == {
+        "alembic-init": {"disable": True},
+        "migrate": {"disable": True},
+    }
+    source = yaml.safe_load(COMPOSE)["services"]
+    assert services["seed"]["healthcheck"] == source["seed"]["healthcheck"], "a step's own check was replaced"
+    assert services["backend"]["healthcheck"] == source["backend"]["healthcheck"]
+    assert "healthcheck" not in services["frontend"]
+    assert SAID in result.warnings
+
+    again = _deploy(tmp_path, version="1.1.1")
+
+    assert not [w for w in again.warnings if w.startswith("Jednorazové kroky")], "said again with nothing changed"
+
+
+def test_the_adoption_preview_foresees_the_same_switch_off():
+    """The preview of an adoption and the write go through one function (ICCINT-151) — it shows what will be written."""
+    # A hand-written compose says ``restart: no`` bare — YAML reads it as ``False``; the cockpit writes ``'no'``.
+    before = textwrap.dedent(
+        """
+        services:
+          migrate:
+            image: nex-inbox-backend:v1.0.0
+            restart: no
+          alembic-init:
+            image: nex-inbox-backend:v1.0.0
+            restart: 'no'
+          backend:
+            image: nex-inbox-backend:v1.0.0
+            restart: unless-stopped
+        """
+    )
+
+    bumped = P.version_bump_from_text(before, version="1.1.0", project_slug="nex-inbox")["services"]
+
+    assert {name: svc.get("healthcheck") for name, svc in bumped.items()} == {
+        "migrate": {"disable": True},
+        "alembic-init": {"disable": True},
+        "backend": None,
+    }

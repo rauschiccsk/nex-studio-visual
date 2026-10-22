@@ -1688,6 +1688,19 @@ def _precitaj_ak_je(cesta: Path) -> Optional[str]:
         return None
 
 
+def one_shot_checks_switched_off(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """DEV-123: the steps that run once whose inherited health check this deploy switched off — said, not silent."""
+    was = (before or {}).get("services") or {}
+    return sorted(
+        name
+        for name, svc in ((after or {}).get("services") or {}).items()
+        if isinstance(svc, dict)
+        and svc.get("healthcheck") == {"disable": True}
+        and isinstance(was.get(name), dict)
+        and "healthcheck" not in was[name]
+    )
+
+
 def version_bump_from_text(
     compose_text: str,
     *,
@@ -1710,6 +1723,13 @@ def version_bump_from_text(
     for svc in sluzby.values():
         if isinstance(svc, dict) and isinstance(svc.get("image"), str):
             svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
+    # DEV-123: a step that runs once (``restart: "no"`` — YAML reads a bare ``no`` as ``False``) inherits the image's
+    # HEALTHCHECK and ends "unhealthy" after exiting 0. A new installation gets the check off when it is rendered; one
+    # made before gets it here, at its next deploy (19.10.2026: seven such containers on ANDROS, two on MAGER) —
+    # unless the installation gave the step a check of its own. The deploy says so (one_shot_checks_switched_off).
+    for svc in sluzby.values():
+        if isinstance(svc, dict) and svc.get("restart") in ("no", False) and "healthcheck" not in svc:
+            svc["healthcheck"] = {"disable": True}
 
     if source is None or project_path is None:
         return novy
@@ -3119,6 +3139,12 @@ def provision_uat(
         # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
         # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
         povodne = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+        vypnute = one_shot_checks_switched_off(povodne, povysene)
+        if vypnute:
+            warnings.append(
+                f"Jednorazové kroky {', '.join(vypnute)} už po skončení nebudú hlásiť „unhealthy“ — kokpit im vypol "
+                "kontrolu zdravia zdedenú z obrazu."
+            )
         nepostavitelne = unbuildable_images(povodne, povysene, image_exists=_docker_image_exists)
         if nepostavitelne:
             raise UndeployableImageError(
