@@ -14,6 +14,7 @@ import { CircleAlert, Send } from "lucide-react";
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import { formatTime } from "@/utils/format";
 
 interface Props {
   board: PipelineBoard | null;
@@ -35,7 +36,7 @@ function reportedAt(board: PipelineBoard | null): string | null {
   if (!latest) return null;
   const d = new Date(latest);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString("sk-SK", { hour: "2-digit", minute: "2-digit" });
+  return formatTime(d);
 }
 
 export default function NahlasitZnovaBar({ board, versionId, onBoard }: Props) {

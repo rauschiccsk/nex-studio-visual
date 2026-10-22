@@ -1,5 +1,6 @@
 // DEV-44: one wording for the attach button (answer box + conversation) and the list of files in `private/`.
 import type { PipelineBoard } from "@/services/api/pipeline";
+import { formatShortDateTime } from "@/utils/format";
 
 export const ATTACH_LABEL = "Priložiť súbor";
 export const ATTACHING_LABEL = "Nahrávam…";
@@ -23,15 +24,10 @@ export function privateFileEvents(board: PipelineBoard | null): number {
     .length;
 }
 
-/** „nahral alex 9. 10. 18:52“ · „vytvoril agent“ */
+/** „nahral alex 09.10. 18:52“ · „vytvoril agent“ */
 export function uploadedLabel(by: string | null | undefined, at: string | null | undefined): string {
   if (!by) return BY_AGENT_LABEL;
   if (!at) return `nahral ${by}`;
-  const when = new Date(at).toLocaleString("sk-SK", {
-    day: "numeric",
-    month: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const when = formatShortDateTime(at);
   return `nahral ${by} ${when}`;
 }

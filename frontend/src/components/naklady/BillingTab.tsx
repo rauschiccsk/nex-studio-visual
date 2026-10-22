@@ -13,10 +13,11 @@ import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel"
 import { WORK_KIND_OPTIONS } from "@/lib/workKind";
 import { getProjectBilling, type BillingOverview, type BillingRow } from "@/services/api/deliveryStatements";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
+import { formatDate } from "@/utils/format";
 
 const eur = (v: string | number | null | undefined) =>
   v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-const day = (iso: string) => new Date(iso).toLocaleDateString("sk-SK");
+const day = (iso: string) => formatDate(iso);
 const sha = (v: string | null) => (v ? v.slice(0, 7) : "?");
 
 const STATE: Record<BillingRow["state"], { label: string; tone: string }> = {

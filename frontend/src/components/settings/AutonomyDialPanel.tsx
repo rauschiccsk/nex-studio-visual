@@ -25,6 +25,7 @@
 import { useState } from "react";
 
 import { humanizeApiError } from "../../services/apiError";
+import { formatDateTime } from "@/utils/format";
 
 /** The dial preset machine value — mirrors the backend `MIERA_AUTONOMIE_VALUES`. */
 export type MieraAutonomieLevel =
@@ -211,7 +212,7 @@ export function AutonomyDialPanel({
                       — <span className="text-[var(--color-text-secondary)] font-medium">{updatedByUsername}</span>
                     </>
                   )}
-                  {updatedAt && <> · {new Date(updatedAt).toLocaleString("sk-SK")}</>}
+                  {updatedAt && <> · {formatDateTime(updatedAt)}</>}
                 </>
               )}
             </span>

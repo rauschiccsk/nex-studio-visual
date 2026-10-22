@@ -6,8 +6,9 @@ import { useState } from "react";
 
 import { BILLING_CATEGORIES, CATEGORY_LABELS, CATEGORY_NAMES, type BillingCategory } from "@/lib/billingCategory";
 import type { CategoryValues, DiscountChange, StatementPreview } from "@/services/api/deliveryStatements";
+import { formatDateTime } from "@/utils/format";
 
-const when = (iso: string) => new Date(iso).toLocaleString("sk-SK");
+const when = (iso: string) => formatDateTime(iso);
 const pct = (v: string | null) => (v == null ? "z Nastavení" : `${Number(v).toLocaleString("sk-SK")} %`);
 
 /** A discount as typed — a decimal comma or point; "" = back to Nastavenia; `undefined` = not 0 to 100. */

@@ -34,6 +34,7 @@ import type { ProjectRead, UserRead } from "@/types";
 import type { Version } from "@/types/version";
 import { mayOperateProject } from "@/services/permissions";
 import { personName } from "@/utils/person";
+import { formatDate } from "@/utils/format";
 
 interface JustCreatedState {
   justCreated?: boolean;
@@ -77,9 +78,7 @@ export function PipelineBar({ version }: { version: Version }) {
 // ─── Version card ─────────────────────────────────────────────────────────────
 
 function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void }) {
-  const dateStr = new Date(version.created_at).toLocaleDateString("sk-SK", {
-    day: "numeric", month: "numeric", year: "numeric",
-  });
+  const dateStr = formatDate(version.created_at);
 
   return (
     <div
@@ -711,7 +710,7 @@ export default function ProjectDetailPage() {
           <ul className="space-y-1 text-xs text-[var(--color-text-secondary)]">
             {history.map((h, idx) => (
               <li key={idx}>
-                {new Date(h.created_at).toLocaleDateString("sk-SK")} — {h.from_person ?? "založený"} →{" "}
+                {formatDate(h.created_at)} — {h.from_person ?? "založený"} →{" "}
                 <span className="font-medium">{h.to_person}</span> (zveril {h.assigned_by_person})
                 {h.note ? ` · ${h.note}` : ""}
               </li>

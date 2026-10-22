@@ -3,6 +3,7 @@
 // content, not from what the browser says).
 
 import type { PoradcaImageUpload } from "@/services/api/poradca";
+import { formatDateTime } from "@/utils/format";
 
 export interface ImageLimits {
   attachment_max_bytes: number;
@@ -80,7 +81,7 @@ export function addImages(
 
 function renamed(file: File, n: number): File {
   const ext = file.type.split("/")[1] === "jpeg" ? "jpg" : file.type.split("/")[1];
-  const stamp = new Date().toLocaleString("sk-SK").replace(/[/:]/g, "-");
+  const stamp = formatDateTime(new Date()).replace(/:/g, "-");
   return new File([file], `Snímka ${n} ${stamp}.${ext}`, { type: file.type });
 }
 

@@ -1,3 +1,5 @@
+import { formatDateTime } from "@/utils/format";
+
 /**
  * Version-number display helper shared by the deploy surface (v4.0.54).
  *
@@ -14,19 +16,12 @@ export const fmtVer = (v: string | null | undefined): string => (v ?? "").replac
 /**
  * Kedy sa nasadilo — v ľudskej podobe, v čase čitateľa (ICCINT-117).
  *
- * Server posiela ISO 8601 v UTC; Manažér číta miestny čas. Formátuje sa cez `sk-SK`, nech to vyzerá
- * ako dátum a nie ako strojový zápis. Neplatný alebo chýbajúci vstup vráti prázdny reťazec — nikdy
- * „Invalid Date“ na obrazovke.
+ * Server posiela ISO 8601 v UTC; Manažér číta miestny čas v jednom tvare dátumu kokpitu (DEV-153,
+ * `utils/format.ts`). Neplatný alebo chýbajúci vstup vráti prázdny reťazec — nikdy „Invalid Date“ na obrazovke.
  */
 export const fmtDeployTime = (iso: string | null | undefined): string => {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("sk-SK", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(d);
 };

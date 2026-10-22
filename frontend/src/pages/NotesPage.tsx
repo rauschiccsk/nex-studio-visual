@@ -24,11 +24,12 @@ import {
   type Note,
 } from "@/services/api/notes";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { formatDateTime, formatTime } from "@/utils/format";
 
 /** How long the typing pauses before the note is saved. */
 const SAVE_DELAY_MS = 800;
 
-const clock = (iso: string) => new Date(iso).toLocaleTimeString("sk-SK", { hour: "2-digit", minute: "2-digit" });
+const clock = (iso: string) => formatTime(iso);
 const nameOf = (note: Note) => note.title || "(prázdna poznámka)";
 
 type Status =
@@ -191,7 +192,7 @@ export default function NotesPage() {
           <span className="block truncate text-sm">{nameOf(note)}</span>
           <span className="block text-[10px] text-[var(--color-text-muted)]">
             {note.backlog ? `REQ-${note.backlog.number} · ` : ""}
-            {new Date(note.updated_at).toLocaleString("sk-SK")}
+            {formatDateTime(note.updated_at)}
           </span>
         </button>
       </li>
@@ -281,7 +282,7 @@ export default function NotesPage() {
 
                 {selected.resolved_at && (
                   <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-                    Vyriešená {new Date(selected.resolved_at).toLocaleString("sk-SK")}
+                    Vyriešená {formatDateTime(selected.resolved_at)}
                     {selected.backlog && (
                       <>
                         {" "}

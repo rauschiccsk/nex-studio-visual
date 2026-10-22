@@ -17,6 +17,7 @@ import {
   type ProjectPlaneTickets,
 } from "@/services/api/planeTickets";
 import { humanizeApiError } from "@/services/apiError";
+import { formatShortDateTime } from "@/utils/format";
 
 type View = "open" | "closed";
 
@@ -33,7 +34,7 @@ interface Notice {
 
 function when(value: string | null | undefined): string {
   if (!value) return "";
-  return new Date(value).toLocaleString("sk-SK", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+  return formatShortDateTime(value);
 }
 
 export default function PlaneTicketsPage() {

@@ -28,11 +28,12 @@ import {
   type StatementPreview,
 } from "@/services/api/deliveryStatements";
 import { WORK_KIND_OPTIONS, type WorkKind } from "@/lib/workKind";
+import { formatDateTime } from "@/utils/format";
 
 const int = new Intl.NumberFormat("sk-SK");
 const eur = (v: string | number | null | undefined) =>
   v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-const when = (iso: string) => new Date(iso).toLocaleString("sk-SK");
+const when = (iso: string) => formatDateTime(iso);
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / 1 000 tokenov`;
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
