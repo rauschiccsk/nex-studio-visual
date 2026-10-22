@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # DEV-87: how often NS Code asks whether the agent changed something — the list is cheap, a file is fetched again
     # only when its stamp moved.
     ns_code_refresh_seconds: int = 10
+    # DEV-180: how long the cockpit's commit of a version's documents may take in a project — the project's pre-commit
+    # check (type-check and eslint of every frontend) runs inside it. 15 s killed Career Asistent's at 18 s.
+    project_commit_timeout_seconds: int = 300
 
     # Claude CLI configuration
     claude_config_dir: str = "/root/.claude"

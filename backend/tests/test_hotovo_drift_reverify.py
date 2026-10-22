@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import types
 import uuid as _uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -79,7 +80,7 @@ def _record_check_marker(db, version_id, *, auto_hotovo: bool) -> None:
 def _stub_git(monkeypatch) -> None:
     """No real git in the test — a fixed HEAD sha + no-op note/tag so ``_apply_hotovo_signoff`` is exercised."""
     monkeypatch.setattr(orchestrator, "_write_release_note_to_disk", lambda *a, **k: None)
-    monkeypatch.setattr(orchestrator, "_commit_release_note", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "_commit_release_note", AsyncMock(return_value=None))
     monkeypatch.setattr(orchestrator, "_repo_head", lambda *a, **k: "deadbeefcafe")
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)
 

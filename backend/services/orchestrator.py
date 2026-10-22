@@ -65,6 +65,7 @@ from backend.services import (
     ci_runs,
     ci_status,
     claude_agent,
+    cockpit_commit,
     database_schema,
     dedo_escalation,
     dedo_message,
@@ -5562,10 +5563,18 @@ def _regenerate_release_note_derivatives(project_root: Path) -> tuple[list[str],
     return sorted(_changed_paths(project_root) - before), None
 
 
-def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path, version_number: str) -> None:
+async def _commit_release_note(
+    db: Session,
+    version_id: uuid.UUID,
+    project_root: Path,
+    version_number: str,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> None:
     """Part 1 (per-app-changelog-standard.md §1): NEX Studio OWNS the user-facing ``RELEASE_NOTES.md`` —
     (re)generate it from the completing version's Epics + commit it INTO the app repo. BEST-EFFORT, NEVER
-    raises: the note is a served artifact, not a release gate, so a git/FS hiccup must never sink a sign-off.
+    raises: the note is a served artifact, not a release gate, so a git/FS hiccup must never sink a sign-off —
+    but a note that did not land in git is said to the Manažér (DEV-180).
 
     Placed at each completion seam BEFORE the sign-off/verified SHA is read, so the note rides the SAME
     signed/tagged commit (and is baked into the backend image, whose Dockerfile COPYs only ``RELEASE_NOTES.md``)
@@ -5591,15 +5600,57 @@ def _commit_release_note(db: Session, version_id: uuid.UUID, project_root: Path,
     if why:
         _tell_manager_the_note_is_not_committed(db, version_id, version_number, why)
         return
-    paths = [rel, *derived]
-    if not _git_ok(project_root, ["add", "-A", "--", *paths]):
-        return
     # Pathspec-scoped commit → only the note (and what is derived from it) lands, even if the worktree carries other
-    # changes. A no-op (note unchanged since the last commit) exits non-zero — harmless, the artifact is in place.
-    _git_ok(
+    # changes. A note unchanged since the last commit is no commit — the artifact is in place.
+    await _commit_off_the_loop(
+        db,
+        version_id,
+        f"Poznámky k vydaniu v{version_number}",
+        cockpit_commit.commit,
         project_root,
-        ["commit", "-m", f"docs(release-notes): v{version_number} — user-facing changelog", "--", *paths],
+        [rel, *derived],
+        f"docs(release-notes): v{version_number} — user-facing changelog",
+        on_message=on_message,
     )
+
+
+#: DEV-180 — what the Manažér reads when the cockpit's commit of documents did not land in git.
+DOCUMENTS_NOT_IN_GIT = (
+    "{what} sa nezapísali do gitu — {why}. Ostali len na disku kokpitu, takže kontroly na GitHube (CI) ich "
+    "nevidia. Stavba pokračuje."
+)
+
+
+async def _commit_off_the_loop(
+    db: Session,
+    version_id: uuid.UUID,
+    what: str,
+    commit: Callable[..., Optional[str]],
+    *args: Any,
+    on_message: Optional[MessageCallback] = None,
+) -> Optional[str]:
+    """DEV-180 — run one of the cockpit's commits of a version's documents in a thread (it waits on the project's
+    pre-commit check) and say to the Manažér what did not land. ``commit`` returns ``None`` or why not; so does this."""
+    try:
+        why = await run_blocking(commit, *args, cap=cockpit_commit.CAP)
+    except BlockingWorkTimedOut:
+        why = f"zápis neskončil do {cockpit_commit.CAP} s"
+    if why:
+        state = _get_state(db, version_id)
+        stage = state.current_stage if state is not None else "verifikacia"
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage=stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=DOCUMENTS_NOT_IN_GIT.format(what=what, why=why),
+            payload={"phase": stage, "documents_not_in_git": why},
+        )
+        if on_message is not None:
+            await on_message(msg)
+    return why
 
 
 def _tell_manager_the_note_is_not_committed(db: Session, version_id: uuid.UUID, version_number: str, why: str) -> None:
@@ -5622,18 +5673,19 @@ def _tell_manager_the_note_is_not_committed(db: Session, version_id: uuid.UUID, 
     )
 
 
-def _commit_vizual_changes(project_root: Path, directories: tuple[str, ...] = ("frontend",)) -> None:
+def _commit_vizual_changes(project_root: Path, directories: tuple[str, ...] = ("frontend",)) -> Optional[str]:
     """Squash the whole Vizuál session into ONE commit at approval (#3, Director 2026-07-13).
 
     The Vizuál round no longer commits each change — :func:`_vizual_directive` tells the AI to only WRITE the
     FE sources (HMR reflects them live WITHOUT a commit), so many small live tweaks accumulate uncommitted in
     the worktree. At the Vizuál schvaľovací bod (vizual → programovanie) the engine stages the whole
     ``frontend/`` and makes ONE commit, so the visual session lands as a single tidy commit before the build.
-    BEST-EFFORT, NEVER raises (a git hiccup must not sink the approval). Nothing changed → ``git commit`` exits
-    non-zero → no empty commit. The sandbox's transient override config is ``.git/info/exclude``-d, so
+    BEST-EFFORT, NEVER raises (a git hiccup must not sink the approval); returns ``None`` or why the commit did not
+    land (DEV-180: :func:`cockpit_commit.commit`, run off the loop by :func:`_commit_off_the_loop`). Nothing
+    changed → no empty commit. The sandbox's transient override config is ``.git/info/exclude``-d, so
     ``git add -A`` never stages it (:mod:`vizual_sandbox`)."""
     if not (project_root / ".git").is_dir():
-        return  # dry-run / no checkout — nothing to commit
+        return None  # dry-run / no checkout — nothing to commit
     # ICCINT-29: the write-back turn just updated specification.md / design.md, and those documents describe
     # exactly these screens. Staging only ``frontend`` would sign the screens and leave the documents for some
     # later commit — two signatures for one decision, which is the split this ticket exists to close.
@@ -5643,15 +5695,14 @@ def _commit_vizual_changes(project_root: Path, directories: tuple[str, ...] = ("
     # the screens would stop being committed at all. Caught by the existing squash test.
     # DEV-162: every frontend of the project — a Web project's web/ screens are signed with the administration's.
     paths = [name for name in (*directories, "docs") if (project_root / name).is_dir()]
-    if not paths or not _git_ok(project_root, ["add", "-A", "--", *paths]):
-        return
-    _git_ok(
-        project_root,
-        ["commit", "-m", "feat(vizual): manažérom schválené vizuálne úpravy + premietnutie do dokumentácie"],
+    if not paths:
+        return None
+    return cockpit_commit.commit(
+        project_root, paths, "feat(vizual): manažérom schválené vizuálne úpravy + premietnutie do dokumentácie"
     )
 
 
-def _commit_navrh_deliverables(project_root: Path) -> None:
+def _commit_navrh_deliverables(project_root: Path) -> Optional[str]:
     """Fix A (Director 2026-07-17): freeze the Príprava/Návrh deliverables (Špecifikácia + design doc + spec
     edits under ``docs/``) into ONE commit BEFORE the Auditor upfront review. Two payoffs:
 
@@ -5662,14 +5713,9 @@ def _commit_navrh_deliverables(project_root: Path) -> None:
 
     Scoped to ``docs`` so only the design deliverables land, never stray worktree changes (mirrors
     :func:`_commit_vizual_changes` scoping to ``frontend``). BEST-EFFORT, NEVER raises (a git hiccup must not
-    sink the phase); nothing changed → ``git commit`` exits non-zero → no empty commit."""
-    if not (project_root / ".git").is_dir():
-        return  # dry-run / no checkout — nothing to commit
-    if not _git_ok(project_root, ["add", "-A", "--", "docs"]):
-        return
-    _git_ok(
-        project_root,
-        ["commit", "-m", "docs(navrh): Špecifikácia + návrhový dokument (zmrazené pred previerkou)"],
+    sink the phase); returns ``None`` or why the commit did not land (DEV-180); nothing changed → no empty commit."""
+    return cockpit_commit.commit(
+        project_root, ["docs"], "docs(navrh): Špecifikácia + návrhový dokument (zmrazené pred previerkou)"
     )
 
 
@@ -8710,7 +8756,15 @@ async def _complete_vizual_signoff(
         return await _settle_vizual_conflict(db, state, conflicts)
 
     vizual_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
-    _commit_vizual_changes(vizual_root, tuple(s.directory for s in _surfaces_for_version(db, version_id)))
+    await _commit_off_the_loop(
+        db,
+        version_id,
+        "Obrazovky Vizuálu a dokumenty",
+        _commit_vizual_changes,
+        vizual_root,
+        tuple(s.directory for s in _surfaces_for_version(db, version_id)),
+        on_message=on_message,
+    )
 
     # ICCINT-29 / §2.5: dokumenty sa práve zmenili, takže predbežná previerka je znovu na rade — ZÚŽENÁ na
     # to, čo pribudlo. Prezerať celú Špecifikáciu druhýkrát by platilo za už posúdené; prídavok je tá časť,
@@ -9257,7 +9311,7 @@ async def _apply_hotovo_signoff(
     """
     proj_root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
     _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
-    _commit_release_note(db, version_id, proj_root, _vnum)
+    await _commit_release_note(db, version_id, proj_root, _vnum)
     hotovo_sha = _repo_head(proj_root)
     if hotovo_sha:
         _git_tag_version(proj_root, _vnum, hotovo_sha)
@@ -10232,7 +10286,14 @@ async def _run_navrh_round(
     # 3b. Fix A (Director 2026-07-17): freeze the deliverables into a commit BEFORE the Auditor reviews them,
     # so the upfront review scans a STABLE committed snapshot (not a still-being-written worktree — the
     # stale-audit that FAILed on already-resolved gaps) AND the Príprava/Návrh output becomes durable.
-    _commit_navrh_deliverables(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, state.version_id))
+    await _commit_off_the_loop(
+        db,
+        state.version_id,
+        "Dokumenty Návrhu",
+        _commit_navrh_deliverables,
+        claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, state.version_id),
+        on_message=on_message,
+    )
 
     # 4. AUDITOR UPFRONT REVIEW (CR-V2-013; AUD-1(a)/AUD-5/NAVRH-4 — replaces the Gate-E Customer function).
     # The independent Auditor (READ + RUN-ONLY, no write/commit) scans the Špecifikácia + the design doc for
@@ -11119,6 +11180,49 @@ async def _run_fix_critique(
         await on_message(note)
 
 
+async def _documents_into_git_before_verification(
+    db: Session,
+    version_id: uuid.UUID,
+    slug: str,
+    version_label: str,
+    *,
+    on_message: Optional[MessageCallback] = None,
+) -> None:
+    """DEV-180 — commit the version's documents (``docs``) that are not in git yet and, when that made a commit, send
+    the branch to GitHub. Never raises; what did not happen is said to the Manažér."""
+    project_root = claude_agent.PROJECTS_ROOT / slug
+    before = _repo_head(project_root)
+    why = await _commit_off_the_loop(
+        db,
+        version_id,
+        f"Dokumenty verzie {version_label}",
+        cockpit_commit.commit,
+        project_root,
+        ["docs"],
+        f"docs: the documents of version {version_label} before its verification",
+        on_message=on_message,
+    )
+    if why or _repo_head(project_root) == before:
+        return
+    push_problem = await _push_after_task(project_root)
+    if push_problem:
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage="verifikacia",
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                f"Dokumenty verzie {version_label} sú v gite, ale na GitHub sa nepodarilo odoslať ({push_problem}). "
+                "Kontroly na GitHube ich zatiaľ nevidia; kokpit ich odošle pri ďalšom odosielaní."
+            ),
+            payload={"phase": "verifikacia", "push_failed": True},
+        )
+        if on_message is not None:
+            await on_message(msg)
+
+
 async def _run_verifikacia_round(
     db: Session,
     state: PipelineState,
@@ -11166,6 +11270,11 @@ async def _run_verifikacia_round(
     version_id = state.version_id
     slug = _project_slug_for_version(db, version_id)
     version_label = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+
+    # 0. DEV-180: a version is verified over its documents in git. What a phase's commit left on disk (Career
+    # Asistent 1.1.0: the Vizuál's, killed by a 15 s cap) lands now and goes to GitHub, so CI runs over the version
+    # with its documents. A commit that does not land is said to the Manažér; the verification goes on.
+    await _documents_into_git_before_verification(db, version_id, slug, version_label, on_message=on_message)
 
     # 1. Release-acceptance against INTERNAL FIXTURES (boot leg + acceptance leg in ONE up/down cycle). NEVER
     # touches a customer instance / uat_provisioner / deploy.py — an ephemeral -p <slug>-smoke stack only.
@@ -11368,7 +11477,9 @@ async def _run_verifikacia_round(
     # RELEASE_NOTES.md into the app repo BEFORE anchoring the verified SHA, so the note rides the
     # verified/tagged commit (version_verified recomputes against the note commit, not its parent).
     if is_pass:
-        _commit_release_note(db, version_id, claude_agent.PROJECTS_ROOT / slug, version_label)
+        await _commit_release_note(
+            db, version_id, claude_agent.PROJECTS_ROOT / slug, version_label, on_message=on_message
+        )
     verified_sha = _repo_head(claude_agent.PROJECTS_ROOT / slug) if is_pass else None
     if verified_sha:
         _git_tag_version(claude_agent.PROJECTS_ROOT / slug, version_label, verified_sha)
@@ -14924,7 +15035,7 @@ async def apply_action(
             # Part 1 (per-app-changelog-standard.md §1): (re)generate + commit the user-facing RELEASE_NOTES.md
             # into the app repo BEFORE anchoring the verified SHA, so the note rides the verified/tagged commit.
             _vnum = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
-            _commit_release_note(db, version_id, _proj_root, _vnum)
+            await _commit_release_note(db, version_id, _proj_root, _vnum)
             verified_sha = _repo_head(_proj_root)
             if verified_sha:
                 _git_tag_version(_proj_root, _vnum, verified_sha)

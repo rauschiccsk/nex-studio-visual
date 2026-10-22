@@ -254,14 +254,14 @@ def test_released_version_note_not_regenerated(db_session, tmp_path):
 # ---------------------------------------------------------------------------
 # Commit into the app repo (orchestrator seam)
 # ---------------------------------------------------------------------------
-def test_commit_release_note_commits_into_repo(db_session, tmp_path):
+async def test_commit_release_note_commits_into_repo(db_session, tmp_path):
     from backend.services import orchestrator
 
     _git_init(tmp_path)
     _creator, project, version = _seed(db_session, version_number="0.1.0")
     _add_epic(db_session, project, version, 1, "Základ", "Prvá verzia aplikácie.")
 
-    orchestrator._commit_release_note(db_session, version.id, tmp_path, "0.1.0")
+    await orchestrator._commit_release_note(db_session, version.id, tmp_path, "0.1.0")
 
     rel = "docs/specs/versions/v0.1.0/RELEASE_NOTES.md"
     assert (tmp_path / rel).is_file()
@@ -274,14 +274,14 @@ def test_commit_release_note_commits_into_repo(db_session, tmp_path):
     assert pending.strip() == ""
 
 
-def test_commit_release_note_released_is_noop(db_session, tmp_path):
+async def test_commit_release_note_released_is_noop(db_session, tmp_path):
     from backend.services import orchestrator
 
     _git_init(tmp_path)
     _creator, project, version = _seed(db_session, version_number="0.1.0", status="released")
     _add_epic(db_session, project, version, 1, "X", "Nesmie sa zapísať.")
 
-    orchestrator._commit_release_note(db_session, version.id, tmp_path, "0.1.0")
+    await orchestrator._commit_release_note(db_session, version.id, tmp_path, "0.1.0")
 
     # A released version → no note written, no commit created.
     assert not (tmp_path / "docs" / "specs" / "versions" / "v0.1.0" / "RELEASE_NOTES.md").exists()

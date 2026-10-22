@@ -13,6 +13,7 @@ import inspect
 import subprocess
 import textwrap
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -215,7 +216,7 @@ async def test_slovak_screen_text_does_not_stop_a_release(db_session, monkeypatc
         project,
         {"backend/app/screen.py": 'SAVED = "Faktúra uložená"  # what the screen says\n', **_guide(version)},
     )
-    monkeypatch.setattr(orchestrator, "_commit_release_note", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "_commit_release_note", AsyncMock(return_value=None))
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)
 
     monkeypatch.setattr(orchestrator, "_push_release_artifacts", lambda *a, **k: None)

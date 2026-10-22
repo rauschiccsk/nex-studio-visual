@@ -19,6 +19,7 @@ nothing. Runs in the cockpit backend container::
 from __future__ import annotations
 
 import argparse
+import asyncio
 from pathlib import Path
 
 from sqlalchemy import select
@@ -72,7 +73,7 @@ def repair(db: Session, *, projects_root: Path, only: set[str], apply: bool) -> 
             continue
         lines.append(f"{label}: poznámky k vydaniu prepíšem vetou agenta")
         if apply:
-            orchestrator._commit_release_note(db, version.id, root, version.version_number)
+            asyncio.run(orchestrator._commit_release_note(db, version.id, root, version.version_number))
     if apply:
         savepoint.commit()
     else:

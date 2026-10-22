@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -114,7 +115,7 @@ def _verify(db_session, monkeypatch, tmp_path, files):
     version, app = _make_version(db_session)
     _seed_verifikacia(db_session, version.id)
     _project_repo(monkeypatch, tmp_path, app, {"backend/app/screen.py": "SHOWN = True\n", **files(version)})
-    monkeypatch.setattr(orchestrator, "_commit_release_note", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "_commit_release_note", AsyncMock(return_value=None))
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)
     monkeypatch.setattr(orchestrator, "_push_release_artifacts", lambda *a, **k: None)
     _stub_auditor(monkeypatch, _verdict_pass())

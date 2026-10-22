@@ -15,6 +15,7 @@ import json
 import subprocess
 import textwrap
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -152,7 +153,7 @@ async def test_the_image_is_ready_before_the_auditor_and_the_brief_names_it(db_s
         return await stubbed(*a, **k)
 
     monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _auditor)
-    monkeypatch.setattr(orchestrator, "_commit_release_note", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator, "_commit_release_note", AsyncMock(return_value=None))
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)
     monkeypatch.setattr(orchestrator, "_push_release_artifacts", lambda *a, **k: None)
     _stub_smoke(monkeypatch)

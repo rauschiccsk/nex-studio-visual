@@ -78,20 +78,20 @@ def _committed(root: Path) -> list[str]:
     return sorted(_git(root, "show", "--name-only", "--format=", "HEAD").split())
 
 
-def test_the_note_and_what_the_app_derives_from_it_land_in_one_commit(
+async def test_the_note_and_what_the_app_derives_from_it_land_in_one_commit(
     db_session, project, writes_the_note, monkeypatch
 ):
     version, _ = _make_version(db_session)
     ran = _generator(monkeypatch)
 
-    orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
 
     assert ran == [project / "frontend"]
     assert _committed(project) == ["docs/specs/versions/v1.5.2/RELEASE_NOTES.md", DERIVED]
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_a_project_without_the_generator_gets_the_note_alone(db_session, project, writes_the_note, monkeypatch):
+async def test_a_project_without_the_generator_gets_the_note_alone(db_session, project, writes_the_note, monkeypatch):
     (project / "frontend" / "package.json").write_text(
         json.dumps({"scripts": {"build": "vite build"}}), encoding="utf-8"
     )
@@ -99,31 +99,33 @@ def test_a_project_without_the_generator_gets_the_note_alone(db_session, project
     version, _ = _make_version(db_session)
     ran = _generator(monkeypatch)
 
-    orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
 
     assert ran == []
     assert _committed(project) == ["docs/specs/versions/v1.5.2/RELEASE_NOTES.md"]
 
 
-def test_the_agents_own_unfinished_work_is_never_committed_along(db_session, project, writes_the_note, monkeypatch):
+async def test_the_agents_own_unfinished_work_is_never_committed_along(
+    db_session, project, writes_the_note, monkeypatch
+):
     (project / "frontend" / "src" / "App.tsx").write_text("// the agent is still writing this\n", encoding="utf-8")
     version, _ = _make_version(db_session)
     _generator(monkeypatch)
 
-    orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
 
     assert "frontend/src/App.tsx" not in _committed(project)
     assert "?? frontend/src/App.tsx" in _git(project, "status", "--porcelain")
 
 
-def test_a_failed_generator_commits_nothing_and_tells_the_manager_why(
+async def test_a_failed_generator_commits_nothing_and_tells_the_manager_why(
     db_session, project, writes_the_note, monkeypatch
 ):
     version, _ = _make_version(db_session)
     _generator(monkeypatch, fails=True)
     head = _git(project, "rev-parse", "HEAD")
 
-    orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
 
     assert _git(project, "rev-parse", "HEAD") == head, "the note went in without what the app derives from it"
     told = [m for m in _msgs(db_session, version.id) if m.kind == "notification" and m.recipient == "manazer"]

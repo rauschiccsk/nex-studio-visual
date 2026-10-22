@@ -41,6 +41,7 @@ SHELLING_MODULES = {
     "ci_status",
     "ci_watch",
     "claude_agent",
+    "cockpit_commit",
     "create_project_postscaffold",
     "database_schema",
     "delivered_tokens",
