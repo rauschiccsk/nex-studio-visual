@@ -2148,6 +2148,12 @@ def _traefik_labels(svc: Any) -> list[str]:
     ]
 
 
+def _routing_of(compose: dict[str, Any]) -> dict[str, list[str]]:
+    """``{service: its Traefik labels}`` of every routed service — what decides whether the cockpit routes it."""
+    services = compose.get("services") or {}
+    return {name: sorted(_traefik_labels(svc)) for name, svc in services.items() if _traefik_labels(svc)}
+
+
 def web_frontends_into_installation(
     bumped: dict[str, Any],
     web_render: dict[str, Any],
@@ -2177,8 +2183,7 @@ def web_frontends_into_installation(
     missing = [s.service for s in surfaces if s.service not in services and s.service in rendered]
     if not missing:
         return [], []
-    routed = {name: sorted(_traefik_labels(svc)) for name, svc in services.items() if _traefik_labels(svc)}
-    if routed != {name: sorted(labels) for name, labels in cockpits_routing.items()}:
+    if _routing_of(bumped) != {name: sorted(labels) for name, labels in cockpits_routing.items()}:
         return [], missing
     for name in missing:
         services[name] = copy.deepcopy(rendered[name])
@@ -2191,6 +2196,39 @@ def web_frontends_into_installation(
             _add_proxy_network(services[name])
     bumped["services"] = services
     return missing, []
+
+
+def cockpits_addresses_into_env(
+    env: dict[str, str],
+    *,
+    had: set[str],
+    installation: dict[str, Any],
+    cockpits_render: dict[str, Any],
+    addresses: dict[str, str],
+) -> list[str]:
+    """DEV-164 — on a redeploy the addresses the cockpit decides are written as the installation's real ones.
+
+    22.10.2026 Career Asistent 1.1.0 got its web on the UAT of ICC and its administration refused every sign-in:
+    ``ADMIN_PUBLIC_URL`` (``@public-url-admin``) was new to the installation, so :func:`env_version_bump` filled it
+    from ``.env.example`` — ``https://career.example.internal:10251`` — and the app's guard against foreign requests
+    took the administration's own address for a foreign one. A redeploy keeps every value an installation has (its
+    identity, its secrets), but an ``@public-url``/``@public-url-admin`` address is not one of them: it is the host the
+    cockpit routes, so it is written on every deploy exactly as on a new installation (``addresses``). Only where the
+    cockpit wrote the routing — the installation (``installation``, its compose as it will be written) is routed as
+    ``cockpits_render``; an installation with its own routing keeps its addresses, and a new one it got from the
+    template (not among ``had``, the keys it had before) is said.
+
+    Returns the warnings."""
+    if _routing_of(installation) == _routing_of(cockpits_render):
+        env.update(addresses)
+        return []
+    from_example = [key for key in addresses if key not in had]
+    if not from_example:
+        return []
+    return [
+        "Inštalácia má vlastné smerovanie, preto jej kokpit adresy nezapisuje; tieto premenné majú hodnotu z príkladu "
+        f"projektu: {', '.join(from_example)} — nastav ich v inštalácii ručne."
+    ]
 
 
 def has_own_routing(facts: Optional["InstanceFacts"]) -> bool:
@@ -2871,6 +2909,9 @@ def provision_uat(
     # from the one place that also names the Traefik route.
     contract = env_contract.for_project(project_path)
     _nb_public, public_host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+    further_public_urls = _further_public_urls(
+        contract, environment, uat_slug, customer_slug, app, private, project_slug
+    )
 
     # ICCINT-59: finish the pairing. Wiring the launch key alone left the app able to VERIFY a token but unable
     # to finish a sign-in: it must ask the Manager who the visitor is, which needs the Manager's address and a
@@ -2921,7 +2962,7 @@ def provision_uat(
         customer_values=customer_values,
         public_url_keys=frozenset(contract.public_url_keys),
         public_url=f"https://{public_host}",
-        public_urls=_further_public_urls(contract, environment, uat_slug, customer_slug, app, private, project_slug),
+        public_urls=further_public_urls,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
@@ -3021,6 +3062,19 @@ def provision_uat(
             source=source,
             project_path=project_path,
         )
+        # DEV-164: what the cockpit writes into a new installation of the project — the routing it would own here.
+        cockpits_render = build_compose_for_instance(
+            project_path=project_path,
+            slug=uat_slug,
+            project=project_slug,
+            environment=environment,
+            customer_slug=customer_slug,
+            app=app,
+            version=version,
+            preserve_extra_hosts=False,
+            loopback_base_port=loopback_base_port,
+            private=private,
+        )
         # DEV-164: a project switched to Web after this installation was made gets its frontends now — the one
         # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
         surfaces = project_surfaces.surfaces_of_slug(project_path.name)
@@ -3029,18 +3083,7 @@ def provision_uat(
             name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
             pridane, vynechane = web_frontends_into_installation(
                 povysene,
-                build_compose_for_instance(
-                    project_path=project_path,
-                    slug=uat_slug,
-                    project=project_slug,
-                    environment=environment,
-                    customer_slug=customer_slug,
-                    app=app,
-                    version=version,
-                    preserve_extra_hosts=False,
-                    loopback_base_port=loopback_base_port,
-                    private=private,
-                ),
+                cockpits_render,
                 surfaces=surfaces,
                 backend=roles["backend"],
                 cockpits_routing=cockpit_routing(src_services, roles, name_base, host),
@@ -3084,7 +3127,17 @@ def provision_uat(
                 + ". Inštalácia zostala nedotknutá."
             )
         compose_text = render_uat_compose(povysene)
+        mala = set(_parse_env_file(env_path))
         env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
+        warnings.extend(
+            cockpits_addresses_into_env(
+                env_riadky,
+                had=mala,
+                installation=povysene,
+                cockpits_render=cockpits_render,
+                addresses={key: f"https://{public_host}" for key in contract.public_url_keys} | further_public_urls,
+            )
+        )
         warnings.extend(
             _undo_inner_mount_paths(env_riadky, src_services, roles["backend"], env_example, remote=bool(deploy_host))
         )
