@@ -74,14 +74,14 @@ def render(src: Path, dst: Path) -> None:
             out.append(f"POSTGRES_PASSWORD={CI_PASSWORD}")
             seen_postgres_password = True
         elif "=" in stripped and not stripped.startswith("#") and not stripped.split("=", 1)[1].strip():
-            # ICCINT-65: prázdna hodnota vo vzore znamená „toto doplň", NIE „nastav prázdny reťazec" — a pre
-            # kontajner sú to dve rôzne veci: nenastavená premenná nechá platiť default aplikácie, prázdna sa
-            # PARSUJE. `CORS_ALLOW_ORIGINS=` prepísané doslova zhodilo CI ešte pred prvým testom na
-            # `SettingsError: error parsing value for field "cors_allow_origins"`, lebo pydantic-settings
-            # dekóduje pole zloženého typu priamo z prostredia, pred validátormi aplikácie.
+            # ICCINT-65: an empty value in the template means "fill this in", NOT "set an empty string" — and for a
+            # container these differ: an unset variable leaves the app's default in force, an empty one is PARSED.
+            # `CORS_ALLOW_ORIGINS=` copied literally broke CI before the first test with
+            # `SettingsError: error parsing value for field "cors_allow_origins"`, because pydantic-settings
+            # decodes a field of a composite type straight from the environment, before the app's validators.
             #
-            # Tri kľúče vyššie sa prepisujú zámerne a tejto vetvy sa netýkajú; vynecháva sa len `KĽÚČ=` bez
-            # hodnoty. Komentáre a prázdne riadky prechádzajú nedotknuté.
+            # The three keys above are rewritten on purpose and do not reach this branch; only a `KEY=` without a
+            # value is left out. Comments and empty lines pass through untouched.
             continue
         else:
             out.append(raw)

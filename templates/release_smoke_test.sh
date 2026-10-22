@@ -2,7 +2,7 @@
 #
 # release_smoke_test.sh — behavioural release acceptance (gate-g-hardening GAP 1; CR-V2-051 risk floor).
 #
-# Black-box acceptance, run by NEX Studio's engine at the Verifikácia release gate against the project's OWN
+# Black-box acceptance, run by NEX Studio's engine at the Verification release gate against the project's OWN
 # compose brought up under an ISOLATED `-p <slug>-smoke` project. Host ports are stripped for isolation, so
 # this script reaches the app via `docker compose exec` (NOT host curl). The engine passes the stack
 # addressing through the environment:
@@ -16,21 +16,21 @@
 #   SMOKE_BACKEND_PORT  the backend CONTAINER port the app listens on
 #
 # CONTRACT (the engine enforces ALL of these — CR-V2-051):
-#   * exit 0  ⇒ every assertion passed.  ANY non-zero exit ⇒ FAIL → the Verifikácia PASS verdict is blocked.
+#   * exit 0  ⇒ every assertion passed.  ANY non-zero exit ⇒ FAIL → the Verification PASS verdict is blocked.
 #   * the script MUST print three sentinels (the LAST value of each is read):
 #       ASSERTIONS_RUN=<n>           total assertions (n>0 — the anti-empty floor).
 #       FEATURE_ASSERTIONS_RUN=<n>   positive behavioural assertions (≥1 per DECLARED flagship feature).
 #       NEGATIVE_ASSERTIONS_RUN=<n>  negative/safety assertions (≥1 per DECLARED safety property — the risky
 #                                    op MUST be REJECTED; a green "it works" test can never prove a safety
 #                                    invariant, only a red-when-abused test can).
-#   * RISK FLOOR: the engine reads the Návrh design's declared flagship features + safety properties and FAILs
+#   * RISK FLOOR: the engine reads the design document's declared flagship features + safety properties and FAILs
 #     the acceptance when FEATURE_ASSERTIONS_RUN < (declared features) or NEGATIVE_ASSERTIONS_RUN < (declared
 #     safety properties). Missing coverage is a FAIL, never a silent SKIP. Proving the app BOOTS is not proving
 #     it does what the spec promises, nor that it refuses what the spec forbids.
 #
 # ADD YOUR SPEC-DERIVED ASSERTIONS where marked below: one FEATURE assertion per flagship feature, one NEGATIVE
-# assertion per safety property. The seeded floors are: app-starts, DB-schema, and the Aktualizácie changelog
-# shape — keep all three; add yours on top.
+# assertion per safety property. The seeded floors are: app-starts, DB-schema, and the changelog shape (the app's
+# "Aktualizácie" tab) — keep all three; add yours on top.
 
 set -euo pipefail
 
@@ -84,14 +84,14 @@ dc_exec sh -c 'alembic upgrade head' \
   || fail "DB schema NOT prepared — the smoke database is empty. Create the schema HERE (your app's migrations, e.g. 'alembic upgrade head') OR add a migrate service to docker-compose.yml. Do not skip this step."
 ASSERTIONS_RUN=$((ASSERTIONS_RUN + 1))
 
-# ── Assertion 3 (MANDATORY floor, v4.0.47): the Aktualizácie changelog serves CLEAN version numbers. ─────
+# ── Assertion 3 (MANDATORY floor, v4.0.47): the changelog ("Aktualizácie" tab) serves CLEAN version numbers. ─
 # The engine's release gate FAILs a full web app whose GET /api/v1/release-notes does not serve the completing
 # version. This mirrors the SHAPE half of that check IN THE CONTAINER — where the packaged files + import paths
 # differ from the host — so a broken changelog is caught HERE, not only by the engine: the endpoint must return
 # a NON-EMPTY JSON list whose every `version` is a CLEAN semver (`vMAJOR.MINOR.PATCH`, nothing more). Catches
 # BOTH a changelog that ships EMPTY in the image (Dockerfile forgot the notes / wrong path) AND a parser that
 # puts the whole H2 heading ("v0.1.0 — Initial prototype") into `version` instead of just "v0.1.0". A 404 →
-# SKIP (a pure API/worker with no Aktualizácie tab); the engine gate stays the authoritative "web app MUST
+# SKIP (a pure API/worker with no "Aktualizácie" tab); the engine gate stays the authoritative "web app MUST
 # serve the CURRENT version" check. Counts as a floor assertion (neither feature nor negative).
 dc_exec python - <<PY || fail "Aktualizácie: /api/v1/release-notes neslúži čisté čísla verzií (prázdny zoznam, alebo verzia vo formáte nadpisu ako '0.1.0 — Initial prototype' namiesto '0.1.0'). Over v BEŽIACOM kontajneri."
 import json, re, sys, urllib.request, urllib.error
@@ -99,7 +99,7 @@ url = "http://localhost:${SMOKE_BACKEND_PORT:-8000}/api/v1/release-notes"
 try:
     body = urllib.request.urlopen(url, timeout=5).read().decode()
 except urllib.error.HTTPError as exc:
-    sys.exit(0 if exc.code == 404 else 1)   # no changelog endpoint → not a web app with Aktualizácie → skip
+    sys.exit(0 if exc.code == 404 else 1)   # no changelog endpoint → not a web app with an "Aktualizácie" tab → skip
 except Exception as exc:
     print("err", exc, file=sys.stderr); sys.exit(1)
 try:

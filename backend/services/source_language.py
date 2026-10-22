@@ -192,20 +192,58 @@ def _script_parts(source: str, is_test: bool) -> Iterator[tuple[int, str, str]]:
                 yield number, WHAT_TEST_NAME, m.group(2)
 
 
+def _hash_comment(text: str) -> Optional[str]:
+    """The comment of a ``#`` line — from the first ``#`` outside quotes to the end. Quotes are followed only up to it:
+    DEV-182, the line „… on the project's own runner. … a Štandardný project's“ lost its middle to a pair of
+    apostrophes taken for a quoted string, and the Slovak word in it passed unread."""
+    quote = None
+    for i, ch in enumerate(text):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return text[i + 1 :]
+    return None
+
+
 def _hash_parts(source: str) -> Iterator[tuple[int, str, str]]:
     """``(line, what, text)`` for ``#`` comments outside quotes (shell, YAML, Dockerfile, …)."""
     for number, text in enumerate(source.splitlines(), 1):
-        stripped = re.sub(r"\"[^\"]*\"|'[^']*'", "", text)
-        if "#" in stripped:
-            yield number, WHAT_COMMENT, stripped.split("#", 1)[1]
+        comment = _hash_comment(text)
+        if comment is not None:
+            yield number, WHAT_COMMENT, comment
+
+
+def _parts_of(path: str, source: str, is_test: bool) -> Optional[Iterator[tuple[int, str, str]]]:
+    """The comments, docstrings, test messages and test names of one file by its kind — ``None`` for a kind this rule
+    does not read."""
+    if path.endswith(PYTHON):
+        return _python_parts(source, is_test)
+    if path.endswith(SCRIPT):
+        return _script_parts(source, is_test)
+    if _HASH_FILES.search(path):
+        return _hash_parts(source)
+    return None
+
+
+def slovak_in(path: str, source: str, *, is_test: bool = False) -> list[SlovakText]:
+    """Slovak text in every line of one file — what :func:`scan` reports for the lines a version added. DEV-182: the
+    cockpit's templates that become a project's code are held to it before any project gets them."""
+    parts = _parts_of(path, source, is_test)
+    found: dict[int, SlovakText] = {}
+    for number, what, text in parts or ():
+        if number not in found and is_slovak(text):
+            found[number] = SlovakText(path=path, line=number, what=what, text=text.strip()[:160])
+    return [found[n] for n in sorted(found)]
 
 
 def scan(repo: Path, base: str, head: str, version: str = "") -> list[SlovakText]:
     """Slovak text in the comments, docstrings, test messages and test names a version added — in record order."""
     found: list[SlovakText] = []
     for path, numbers in sorted(added_line_numbers(repo, base, head).items()):
-        is_python, is_script = path.endswith(PYTHON), path.endswith(SCRIPT)
-        if not (is_python or is_script or _HASH_FILES.search(path)):
+        if not (path.endswith(PYTHON) or path.endswith(SCRIPT) or _HASH_FILES.search(path)):
             continue
         try:
             source = _git(repo, "show", f"{head}:{path}")
@@ -215,15 +253,8 @@ def scan(repo: Path, base: str, head: str, version: str = "") -> list[SlovakText
         if kind not in (delivered_tokens.KIND_CODE, delivered_tokens.KIND_TESTS):
             continue  # documentation, generated, the agent's notes … — not what this rule is about
         is_test = kind == delivered_tokens.KIND_TESTS
-        parts = (
-            _python_parts(source, is_test)
-            if is_python
-            else _script_parts(source, is_test)
-            if is_script
-            else _hash_parts(source)
-        )
         seen: set[int] = set()
-        for number, what, text in parts:
+        for number, what, text in _parts_of(path, source, is_test) or ():
             if number in numbers and number not in seen and is_slovak(text):
                 seen.add(number)
                 found.append(SlovakText(path=path, line=number, what=what, text=text.strip()[:160]))

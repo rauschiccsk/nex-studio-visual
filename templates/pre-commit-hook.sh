@@ -45,8 +45,8 @@ if [[ "${NEEDS_BACKEND}" == "1" && -f backend/pyproject.toml ]]; then
     # message that blames the code when the truth is that the linter is not installed. A hook that
     # cannot run its check must say so; it must not convict.
     if ! ${RUFF} --version >/dev/null 2>&1; then
-        echo "pre-commit: backend — ruff SKIPPED (nie je nainštalovaný v tomto prostredí)"
-        echo "            CI ho spustí tak či tak; lokálne doinštaluj: pip install ruff"
+        echo "pre-commit: backend — ruff SKIPPED (not installed in this environment)"
+        echo "            CI runs it anyway; to run it here: pip install ruff"
     else
         echo "pre-commit: backend — ruff format --check"
         ( cd backend && ${RUFF} format --check . ) \

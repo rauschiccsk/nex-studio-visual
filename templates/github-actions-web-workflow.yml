@@ -2,7 +2,7 @@
 #
 # A Web project has two frontends: the administration in frontend/ (checked by ci.yml like every project's frontend)
 # and the public web in web/. This workflow runs the same checks on web/ that ci.yml runs on frontend/ — type-check,
-# lint, vitest — plus the production build, on the project's own runner. It is its own file so a Štandardný project's
+# lint, vitest — plus the production build, on the project's own runner. It is its own file so a Standard project's
 # ci.yml stays exactly as it was, and a project switched to Web gets it without its ci.yml being edited.
 #
 # `{{PROJECT_SLUG}}` is substituted by NEX Studio (_wire_web_workflow / the switch to Web) → `runs-on:
