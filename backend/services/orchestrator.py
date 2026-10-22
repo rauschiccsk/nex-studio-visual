@@ -7517,6 +7517,41 @@ async def _source_language_finding(
     }
 
 
+def _scan_task_source(repo: Path, baseline: str, version_label: str) -> list:
+    """Off the main loop: the Slovak text one task added — its baseline .. HEAD (DEV-183)."""
+    head = _repo_head(repo)
+    return source_language.scan(repo, baseline, head, version_label) if head else []
+
+
+async def _task_source_language(slug: str, baseline_sha: Optional[str], version_label: str) -> Optional[str]:
+    """DEV-183: the reason a finished task goes back to the AI Agent for Slovak text it added, or ``None``.
+
+    22.10.2026 Career Asistent 1.1.0 met the check only at Verifikácia: two more rounds of fixes and two full
+    verifications by the Auditor for text the agent could have translated in the task that wrote it. The same rule
+    (:func:`source_language.scan`) reads the task's own range; one that cannot be read sends nothing back — the
+    Verifikácia check reads the whole version anyway."""
+    if not baseline_sha:
+        return None
+    repo = claude_agent.PROJECTS_ROOT / slug
+    try:
+        found = await run_blocking(
+            _scan_task_source, repo, _bare_hash(baseline_sha), version_label, cap=SOURCE_LANGUAGE_CAP
+        )
+    except (source_language.GitUnreadable, BlockingWorkTimedOut) as exc:
+        logger.warning("task source language check skipped (slug=%s): %s", slug, exc)
+        return None
+    if not found:
+        return None
+    listed = "; ".join(f"{f.location()}: {f.text}" for f in found[:SOURCE_LANGUAGE_LISTED])
+    more = len(found) - SOURCE_LANGUAGE_LISTED
+    return (
+        f"the code this task added has Slovak text in {len(found)} place(s) — the code a customer receives is all "
+        "English: translate these comments, docstrings, test messages and test names (Slovak written without "
+        "diacritics too) and leave every text the application shows unchanged: "
+        f"{listed}{f'; and {more} more' if more > 0 else ''}"
+    )
+
+
 def _uat_guide_finding(slug: str, version_label: str) -> Optional[dict[str, Any]]:
     """DEV-90: the blocking finding for a missing or incomplete UAT test guide, or ``None``.
 
@@ -13446,7 +13481,8 @@ async def _run_build_round(
     Per task the AI Agent implements + runs its own tests/verification, commits, and reports; **there is NO
     per-task Auditor** — the independent Auditor verifies ONCE at Verifikácia (§2.2). The engine's per-task
     gate is the deterministic **mechanical commit verify** (:func:`verify_mechanical` scoped to the task
-    baseline: commit exists + deliverables on disk + in ``baseline..HEAD``) — never an LLM audit turn.
+    baseline: commit exists + deliverables on disk + in ``baseline..HEAD``) and the source-language check of what
+    the task added (:func:`_task_source_language`, DEV-183) — never an LLM audit turn.
 
     Like v1, build does NOT stop between successful tasks: it loops in plan order, mechanically verifies each
     (bounded self-check re-attempts up to :data:`_SELF_CHECK_RETRIES` with the prior reasons threaded into
@@ -13857,6 +13893,10 @@ async def _run_build_round(
                 # A gate_report/done-class turn → the AI Agent self-checked + committed. The engine's per-task
                 # gate is the DETERMINISTIC mechanical commit verify ONLY (no Auditor turn — design §2.2 / D5).
                 mech = verify_mechanical(slug, result, task.baseline_sha)
+                if mech is None and attempt < _SELF_CHECK_RETRIES:
+                    # DEV-183: Slovak text the task added goes back to the agent in the same task. Never on the last
+                    # attempt — a task does not fail for its language; what is left, Verifikácia finds as before.
+                    mech = await _task_source_language(slug, task.baseline_sha, version_number)
                 if mech is None:
                     db.execute(update(Task).where(Task.id == task.id).values(status="done"))
                     db.flush()

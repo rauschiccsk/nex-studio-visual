@@ -10,7 +10,9 @@ messages of assertions and the names of tests. String literals are left alone: t
 for its users, in the customer's language. Text in double or Slovak quotation marks inside a comment is left alone
 too — it quotes a screen text or a person.
 
-What it cannot see (Slovak written without diacritics, other file types) the Auditor reviews by its charter.
+Slovak written without diacritics is known by its words (DEV-183): ``slovak_words.txt`` beside this module lists Slovak
+words as they are written without diacritics, none of them an English word. What the rule cannot see (Slovak names in
+the code itself, other file types) the Auditor reviews by its charter.
 """
 
 from __future__ import annotations
@@ -33,6 +35,19 @@ SLOVAK_LETTERS = re.compile(r"[áäčďéíľĺňóôŕšťúýž]", re.IGNORECA
 #: mark is tried first, so straight quotes inside a quotation stay in it; neither form reaches past the next „, so two
 #: quotations on a line never swallow the words between them.
 _QUOTED = re.compile(r"„[^„“”\n]*[“”]|„[^„“”\"\n]*\"|\"[^\"\n]*\"|`[^`\n]*`")
+#: DEV-183: Slovak words as they are written without diacritics — a Slovak sentence the letters do not give away
+#: („Ponuky“, ``test_override_aplikacie_422``). One per line; ``#`` starts a note.
+WORDS_FILE = Path(__file__).with_name("slovak_words.txt")
+SLOVAK_WORDS: frozenset[str] = frozenset(
+    line.strip()
+    for line in WORDS_FILE.read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.startswith("#")
+)
+_WORD = re.compile(r"[A-Za-z]+")
+#: The words of one name: ``nezaradenaPosta`` → ``nezaradena``, ``Posta``; ``HTTPServer`` → ``HTTP``, ``Server``.
+_NAME_PART = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+#: A path or an address — the application's own names (``/aktualizacie``, ``web/src/pages/profile``), not a sentence.
+_PATH = re.compile(r"\S*/\S*")
 
 PYTHON = (".py",)
 SCRIPT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
@@ -105,13 +120,30 @@ def added_line_numbers(repo: Path, base: str, head: str) -> dict[str, set[int]]:
     return added
 
 
-def is_slovak(text: str) -> bool:
-    """Slovak letters outside quoted parts."""
-    return bool(SLOVAK_LETTERS.search(_QUOTED.sub("", text)))
+def slovak_words(text: str, own: frozenset[str] = frozenset()) -> list[str]:
+    """The words of ``text`` that are Slovak written without diacritics — outside quoted parts, paths and the
+    project's own name (``own``, lower case: Career Asistent is the application's name, not a Slovak sentence)."""
+    found = []
+    for word in _WORD.findall(_PATH.sub(" ", _QUOTED.sub("", text))):
+        for part in _NAME_PART.findall(word):
+            if part.lower() in SLOVAK_WORDS and part.lower() not in own:
+                found.append(part.lower())
+    return found
+
+
+def is_slovak(text: str, own: frozenset[str] = frozenset()) -> bool:
+    """Slovak letters outside quoted parts, or a Slovak word written without them (DEV-183)."""
+    return bool(SLOVAK_LETTERS.search(_QUOTED.sub("", text))) or bool(slovak_words(text, own))
+
+
+def own_name(repo: Path) -> frozenset[str]:
+    """The words of the project's own name — its repository's directory (``career-asistent``)."""
+    return frozenset(part for part in re.split(r"[^a-z]+", repo.name.lower()) if part)
 
 
 def _python_parts(source: str, is_test: bool) -> Iterator[tuple[int, str, str]]:
-    """``(line, what, text)`` for every comment, docstring line and — in a test — assertion message line."""
+    """``(line, what, text)`` for every comment, docstring line and — in a test — test name and assertion message
+    line."""
     try:
         for tok in tokenize.generate_tokens(io.StringIO(source).readline):
             if tok.type == tokenize.COMMENT:
@@ -123,6 +155,12 @@ def _python_parts(source: str, is_test: bool) -> Iterator[tuple[int, str, str]]:
     except SyntaxError:
         return
     for node in ast.walk(tree):
+        if is_test and (
+            (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"))
+            or (isinstance(node, ast.ClassDef) and node.name.startswith("Test"))
+        ):
+            # DEV-183: a test's name is read as its words — ``test_override_aplikacie_422`` names a Slovak test.
+            yield node.lineno, WHAT_TEST_NAME, node.name
         body = getattr(node, "body", None)
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body:
             first = body[0]
@@ -228,13 +266,14 @@ def _parts_of(path: str, source: str, is_test: bool) -> Optional[Iterator[tuple[
     return None
 
 
-def slovak_in(path: str, source: str, *, is_test: bool = False) -> list[SlovakText]:
+def slovak_in(path: str, source: str, *, is_test: bool = False, own: frozenset[str] = frozenset()) -> list[SlovakText]:
     """Slovak text in every line of one file — what :func:`scan` reports for the lines a version added. DEV-182: the
-    cockpit's templates that become a project's code are held to it before any project gets them."""
+    cockpit's templates that become a project's code are held to it before any project gets them. ``own`` is the
+    project's own name (:func:`own_name`)."""
     parts = _parts_of(path, source, is_test)
     found: dict[int, SlovakText] = {}
     for number, what, text in parts or ():
-        if number not in found and is_slovak(text):
+        if number not in found and is_slovak(text, own):
             found[number] = SlovakText(path=path, line=number, what=what, text=text.strip()[:160])
     return [found[n] for n in sorted(found)]
 
@@ -242,6 +281,7 @@ def slovak_in(path: str, source: str, *, is_test: bool = False) -> list[SlovakTe
 def scan(repo: Path, base: str, head: str, version: str = "") -> list[SlovakText]:
     """Slovak text in the comments, docstrings, test messages and test names a version added — in record order."""
     found: list[SlovakText] = []
+    own = own_name(repo)
     for path, numbers in sorted(added_line_numbers(repo, base, head).items()):
         if not (path.endswith(PYTHON) or path.endswith(SCRIPT) or _HASH_FILES.search(path)):
             continue
@@ -255,7 +295,7 @@ def scan(repo: Path, base: str, head: str, version: str = "") -> list[SlovakText
         is_test = kind == delivered_tokens.KIND_TESTS
         seen: set[int] = set()
         for number, what, text in _parts_of(path, source, is_test) or ():
-            if number in numbers and number not in seen and is_slovak(text):
+            if number in numbers and number not in seen and is_slovak(text, own):
                 seen.add(number)
                 found.append(SlovakText(path=path, line=number, what=what, text=text.strip()[:160]))
     found.sort(key=lambda f: (f.path, f.line))

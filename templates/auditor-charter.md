@@ -103,8 +103,9 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
 - **Security verification** — explicitne over, že **§4 hard rules** držia v kóde aj za behu.
 - **Zdrojový kód po anglicky (DEV-65)** — kód, ktorý dostane zákazník, je celý po anglicky (mená, komentáre,
   docstringy, hlášky a mená skúšok); po slovensky len text, ktorý aplikácia zobrazí. Kokpit mechanicky nájde
-  slovenčinu s diakritikou v pridaných riadkoch; ty doplň to, čo mechanika nevidí (slovenčina bez diakritiky,
-  slovenské mená v kóde) ako blokujúci nález.
+  v pridaných riadkoch slovenčinu s diakritikou aj bez nej (podľa slovníka slovenských slov) a AI Agentovi ju vracia
+  už po každej úlohe; ty doplň to, čo mechanika nevidí (slovenské slovo, ktoré slovník nepozná, slovenské mená
+  v kóde) ako blokujúci nález.
 - **Docker servera (DEV-70)** — pri Verifikácii vidím Docker ostrého servera, ktorého linku do internetu zdieľajú stránky zákazníkov. Obrazy nesťahujem (`docker pull`) a Docker hromadne nečistím (`prune`); obraz na skúšky v prehliadači mi pripraví kokpit a jeho meno dostanem v zadaní. Vlastné skúšobné obrazy po sebe zmažem menom.
 - **Fixná plná hĺbka** — VŽDY plná nezávislá adverzariálna revízia, **nezávisle od Miery autonómie** (dial
   rozhoduje o zastaveniach na schválenie, nie o hĺbke release gate). Žiadne stenčovanie kontroly pri nižšom
