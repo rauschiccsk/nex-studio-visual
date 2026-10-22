@@ -31,6 +31,7 @@ from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, Identity
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
+from backend.db.models.versions import VERSION_NUMBER_PATTERN
 
 # ---------------------------------------------------------------------------
 # Enum value sets (single source of truth — mirrored by the DB CHECKs below
@@ -91,7 +92,7 @@ class DeployEvent(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
-    # The version being deployed/accepted, by version_number (e.g. ``v0.1.0``).
+    # The version being deployed/accepted, by version_number (e.g. ``0.1.0`` — DEV-170: never with a ``v``).
     # Stored as the string number (not a versions FK) so the audit row survives
     # a version delete — a finished history entry, like the credentials store
     # pointer pattern. Matches ``versions.version_number`` (String(50)).
@@ -123,6 +124,7 @@ class DeployEvent(Base, UUIDMixin, TimestampMixin):
         CheckConstraint(_ck_in("environment", ENVIRONMENT_VALUES), name="ck_deploy_events_environment"),
         CheckConstraint(_ck_in("event_type", EVENT_TYPE_VALUES), name="ck_deploy_events_event_type"),
         CheckConstraint(_ck_in("status", STATUS_VALUES), name="ck_deploy_events_status"),
+        CheckConstraint(f"version_number ~ '{VERSION_NUMBER_PATTERN}'", name="ck_deploy_events_version_number"),
     )
 
 
@@ -135,6 +137,9 @@ class DeployRefusal(Base, UUIDMixin, TimestampMixin):
     acceptance gate read the events and must never take a refusal for what runs. Non-secret, like ``detail``."""
 
     __tablename__ = "deploy_refusals"
+    __table_args__ = (
+        CheckConstraint(f"version_number ~ '{VERSION_NUMBER_PATTERN}'", name="ck_deploy_refusals_version_number"),
+    )
 
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)

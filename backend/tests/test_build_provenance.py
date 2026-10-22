@@ -234,7 +234,7 @@ async def test_the_deploy_builds_with_the_commit_next_to_the_version(monkeypatch
 
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _spawn)
 
-    ok, _detail = await orchestrator._run_uat_deploy("app", "app", version_number="v1.2.3")
+    ok, _detail = await orchestrator._run_uat_deploy("app", "app", version_number="1.2.3")
 
     assert ok is False  # zastavené zámerne pri spustení
     assert seen["cmd"][-1] == "build"  # DEV-68: the deploy builds first, in a step of its own

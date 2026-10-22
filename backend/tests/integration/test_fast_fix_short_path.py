@@ -65,7 +65,7 @@ def _seed_project(db, *, creator: User) -> Project:
     return project
 
 
-def _seed_base_version(db, project: Project, version_number: str = "v1.2.3") -> Version:
+def _seed_base_version(db, project: Project, version_number: str = "1.2.3") -> Version:
     """A pre-existing FINISHED version so ``create_patch_version`` has a semver base to bump — since DEV-110 a fast
     fix numbers itself from what the customer has, never from a version still being built."""
     version = Version(project_id=project.id, version_number=version_number, status="released")
@@ -97,10 +97,10 @@ async def test_fast_fix_start_creates_patch_version_at_priprava(db_session) -> N
     is Príprava, carrying the directive in the kickoff message payload."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v0.4.9")
+    _seed_base_version(db_session, project, "0.4.9")
 
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    assert patch.version_number == "v0.4.10"  # semver bump, NOT lexicographic
+    assert patch.version_number == "0.4.10"  # semver bump, NOT lexicographic
     assert patch.name == "Rýchla oprava"
 
     state = await orchestrator.apply_action(
@@ -135,7 +135,7 @@ async def test_ensure_build_task_reads_v2_kickoff_directive(db_session) -> None:
     ``kickoff``/``director`` tokens the v2 DB CHECK rejects)."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     await orchestrator.apply_action(
         db_session,
@@ -176,7 +176,7 @@ async def test_ensure_build_task_multiline_directive_titles_from_first_line(db_s
     test never exercised (single-line → title==description so the first-line trim was untested)."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = (
         "  Fix the IBAN validator off-by-one  \nIt drops the last check digit on 24-char IBANs.\nAdd a regression test."
@@ -204,7 +204,7 @@ async def test_ensure_build_task_multiline_directive_titles_from_first_line(db_s
 def _settled_priprava_state(db, *, flow_type: str) -> PipelineState:
     creator = _seed_user(db)
     project = _seed_project(db, creator=creator)
-    version = Version(project_id=project.id, version_number="v2.0.0", status="active")
+    version = Version(project_id=project.id, version_number="2.0.0", status="active")
     db.add(version)
     db.flush()
     state = PipelineState(
@@ -245,7 +245,7 @@ async def test_run_dispatch_fast_fix_priprava_auto_advances_without_spec(db_sess
     mid-flight approvals, no ``specification.md`` required (CR-V2-028)."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     state = await orchestrator.apply_action(
         db_session,
@@ -292,7 +292,7 @@ def _record_kickoff(db, version_id, directive: str) -> PipelineMessage:
 def test_priprava_directive_is_lightweight_for_fast_fix(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    version = Version(project_id=project.id, version_number="v3.0.0", status="active")
+    version = Version(project_id=project.id, version_number="3.0.0", status="active")
     db_session.add(version)
     db_session.flush()
     # A real fast-fix ALWAYS has the Manažér's kickoff directive recorded (apply_action 'start'); without it
@@ -321,7 +321,7 @@ async def test_fast_fix_priprava_brief_carries_the_manager_directive(db_session)
     """
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = "Aplikácia sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
     await orchestrator.apply_action(
@@ -343,7 +343,7 @@ def test_fast_fix_priprava_brief_asks_when_the_directive_is_missing(db_session) 
     """No kickoff directive → the brief must ASK for it, never fabricate or imply one (honest-by-construction)."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    version = Version(project_id=project.id, version_number="v4.0.0", status="active")
+    version = Version(project_id=project.id, version_number="4.0.0", status="active")
     db_session.add(version)
     db_session.flush()
 
@@ -356,7 +356,7 @@ def test_fast_fix_priprava_brief_asks_when_the_directive_is_missing(db_session) 
 def test_verifikacia_directive_is_light_for_fast_fix(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    version = Version(project_id=project.id, version_number="v4.0.0", status="active")
+    version = Version(project_id=project.id, version_number="4.0.0", status="active")
     db_session.add(version)
     db_session.flush()
 
@@ -383,7 +383,7 @@ async def test_build_round_materializes_fast_fix_task_and_runs_it(db_session, mo
     marked done and the (plna) dial auto-signs the boundary forward to Verifikácia."""
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     state = await orchestrator.apply_action(
         db_session,
@@ -442,7 +442,7 @@ def test_fast_fix_dial_is_full_auto_through_verification(db_session) -> None:
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
     project.miera_autonomie = "po_kazdej_faze"  # the MOST-stops setting
-    version = Version(project_id=project.id, version_number="v5.0.0", status="active")
+    version = Version(project_id=project.id, version_number="5.0.0", status="active")
     db_session.add(version)
     db_session.flush()
     db_session.add(
@@ -589,7 +589,7 @@ def test_the_customer_sentence_replaces_the_directive_the_cockpit_copied(db_sess
 
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v0.1.0")
+    _seed_base_version(db_session, project, "0.1.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="change")
     directive = (
         "Mark in `.env.example` what each customer provides.\n\n"
@@ -753,7 +753,7 @@ def test_the_fast_fix_priprava_brief_asks_for_the_declaration(db_session) -> Non
 
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     _record_kickoff(db_session, patch.id, "Oprav vstup z Managera")
 
@@ -843,7 +843,7 @@ def test_the_repair_leaves_a_written_note_and_a_running_build_alone(db_session, 
 
     project, patch, root, note = _past_fast_fix(db_session, tmp_path)
     label = f"{project.slug} {patch.version_number}"
-    busy = Version(project_id=project.id, version_number="v0.2.0", status="active")
+    busy = Version(project_id=project.id, version_number="0.2.0", status="active")
     db_session.add(busy)
     db_session.flush()
     db_session.add(
@@ -922,7 +922,7 @@ def test_the_task_plan_carries_the_managers_own_words(db_session) -> None:
 
     creator = _seed_user(db_session)
     project = _seed_project(db_session, creator=creator)
-    _seed_base_version(db_session, project, "v1.0.0")
+    _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = "Vstup tokenom cez NEX Manager zlyhá — aplikácia posiela inú hlavičku, než Manager čaká."
     _record_kickoff(db_session, patch.id, directive)

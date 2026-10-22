@@ -54,7 +54,7 @@ def _make_version(db_session, *, project: Project | None = None, **overrides) ->
         project = _make_project(db_session)
     defaults = {
         "project_id": project.id,
-        "version_number": f"v{uuid.uuid4().hex[:6]}",
+        "version_number": f"0.0.{uuid.uuid4().int % 10**9}",
     }
     defaults.update(overrides)
     return Version(**defaults)
@@ -133,7 +133,7 @@ class TestVersionModel:
     def test_project_id_not_nullable(self, db_session):
         """project_id=NULL must be rejected."""
         _make_project(db_session)  # ensure at least one project exists
-        version = Version(project_id=None, version_number="v1.0")
+        version = Version(project_id=None, version_number="1.0.0")
         db_session.add(version)
         with pytest.raises((IntegrityError, ProgrammingError)):
             db_session.flush()
@@ -151,7 +151,7 @@ class TestVersionModel:
     def test_project_id_fk_valid(self, db_session):
         """project_id must reference an existing project."""
         fake_project_id = uuid.uuid4()
-        version = Version(project_id=fake_project_id, version_number="v1.0")
+        version = Version(project_id=fake_project_id, version_number="1.0.0")
         db_session.add(version)
         with pytest.raises((IntegrityError, ProgrammingError)):
             db_session.flush()
@@ -205,8 +205,8 @@ class TestVersionUniqueConstraint:
         """The same version_number can be used across different projects."""
         p1 = _make_project(db_session)
         p2 = _make_project(db_session)
-        v1 = _make_version(db_session, project=p1, version_number="v1.0")
-        v2 = _make_version(db_session, project=p2, version_number="v1.0")
+        v1 = _make_version(db_session, project=p1, version_number="1.0.0")
+        v2 = _make_version(db_session, project=p2, version_number="1.0.0")
         db_session.add_all([v1, v2])
         db_session.flush()
         assert v1.id != v2.id
@@ -214,11 +214,11 @@ class TestVersionUniqueConstraint:
     def test_duplicate_number_same_project_rejected(self, db_session):
         """A (project_id, version_number) pair must be unique."""
         project = _make_project(db_session)
-        v1 = _make_version(db_session, project=project, version_number="v1.0")
+        v1 = _make_version(db_session, project=project, version_number="1.0.0")
         db_session.add(v1)
         db_session.flush()
 
-        v2 = _make_version(db_session, project=project, version_number="v1.0")
+        v2 = _make_version(db_session, project=project, version_number="1.0.0")
         db_session.add(v2)
         with pytest.raises((IntegrityError, ProgrammingError)):
             db_session.flush()
@@ -241,8 +241,8 @@ class TestVersionRelationships:
     def test_project_versions_relationship(self, db_session):
         """project.versions returns the collection of Versions."""
         project = _make_project(db_session)
-        v1 = _make_version(db_session, project=project, version_number="v1.0")
-        v2 = _make_version(db_session, project=project, version_number="v2.0")
+        v1 = _make_version(db_session, project=project, version_number="1.0.0")
+        v2 = _make_version(db_session, project=project, version_number="2.0.0")
         db_session.add_all([v1, v2])
         db_session.flush()
         db_session.refresh(project)
@@ -254,7 +254,7 @@ class TestVersionRelationships:
     def test_back_populates_bidirectional(self, db_session):
         """Assigning via version.project keeps project.versions in sync."""
         project = _make_project(db_session)
-        version = Version(version_number="v3.0")
+        version = Version(version_number="3.0.0")
         version.project = project
         db_session.add(version)
         db_session.flush()

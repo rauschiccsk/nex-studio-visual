@@ -118,7 +118,7 @@ def _seed_tree_with_four_roles(db_session):
     from backend.db.models.bugs import Bug
     from backend.db.models.versions import Version
 
-    version = Version(project_id=project.id, version_number="v1.0.0", status="active")
+    version = Version(project_id=project.id, version_number="1.0.0", status="active")
     db_session.add(version)
     db_session.flush()
 
@@ -140,7 +140,7 @@ def _seed_tree_with_four_roles(db_session):
     deploy = DeployEvent(
         customer_id=customer.id,
         project_id=project.id,
-        version_number="v1.0.0",
+        version_number="1.0.0",
         environment="uat",
         event_type="deploy",
         status="ok",

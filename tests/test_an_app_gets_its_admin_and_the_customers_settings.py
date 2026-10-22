@@ -224,7 +224,7 @@ def _career(db_session, monkeypatch, tmp_path, env_example: str):
     (tmp_path / "career-asistent" / ".env.example").write_text(env_example, encoding="utf-8")
     user = _make_user(db_session)
     project = _make_project(db_session, user=user, slug="career-asistent", auth_mode="password")
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project, slug="icc", subdomain="icc")
     return user, project, customer
 
@@ -235,7 +235,7 @@ async def test_the_deploy_of_12_10_stops_before_anything_changes(db_session, mon
     runner = _RecordingRunner()
 
     with pytest.raises(ValueError) as stopped:
-        await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+        await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
 
     assert str(stopped.value).startswith("Nasadenie sa nedá spustiť: Heslo správcu aplikácie by dostalo náhodnú")
     assert runner.calls == [], "the installation was touched"
@@ -255,7 +255,7 @@ async def test_a_marked_app_deploys_with_what_the_manager_entered(db_session, mo
     runner = _RecordingRunner()
 
     event, _url, _bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner
     )
 
     assert event.status == "ok"
@@ -268,7 +268,7 @@ async def test_a_missing_required_setting_stops_the_deploy_by_name(db_session, m
     runner = _RecordingRunner()
 
     with pytest.raises(ValueError) as stopped:
-        await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+        await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
 
     assert str(stopped.value) == (
         "Nasadenie sa nedá spustiť: Zákazníkovi chýbajú povinné nastavenia: E-mail prvého správcu — ním sa prvý raz "

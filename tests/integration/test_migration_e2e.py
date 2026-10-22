@@ -277,7 +277,7 @@ def _seed_forward_pipeline_row(engine):
                 created_by=U_CREATOR,
             )
         )
-        c.execute(insert(versions).values(id=vid, project_id=pid, version_number="v9.0.0", status="active"))
+        c.execute(insert(versions).values(id=vid, project_id=pid, version_number="9.0.0", status="active"))
         c.execute(
             insert(pipeline_state).values(
                 version_id=vid,
@@ -320,7 +320,7 @@ def test_deploy_seq_high_water_mark(source_url, target):
         ev = DeployEvent(
             customer_id=cust_id,
             project_id=pid,
-            version_number="v1.1.0",
+            version_number="1.1.0",
             environment="prod",
             event_type="deploy",
             status="ok",

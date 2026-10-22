@@ -31,7 +31,7 @@ from sqlalchemy.engine import Connection
 
 from backend.db.base import Base
 from backend.services.migration.config import MigrationConfig
-from backend.services.migration.transforms import new_column_defaults, rewrite_source_path
+from backend.services.migration.transforms import new_column_defaults, rewrite_source_path, version_number
 
 
 def _target(name: str) -> Table:
@@ -122,7 +122,7 @@ def _version_dict(row: Mapping) -> dict:
     return {
         "id": row["id"],
         "project_id": row["project_id"],
-        "version_number": row["version_number"],
+        "version_number": version_number(row["version_number"]),
         "name": row.get("name"),
         "status": row.get("status") or "planned",
         "description": row.get("description"),
@@ -231,7 +231,7 @@ def _deploy_dict(row: Mapping) -> dict:
         "seq": row["seq"],
         "customer_id": row["customer_id"],
         "project_id": row["project_id"],
-        "version_number": row["version_number"],
+        "version_number": version_number(row["version_number"]),
         "environment": row["environment"],
         "event_type": row["event_type"],
         "status": row.get("status") or "ok",

@@ -1,7 +1,7 @@
 """Version domain model — release version for a project.
 
 A ``Version`` groups Epics and Bugs targeted at a specific release of a
-project. Each project has many versions (e.g. ``v1.0``, ``v1.1``).
+project. Each project has many versions (e.g. ``1.0.0``, ``1.1.0``).
 """
 
 from sqlalchemy import (
@@ -18,6 +18,13 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
+
+#: DEV-170 — a version number is ``major.minor.patch``, nothing before or after it. The cockpit adds the ``v`` itself
+#: where one belongs (``docs/specs/versions/v1.2.0``, the tag ``v1.2.0``); a stored ``v1.0.0`` became ``vv1.0.0``
+#: there. The database, the API (:mod:`backend.schemas.version`) and the deploy log hold every number to this.
+VERSION_NUMBER_PATTERN = r"^[0-9]+\.[0-9]+\.[0-9]+$"
+#: What the Manažér reads when a number does not have that shape.
+VERSION_NUMBER_RULE = "Číslo verzie musí byť v tvare 1.2.3."
 
 
 class Version(Base, UUIDMixin, TimestampMixin):
@@ -69,6 +76,7 @@ class Version(Base, UUIDMixin, TimestampMixin):
             "status IN ('planned', 'active', 'done', 'released')",
             name="ck_versions_status",
         ),
+        CheckConstraint(f"version_number ~ '{VERSION_NUMBER_PATTERN}'", name="ck_versions_version_number"),
         CheckConstraint("work_kind IS NULL OR work_kind IN ('fix', 'change', 'gift')", name="ck_versions_work_kind"),
         # DEV-74: an own rate is a price — empty means Nastavenia, zero is no rate.
         CheckConstraint("rate_code > 0 AND rate_docs > 0", name="ck_versions_rates_positive"),

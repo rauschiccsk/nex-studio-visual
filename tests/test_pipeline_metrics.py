@@ -35,7 +35,7 @@ def _project_version(db_session):
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return project, version

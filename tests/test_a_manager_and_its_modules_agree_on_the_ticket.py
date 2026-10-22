@@ -172,7 +172,7 @@ async def test_a_deploy_of_the_module_or_of_the_manager_says_it(db_session, tmp_
     inbox = _make_project(db_session, user=user, slug="nex-inbox", auth_mode="token")
     manager = _make_project(db_session, user=user, slug="nex-manager", auth_mode="password")
     project = inbox if deployed == "module" else manager
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     inbox_customer = _make_customer(db_session, inbox, slug="magerstav", subdomain="mager")
     # both installations live under the same customer folder — the subdomain decides it
     manager_customer = _make_customer(db_session, manager, slug="MAGERSTAV", subdomain="mager")
@@ -183,7 +183,7 @@ async def test_a_deploy_of_the_module_or_of_the_manager_says_it(db_session, tmp_
     monkeypatch.setattr(deploy_service, "_uat_door_warning", lambda *a, **k: None)
 
     event, _url, _bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner()
+        db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner()
     )
 
     assert event.status == "ok", "a pairing problem never fails a deploy — the apps run"

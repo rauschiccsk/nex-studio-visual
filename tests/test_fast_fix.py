@@ -55,7 +55,7 @@ def _make_project(db_session, *, version_numbers=()):
         ("0.6.0", "0.6.1"),
         ("0.9.0", "0.9.1"),
         ("0.6.9", "0.6.10"),
-        ("v1.2.9", "v1.2.10"),
+        ("1.2.9", "1.2.10"),
         ("10.0.0", "10.0.1"),
         ("1.2.3-rc1", "1.2.4"),  # pre-release suffix dropped from the bump
     ],
@@ -80,14 +80,10 @@ def test_latest_finished_version_picks_semver_max_not_lexicographic(db_session):
     assert latest.version_number == "0.10.0"
 
 
-def test_latest_finished_version_skips_non_semver(db_session):
-    project, _ = _make_project(db_session, version_numbers=["0.1.0", "1.deadbeef.0"])
-    latest = fast_fix.latest_finished_version(db_session, project.id)
-    assert latest.version_number == "0.1.0"
-
-
 def test_latest_finished_version_no_base_raises(db_session):
-    project, _ = _make_project(db_session, version_numbers=["1.deadbeef.0"])
+    # DEV-170: a number that is not major.minor.patch cannot be stored any more — what is left to refuse is a project
+    # without a finished version.
+    project, _ = _make_project(db_session, version_numbers=())
     with pytest.raises(ValueError):
         fast_fix.latest_finished_version(db_session, project.id)
 

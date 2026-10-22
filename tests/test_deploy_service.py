@@ -87,7 +87,7 @@ def _make_project(db_session, *, user: User | None = None, **overrides) -> Proje
     return project
 
 
-def _make_version(db_session, project, version_number="v0.1.0") -> Version:
+def _make_version(db_session, project, version_number="0.1.0") -> Version:
     version = Version(project_id=project.id, version_number=version_number, name="dev")
     db_session.add(version)
     db_session.flush()
@@ -179,11 +179,11 @@ async def test_the_deploy_hands_the_projects_private_option_to_the_runner(db_ses
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
     project.private_network = private
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
 
     assert runner.calls[0]["private_network"] is private
 
@@ -197,18 +197,18 @@ async def test_the_deploy_hands_the_projects_private_option_to_the_runner(db_ses
 async def test_uat_deploy_provisions_and_logs_event(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     event, url, bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner
     )
 
     assert event.status == "ok"
     assert event.event_type == "deploy"
     assert event.environment == "uat"
-    assert event.version_number == "v0.1.0"
+    assert event.version_number == "0.1.0"
     assert event.customer_id == customer.id
     assert event.project_id == project.id
     assert event.actor_id == user.id  # WHO
@@ -228,7 +228,7 @@ async def test_deploy_unknown_version_rejected(db_session):
     runner = _FakeRunner()
 
     with pytest.raises(ValueError, match="not found for this project"):
-        await _deploy(db_session, customer, version_number="v9.9.9", environment="uat", actor=user, runner=runner)
+        await _deploy(db_session, customer, version_number="9.9.9", environment="uat", actor=user, runner=runner)
     assert runner.calls == [], "an unknown version must never reach the deploy runner"
 
 
@@ -236,11 +236,11 @@ async def test_deploy_unknown_version_rejected(db_session):
 async def test_unknown_environment_rejected(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     with pytest.raises(ValueError, match="Unknown environment"):
         await _deploy(
-            db_session, customer, version_number="v0.1.0", environment="staging", actor=user, runner=_FakeRunner()
+            db_session, customer, version_number="0.1.0", environment="staging", actor=user, runner=_FakeRunner()
         )
 
 
@@ -256,15 +256,15 @@ async def test_redeploy_preserves_secrets_by_default(db_session):
     preserved, migrations run on ``up``) — the inbox-UAT redeploy lesson."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     # First install.
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
     # Later deploy of a higher version to the SAME instance.
-    await _deploy(db_session, customer, version_number="v0.2.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, customer, version_number="0.2.0", environment="uat", actor=user, runner=runner)
 
     assert runner.calls[0]["force_fresh"] is False
     assert runner.calls[1]["force_fresh"] is False, "a redeploy must NOT rotate secrets by default"
@@ -278,12 +278,12 @@ async def test_force_fresh_opts_into_rotation(db_session):
     (rotation) — explicit, opt-in, never the default."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner, force_fresh=True
+        db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner, force_fresh=True
     )
     assert runner.calls[0]["force_fresh"] is True
 
@@ -315,7 +315,7 @@ def test_default_runner_passes_rotate_secrets_through(monkeypatch):
 
     ok, detail, url = asyncio.run(
         deploy_service._default_deploy_runner(
-            project_slug="nex-demo", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=False
+            project_slug="nex-demo", uat_slug="andros-uat", version_number="0.1.0", force_fresh=False
         )
     )
     assert captured["rotate_secrets"] is False  # preserve by default
@@ -323,7 +323,7 @@ def test_default_runner_passes_rotate_secrets_through(monkeypatch):
 
     asyncio.run(
         deploy_service._default_deploy_runner(
-            project_slug="nex-demo", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=True
+            project_slug="nex-demo", uat_slug="andros-uat", version_number="0.1.0", force_fresh=True
         )
     )
     assert captured["rotate_secrets"] is True  # force_fresh → rotate
@@ -339,12 +339,12 @@ async def test_prod_deploy_without_acceptance_blocked(db_session):
     """No PROD deploy of a (customer, version) without a recorded acceptance."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     with pytest.raises(ValueError, match="PROD deploy blocked"):
-        await _deploy(db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=runner)
+        await _deploy(db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner)
     assert runner.calls == [], "a PROD deploy without acceptance must never reach the runner"
 
 
@@ -353,11 +353,11 @@ async def test_accept_requires_uat_deploy_first(db_session):
     """You cannot accept a version that was never successfully deployed to UAT."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
 
     with pytest.raises(ValueError, match="has not been successfully deployed"):
-        deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+        deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
 
 
 @pytest.mark.asyncio
@@ -365,21 +365,21 @@ async def test_accept_then_prod_deploy_allowed(db_session):
     """Full gate flow: UAT deploy → accept (logs who/when) → PROD deploy permitted."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    assert deploy_service.is_accepted(db_session, customer.id, "v0.1.0") is False
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    assert deploy_service.is_accepted(db_session, customer.id, "0.1.0") is False
 
-    accept_event = deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    accept_event = deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
     assert accept_event.event_type == "accept"
     assert accept_event.actor_id == user.id  # WHO
     assert accept_event.created_at is not None  # WHEN
-    assert deploy_service.is_accepted(db_session, customer.id, "v0.1.0") is True
+    assert deploy_service.is_accepted(db_session, customer.id, "0.1.0") is True
 
     event, url, bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner
     )
     assert event.status == "ok"
     assert event.environment == "prod"
@@ -391,22 +391,22 @@ async def test_acceptance_is_per_customer_and_per_version(db_session):
     or another version (the gate is per exact pair)."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     cust_a = _make_customer(db_session, project, slug="andros", subdomain="andros")
     cust_b = _make_customer(db_session, project, slug="icc", subdomain="icc")
     runner = _FakeRunner()
 
-    await _deploy(db_session, cust_a, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, cust_a.id, "v0.1.0", user.id)
+    await _deploy(db_session, cust_a, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    deploy_service.accept(db_session, cust_a.id, "0.1.0", user.id)
 
     # Another customer is NOT opened by A's acceptance.
-    assert deploy_service.is_accepted(db_session, cust_b.id, "v0.1.0") is False
+    assert deploy_service.is_accepted(db_session, cust_b.id, "0.1.0") is False
     with pytest.raises(ValueError, match="PROD deploy blocked"):
-        await _deploy(db_session, cust_b, version_number="v0.1.0", environment="prod", actor=user, runner=runner)
+        await _deploy(db_session, cust_b, version_number="0.1.0", environment="prod", actor=user, runner=runner)
 
     # A different version for A is NOT opened either.
-    assert deploy_service.is_accepted(db_session, cust_a.id, "v0.2.0") is False
+    assert deploy_service.is_accepted(db_session, cust_a.id, "0.2.0") is False
 
 
 # ---------------------------------------------------------------------------
@@ -418,24 +418,24 @@ async def test_acceptance_is_per_customer_and_per_version(db_session):
 async def test_first_prod_deploy_bumps_to_v1(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
 
     event, url, bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner
     )
-    assert bumped == "v1.0.0"
-    assert event.version_number == "v1.0.0", "the recorded PROD event reflects the graduated version"
+    assert bumped == "1.0.0"
+    assert event.version_number == "1.0.0", "the recorded PROD event reflects the graduated version"
     # The graduated version is what the runner provisioned.
     prod_call = runner.calls[-1]
-    assert prod_call["version_number"] == "v1.0.0"
+    assert prod_call["version_number"] == "1.0.0"
     # A v1.0.0 version row now exists for the project.
     rows = [v.version_number for v in project.versions]
-    assert "v1.0.0" in rows
+    assert "1.0.0" in rows
 
 
 @pytest.mark.asyncio
@@ -444,27 +444,27 @@ async def test_second_prod_deploy_does_not_rebump(db_session):
     its requested version_number (no re-bump)."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v1.1.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "1.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     # First PROD → v1.0.0.
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
     _e1, _u1, bumped1 = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner
     )
-    assert bumped1 == "v1.0.0"
+    assert bumped1 == "1.0.0"
 
     # Second PROD of a real later version → no re-bump.
-    await _deploy(db_session, customer, version_number="v1.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, customer.id, "v1.1.0", user.id)
+    await _deploy(db_session, customer, version_number="1.1.0", environment="uat", actor=user, runner=runner)
+    deploy_service.accept(db_session, customer.id, "1.1.0", user.id)
     e2, _u2, bumped2 = await _deploy(
-        db_session, customer, version_number="v1.1.0", environment="prod", actor=user, runner=runner
+        db_session, customer, version_number="1.1.0", environment="prod", actor=user, runner=runner
     )
     assert bumped2 is None
-    assert e2.version_number == "v1.1.0"
+    assert e2.version_number == "1.1.0"
 
 
 @pytest.mark.asyncio
@@ -473,24 +473,24 @@ async def test_failed_prod_deploy_does_not_graduate(db_session):
     graduation (the project has not graduated until a deploy actually succeeds)."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     ok_runner = _FakeRunner()
     fail_runner = _FakeRunner(ok=False, detail="exit 1: build error")
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=ok_runner)
-    deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=ok_runner)
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
     event, url, bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=fail_runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=fail_runner
     )
     assert event.status == "failed"
     assert url is None
     assert bumped is None
     # A subsequent successful PROD still treats THIS as the first successful one → bumps.
     event2, _u2, bumped2 = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=ok_runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=ok_runner
     )
-    assert bumped2 == "v1.0.0"
+    assert bumped2 == "1.0.0"
 
 
 class _StartedButUnverified(_FakeRunner):
@@ -508,43 +508,43 @@ async def test_a_started_version_whose_check_failed_is_the_version_that_runs(db_
     version AND the failure; what was never verified cannot be accepted."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     customer = _make_customer(db_session, project)
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner())
 
     event, url, _bumped = await _deploy(
-        db_session, customer, version_number="v0.2.0", environment="uat", actor=user, runner=_StartedButUnverified()
+        db_session, customer, version_number="0.2.0", environment="uat", actor=user, runner=_StartedButUnverified()
     )
 
     assert (event.status, url) == ("unverified", None)
-    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.2.0"
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "0.2.0"
     assert deploy_service.last_deploy_attempt_failed(db_session, customer.id, "uat") is True
-    assert deploy_service.last_successful_deploy(db_session, customer.id, "uat").version_number == "v0.1.0"
+    assert deploy_service.last_successful_deploy(db_session, customer.id, "uat").version_number == "0.1.0"
     with pytest.raises(ValueError, match="has not been successfully deployed"):
-        deploy_service.accept(db_session, customer.id, "v0.2.0", user.id)
+        deploy_service.accept(db_session, customer.id, "0.2.0", user.id)
 
 
 @pytest.mark.asyncio
 async def test_a_version_that_never_started_leaves_the_previous_one_running(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     customer = _make_customer(db_session, project)
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner())
 
     event, _url, _bumped = await _deploy(
         db_session,
         customer,
-        version_number="v0.2.0",
+        version_number="0.2.0",
         environment="uat",
         actor=user,
         runner=_FakeRunner(ok=False, detail="exit 1: build error"),
     )
 
     assert event.status == "failed"
-    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.1.0"
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "0.1.0"
     assert deploy_service.last_deploy_attempt_failed(db_session, customer.id, "uat") is True
 
 
@@ -559,13 +559,13 @@ async def test_deploy_event_detail_carries_no_secret(db_session):
     event's persisted ``detail`` (or anywhere on the row) — §4/OQ-5."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     secret_value = "SUPER-SECRET-TOKEN-9f8e7d6c"
     customer = _make_customer(db_session, project, secret=secret_value)
     runner = _FakeRunner(detail="OK | warnings: no frontend route")
 
     event, _url, _bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner
     )
     # The secret value must not have leaked into any column on the event row.
     dumped = " ".join(str(getattr(event, c.name)) for c in DeployEvent.__table__.columns)
@@ -583,16 +583,16 @@ async def test_deploy_event_detail_carries_no_secret(db_session):
 async def test_current_version_tracks_latest_ok_deploy(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     assert deploy_service.current_version(db_session, customer.id, "uat") is None
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.1.0"
-    await _deploy(db_session, customer, version_number="v0.2.0", environment="uat", actor=user, runner=runner)
-    assert deploy_service.current_version(db_session, customer.id, "uat") == "v0.2.0"
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "0.1.0"
+    await _deploy(db_session, customer, version_number="0.2.0", environment="uat", actor=user, runner=runner)
+    assert deploy_service.current_version(db_session, customer.id, "uat") == "0.2.0"
     # PROD is independent (never deployed).
     assert deploy_service.current_version(db_session, customer.id, "prod") is None
 
@@ -602,29 +602,29 @@ async def test_different_customers_run_different_versions(db_session):
     """§3.3: different customers may run different versions simultaneously."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
-    _make_version(db_session, project, "v0.2.0")
+    _make_version(db_session, project, "0.1.0")
+    _make_version(db_session, project, "0.2.0")
     cust_a = _make_customer(db_session, project, slug="andros", subdomain="andros")
     cust_b = _make_customer(db_session, project, slug="icc", subdomain="icc")
     runner = _FakeRunner()
 
-    await _deploy(db_session, cust_a, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    await _deploy(db_session, cust_b, version_number="v0.2.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, cust_a, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, cust_b, version_number="0.2.0", environment="uat", actor=user, runner=runner)
 
-    assert deploy_service.current_version(db_session, cust_a.id, "uat") == "v0.1.0"
-    assert deploy_service.current_version(db_session, cust_b.id, "uat") == "v0.2.0"
+    assert deploy_service.current_version(db_session, cust_a.id, "uat") == "0.1.0"
+    assert deploy_service.current_version(db_session, cust_b.id, "uat") == "0.2.0"
 
 
 @pytest.mark.asyncio
 async def test_list_events_and_project_events(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
 
     customer_events = deploy_service.list_events(db_session, customer.id)
     assert {e.event_type for e in customer_events} == {"deploy", "accept"}
@@ -693,14 +693,14 @@ def test_http_uat_deploy_then_accept_then_prod(client, db_session, _fake_default
     _auth_ri(client, db_session)
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     db_session.commit()
 
     # UAT deploy.
     resp = client.post(
         f"/api/v1/customers/{customer.id}/deploy",
-        json={"version_number": "v0.1.0", "environment": "uat"},
+        json={"version_number": "0.1.0", "environment": "uat"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -713,14 +713,14 @@ def test_http_uat_deploy_then_accept_then_prod(client, db_session, _fake_default
     # PROD without acceptance → 409 (gate never bypassed).
     blocked = client.post(
         f"/api/v1/customers/{customer.id}/deploy",
-        json={"version_number": "v0.1.0", "environment": "prod"},
+        json={"version_number": "0.1.0", "environment": "prod"},
     )
     assert blocked.status_code == 409, blocked.text
 
     # Accept the UAT.
     acc = client.post(
         f"/api/v1/customers/{customer.id}/accept",
-        json={"version_number": "v0.1.0"},
+        json={"version_number": "0.1.0"},
     )
     assert acc.status_code == 200, acc.text
     assert acc.json()["event_type"] == "accept"
@@ -728,21 +728,21 @@ def test_http_uat_deploy_then_accept_then_prod(client, db_session, _fake_default
     # PROD now opens → first PROD bumps to v1.0.0.
     prod = client.post(
         f"/api/v1/customers/{customer.id}/deploy",
-        json={"version_number": "v0.1.0", "environment": "prod"},
+        json={"version_number": "0.1.0", "environment": "prod"},
     )
     assert prod.status_code == 200, prod.text
-    assert prod.json()["bumped_to"] == "v1.0.0"
+    assert prod.json()["bumped_to"] == "1.0.0"
 
 
 def test_http_deploy_events_log(client, db_session, _fake_default_runner):
     _auth_ri(client, db_session)
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     db_session.commit()
 
-    client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "v0.1.0", "environment": "uat"})
+    client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "0.1.0", "environment": "uat"})
 
     proj_log = client.get(f"/api/v1/projects/{project.slug}/deploy-events")
     assert proj_log.status_code == 200
@@ -758,14 +758,14 @@ def test_http_deploy_response_never_echoes_secret(client, db_session, _fake_defa
     _auth_ri(client, db_session)
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     secret = "HTTP-DEPLOY-SECRET-DO-NOT-LEAK-abc123"
     customer = _make_customer(db_session, project, secret=secret)
     db_session.commit()
 
     resp = client.post(
         f"/api/v1/customers/{customer.id}/deploy",
-        json={"version_number": "v0.1.0", "environment": "uat"},
+        json={"version_number": "0.1.0", "environment": "uat"},
     )
     assert resp.status_code == 200
     assert secret not in resp.text

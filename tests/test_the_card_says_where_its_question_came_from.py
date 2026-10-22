@@ -35,7 +35,7 @@ def _version(db) -> uuid.UUID:
     )
     db.add(project)
     db.flush()
-    version = Version(project_id=project.id, version_number="v1.5.0", status="active")
+    version = Version(project_id=project.id, version_number="1.5.0", status="active")
     db.add(version)
     db.flush()
     db.add(

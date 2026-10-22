@@ -76,7 +76,7 @@ def test_list_release_notes_orders_numeric_and_joins_db_date(db_session, tmp_pat
     (tmp_path / "scratch").mkdir()
     (tmp_path / "scratch" / "RELEASE_NOTES.md").write_text("nope", encoding="utf-8")
 
-    _seed_released_version(db_session, "v0.2.0", date(2026, 5, 26))
+    _seed_released_version(db_session, "0.2.0", date(2026, 5, 26))
 
     out = release_notes_service.list_release_notes(db_session)
 

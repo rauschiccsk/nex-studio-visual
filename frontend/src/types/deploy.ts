@@ -47,7 +47,7 @@ export interface DeployResult {
   event: DeployEventRead;
   /** The deployed instance URL (null when no FE route / on failure). */
   url: string | null;
-  /** Set when a first-PROD deploy bumped the project version (e.g. "v1.0.0"). */
+  /** Set when a first-PROD deploy bumped the project version (e.g. "1.0.0"). */
   bumped_to: string | null;
   warnings: string[];
 }

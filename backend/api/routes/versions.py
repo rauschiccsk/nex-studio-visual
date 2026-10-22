@@ -65,7 +65,7 @@ from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
-from backend.db.models.versions import Version
+from backend.db.models.versions import VERSION_NUMBER_PATTERN, VERSION_NUMBER_RULE, Version
 from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
 from backend.services import delivery_statement as statements
@@ -83,7 +83,6 @@ _BLOCKING_IDS_RE = re.compile(r"\[([^\]]*)\]")
 #: Číslo verzie je súčasťou názvu priečinka na disku. Tvar sa preto overuje TU, na vstupe — nie až
 #: v službe, kde by z neho bola len záhadná cesta. (Únik zo stromu projektu blokuje aj
 #: ``version._zadanie_paths``; toto je prvá z tých dvoch obrán, nie jediná.)
-_SEMVER_RE = re.compile(r"\d+\.\d+\.\d+")
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -587,11 +586,8 @@ def peek_zadanie(
     **422** — číslo verzie nemá tvar ``1.2.3``. **404** — projekt neexistuje.
     """
     authz.assert_project_id_access(db, current_user, project_id)
-    if not _SEMVER_RE.fullmatch(version_number):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Číslo verzie musí byť v tvare 1.2.3.",
-        )
+    if not re.fullmatch(VERSION_NUMBER_PATTERN, version_number):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=VERSION_NUMBER_RULE)
     try:
         content, rel = version_service.peek_zadanie(db, project_id, version_number)
     except ValueError as exc:

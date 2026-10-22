@@ -31,12 +31,12 @@ class TestCreateVersion:
     def test_create_version_planned(self, client, project):
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v1.0"},
+            json={"version_number": "1.0.0"},
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["status"] == "planned"
-        assert body["version_number"] == "v1.0"
+        assert body["version_number"] == "1.0.0"
         assert body["project_id"] == str(project.id)
         assert body["release_date"] is None
         assert body["id"]
@@ -55,13 +55,13 @@ class TestDuplicateVersionNumber:
     def test_duplicate_version_number(self, client, project):
         resp1 = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v1.0"},
+            json={"version_number": "1.0.0"},
         )
         assert resp1.status_code == 201, resp1.text
 
         resp2 = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v1.0"},
+            json={"version_number": "1.0.0"},
         )
         # The router maps "already exists" → 409
         assert resp2.status_code == 409, resp2.text
@@ -79,7 +79,7 @@ class TestAutoActivateTrigger:
         # Create version v2.0 (status=planned)
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v2.0"},
+            json={"version_number": "2.0.0"},
         )
         assert resp.status_code == 201, resp.text
         version = resp.json()
@@ -128,7 +128,7 @@ class TestReleaseGateBlocked:
         # Create version v3.0
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v3.0"},
+            json={"version_number": "3.0.0"},
         )
         assert resp.status_code == 201, resp.text
         version_id = resp.json()["id"]
@@ -168,7 +168,7 @@ class TestReleaseSuccess:
         # Create version
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v4.0"},
+            json={"version_number": "4.0.0"},
         )
         assert resp.status_code == 201, resp.text
         version_id = resp.json()["id"]
@@ -214,7 +214,7 @@ class TestVersionCRUD:
 
     def test_list_versions_by_project(self, client, project):
         # Create 2 versions
-        for vn in ("v5.0", "v5.1"):
+        for vn in ("5.0.0", "5.1.0"):
             resp = client.post(
                 f"/api/v1/projects/{project.id}/versions",
                 json={"version_number": vn},
@@ -228,12 +228,12 @@ class TestVersionCRUD:
         assert isinstance(body, list)
         assert len(body) == 2
         version_numbers = {v["version_number"] for v in body}
-        assert version_numbers == {"v5.0", "v5.1"}
+        assert version_numbers == {"5.0.0", "5.1.0"}
 
     def test_get_version_by_id(self, client, project):
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v6.0", "name": "Test Release"},
+            json={"version_number": "6.0.0", "name": "Test Release"},
         )
         assert resp.status_code == 201, resp.text
         version_id = resp.json()["id"]
@@ -242,7 +242,7 @@ class TestVersionCRUD:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["id"] == version_id
-        assert body["version_number"] == "v6.0"
+        assert body["version_number"] == "6.0.0"
         assert body["name"] == "Test Release"
 
     def test_get_missing_version_returns_404(self, client):
@@ -252,7 +252,7 @@ class TestVersionCRUD:
     def test_patch_version_description(self, client, project):
         resp = client.post(
             f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "v7.0"},
+            json={"version_number": "7.0.0"},
         )
         assert resp.status_code == 201, resp.text
         version_id = resp.json()["id"]
@@ -266,7 +266,7 @@ class TestVersionCRUD:
         assert body["description"] == "updated"
         # Immutable fields unchanged
         assert body["id"] == version_id
-        assert body["version_number"] == "v7.0"
+        assert body["version_number"] == "7.0.0"
 
     def test_patch_missing_version_returns_404(self, client):
         resp = client.patch(

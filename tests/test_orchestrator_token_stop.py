@@ -70,7 +70,7 @@ def _make_version(db_session):
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return version, project
@@ -305,7 +305,7 @@ def _make_away_owner_version(db_session, chat_id: str):
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"0.1.{uuid.uuid4().hex[:3]}")
+    version = Version(project_id=project.id, version_number=f"0.1.{uuid.uuid4().int % 1000}")
     db_session.add(version)
     db_session.flush()
     return version, owner

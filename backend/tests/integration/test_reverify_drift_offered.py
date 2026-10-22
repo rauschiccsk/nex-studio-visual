@@ -47,7 +47,7 @@ def _seed_settled_version(db, *, state_status: str) -> Version:
     )
     db.add(project)
     db.flush()
-    version = Version(project_id=project.id, version_number="v1.0.0", name="v1.0.0", status="active")
+    version = Version(project_id=project.id, version_number="1.0.0", name="v1.0.0", status="active")
     db.add(version)
     db.flush()
     db.add(

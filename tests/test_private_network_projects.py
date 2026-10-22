@@ -139,7 +139,7 @@ def _runner(monkeypatch, *, private: bool, problems=None, uat_slug="icc-uat", de
         deploy_service._default_deploy_runner(
             project_slug="career-asistent",
             uat_slug=uat_slug,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             force_fresh=False,
             deploy_host=deploy_host,
             private_network=private,

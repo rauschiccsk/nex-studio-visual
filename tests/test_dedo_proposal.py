@@ -120,7 +120,7 @@ def _make_version(db_session, user: User, *, version_number: Optional[str] = Non
     db_session.flush()
     # ``version_number`` is pinned only by the prompt-equality test: the conversation brief names the
     # version's spec paths, so two builds must share a number for their prompts to be comparable at all.
-    version = Version(project_id=project.id, version_number=version_number or f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=version_number or f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return version

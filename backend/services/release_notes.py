@@ -98,11 +98,12 @@ def list_release_notes(db: Session) -> list[dict]:
     if not discovered:
         return []
 
-    release_dates = _release_dates_by_version(db, [v for v, _, _ in discovered])
+    # DEV-170: a folder carries the ``v`` (``v4.69.0``), a stored version number never does.
+    release_dates = _release_dates_by_version(db, [v.lstrip("v") for v, _, _ in discovered])
 
     out: list[dict] = []
     for version, resolved, markdown in discovered:
-        released = release_dates.get(version)
+        released = release_dates.get(version.lstrip("v"))
         if released is None:
             # mtime fallback — no released row in the DB for this version
             # number (e.g. NEX Studio is not a project in its own DB).

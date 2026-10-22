@@ -140,7 +140,7 @@ def version(db_session, project) -> Version:
     """
     v = Version(
         project_id=project.id,
-        version_number=f"v{uuid.uuid4().hex[:6]}",
+        version_number=f"0.0.{uuid.uuid4().int % 10**9}",
         name="Test version",
         status="planned",
     )
@@ -153,7 +153,7 @@ def _make_version(db_session, project: Project, **overrides) -> Version:
     """Ad-hoc Version factory for tests that build their own projects."""
     defaults = {
         "project_id": project.id,
-        "version_number": f"v{uuid.uuid4().hex[:6]}",
+        "version_number": f"0.0.{uuid.uuid4().int % 10**9}",
         "name": "Test version",
         "status": "planned",
     }

@@ -273,7 +273,7 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
 
     ok, detail, url = asyncio.run(
         deploy_service._default_deploy_runner(
-            project_slug="nex-payables", uat_slug="andros-prod", version_number="v1.0.0", force_fresh=False
+            project_slug="nex-payables", uat_slug="andros-prod", version_number="1.0.0", force_fresh=False
         )
     )
 
@@ -317,7 +317,7 @@ def test_default_deploy_runner_uat_passes_no_prod_kwargs(monkeypatch):
 
     ok, detail, url = asyncio.run(
         deploy_service._default_deploy_runner(
-            project_slug="nex-payables", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=False
+            project_slug="nex-payables", uat_slug="andros-uat", version_number="0.1.0", force_fresh=False
         )
     )
 

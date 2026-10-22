@@ -211,9 +211,9 @@ class TestDeployMatrixRead:
     def test_matrix_lists_only_verified_versions(self, client, db_session, fake_deploy_runner):
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
-        _seed_verified_version(db_session, project, "v0.2.0")
-        _seed_unverified_version(db_session, project, "v0.3.0")  # in-flight → excluded
+        _seed_verified_version(db_session, project, "0.1.0")
+        _seed_verified_version(db_session, project, "0.2.0")
+        _seed_unverified_version(db_session, project, "0.3.0")  # in-flight → excluded
         _seed_customer(db_session, project, "andros")
 
         resp = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix")
@@ -221,8 +221,8 @@ class TestDeployMatrixRead:
         body = resp.json()
 
         # Only the two Hotovo versions are deployable; the in-flight one is excluded.
-        assert body["verified_versions"] == ["v0.2.0", "v0.1.0"]
-        assert "v0.3.0" not in body["verified_versions"]
+        assert body["verified_versions"] == ["0.2.0", "0.1.0"]
+        assert "0.3.0" not in body["verified_versions"]
         assert len(body["rows"]) == 1
         row = body["rows"][0]
         assert row["customer_slug"] == "andros"
@@ -243,25 +243,25 @@ class TestDeployMatrixRead:
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "andros")
 
         # UAT succeeds → last-good version, no failure flag.
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.1.0"})
         # PROD FAILS (the fixture fails the ``-prod`` instance).
         prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert prod.json()["ok"] is False
 
         row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
         # UAT succeeded → shows the version, no failure flag.
-        assert row["uat_version"] == "v0.1.0"
+        assert row["uat_version"] == "0.1.0"
         assert row["uat_last_attempt_failed"] is False
         # PROD never succeeded AND the newest attempt failed → honest failure flag, not a silent empty cell.
         assert row["prod_version"] is None
@@ -282,14 +282,14 @@ class TestProdAcceptanceGate:
         """⚠ SAFETY INVARIANT: no PROD deploy without a recorded UAT acceptance."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "0.1.0")
         version_id = version.id  # the row that will be graduated IN PLACE (§3.6)
         customer = _seed_customer(db_session, project, "andros")
 
         # 1) Deploy to UAT — allowed (no gate on UAT).
         uat = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
         assert uat.status_code == 200, uat.text
         assert uat.json()["ok"] is True
@@ -297,7 +297,7 @@ class TestProdAcceptanceGate:
         # 2) PROD deploy of the SAME version BEFORE acceptance → BLOCKED (409).
         blocked = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert blocked.status_code == 409, blocked.text
         assert "accept" in blocked.json()["detail"].lower()
@@ -305,30 +305,30 @@ class TestProdAcceptanceGate:
         # The matrix still shows the version as NOT accepted → FE keeps PROD disabled.
         matrix = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()
         row = matrix["rows"][0]
-        assert "v0.1.0" not in row["accepted_versions"]
-        assert row["uat_version"] == "v0.1.0"
+        assert "0.1.0" not in row["accepted_versions"]
+        assert row["uat_version"] == "0.1.0"
         assert row["uat_url"] is not None  # UAT deployed → link present
 
         # 3) Akceptovať the UAT — opens PROD.
         accept = client.post(
             f"/api/v1/customers/{customer.id}/accept",
-            json={"version_number": "v0.1.0"},
+            json={"version_number": "0.1.0"},
         )
         assert accept.status_code == 200, accept.text
 
         # 4) Now the matrix shows it accepted → FE enables PROD Nasadiť.
         matrix2 = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()
-        assert "v0.1.0" in matrix2["rows"][0]["accepted_versions"]
+        assert "0.1.0" in matrix2["rows"][0]["accepted_versions"]
 
         # 5) PROD deploy now SUCCEEDS (gate satisfied) — and graduates to v1.0.0 (§3.6).
         prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert prod.status_code == 200, prod.text
         result = prod.json()
         assert result["ok"] is True
-        assert result["bumped_to"] == "v1.0.0"  # first PROD deploy bump (§3.6)
+        assert result["bumped_to"] == "1.0.0"  # first PROD deploy bump (§3.6)
 
         # 5b) §3.6 graduation is IN PLACE: the BUILT version (v0.1.0) is promoted to v1.0.0 on the
         # SAME row (its history preserved) + marked released — NOT a new empty v1.0.0 shell beside it.
@@ -337,7 +337,7 @@ class TestProdAcceptanceGate:
         assert len(rows) == 1, "graduation must promote in place, not create a second version row"
         graduated = rows[0]
         assert graduated.id == version_id  # SAME row — not a new shell
-        assert graduated.version_number == "v1.0.0"
+        assert graduated.version_number == "1.0.0"
         assert graduated.status == "released"  # a first-prod graduation IS the release
         assert graduated.release_date is not None
         # History preserved: the pipeline_message seeded on the pre-graduation version is still
@@ -355,21 +355,21 @@ class TestProdAcceptanceGate:
         """Akceptovať records who/when/version/customer (§3.5 audit log)."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "icc")
 
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
         accept = client.post(
             f"/api/v1/customers/{customer.id}/accept",
-            json={"version_number": "v0.1.0"},
+            json={"version_number": "0.1.0"},
         )
         assert accept.status_code == 200, accept.text
         event = accept.json()
         assert event["event_type"] == "accept"
-        assert event["version_number"] == "v0.1.0"  # which version
+        assert event["version_number"] == "0.1.0"  # which version
         assert event["customer_id"] == str(customer.id)  # which customer
         assert event["actor_id"] == str(user.id)  # WHO accepted
         assert event["created_at"] is not None  # WHEN
@@ -378,13 +378,13 @@ class TestProdAcceptanceGate:
     def test_cannot_accept_version_never_deployed_to_uat(self, client, db_session, fake_deploy_runner):
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "andros")
 
         # No UAT deploy yet → accept must be rejected (cannot accept the un-deployed).
         accept = client.post(
             f"/api/v1/customers/{customer.id}/accept",
-            json={"version_number": "v0.1.0"},
+            json={"version_number": "0.1.0"},
         )
         assert accept.status_code == 409, accept.text
 
@@ -397,9 +397,9 @@ class TestProdAcceptanceGate:
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        first = _seed_verified_version(db_session, project, "v0.1.0")
+        first = _seed_verified_version(db_session, project, "0.1.0")
         first_id = first.id
-        second = _seed_verified_version(db_session, project, "v0.2.0")
+        second = _seed_verified_version(db_session, project, "0.2.0")
         second_id = second.id
         customer = _seed_customer(db_session, project, "andros")
 
@@ -407,25 +407,25 @@ class TestProdAcceptanceGate:
         for env in ("uat",):
             client.post(
                 f"/api/v1/customers/{customer.id}/deploy",
-                json={"version_number": "v0.1.0", "environment": env},
+                json={"version_number": "0.1.0", "environment": env},
             )
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.1.0"})
         first_prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
-        assert first_prod.json()["bumped_to"] == "v1.0.0"
+        assert first_prod.json()["bumped_to"] == "1.0.0"
 
         # Second, DIFFERENT version → UAT, accept, PROD. The project already had a prod deploy,
         # so this one does NOT graduate: no bump, deploys as v0.2.0, its row is untouched.
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.2.0", "environment": "uat"},
+            json={"version_number": "0.2.0", "environment": "uat"},
         )
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.2.0"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.2.0"})
         second_prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.2.0", "environment": "prod"},
+            json={"version_number": "0.2.0", "environment": "prod"},
         )
         assert second_prod.status_code == 200, second_prod.text
         assert second_prod.json()["ok"] is True
@@ -436,9 +436,9 @@ class TestProdAcceptanceGate:
             v.id: v for v in db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
         }
         # The graduated first version and the ungraduated second version coexist as distinct rows.
-        assert by_id[first_id].version_number == "v1.0.0"
+        assert by_id[first_id].version_number == "1.0.0"
         assert by_id[first_id].status == "released"
-        assert by_id[second_id].version_number == "v0.2.0"  # untouched — no rename, no second v1.0.0
+        assert by_id[second_id].version_number == "0.2.0"  # untouched — no rename, no second v1.0.0
 
 
 # ---------------------------------------------------------------------------
@@ -457,24 +457,24 @@ class TestGraduationGatedOnDeploySuccess:
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "0.1.0")
         version_id = version.id
         customer = _seed_customer(db_session, project, "andros")
 
         # UAT deploy succeeds, then accept → the PROD gate (§3.5) is satisfied.
         uat = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
         assert uat.status_code == 200, uat.text
         assert uat.json()["ok"] is True
-        accept = client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        accept = client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.1.0"})
         assert accept.status_code == 200, accept.text
 
         # PROD deploy — the runner FAILS (ok=False). The action itself returns 200; the DEPLOY failed.
         prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert prod.status_code == 200, prod.text
         result = prod.json()
@@ -488,10 +488,10 @@ class TestGraduationGatedOnDeploySuccess:
         assert len(rows) == 1, "a failed deploy must not create a v1.0.0 shell"
         stayed = rows[0]
         assert stayed.id == version_id
-        assert stayed.version_number == "v0.1.0"  # NOT graduated
+        assert stayed.version_number == "0.1.0"  # NOT graduated
         assert stayed.status == "planned"  # seed default, untouched — a failed deploy never marks released
         # Still resolvable under its original number for a retry (the deploy is repeatable).
-        assert deploy_service._resolve_version(db_session, project.id, "v0.1.0").id == version_id
+        assert deploy_service._resolve_version(db_session, project.id, "0.1.0").id == version_id
         # The failure is in the audit log as a 'failed' prod deploy event.
         prod_events = [
             e
@@ -539,21 +539,21 @@ class TestGraduationGatedOnDeploySuccess:
         """Poistka proti tomu, aby oprava zrušila pôvodné pravidlo. Z vývojového čísla sa povyšuje ďalej."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.9.0")
+        _seed_verified_version(db_session, project, "0.9.0")
         customer = _seed_customer(db_session, project, "andros")
 
-        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "v0.9.0", "environment": "uat"})
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.9.0"})
+        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "0.9.0", "environment": "uat"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.9.0"})
         prve = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.9.0", "environment": "prod"},
+            json={"version_number": "0.9.0", "environment": "prod"},
         )
 
-        assert prve.json()["bumped_to"] == "v1.0.0"
+        assert prve.json()["bumped_to"] == "1.0.0"
 
         db_session.expire_all()
         rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
-        assert [r.version_number for r in rows] == ["v1.0.0"]
+        assert [r.version_number for r in rows] == ["1.0.0"]
 
     def test_deploying_already_v1_0_0_version_is_idempotent(self, client, db_session, fake_deploy_runner):
         """Deploying a version ALREADY numbered v1.0.0 neither errors nor double-graduates (§3.6 idempotent).
@@ -564,33 +564,33 @@ class TestGraduationGatedOnDeploySuccess:
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        version = _seed_verified_version(db_session, project, "v1.0.0")  # already carries the graduation target
+        version = _seed_verified_version(db_session, project, "1.0.0")  # already carries the graduation target
         version_id = version.id
         customer = _seed_customer(db_session, project, "andros")
 
-        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "v1.0.0", "environment": "uat"})
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v1.0.0"})
+        client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "1.0.0", "environment": "uat"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "1.0.0"})
 
         first_prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v1.0.0", "environment": "prod"},
+            json={"version_number": "1.0.0", "environment": "prod"},
         )
         assert first_prod.status_code == 200, first_prod.text
         assert first_prod.json()["ok"] is True
         # First PROD (no prior prod history) → the idempotent branch marks it released + still reports the bump.
-        assert first_prod.json()["bumped_to"] == "v1.0.0"
+        assert first_prod.json()["bumped_to"] == "1.0.0"
 
         db_session.expire_all()
         rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
         assert len(rows) == 1  # no duplicate v1.0.0 shell
         assert rows[0].id == version_id
-        assert rows[0].version_number == "v1.0.0"
+        assert rows[0].version_number == "1.0.0"
         assert rows[0].status == "released"
 
         # SECOND PROD deploy of the same v1.0.0 — prod history now exists → not first_prod → no re-graduation, no error.
         second_prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v1.0.0", "environment": "prod"},
+            json={"version_number": "1.0.0", "environment": "prod"},
         )
         assert second_prod.status_code == 200, second_prod.text
         assert second_prod.json()["ok"] is True
@@ -599,7 +599,7 @@ class TestGraduationGatedOnDeploySuccess:
         db_session.expire_all()
         rows2 = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
         assert len(rows2) == 1  # STILL exactly one row — no double-graduate
-        assert rows2[0].version_number == "v1.0.0"
+        assert rows2[0].version_number == "1.0.0"
         assert rows2[0].status == "released"
 
 
@@ -612,42 +612,42 @@ class TestPerCustomerIndependence:
     def test_two_customers_run_different_versions(self, client, db_session, fake_deploy_runner):
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v1.0.0")
-        _seed_verified_version(db_session, project, "v1.1.0")
+        _seed_verified_version(db_session, project, "1.0.0")
+        _seed_verified_version(db_session, project, "1.1.0")
         andros = _seed_customer(db_session, project, "andros")
         icc = _seed_customer(db_session, project, "icc")
 
         # ANDROS UAT → v1.0.0; ICC UAT → v1.1.0 (different versions, same time).
         client.post(
             f"/api/v1/customers/{andros.id}/deploy",
-            json={"version_number": "v1.0.0", "environment": "uat"},
+            json={"version_number": "1.0.0", "environment": "uat"},
         )
         client.post(
             f"/api/v1/customers/{icc.id}/deploy",
-            json={"version_number": "v1.1.0", "environment": "uat"},
+            json={"version_number": "1.1.0", "environment": "uat"},
         )
 
         matrix = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()
         by_slug = {r["customer_slug"]: r for r in matrix["rows"]}
-        assert by_slug["andros"]["uat_version"] == "v1.0.0"
-        assert by_slug["icc"]["uat_version"] == "v1.1.0"  # genuinely different
+        assert by_slug["andros"]["uat_version"] == "1.0.0"
+        assert by_slug["icc"]["uat_version"] == "1.1.0"  # genuinely different
 
     def test_redeploy_preserves_secrets_by_default(self, client, db_session, fake_deploy_runner):
         """⚠ SAFETY INVARIANT: a redeploy does NOT rotate secrets by default (§3.7)."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
-        _seed_verified_version(db_session, project, "v0.2.0")
+        _seed_verified_version(db_session, project, "0.1.0")
+        _seed_verified_version(db_session, project, "0.2.0")
         customer = _seed_customer(db_session, project, "andros")
 
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
         # A later version to an EXISTING instance — must preserve (force_fresh False).
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.2.0", "environment": "uat"},
+            json={"version_number": "0.2.0", "environment": "uat"},
         )
         # The runner was invoked with force_fresh=False on every call (preserve-by-default).
         assert fake_deploy_runner, "runner was never called"
@@ -671,11 +671,11 @@ class TestMatrixServiceHelpers:
         db_session.add(creator)
         db_session.flush()
         project = _seed_project(db_session, creator=creator)
-        _seed_verified_version(db_session, project, "v0.1.0")
-        _seed_unverified_version(db_session, project, "v0.2.0")
+        _seed_verified_version(db_session, project, "0.1.0")
+        _seed_unverified_version(db_session, project, "0.2.0")
 
         verified = deploy_service.list_verified_versions(db_session, project.id)
-        assert verified == ["v0.1.0"]
+        assert verified == ["0.1.0"]
 
     def test_instance_url_is_single_source_of_truth(self, db_session):
         creator = User(
@@ -805,7 +805,7 @@ class TestDeployabilityCause:
         """
         owner = _seed_user(db_session, role="ri", prefix="drift_owner")
         project = _seed_project(db_session, creator=owner)
-        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "0.1.0")
         _force_provenance(monkeypatch, "hotovo_drift")  # signed at a commit the repo has since moved past
 
         matrix = deploy_service.build_matrix(db_session, project)
@@ -814,7 +814,7 @@ class TestDeployabilityCause:
         assert matrix["verified_versions"] == []
         block = matrix["deployability"]
         assert block["cause"] == "drift"
-        assert block["version_number"] == "v0.1.0"
+        assert block["version_number"] == "0.1.0"
         assert block["version_id"] == version.id
         # No user was supplied → the offer is never granted on a guess.
         assert block["can_reverify"] is False
@@ -828,7 +828,7 @@ class TestDeployabilityCause:
         """
         owner = _seed_user(db_session, role="ri", prefix="running_owner")
         project = _seed_project(db_session, creator=owner)
-        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "0.1.0")
         state = db_session.query(PipelineState).filter_by(version_id=version.id).one()
         # The shape apply_action('overit_znovu') leaves for a sha_drift: re-entered Verifikácia as a RE-GATE,
         # turn in flight. The re-gate flag is the evidence — a merely busy version is NOT re-verifying.
@@ -841,7 +841,7 @@ class TestDeployabilityCause:
         block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
 
         assert block["cause"] == "reverify_running"
-        assert block["version_number"] == "v0.1.0"
+        assert block["version_number"] == "0.1.0"
         # A run is already in flight — no second trigger, even for a user who would otherwise qualify.
         assert block["can_reverify"] is False
 
@@ -855,7 +855,7 @@ class TestDeployabilityCause:
         """
         owner = _seed_user(db_session, role="ri", prefix="stale_owner")
         project = _seed_project(db_session, creator=owner)
-        version = _seed_signed_off_version(db_session, project, "v0.1.0")
+        version = _seed_signed_off_version(db_session, project, "0.1.0")
         # The Hotovo signature IS on record (staleness ignored) — this is what separates a stale sign-off
         # from a version that never got anywhere.
         assert orchestrator.ever_signed_off(db_session, version.id) is True
@@ -864,7 +864,7 @@ class TestDeployabilityCause:
         block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
 
         assert block["cause"] == "stale_signoff"
-        assert block["version_number"] == "v0.1.0"
+        assert block["version_number"] == "0.1.0"
         assert block["version_id"] == version.id
         assert block["can_reverify"] is False
 
@@ -873,7 +873,7 @@ class TestDeployabilityCause:
         so no version is named (the screen must not blame an innocent in-flight version)."""
         owner = _seed_user(db_session, role="ri", prefix="fresh_owner")
         project = _seed_project(db_session, creator=owner)
-        _seed_unverified_version(db_session, project, "v0.1.0")  # still in Programovanie, never signed off
+        _seed_unverified_version(db_session, project, "0.1.0")  # still in Programovanie, never signed off
 
         block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
 
@@ -887,11 +887,11 @@ class TestDeployabilityCause:
         button — the notice is absent and the normal screen is untouched."""
         owner = _seed_user(db_session, role="ri", prefix="ok_owner")
         project = _seed_project(db_session, creator=owner)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
 
         matrix = deploy_service.build_matrix(db_session, project, owner)
 
-        assert matrix["verified_versions"] == ["v0.1.0"]
+        assert matrix["verified_versions"] == ["0.1.0"]
         block = matrix["deployability"]
         assert block["cause"] == "ok"
         assert block["version_number"] is None
@@ -908,14 +908,14 @@ class TestDeployabilityCause:
         """
         owner = _seed_user(db_session, role="ri", prefix="newest_owner")
         project = _seed_project(db_session, creator=owner)
-        _seed_verified_version(db_session, project, "v0.9.0")
-        newest = _seed_verified_version(db_session, project, "v0.10.0")
+        _seed_verified_version(db_session, project, "0.9.0")
+        newest = _seed_verified_version(db_session, project, "0.10.0")
         _force_provenance(monkeypatch, "sha_drift")
 
         block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
 
         assert block["cause"] == "drift"
-        assert block["version_number"] == "v0.10.0"
+        assert block["version_number"] == "0.10.0"
         assert block["version_id"] == newest.id
 
     def test_reverify_offer_follows_ownership(self, db_session, monkeypatch, fake_repo_head):
@@ -933,7 +933,7 @@ class TestDeployabilityCause:
         admin.username = "admin"  # the ACCOUNT; note its role here is shu and it does not matter
         db_session.flush()
         project = _seed_project(db_session, creator=owner)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         _force_provenance(monkeypatch, "hotovo_drift")
 
         def _can_reverify(user) -> bool:
@@ -957,7 +957,7 @@ class TestDeployabilityCause:
         """
         owner = _seed_user(db_session, role="ri", prefix="await_owner")
         project = _seed_project(db_session, creator=owner)
-        version = _seed_verified_version(db_session, project, "v0.1.0")
+        version = _seed_verified_version(db_session, project, "0.1.0")
         state = db_session.query(PipelineState).filter_by(version_id=version.id).one()
         state.current_stage = "verifikacia"  # PASS recorded, waiting for the Hotovo approval
         state.status = "awaiting_manazer"
@@ -967,7 +967,7 @@ class TestDeployabilityCause:
         block = deploy_service.deployability(db_session, project, verified_versions=[], user=owner)
 
         assert block["cause"] == "awaiting_signoff"
-        assert block["version_number"] == "v0.1.0"
+        assert block["version_number"] == "0.1.0"
         # Nothing to re-verify — the check already passed; the remedy is an approval, not a re-run.
         assert block["can_reverify"] is False
 
@@ -983,7 +983,7 @@ class TestDeployabilityCause:
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         _seed_customer(db_session, project, "andros")
         _force_provenance(monkeypatch, "hotovo_drift")
 
@@ -993,7 +993,7 @@ class TestDeployabilityCause:
         body = resp.json()
         assert body["verified_versions"] == []
         assert body["deployability"]["cause"] == "drift"
-        assert body["deployability"]["version_number"] == "v0.1.0"
+        assert body["deployability"]["version_number"] == "0.1.0"
         assert body["deployability"]["version_id"] is not None
         assert body["deployability"]["can_reverify"] is True
 
@@ -1008,7 +1008,7 @@ class TestDeployabilityCause:
         manager = _seed_user(db_session, role="ri", prefix="accept_ri")
         medior = _seed_user(db_session, role="ha", prefix="accept_ha")
         project = _seed_project(db_session, creator=owner)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         _seed_customer(db_session, project, "andros")
 
         admin = _seed_user(db_session, role="shu", prefix="accept_admin")
@@ -1038,7 +1038,7 @@ class TestDeployabilityCause:
         manager = _seed_user(db_session, role="ri", prefix="depl_ri")
         medior = _seed_user(db_session, role="ha", prefix="depl_ha")
         project = _seed_project(db_session, creator=owner)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         _seed_customer(db_session, project, "andros")
 
         admin = _seed_user(db_session, role="shu", prefix="depl_admin")
@@ -1075,16 +1075,16 @@ class TestDeployStatusSurvivesRefresh:
     def test_row_carries_when_the_last_successful_deploy_happened(self, client, db_session, fake_deploy_runner):
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "andros")
 
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
 
         row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
-        assert row["uat_version"] == "v0.1.0"
+        assert row["uat_version"] == "0.1.0"
         assert row.get("uat_last_deploy_at"), "riadok nevie, KEDY sa nasadilo — po F5 to nemá odkiaľ vziať"
         # Druhé prostredie sa nikdy nenasadilo → nesmie si nič vymyslieť.
         assert row.get("prod_last_deploy_at") is None, "PROD sa nenasadil, a predsa hlási čas"
@@ -1093,12 +1093,12 @@ class TestDeployStatusSurvivesRefresh:
         """Upozornenia („nasadilo sa, ale niečo nebolo ideálne“) povedala aplikácia raz a už nikdy."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "andros")
 
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
 
         row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
@@ -1112,20 +1112,20 @@ class TestDeployStatusSurvivesRefresh:
         že posledné dobré nasadenie je novšie, než v skutočnosti je — a to je horšie než mlčať."""
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
-        _seed_verified_version(db_session, project, "v0.1.0")
+        _seed_verified_version(db_session, project, "0.1.0")
         customer = _seed_customer(db_session, project, "andros")
 
         client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "uat"},
+            json={"version_number": "0.1.0", "environment": "uat"},
         )
         po_uspechu = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
 
         # PROD zlyhá — UAT sa to nesmie dotknúť vôbec.
-        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "v0.1.0"})
+        client.post(f"/api/v1/customers/{customer.id}/accept", json={"version_number": "0.1.0"})
         prod = client.post(
             f"/api/v1/customers/{customer.id}/deploy",
-            json={"version_number": "v0.1.0", "environment": "prod"},
+            json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert prod.json()["ok"] is False
 

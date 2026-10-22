@@ -83,7 +83,7 @@ def deploy_fixture(db_session):
         )
         db_session.add(project)
         db_session.flush()
-        version = Version(project_id=project.id, version_number="v0.1.0", name="v0.1.0")
+        version = Version(project_id=project.id, version_number="0.1.0", name="0.1.0")
         db_session.add(version)
         db_session.flush()
         db_session.add(
@@ -186,7 +186,7 @@ class TestUpFrontGate:
             await deploy_service.deploy(
                 db_session,
                 customer.id,
-                version_number="v0.1.0",
+                version_number="0.1.0",
                 environment="uat",
                 actor_id=None,
                 deploy_runner=_never_called_runner,
@@ -207,7 +207,7 @@ class TestUpFrontGate:
         event, url, _ = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
@@ -248,7 +248,7 @@ class TestPostDeployLaunchProof:
         outcome = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
@@ -282,15 +282,15 @@ class TestPostDeployLaunchProof:
         await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
         )
-        accepted = deploy_service.accept(db_session, customer.id, "v0.1.0", None)
+        accepted = deploy_service.accept(db_session, customer.id, "0.1.0", None)
 
         assert accepted.event_type == "accept"
-        assert deploy_service.is_accepted(db_session, customer.id, "v0.1.0") is True
+        assert deploy_service.is_accepted(db_session, customer.id, "0.1.0") is True
 
     async def test_the_pairing_warning_is_reported_once_not_twice(
         self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
@@ -314,7 +314,7 @@ class TestPostDeployLaunchProof:
         outcome = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_runner_that_already_warned,
@@ -336,7 +336,7 @@ class TestPostDeployLaunchProof:
         event, url, _ = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
@@ -361,7 +361,7 @@ class TestPostDeployLaunchProof:
         event, _url, _ = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
@@ -392,7 +392,7 @@ class TestPostDeployLaunchProof:
         event, url, _ = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_failing_runner,
@@ -422,7 +422,7 @@ class TestWarningsChannel:
         outcome = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_warning_runner,
@@ -442,7 +442,7 @@ class TestWarningsChannel:
         outcome = await deploy_service.deploy(
             db_session,
             customer.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             actor_id=None,
             deploy_runner=_ok_runner,
@@ -472,7 +472,7 @@ class TestWarningsChannel:
 
         result = asyncio.run(
             deploy_service._default_deploy_runner(
-                project_slug="nex-shopify", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=False
+                project_slug="nex-shopify", uat_slug="andros-uat", version_number="0.1.0", force_fresh=False
             )
         )
         ok, detail, url = result

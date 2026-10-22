@@ -95,7 +95,7 @@ def _make_version(
         project = _make_project(db_session)
     defaults = {
         "project_id": project.id,
-        "version_number": f"v{uuid.uuid4().hex[:6]}",
+        "version_number": f"0.0.{uuid.uuid4().int % 10**9}",
         "name": "Test version",
         "status": status,
     }

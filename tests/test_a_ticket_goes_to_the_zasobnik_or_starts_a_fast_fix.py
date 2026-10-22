@@ -323,24 +323,24 @@ async def test_only_a_successful_deploy_of_a_fix_from_a_ticket_tells_the_ticket(
     monkeypatch.setattr(deploy, "_follow_fix_ticket", spy)
     user = _deploy_user(db_session)
     project = _deploy_project(db_session, user=user)
-    plain = _deploy_version(db_session, project, "v0.1.0")
+    plain = _deploy_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner())
     assert calls == [] and plain.plane_issue_id is None
 
-    fixed = _deploy_version(db_session, project, "v0.1.1")
+    fixed = _deploy_version(db_session, project, "0.1.1")
     fixed.plane_issue_id, fixed.plane_identifier = "x11", "DEV-11"
     db_session.flush()
     await _deploy(
-        db_session, customer, version_number="v0.1.1", environment="uat", actor=user, runner=_FakeRunner(ok=False)
+        db_session, customer, version_number="0.1.1", environment="uat", actor=user, runner=_FakeRunner(ok=False)
     )
     assert calls == []
     outcome = await _deploy(
-        db_session, customer, version_number="v0.1.1", environment="uat", actor=user, runner=_FakeRunner()
+        db_session, customer, version_number="0.1.1", environment="uat", actor=user, runner=_FakeRunner()
     )
-    assert calls == [("v0.1.1", "ANDROS", "uat")]
+    assert calls == [("0.1.1", "ANDROS", "uat")]
     assert "tiket sa neposunul" in outcome.warnings
-    deploy.accept(db_session, customer.id, "v0.1.1", user.id)
-    await _deploy(db_session, customer, version_number="v0.1.1", environment="prod", actor=user, runner=_FakeRunner())
+    deploy.accept(db_session, customer.id, "0.1.1", user.id)
+    await _deploy(db_session, customer, version_number="0.1.1", environment="prod", actor=user, runner=_FakeRunner())
     assert calls[-1][1:] == ("ANDROS", "prod")

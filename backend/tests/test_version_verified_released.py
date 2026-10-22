@@ -87,7 +87,7 @@ def test_released_version_stays_verified_after_head_moves_past_anchor(db_session
     """After graduation (status='released', the note-move commit advanced HEAD past ``verified_sha``),
     ``version_verified`` returns verified — NOT drift. This is the exact gap the graduation test missed:
     it only checked the moved file/tree, never called ``version_verified`` afterward."""
-    version = _seed_sha_anchored_version(db_session, version_number="v1.0.0", status="released")
+    version = _seed_sha_anchored_version(db_session, version_number="1.0.0", status="released")
 
     is_verified, provenance = orchestrator.version_verified(db_session, version.id, head=MOVED_HEAD)
 
@@ -99,7 +99,7 @@ def test_not_released_version_still_drifts_when_head_moves(db_session):
     """Guardrail — a NOT-released version whose HEAD moved past its anchored SHA STILL reports drift.
     Only ``released`` short-circuits; the drift detection that catches code changing after a Verifikácia
     PASS is byte-identical for every non-released status."""
-    version = _seed_sha_anchored_version(db_session, version_number="v0.1.0", status="active")
+    version = _seed_sha_anchored_version(db_session, version_number="0.1.0", status="active")
 
     is_verified, provenance = orchestrator.version_verified(db_session, version.id, head=MOVED_HEAD)
 

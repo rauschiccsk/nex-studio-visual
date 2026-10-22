@@ -85,11 +85,11 @@ class TestVersionCreate:
     def test_version_number_rejects_overlong(self) -> None:
         """``version_number`` is capped at 50 chars (mirrors DB VARCHAR(50))."""
         with pytest.raises(ValidationError):
-            VersionCreate(version_number="v" + "0" * 50)
+            VersionCreate(version_number="0.0." + "0" * 47)
 
     def test_version_number_accepts_boundary(self) -> None:
         """A 50-char ``version_number`` is accepted (inclusive upper bound)."""
-        boundary = "v" + "0" * 49
+        boundary = "0.0." + "0" * 46
         payload = VersionCreate(version_number=boundary)
         assert len(payload.version_number) == 50
 

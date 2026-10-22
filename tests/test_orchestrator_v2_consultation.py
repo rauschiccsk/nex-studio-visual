@@ -53,7 +53,7 @@ def _seed_consultation(db, *, status="blocked"):
     )
     db.add(project)
     db.flush()
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db.add(version)
     db.flush()
     state = PipelineState(

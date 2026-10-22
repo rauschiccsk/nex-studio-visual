@@ -134,9 +134,9 @@ def list_versions(db: Session, project_id: UUID) -> list[Version]:
 
 
 def number_order_key(version_number: str) -> tuple[int, ...]:
-    """Where a version number stands among the project's versions — compared as numbers, the ``v`` of the first PROD
-    version (``deploy.FIRST_PROD_VERSION``) ignored: ``'v1.2.0'`` and ``'1.2.0'`` → ``(1, 2, 0)``; ``1.10.0`` after
-    ``1.9.0``. A part that is not a number counts as 0, so an odd label never breaks a list.
+    """Where a version number stands among the project's versions — compared as numbers, a ``v`` before it ignored
+    (the first PROD version was ``v1.0.0`` until DEV-170): ``'v1.2.0'`` and ``'1.2.0'`` → ``(1, 2, 0)``;
+    ``1.10.0`` after ``1.9.0``. A part that is not a number counts as 0, so an odd label never breaks a list.
 
     The one order of versions in the cockpit (DEV-169): ``tests/test_versions_are_ordered_by_their_number.py`` refuses
     a database ``order_by`` on ``version_number``, which compares text (Director 21.10.2026: „poradie nejako

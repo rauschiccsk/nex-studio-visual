@@ -23,12 +23,14 @@ already present on the ORM instance.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.db.models.versions import VERSION_NUMBER_PATTERN, VERSION_NUMBER_RULE
 from backend.schemas.delivery_statement import WorkKind
 
 # Mirrors the CHECK constraint
@@ -39,6 +41,14 @@ from backend.schemas.delivery_statement import WorkKind
 # nasadená. Bez neho hotová verzia niesla ``planned`` a na obrazovke sa nedala odlíšiť od nezačatej.
 # Ponechať ju ``active`` až do nasadenia by ju zase nedalo odlíšiť od tej, ktorá sa práve stavia.
 VersionStatus = Literal["planned", "active", "done", "released"]
+
+
+def _version_number(value: str) -> str:
+    """DEV-170 — ``major.minor.patch`` and nothing else; the database holds the same rule
+    (``ck_versions_version_number``)."""
+    if not re.fullmatch(VERSION_NUMBER_PATTERN, value):
+        raise ValueError(VERSION_NUMBER_RULE)
+    return value
 
 
 class VersionCreate(BaseModel):
@@ -60,6 +70,12 @@ class VersionCreate(BaseModel):
         max_length=50,
         description="Semver-style version string, e.g. '1.0.0' or '1.1.0'.",
     )
+
+    @field_validator("version_number")
+    @classmethod
+    def _number_has_its_shape(cls, value: str) -> str:
+        return _version_number(value)
+
     name: Optional[str] = Field(
         default=None,
         max_length=255,
@@ -99,6 +115,12 @@ class VersionUpdate(BaseModel):
         max_length=50,
         description="Updated semver-style version string.",
     )
+
+    @field_validator("version_number")
+    @classmethod
+    def _number_has_its_shape(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else _version_number(value)
+
     name: Optional[str] = Field(
         default=None,
         max_length=255,

@@ -946,7 +946,7 @@ def _seed_prod_deploy(db_session, project_id) -> None:
         DeployEvent(
             customer_id=customer.id,
             project_id=project_id,
-            version_number="v1.0.0",
+            version_number="1.0.0",
             environment="prod",
             event_type="deploy",
             status="ok",
@@ -1021,7 +1021,7 @@ def _seed_uat_deploy(db_session, project_id, *, status: str = "ok") -> None:
         DeployEvent(
             customer_id=customer.id,
             project_id=project_id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="uat",
             event_type="deploy",
             status=status,

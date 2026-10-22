@@ -49,7 +49,7 @@ def _project(db, numbers: list[str]) -> Project:
 @pytest.mark.parametrize(
     ("founded", "shown"),
     [
-        (["0.1.0", "v1.0.0", "1.1.0"], ["1.1.0", "v1.0.0", "0.1.0"]),
+        (["0.1.0", "1.0.0", "1.1.0"], ["1.1.0", "1.0.0", "0.1.0"]),
         (["1.5.0", "1.9.0", "1.10.0"], ["1.10.0", "1.9.0", "1.5.0"]),
     ],
 )
@@ -65,11 +65,11 @@ def test_the_project_page_lists_the_newest_number_first(client, db_session, foun
 
 
 def test_the_costs_add_the_versions_up_in_the_order_of_their_numbers(db_session):
-    project = _project(db_session, ["1.10.0", "v1.0.0", "1.9.0", "0.1.0"])
+    project = _project(db_session, ["1.10.0", "1.0.0", "1.9.0", "0.1.0"])
 
     costs = metrics.compute_project_metrics(db_session, project)
 
-    assert [v.version_number for v in costs.by_version] == ["0.1.0", "v1.0.0", "1.9.0", "1.10.0"]
+    assert [v.version_number for v in costs.by_version] == ["0.1.0", "1.0.0", "1.9.0", "1.10.0"]
 
 
 def _ordered_as_text(path: Path) -> list[int]:

@@ -301,10 +301,10 @@ def test_graduation_moves_release_note_dir(db_session, tmp_path):
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "note"], check=True)
 
-    deploy._graduate_version_in_place(db_session, version, "v1.0.0", tmp_path)
+    deploy._graduate_version_in_place(db_session, version, "1.0.0", tmp_path)
 
     # Version renamed + released.
-    assert version.version_number == "v1.0.0"
+    assert version.version_number == "1.0.0"
     assert version.status == "released"
     # Note moved: old dir file gone, new dir file present with the same content.
     assert not (old_dir / "RELEASE_NOTES.md").exists()
@@ -325,12 +325,12 @@ def test_graduation_idempotent_when_number_unchanged(db_session, tmp_path):
     from backend.services import deploy
 
     _git_init(tmp_path)
-    _creator, _project, version = _seed(db_session, version_number="v1.0.0", status="active")
+    _creator, _project, version = _seed(db_session, version_number="1.0.0", status="active")
 
     # Already the target number → no rename, no move, no crash.
-    deploy._graduate_version_in_place(db_session, version, "v1.0.0", tmp_path)
+    deploy._graduate_version_in_place(db_session, version, "1.0.0", tmp_path)
 
-    assert version.version_number == "v1.0.0"
+    assert version.version_number == "1.0.0"
     assert version.status == "released"
 
 

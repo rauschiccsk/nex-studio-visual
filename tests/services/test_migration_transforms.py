@@ -176,3 +176,41 @@ def test_secrets_guard_module_never_imports_or_calls_read_content():
     # Must not import the credentials service (its content API decodes secret bytes).
     assert "backend.services.credentials" not in source
     assert "import credentials" not in source
+
+
+# ── DEV-170: a version number is major.minor.patch ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("v1", "v2"),
+    [
+        ("v1.0.0", "1.0.0"),
+        ("v1.0", "1.0.0"),
+        ("v2", "2.0.0"),
+        ("0.3.1", "0.3.1"),
+        ("1.2", "1.2.0"),
+        ("pilot-x", "pilot-x"),
+    ],
+)
+def test_a_v1_version_number_gets_the_shape_v2_keeps(v1, v2):
+    """v1 numbered versions „v1.0“; the v2 database takes only ``1.2.3`` (DEV-170). A number that is not one is left
+    as it is — the database refuses it and only that project's transaction stops, with the reason."""
+    from backend.services.migration.transforms import version_number
+
+    assert version_number(v1) == v2
+
+
+def test_the_verification_compares_a_version_number_in_its_v2_shape():
+    from backend.services.migration.verify import _compare_rows
+
+    found: list[dict] = []
+    same = {"id": 1, "project_id": 7, "version_number": "v1.0"}
+    _compare_rows(
+        "versions", [same], [{**same, "version_number": "1.0.0"}], {"id", "project_id", "version_number"}, found
+    )
+    assert found == []
+
+    _compare_rows(
+        "versions", [same], [{**same, "version_number": "1.1.0"}], {"id", "project_id", "version_number"}, found
+    )
+    assert [(f["code"], f["detail"]) for f in found] == [("field_mismatch", "column=version_number")]

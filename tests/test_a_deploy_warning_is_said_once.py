@@ -57,7 +57,7 @@ def provision_with_warnings(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_runner_keeps_the_warnings_out_of_its_report(provision_with_warnings):
     result = await deploy_service._default_deploy_runner(
-        project_slug="nex-demo", uat_slug="andros-uat", version_number="v0.1.0", force_fresh=False
+        project_slug="nex-demo", uat_slug="andros-uat", version_number="0.1.0", force_fresh=False
     )
     _ok, detail, _url = result
     assert detail == "OK"
@@ -92,13 +92,13 @@ def _runner(*warnings: str):
 async def test_the_event_keeps_the_warnings_in_their_own_field_and_the_matrix_hands_them_over(db_session):
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
 
     outcome = await deploy_service.deploy(
         db_session,
         customer.id,
-        version_number="v0.1.0",
+        version_number="0.1.0",
         environment="uat",
         actor_id=user.id,
         deploy_runner=_runner(FIRST, SECOND),
@@ -119,7 +119,7 @@ async def test_a_warning_found_after_the_event_was_written_is_kept_too(db_sessio
     """The ticket of a fast fix follows its deploy only after the event exists (DEV-122) — its warning still counts."""
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    version = _make_version(db_session, project, "v0.1.0")
+    version = _make_version(db_session, project, "0.1.0")
     version.plane_issue_id = "issue-1"
     customer = _make_customer(db_session, project)
     late = "Tiket opravy sa nepohol — Plane neodpovedal."
@@ -132,7 +132,7 @@ async def test_a_warning_found_after_the_event_was_written_is_kept_too(db_sessio
     outcome = await deploy_service.deploy(
         db_session,
         customer.id,
-        version_number="v0.1.0",
+        version_number="0.1.0",
         environment="uat",
         actor_id=user.id,
         deploy_runner=_runner(FIRST),
@@ -161,7 +161,7 @@ def test_an_event_from_before_the_field_is_split_when_read(db_session, detail, r
         DeployEvent(
             customer_id=customer.id,
             project_id=project.id,
-            version_number="v0.1.0",
+            version_number="0.1.0",
             environment="prod",
             event_type="deploy",
             status="ok",

@@ -46,7 +46,7 @@ def _seed_state_at_verifikacia(db, *, flow_type: str = "new_version", iteration:
     )
     db.add(project)
     db.flush()
-    version = Version(project_id=project.id, version_number="v1.1.0", status="active")
+    version = Version(project_id=project.id, version_number="1.1.0", status="active")
     db.add(version)
     db.flush()
     state = PipelineState(

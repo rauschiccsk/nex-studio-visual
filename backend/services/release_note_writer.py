@@ -85,7 +85,7 @@ def version_notes_dir(proj_root: Path, version_number: str) -> Path:
     Mirrors the layout :mod:`backend.services.release_notes` globs and
     ``orchestrator._version_spec_rel`` writes the rest of the version spec into.
     Normalises the ``v`` prefix so a graduated number that already carries it
-    (``FIRST_PROD_VERSION == "v1.0.0"``) does not yield a ``vv1.0.0`` dir.
+    (the first PROD version was ``v1.0.0`` until DEV-170) does not yield a ``vv1.0.0`` dir.
     """
     return Path(proj_root) / "docs" / "specs" / "versions" / f"v{_bare(version_number)}"
 

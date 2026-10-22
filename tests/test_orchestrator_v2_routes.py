@@ -10,6 +10,7 @@ real v2 branch DB + the v2 route module.
 """
 
 import uuid
+from typing import Optional
 
 import bcrypt
 import pytest
@@ -54,13 +55,13 @@ def _make_version(db_session, user) -> Version:
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return version
 
 
-def _make_project_with_semver(db_session, user, version_number="0.3.0") -> Project:
+def _make_project_with_semver(db_session, user, version_number: Optional[str] = "0.3.0") -> Project:
     project = Project(
         name=f"P {uuid.uuid4().hex[:8]}",
         slug=f"p-{uuid.uuid4().hex[:8]}",
@@ -72,8 +73,9 @@ def _make_project_with_semver(db_session, user, version_number="0.3.0") -> Proje
     db_session.add(project)
     db_session.flush()
     # DEV-110: the base of a fast fix is a finished version — one the customer has.
-    db_session.add(Version(project_id=project.id, version_number=version_number, status="released"))
-    db_session.flush()
+    if version_number is not None:
+        db_session.add(Version(project_id=project.id, version_number=version_number, status="released"))
+        db_session.flush()
     return project
 
 
@@ -179,9 +181,10 @@ def test_fast_fix_route_unknown_project_404(client):
     assert r.status_code == 404
 
 
-def test_fast_fix_route_no_semver_base_400(client, db_session):
-    # A project with no semver-parseable version cannot be patched → 400 (precondition), not 500.
-    project = _make_project_with_semver(db_session, client._ri, "pilot-x")
+def test_fast_fix_route_no_finished_base_400(client, db_session):
+    # A project with no finished version cannot be patched → 400 (precondition), not 500. DEV-170: a number that is
+    # not major.minor.patch (the old „pilot-x“) cannot be stored any more.
+    project = _make_project_with_semver(db_session, client._ri, None)
     r = client.post(
         "/api/v1/pipeline/fast-fix",
         json={"project_id": str(project.id), "directive": "x", "work_kind": "fix"},
@@ -404,7 +407,7 @@ def test_board_reflects_live_verified_drift(db_session, monkeypatch):
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number="v0.1.0", name="dev")
+    version = Version(project_id=project.id, version_number="0.1.0", name="dev")
     db_session.add(version)
     db_session.flush()
     db_session.add(

@@ -65,7 +65,7 @@ async def test_away_director_pinged_when_project_has_no_owner(db_session, monkey
     db_session.flush()
     assert project.owner_id is None
 
-    version = Version(project_id=project.id, version_number="v1.0.0", status="planned")
+    version = Version(project_id=project.id, version_number="1.0.0", status="planned")
     db_session.add(version)
     db_session.flush()
 
@@ -159,7 +159,7 @@ async def test_away_user_pinged_even_when_another_active_director_watches(db_ses
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number="v1.0.0", status="planned")
+    version = Version(project_id=project.id, version_number="1.0.0", status="planned")
     db_session.add(version)
     db_session.flush()
 

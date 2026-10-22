@@ -295,18 +295,18 @@ async def test_only_a_successful_prod_deploy_closes_the_tickets(db_session, monk
     monkeypatch.setattr(deploy, "_close_requirement_tickets", spy)
     user = _deploy_user(db_session)
     project = _deploy_project(db_session, user=user)
-    _deploy_version(db_session, project, "v0.1.0")
+    _deploy_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
 
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner())
     assert calls == []
-    deploy.accept(db_session, customer.id, "v0.1.0", user.id)
+    deploy.accept(db_session, customer.id, "0.1.0", user.id)
     await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=_FakeRunner(ok=False)
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=_FakeRunner(ok=False)
     )
     assert calls == []
     outcome = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=_FakeRunner()
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=_FakeRunner()
     )
     assert len(calls) == 1 and calls[0][1] == "ANDROS"
     assert "tiket sa neuzavrel" in outcome.warnings

@@ -53,7 +53,7 @@ def _make_version(db_session):
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return version, project
@@ -317,7 +317,7 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
     monkeypatch.setattr(
         orchestrator.verified_build, "prepare", lambda _compose: orchestrator.verified_build.Preparation(None)
     )
-    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="v0.1.42")
+    ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="0.1.42")
 
     assert ok is True and detail == "OK"
     base = ["docker", "compose", "-f", "/opt/uat/ledger/docker-compose.yml"]

@@ -24,6 +24,7 @@ from sqlalchemy.engine import Connection
 
 from backend.db.base import Base
 from backend.services.migration.secrets_guard import credential_file_present
+from backend.services.migration.transforms import version_number
 
 CRITICAL = "CRITICAL"
 WARN = "WARN"
@@ -191,6 +192,15 @@ def capture_pipeline_counts(conn: Connection) -> dict[str, int]:
     return {"pipeline_state": ps, "pipeline_message": pm}
 
 
+#: Columns the copier writes in their v2 shape — compared with what the copier made of the source value.
+_V2_SHAPE = {"version_number": version_number}
+
+
+def _expected(column: str, value):
+    shape = _V2_SHAPE.get(column)
+    return shape(value) if shape is not None and value is not None else value
+
+
 def _compare_rows(
     table: str,
     source_rows: list[Mapping],
@@ -216,7 +226,7 @@ def _compare_rows(
             findings.append({"table": table, "severity": CRITICAL, "code": "row_missing", "id": str(s_row["id"])})
             continue
         for col in cols:
-            if s_row[col] != t_row[col]:
+            if _expected(col, s_row[col]) != t_row[col]:
                 findings.append(
                     {
                         "table": table,

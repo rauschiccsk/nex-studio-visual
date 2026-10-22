@@ -51,7 +51,7 @@ def _make_project(db_session: Any, owner: User) -> Project:
 
 
 def _make_version(db_session: Any, project: Project) -> Version:
-    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().hex[:4]}.0")
+    version = Version(project_id=project.id, version_number=f"1.{uuid.uuid4().int % 10**4}.0")
     db_session.add(version)
     db_session.flush()
     return version

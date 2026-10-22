@@ -104,8 +104,9 @@ from backend.services.version import number_order_key
 # version may be deployed to a customer — the Nasadiť dropdown lists exactly these.
 VERIFIED_STAGE = "done"
 
-# The version a first PROD deploy bumps the project to (§3.6).
-FIRST_PROD_VERSION = "v1.0.0"
+# The version a first PROD deploy bumps the project to (§3.6). DEV-170: a bare number like every other — the cockpit
+# adds the ``v`` itself where one belongs, so the ``v1.0.0`` this was until 21.10.2026 became ``vv1.0.0`` there.
+FIRST_PROD_VERSION = "1.0.0"
 
 # v4.0.58 — the launch contract a token-launch app MUST declare in its own ``.env.example``.
 #
@@ -1567,7 +1568,7 @@ def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> Non
 
 #: DEV-147 — what the Manažér reads when the graduation commit stayed on the cockpit's server.
 GRADUATION_NOT_PUSHED = (
-    "Poznámky k vydaniu sa presunuli do {version}, ale zmena ostala len na serveri — na GitHub sa neodoslala "
+    "Poznámky k vydaniu sa presunuli do v{version}, ale zmena ostala len na serveri — na GitHub sa neodoslala "
     "({why}). Kontroly (CI) pre ňu nebežia, kým sa neodošle."
 )
 

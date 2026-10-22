@@ -49,15 +49,15 @@ async def _first_prod_deploy(db_session, monkeypatch, tmp_path, *, push_to: Path
     work = _checkout_with_notes(projects_root, project.slug, origin)
     if push_to is not None:
         _git(work, "remote", "set-url", "--push", "origin", str(push_to))
-    _make_version(db_session, project, "v0.1.0")
+    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
-    await _deploy(db_session, customer, version_number="v0.1.0", environment="uat", actor=user, runner=runner)
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
     from backend.services import deploy as deploy_service
 
-    deploy_service.accept(db_session, customer.id, "v0.1.0", user.id)
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
     event, _url, bumped = await _deploy(
-        db_session, customer, version_number="v0.1.0", environment="prod", actor=user, runner=runner
+        db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner
     )
     return event, bumped, work, origin
 
@@ -66,7 +66,7 @@ async def _first_prod_deploy(db_session, monkeypatch, tmp_path, *, push_to: Path
 async def test_the_moved_release_notes_reach_github(db_session, monkeypatch, tmp_path) -> None:
     event, bumped, work, origin = await _first_prod_deploy(db_session, monkeypatch, tmp_path)
 
-    assert bumped == "v1.0.0"
+    assert bumped == "1.0.0"
     assert _git(work, "log", "-1", "--format=%s") == "docs(release-notes): graduate notes to v1.0.0"
     assert _git(origin, "log", "-1", "--format=%s", "main") == "docs(release-notes): graduate notes to v1.0.0"
     assert _git(work, "rev-list", "--count", "origin/main..HEAD") == "0"
@@ -79,7 +79,7 @@ async def test_a_refused_push_is_said_and_the_deploy_still_stands(db_session, mo
         db_session, monkeypatch, tmp_path, push_to=tmp_path / "missing.git"
     )
 
-    assert bumped == "v1.0.0" and event.status == "ok"
+    assert bumped == "1.0.0" and event.status == "ok"
     said = [w for w in event.warnings if w.startswith("Poznámky k vydaniu sa presunuli do v1.0.0")]
     assert len(said) == 1, event.warnings
     assert said[0].startswith(
@@ -123,7 +123,7 @@ async def test_nothing_waiting_is_not_pushed(db_session, monkeypatch, tmp_path) 
     second = await deploy_service.deploy(
         db_session,
         customer_id,
-        version_number="v1.0.0",
+        version_number="1.0.0",
         environment="prod",
         actor_id=user_id,
         force_fresh=False,
@@ -141,7 +141,7 @@ def test_a_checkout_with_nothing_waiting_is_not_pushed(monkeypatch, tmp_path) ->
     work = _checkout_with_notes(tmp_path / "projects", "p", tmp_path / "origin.git")
     monkeypatch.setattr(orchestrator, "_push_branch", lambda root: pytest.fail("pushed with nothing waiting"))
 
-    assert deploy_service._publish_graduation(work, "v1.0.0") is None
+    assert deploy_service._publish_graduation(work, "1.0.0") is None
 
 
 def test_a_checkout_without_github_is_not_a_failure(tmp_path) -> None:
@@ -151,7 +151,7 @@ def test_a_checkout_without_github_is_not_a_failure(tmp_path) -> None:
     work = _checkout_with_notes(tmp_path / "projects", "p", tmp_path / "origin.git")
     _git(work, "remote", "remove", "origin")
 
-    assert deploy_service._publish_graduation(work, "v1.0.0") is None
+    assert deploy_service._publish_graduation(work, "1.0.0") is None
 
 
 @pytest.mark.asyncio

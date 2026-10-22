@@ -55,6 +55,19 @@ def map_category_to_type(category: str | None) -> str:
     return _CATEGORY_TO_TYPE.get(category.strip().lower(), "standard")
 
 
+def version_number(number: str) -> str:
+    """A v1 version number in the shape v2 keeps: ``major.minor.patch``, without the ``v`` (DEV-170).
+
+    v1 numbered its versions „v1.0“; the v2 database takes only ``1.2.3`` (``ck_versions_version_number``). A number
+    that is not one even so (``pilot-x``) is left as it is — the database refuses it and only that project's
+    transaction stops, with the reason."""
+    bare = number[1:] if number[:1] in ("v", "V") else number
+    parts = bare.split(".")
+    if not 1 <= len(parts) <= 3 or not all(part.isdigit() for part in parts):
+        return number
+    return ".".join(parts + ["0"] * (3 - len(parts)))
+
+
 def default_auth_mode() -> str:
     """Return the backfill value for the v2-mandatory ``projects.auth_mode``."""
     return _DEFAULT_AUTH_MODE

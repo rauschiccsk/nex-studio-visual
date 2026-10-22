@@ -31,7 +31,7 @@ def _mk_version(db):
     )
     db.add(project)
     db.flush()
-    v = Version(project_id=project.id, version_number="v0.1.0", name="dev")
+    v = Version(project_id=project.id, version_number="0.1.0", name="dev")
     db.add(v)
     db.flush()
     return v

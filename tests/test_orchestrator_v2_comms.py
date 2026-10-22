@@ -202,7 +202,7 @@ def _make_version_with_away_owner(db_session, chat_id: str) -> tuple[Version, Us
     )
     db_session.add(project)
     db_session.flush()
-    version = Version(project_id=project.id, version_number=f"0.1.{uuid.uuid4().hex[:3]}")
+    version = Version(project_id=project.id, version_number=f"0.1.{uuid.uuid4().int % 1000}")
     db_session.add(version)
     db_session.flush()
     return version, owner
