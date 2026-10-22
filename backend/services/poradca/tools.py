@@ -30,6 +30,7 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
+from backend.services import version_notes
 from backend.services.poradca.context import UatInstallation, uat_installations
 from backend.services.poradca.mcp_server import Tool, ToolError
 
@@ -315,6 +316,15 @@ class PoradcaTools:
                 lines.extend(_cards_lines(db, version.id))
             if state.current_stage == "vizual":
                 lines.extend(_vizual_checklist_lines(board.vizual_checklists))
+            # DEV-151: what the people wrote about why the development stands — Poradca reads everything the Manažér
+            # reads (DEV-181); the build agent never gets it.
+            note = version_notes.latest(db, version.id)
+            if note is not None:
+                when = local_time(note.created_at).strftime("%d.%m.%Y %H:%M")
+                lines.append(
+                    f"Kde sme skončili (poznámka ľudí): „{note.text}“ — "
+                    f"{note.author_name or 'bývalý používateľ'}, {when}."
+                )
             lines.append(f"\nPosledných {len(board.recent_messages or [])} správ rozhovoru stavby (najstaršia prvá):")
             for msg in board.recent_messages or []:
                 text = (msg.content or "").strip()

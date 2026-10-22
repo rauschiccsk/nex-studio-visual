@@ -42,6 +42,13 @@ const STANDING: standingApi.Standing = {
           waiting_since: new Date(2026, 9, 15, 9).toISOString(),
           tasks_done: 7,
           tasks_total: 16,
+          last_note: {
+            id: "n-1",
+            version_id: "v-130",
+            text: "Čakáme na odpoveď zákazníka.",
+            author_name: "Zoltán Rausch",
+            created_at: new Date(2026, 9, 20, 18, 5).toISOString(),
+          },
         }),
       ],
     },
@@ -94,6 +101,9 @@ describe("WhereWeStand", () => {
     expect(screen.getByText("Čaká na teba od 15.10. (7 dní)")).toBeInTheDocument();
     expect(
       screen.getByText("Čaká na tvoje schválenie fázy Programovanie v Riadiacom centre. Na PROD je 1.2.2."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Kde sme skončili: „Čakáme na odpoveď zákazníka.“ — Zoltán Rausch, 20.10.2026 18:05"),
     ).toBeInTheDocument();
     expect(screen.getByText("NEX Inbox 1.10.0 — Programovanie")).toBeInTheDocument();
     expect(screen.getByText("Čaká na teba od 21.10. (1 deň)")).toBeInTheDocument();

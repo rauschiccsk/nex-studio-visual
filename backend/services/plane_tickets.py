@@ -23,6 +23,7 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.schemas.backlog import BacklogItemCreate
 from backend.services import backlog as backlog_service
+from backend.services.people import person_name
 from backend.services.plane_gateway import PlaneError, PlaneGateway, TicketRef, html_to_paragraphs
 
 #: Where a ticket came from — said in its text, so the register shows which door of the cockpit founded it.
@@ -74,10 +75,7 @@ def work_kind_words(kind: Optional[str]) -> Optional[str]:
 
 def person(user: Optional[User]) -> str:
     """The name a person goes by in the register — first and last name, else the user name."""
-    if user is None:
-        return "neznámy používateľ"
-    full = " ".join(part for part in (user.first_name, user.last_name) if part)
-    return full or user.username
+    return person_name(user) or "neznámy používateľ"
 
 
 def module_for(db: Session, project: Project, gateway: PlaneGateway) -> dict:

@@ -26,6 +26,7 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.schemas.standing import OpenVersionStanding, ProjectStanding
+from backend.services import version_notes
 
 #: Waiting on a person first, then the agent at work, then a build the Manažér paused.
 _ORDER = {"awaiting_manazer": 0, "blocked": 0, "agent_working": 1, "paused": 2}
@@ -59,6 +60,7 @@ def _open_versions(db: Session, project_id) -> list[OpenVersionStanding]:
                 tasks_done=done,
                 tasks_total=total,
                 fast_fix=state.flow_type == "fast_fix",
+                last_note=version_notes.latest(db, version.id),
             )
         )
     return out

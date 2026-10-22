@@ -65,6 +65,8 @@ import {
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
 import { humanizeApiError, type HumanError } from "../../services/apiError";
 import ErrorNote from "../common/ErrorNote";
+import { draftKey, useDraft } from "@/hooks/useDraft";
+import { addVersionNoteApi } from "@/services/api/versionNotes";
 import { emptyPlanSentence } from "./emptyPlan";
 
 interface Props {
@@ -353,6 +355,10 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTas
   const [collapsed, setCollapsed] = useState<Set<string>>(() => (versionId ? readCollapsed(versionId) : new Set()));
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<HumanError | null>(null);
+  // DEV-151: why the build is paused and what next — optional, saved as „Kde sme skončili“ before the pause; a note that
+  // fails to save never holds the pause up, its draft stays.
+  const pauseNote = useDraft(draftKey("pozastavenie", versionId));
+  const [pauseNoteError, setPauseNoteError] = useState<HumanError | null>(null);
   // DEV-75 — a category change refetches the plan; its failure is said above the tree, the plan stays visible.
   const [planTick, setPlanTick] = useState(0);
   const [categoryBusy, setCategoryBusy] = useState(false);
@@ -582,6 +588,20 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTas
   // The BE offers nothing meanwhile; the rung says why instead of just disappearing.
   const pausePending = board?.state?.status === "agent_working" && board?.state?.pause_reason === "manazer";
 
+  async function pauseWithNote() {
+    const text = pauseNote.text.trim();
+    if (versionId && text) {
+      try {
+        await addVersionNoteApi(versionId, text);
+        pauseNote.clear();
+        setPauseNoteError(null);
+      } catch (err) {
+        setPauseNoteError(humanizeApiError(err, "Poznámku sa nepodarilo uložiť — stavbu pozastavujem aj tak"));
+      }
+    }
+    await runTrigger("pause", "Pozastavenie stavby zlyhalo");
+  }
+
   // One handler for all three trigger buttons — reuses the shared triggering/triggerError state + the EXISTING
   // postPipelineActionApi client, then swaps in the fresh board the action returns (onBoard from usePipelineWs).
   async function runTrigger(action: PipelineActionName, failMsg: string) {
@@ -742,14 +762,27 @@ export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTas
       ) : canPause ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">Stavba prebieha — v prípade potreby ju pozastav.</p>
+          <textarea
+            data-draft="pozastavenie"
+            lang="sk"
+            spellCheck={true}
+            value={pauseNote.text}
+            onChange={(e) => pauseNote.setText(e.target.value)}
+            rows={2}
+            maxLength={600}
+            aria-label="Prečo pozastavuješ a čo ďalej"
+            placeholder="Prečo pozastavuješ a čo ďalej? (nepovinné — uvidí to každý, kto s projektom pracuje)"
+            className="mb-2 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
+          />
           <button
             type="button"
-            onClick={() => runTrigger("pause", "Pozastavenie stavby zlyhalo")}
+            onClick={() => void pauseWithNote()}
             disabled={triggering}
             className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
           >
             {triggering ? "Pozastavujem…" : "Pozastaviť"}
           </button>
+          <ErrorNote error={pauseNoteError} className="mt-1" />
           <ErrorNote error={triggerError} className="mt-1" />
         </div>
       ) : canCheck ? (

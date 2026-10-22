@@ -779,6 +779,16 @@ export function registerFixtures(): void {
   ]);
   answerUntyped("get", "/api/v1/version", { version: "4.43.26" });
   answer("get", "/api/v1/projects", { items: [PROJECT], total: 1, skip: 0, limit: 50 });
+  // DEV-151 — „Kde sme skončili“ at the top of Riadiace centrum: a long note, so the guard measures it wrapped.
+  answer("get", "/api/v1/versions/{version_id}/notes", [
+    {
+      id: "55555555-5555-4555-8555-555555555555",
+      version_id: VERSION.id,
+      text: "Čakáme na Tibora, ktorý doplní zoznam dodávateľov; potom pokračovať úlohou 1.1.4 a skontrolovať import.",
+      author_name: "Zoltán Rausch",
+      created_at: T2,
+    },
+  ]);
   // DEV-150 — „Kde stojíme“ on the Prehľad: one project waiting on the Manažér with a long name, one at work, one still.
   answer("get", "/api/v1/standing", {
     projects: [
@@ -798,6 +808,13 @@ export function registerFixtures(): void {
             tasks_done: 7,
             tasks_total: 16,
             fast_fix: false,
+            last_note: {
+              id: "55555555-5555-4555-8555-555555555555",
+              version_id: VERSION.id,
+              text: "Čakáme na Tibora, ktorý doplní zoznam dodávateľov; potom pokračovať úlohou 1.1.4 a skontrolovať import.",
+              author_name: "Zoltán Rausch",
+              created_at: T2,
+            },
           },
         ],
       },

@@ -55,6 +55,7 @@ import StavZostavenia from "@/components/riadiace/StavZostavenia";
 import { useStavZostavenia } from "@/components/riadiace/useStavZostavenia";
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
 import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
+import KdeSmeSkoncili from "@/components/riadiace/KdeSmeSkoncili";
 
 export default function RiadiaceCentrumPage() {
   const navigate = useNavigate();
@@ -266,6 +267,8 @@ export default function RiadiaceCentrumPage() {
       {/* Top — read-only phase bar (conversation column). */}
       <div className={`col-start-1 row-start-2 min-w-0 md:row-start-1 ${conversationOnPhone}`}>
         <PhaseBar board={board ?? null} />
+        {/* DEV-151: why the development of this version stands and what next — written by a person. */}
+        <KdeSmeSkoncili versionId={versionId} />
         {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
         <StavZostavenia stav={ci} />

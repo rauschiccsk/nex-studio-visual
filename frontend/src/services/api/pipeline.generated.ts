@@ -3690,6 +3690,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/versions/{version_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Version Notes
+         * @description The version's notes, newest first.
+         */
+        get: operations["list_version_notes_api_v1_versions__version_id__notes_get"];
+        put?: never;
+        /**
+         * Add Version Note
+         * @description A new note — one to three sentences; the older ones stay.
+         */
+        post: operations["add_version_note_api_v1_versions__version_id__notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/versions/{version_id}/release": {
         parameters: {
             query?: never;
@@ -6624,6 +6648,7 @@ export interface components {
              * @default false
              */
             fast_fix: boolean;
+            last_note?: components["schemas"]["VersionNoteRead"] | null;
             /** Stage */
             stage: string;
             /** Status */
@@ -9307,6 +9332,33 @@ export interface components {
              * @description DEV-50: 'fix' — fixes an error in delivered code (never billed); 'change' — new work or a change (billed). None: a new version counts as 'change'.
              */
             work_kind?: ("fix" | "change" | "gift") | null;
+        };
+        /** VersionNoteCreate */
+        VersionNoteCreate: {
+            /** Text */
+            text: string;
+        };
+        /** VersionNoteRead */
+        VersionNoteRead: {
+            /** Author Name */
+            author_name?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Text */
+            text: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
         };
         /**
          * VersionRead
@@ -16033,6 +16085,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_VersionSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_version_notes_api_v1_versions__version_id__notes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionNoteRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_version_note_api_v1_versions__version_id__notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionNoteCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionNoteRead"];
                 };
             };
             /** @description Validation Error */

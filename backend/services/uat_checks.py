@@ -21,6 +21,7 @@ from backend.db.models.foundation import User
 from backend.db.models.uat_check import BROKEN, TESTED, UatCheck
 from backend.db.models.versions import Version
 from backend.services import delivery_statement, uat_guide
+from backend.services.people import person_name
 
 STATUSES = (TESTED, BROKEN)
 
@@ -68,10 +69,7 @@ def items_for(db: Session, version: Version, repo: Path) -> list[str]:
 
 
 def _person(user: Optional[User]) -> Optional[str]:
-    if user is None:
-        return None
-    name = " ".join(p for p in (user.first_name, user.last_name) if p)
-    return name or user.username
+    return person_name(user)
 
 
 def progress(db: Session, customer_id: uuid.UUID, version: Version, changes: list[str]) -> Progress:

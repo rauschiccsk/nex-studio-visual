@@ -13,6 +13,8 @@ import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { getStandingApi, type ProjectStanding } from "@/services/api/standing";
 
+import { noteLine } from "@/lib/versionNote";
+
 import { nextWords, prodWords, turnWords, versionWords } from "./standingWords";
 
 function ProjectRow({ project }: { project: ProjectStanding }) {
@@ -38,6 +40,9 @@ function ProjectRow({ project }: { project: ProjectStanding }) {
             <p className="text-xs text-[var(--color-text-muted)]">
               {nextWords(v)} {prodWords(project)}
             </p>
+            {v.last_note && (
+              <p className="text-xs text-[var(--color-text-secondary)]">Kde sme skončili: {noteLine(v.last_note)}</p>
+            )}
           </div>
           <button
             type="button"

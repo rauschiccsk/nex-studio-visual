@@ -46,6 +46,7 @@ from backend.api.routes.user_layout import router as user_layout_router
 from backend.api.routes.user_notes import router as user_notes_router
 from backend.api.routes.user_sessions import router as user_sessions_router
 from backend.api.routes.users import router as users_router
+from backend.api.routes.version_notes import router as version_notes_router
 from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
 from backend.db.session import SessionLocal
@@ -412,6 +413,7 @@ app.include_router(versions_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
 app.include_router(plane_tickets_router, prefix="/api/v1")  # DEV-120 „Plane tikety“
 app.include_router(standing_router, prefix="/api/v1")  # DEV-150 „Kde stojíme“ na Prehľade
+app.include_router(version_notes_router, prefix="/api/v1")  # DEV-151 „Kde sme skončili“
 # The deploy router (CR-V2-026) also mounts under the bare ``/api/v1`` prefix
 # because it spans two URL families (``/projects/{slug}/deploy-events`` and
 # ``/customers/{id}/deploy`` | ``/accept``) — see design §3 Deploy & Customers.

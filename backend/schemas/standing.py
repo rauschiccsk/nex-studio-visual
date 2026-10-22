@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from backend.schemas.version_note import VersionNoteRead
+
 
 class OpenVersionStanding(BaseModel):
     """A version whose build is not done — its phase, its state, since when it waits on a person, its tasks."""
@@ -23,6 +25,8 @@ class OpenVersionStanding(BaseModel):
     tasks_done: int = 0
     tasks_total: int = 0
     fast_fix: bool = False
+    #: DEV-151: the newest „Kde sme skončili“ — why the people stopped and what next, in their own words.
+    last_note: Optional[VersionNoteRead] = None
 
 
 class ProjectStanding(BaseModel):
