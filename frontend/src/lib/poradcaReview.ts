@@ -24,6 +24,9 @@ export const REVIEW_REQUEST = "Prekontroluj opodstatnenosť tohto nálezu a ako 
 export const CHOICE_REQUEST = "Poraď mi, ktorú možnosť zvoliť a prečo.";
 /** DEV-135 — for the agent's question in Riadiace centrum. */
 const AGENT_QUESTION_REQUEST = "Poraď mi, ako agentovi odpovedať.";
+/** DEV-135 — what precedes the agent's own report under its question, and the change the build describes. */
+const AGENT_WROTE = "Pred otázkou agent napísal:";
+const BUILD_CHANGE = "Zmena, ktorú stavba navrhuje:";
 /** DEV-135 — for a database change the build waits to have approved (DEV-7): accepting it is the other answer. */
 const SCHEMA_QUESTION_REQUEST = "Poraď mi, či túto zmenu databázy prijať; ak nie, ako agentovi odpovedať.";
 /** The consultations that carry the Auditor's findings; the engine writes the source on every card (DEV-106). */
@@ -64,8 +67,9 @@ export interface AgentQuestionReview {
   question: string;
   /** Where the build stands and what it waits for. */
   origin: string;
-  /** What the agent found before it asked — its report, or the change the build describes. */
+  /** What the agent found before it asked — its report, or the change the build describes — and whose it is. */
   explanation?: string;
+  explanationTitle?: string;
   request: string;
 }
 
@@ -78,7 +82,9 @@ export function reviewRequestFor(source: string | undefined): string {
 
 function compose(card: ReviewCard, explanation: string, detail: string): string {
   if (card.kind === "agent_question") {
-    return [`Otázka agenta — ${card.question}\n${card.origin}`, explanation, card.request].filter(Boolean).join("\n\n");
+    // The agent writes its question as paragraphs with headings — it stands whole, under one line saying whose it is.
+    const found = explanation ? `${card.explanationTitle ?? AGENT_WROTE}\n${explanation}` : "";
+    return [`Otázka agenta. ${card.origin}`, card.question, found, card.request].filter(Boolean).join("\n\n");
   }
   const head = [`Rozhodnutie ${card.position} z ${card.total} — ${card.question}`];
   if (card.round != null) {
@@ -203,6 +209,7 @@ export function agentQuestionCard(board: PipelineBoard | null): AgentQuestionRev
       question,
       origin: `Stavba stojí vo fáze ${phase} a čaká na schválenie zmeny databázy.`,
       explanation: change ? text(change.content) || undefined : undefined,
+      explanationTitle: BUILD_CHANGE,
       request: SCHEMA_QUESTION_REQUEST,
     };
   }

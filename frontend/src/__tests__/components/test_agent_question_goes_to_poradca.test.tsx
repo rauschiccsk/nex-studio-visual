@@ -130,9 +130,11 @@ describe("the agent's question goes to Poradca", () => {
     ).toBeInTheDocument();
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      `Otázka agenta — ${QUESTION}`,
-      "Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
+      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
       "",
+      QUESTION,
+      "",
+      "Pred otázkou agent napísal:",
       "Našiel som dva zoznamy dodávateľov a líšia sa v troch firmách.",
       "",
       "Poraď mi, ako agentovi odpovedať.",
@@ -152,8 +154,9 @@ describe("the agent's question goes to Poradca", () => {
 
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      "Otázka agenta — AI partner sa pýta: Môžem pokračovať?",
-      "Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
+      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
+      "",
+      "AI partner sa pýta: Môžem pokračovať?",
       "",
       "Poraď mi, ako agentovi odpovedať.",
     ]);
@@ -178,9 +181,11 @@ describe("the agent's question goes to Poradca", () => {
 
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      "Otázka agenta — Návrh mení štruktúru databázy. Schváliť ju smie len Ri.",
-      "Stavba stojí vo fáze Príprava a čaká na schválenie zmeny databázy.",
+      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na schválenie zmeny databázy.",
       "",
+      "Návrh mení štruktúru databázy. Schváliť ju smie len Ri.",
+      "",
+      "Zmena, ktorú stavba navrhuje:",
       "Návrh mení štruktúru databázy. Pribudne tabuľka suppliers.",
       "",
       "Poraď mi, či túto zmenu databázy prijať; ak nie, ako agentovi odpovedať.",
