@@ -101,6 +101,55 @@ def test_someone_elses_staged_change_is_neither_committed_nor_touched(project):
     assert len(_tracked_leftovers(ws)) == 2
 
 
+def test_leftovers_waiting_in_the_index_are_the_cleanups_own_not_someone_elses(project):
+    """Career Asistent 22.10.2026: the Vizuál commit killed on 21.10. (DEV-180) left the frontend's two leftovers
+    staged, and the cleanup took them for someone else's change — it never ran, and they showed as unsaved work
+    (DEV-175)."""
+    ws, _origin = project
+    (ws / "frontend" / "tsconfig.node.tsbuildinfo").write_text("{}\n")
+    _git(ws, "add", "frontend/tsconfig.node.tsbuildinfo")
+
+    assert build_leftovers.keep_out_of_git(ws) is None
+
+    assert _tracked_leftovers(ws) == []
+    assert sorted(_git(ws, "show", "--name-only", "--format=", "HEAD").split()) == [
+        ".gitignore",
+        "frontend/tsconfig.app.tsbuildinfo",
+        "web/tsconfig.node.tsbuildinfo",
+    ]
+    assert (ws / "frontend" / "tsconfig.node.tsbuildinfo").is_file(), "the build's cache must stay on disk"
+    assert _git(ws, "status", "--porcelain") == ""
+
+
+def test_a_leftover_staged_in_an_ignoring_project_leaves_the_index_without_an_empty_commit(project):
+    ws, _origin = project
+    build_leftovers.keep_out_of_git(ws)
+    head = _git(ws, "rev-parse", "HEAD")
+    (ws / "web" / "tsconfig.app.tsbuildinfo").write_text("{}\n")
+    _git(ws, "add", "-f", "web/tsconfig.app.tsbuildinfo")
+
+    assert build_leftovers.keep_out_of_git(ws) is None
+
+    assert _git(ws, "rev-parse", "HEAD") == head
+    assert (_tracked_leftovers(ws), _git(ws, "status", "--porcelain")) == ([], "")
+
+
+def test_a_leftover_staged_next_to_someone_elses_change_touches_neither(project):
+    ws, _origin = project
+    (ws / "frontend" / "tsconfig.node.tsbuildinfo").write_text("{}\n")
+    (ws / "frontend" / "src" / "a.ts").write_text("export const a = 2;\n")
+    _git(ws, "add", "frontend/tsconfig.node.tsbuildinfo", "frontend/src/a.ts")
+    head = _git(ws, "rev-parse", "HEAD")
+
+    assert build_leftovers.keep_out_of_git(ws) == build_leftovers.FOREIGN_CHANGES
+
+    assert _git(ws, "rev-parse", "HEAD") == head
+    assert _git(ws, "status", "--porcelain").splitlines() == [
+        "M  frontend/src/a.ts",
+        "A  frontend/tsconfig.node.tsbuildinfo",
+    ]
+
+
 def test_someone_elses_unsaved_edit_of_the_ignore_file_is_neither_committed_nor_touched(project):
     ws, _origin = project
     (ws / ".gitignore").write_text("node_modules\ncoverage\n")

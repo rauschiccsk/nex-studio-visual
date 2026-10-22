@@ -10,9 +10,10 @@ still tracks them loses them here, in one commit of the cockpit's, after a finis
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from backend.services import ci_runs
@@ -36,10 +37,11 @@ def keep_out_of_git(project_root: Path) -> Optional[str]:
     of these paths only, without the pre-commit check (it would type-check a frontend for a cache file). ``None`` when
     there was nothing to do or it is done; otherwise why not, in the manager's words. Never raises.
 
-    Someone else's change — anything staged, or an unsaved edit of ``.gitignore`` — is never swept into this commit:
-    then nothing happens and the reason says so. Nor is a red proof the agent stayed on (DEV-173): its newest commit
-    must stay the proof, or the cockpit would no longer know it for one — the next task, back on the working branch,
-    does the cleanup."""
+    Someone else's change — anything staged but a leftover, or an unsaved edit of ``.gitignore`` — is never swept into
+    this commit: then nothing happens and the reason says so. A staged leftover is this cleanup's own: Career Asistent's
+    two were left staged by a killed commit (DEV-180) and kept the cleanup from ever running. Nor is a red proof the
+    agent stayed on (DEV-173): its newest commit must stay the proof, or the cockpit would no longer know it for one —
+    the next task, back on the working branch, does the cleanup."""
     try:
         if not (project_root / ".git").exists():
             return None
@@ -50,8 +52,11 @@ def keep_out_of_git(project_root: Path) -> Optional[str]:
             return None
         if _git(project_root, "log", "-1", "--format=%s").stdout.lower().startswith(ci_runs.PROOF_MARK):
             return None
-        staged = _git(project_root, "diff", "--cached", "--name-only").stdout.strip()
-        if staged or _git(project_root, "diff", "--name-only", "--", ".gitignore").stdout.strip():
+        staged = [
+            path for path in _git(project_root, "diff", "--cached", "--name-only", "-z").stdout.split("\0") if path
+        ]
+        foreign = [path for path in staged if not fnmatch.fnmatch(PurePosixPath(path).name, PATTERN)]
+        if foreign or _git(project_root, "diff", "--name-only", "--", ".gitignore").stdout.strip():
             return FOREIGN_CHANGES
         if PATTERN not in lines:
             text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
@@ -63,6 +68,8 @@ def keep_out_of_git(project_root: Path) -> Optional[str]:
             _git(project_root, "add", "--", ".gitignore")
         if tracked:
             _git(project_root, "rm", "--cached", "-q", "--", *tracked)
+        if _git(project_root, "diff", "--cached", "--quiet").returncode == 0:
+            return None  # only leftovers that git had never committed — out of the index, nothing to commit
         done = _git(project_root, "commit", "--no-verify", "-q", "-m", COMMIT_MESSAGE)
         if done.returncode != 0:
             logger.warning("build leftovers commit failed in %s: %s", project_root, done.stderr.strip()[:300])
