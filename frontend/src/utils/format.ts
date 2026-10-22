@@ -37,6 +37,12 @@ export function formatShortDateTime(value: string | Date | null | undefined): st
   return d ? `${day(d)} ${clock(d)}` : "—";
 }
 
+/** „15.10.“ — the day alone, where a sentence says since when („čaká od 15.10.“); „—“ when there is no date. */
+export function formatDayMonth(value: string | Date | null | undefined): string {
+  const d = parsed(value);
+  return d ? day(d) : "—";
+}
+
 /** „08:30“ — „—“ when there is no date. */
 export function formatTime(value: string | Date | null | undefined): string {
   const d = parsed(value);

@@ -3043,6 +3043,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/standing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where We Stand
+         * @description Where each project stands: its open versions with phase, state, waiting time and tasks; the version on PROD.
+         */
+        get: operations["where_we_stand_api_v1_standing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system-settings": {
         parameters: {
             query?: never;
@@ -6592,6 +6612,42 @@ export interface components {
             /** Project Slug */
             project_slug: string;
         };
+        /**
+         * OpenVersionStanding
+         * @description A version whose build is not done — its phase, its state, since when it waits on a person, its tasks.
+         */
+        OpenVersionStanding: {
+            /** Block Reason */
+            block_reason?: string | null;
+            /**
+             * Fast Fix
+             * @default false
+             */
+            fast_fix: boolean;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /**
+             * Tasks Done
+             * @default 0
+             */
+            tasks_done: number;
+            /**
+             * Tasks Total
+             * @default 0
+             */
+            tasks_total: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: string;
+            /** Waiting Since */
+            waiting_since?: string | null;
+        };
         /** PaginatedResponse[BacklogItemRead] */
         PaginatedResponse_BacklogItemRead_: {
             /** Items */
@@ -7980,6 +8036,22 @@ export interface components {
             /** Content */
             content: string;
         };
+        /** ProjectStanding */
+        ProjectStanding: {
+            /** Name */
+            name: string;
+            /** Open Versions */
+            open_versions: components["schemas"]["OpenVersionStanding"][];
+            /** Prod Version */
+            prod_version?: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Slug */
+            slug: string;
+        };
         /**
          * ProjectUpdate
          * @description Partial update for an existing project.
@@ -8151,6 +8223,14 @@ export interface components {
              * @description One sentence saying why — the build that holds it, or that none does.
              */
             reason: string;
+        };
+        /**
+         * StandingRead
+         * @description The projects the person works on, those waiting on a person first, the longest waiting at the top.
+         */
+        StandingRead: {
+            /** Projects */
+            projects: components["schemas"]["ProjectStanding"][];
         };
         /**
          * StatementLineRead
@@ -14876,6 +14956,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleaseNote"][];
+                };
+            };
+        };
+    };
+    where_we_stand_api_v1_standing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StandingRead"];
                 };
             };
         };

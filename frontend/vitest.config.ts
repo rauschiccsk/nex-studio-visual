@@ -20,5 +20,8 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/__tests__/**/*.test.{ts,tsx}"],
     setupFiles: ["src/__tests__/setup.ts"],
+    // A screen test waits up to 5 s for what it expects (setup.ts); the test itself gets more, so a missing text is
+    // reported as what was not found — not as a timeout of the whole test (DEV-150).
+    testTimeout: 15000,
   },
 });

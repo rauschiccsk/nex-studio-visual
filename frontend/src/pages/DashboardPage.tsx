@@ -5,6 +5,7 @@ import type { ProjectRead } from "@/types";
 import ErrorNote from "@/components/common/ErrorNote";
 import { InstallButton } from "@/pwa/InstallButton";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
+import WhereWeStand from "@/components/dashboard/WhereWeStand";
 
 const SLUG_COLORS = [
   "bg-primary-600/20 border-primary-600/30 text-primary-700 dark:text-primary-400",
@@ -89,6 +90,8 @@ export default function DashboardPage() {
       <div className="mb-6 flex justify-end">
         <InstallButton appName="NEX Studio Visual" />
       </div>
+      {/* DEV-150: where every project's development stands and how to carry on — before the list of projects. */}
+      <WhereWeStand />
       {/* My Projects */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">
