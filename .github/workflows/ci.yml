@@ -92,7 +92,9 @@ jobs:
         # floor existed to stop it drifting down. First measurement: 90%. The floor is set slightly
         # below that so ordinary variation does not turn a green suite red, and it may only ever be
         # RAISED — never lowered to make a run pass (see feedback_threshold_downgrade_antipattern).
-        run: poetry run pytest --tb=short -q --cov=backend --cov-report=term --cov-fail-under=88
+        # DEV-184: the gate runs every test in parallel through the script the developer runs too — the
+        # floor and the number of parallel runs live there, in one place.
+        run: poetry run python scripts/backend_tests.py --all
 
   build-frontend:
     name: Build Frontend

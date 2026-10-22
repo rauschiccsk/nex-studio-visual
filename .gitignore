@@ -53,3 +53,6 @@ migrations/versions/__pycache__/
 
 # Claude MAX OAuth session credentials (P0 — never commit)
 .claude/.credentials.json
+
+# DEV-184: pytest-testmon's record of which code each test ran — the developer's own, never committed
+.testmondata*

@@ -83,7 +83,7 @@ class _Ctx:
 
 
 @pytest.fixture()
-def world(db_session, tmp_path, monkeypatch):
+def world(db_session, tmp_path, short_dir, monkeypatch):
     user = User(
         username=f"u_{uuid.uuid4().hex[:8]}",
         email=f"{uuid.uuid4().hex[:8]}@example.com",
@@ -109,7 +109,7 @@ def world(db_session, tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "known_secret_values", lambda db, p: [FAKE_SECRET])
     monkeypatch.setattr(runner, "max_concurrent", lambda db: 3)
 
-    data = tmp_path / "poradca"
+    data = short_dir / "poradca"
     data.mkdir()
     monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(data))
     monkeypatch.setattr(sandbox, "project_dirs", lambda slug: ("/opt/projects/demo", str(tmp_path)))

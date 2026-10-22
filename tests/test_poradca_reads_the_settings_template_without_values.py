@@ -63,12 +63,12 @@ def test_a_single_quoted_value_over_lines_is_cut_whole():
 
 
 @pytest.fixture()
-def project(tmp_path, monkeypatch):
+def project(tmp_path, short_dir, monkeypatch):
     root = tmp_path / "projects"
     proj = root / "demo"
     proj.mkdir(parents=True)
     monkeypatch.setattr(sandbox, "project_dirs", lambda slug: (str(root / slug), str(root / slug)))
-    monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(tmp_path / "poradca"))
+    monkeypatch.setattr(sandbox.settings, "poradca_data_dir", str(short_dir / "poradca"))
     sandbox.run_dir("abc123").mkdir(parents=True)
     return proj
 

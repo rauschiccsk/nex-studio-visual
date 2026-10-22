@@ -509,3 +509,15 @@ def _no_real_ci_questions(monkeypatch):
     from backend.services import orchestrator
 
     monkeypatch.setattr(orchestrator, "_project_has_ci", lambda root: False)
+
+
+@pytest.fixture
+def short_dir():
+    """A directory with a short path — for what makes a Unix socket in it (Poradca's tools server).
+
+    The kernel takes 108 bytes for a socket path. Under a parallel run (pytest-xdist, DEV-184) every test's ``tmp_path``
+    is ten characters deeper (``…/popen-gw4/…``), and Poradca's socket in it went past the limit — ten tests failed
+    with „AF_UNIX path too long“ that pass one by one. In production the path is short (``/opt/data/…``)."""
+    path = Path(tempfile.mkdtemp(prefix="nsv-", dir="/tmp"))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
