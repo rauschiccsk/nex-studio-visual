@@ -48,3 +48,10 @@ export function formatTime(value: string | Date | null | undefined): string {
   const d = parsed(value);
   return d ? clock(d) : "—";
 }
+
+/** „1 234,50 €“ — two decimals, Slovak grouping; „—“ when there is no amount. The one shape of a euro amount. */
+export function formatEur(value: string | number | null | undefined): string {
+  return value == null
+    ? "—"
+    : `${Number(value).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}

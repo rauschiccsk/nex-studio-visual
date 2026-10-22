@@ -222,6 +222,11 @@ def _rates(db: Session, version: Optional[Version] = None) -> tuple[Decimal, Dec
     return code, docs
 
 
+def version_rates(db: Session, version: Version) -> tuple[Decimal, Decimal]:
+    """The rates a version counts with — its own, else Nastavenia (the orientačná cena uses them too, DEV-154)."""
+    return _rates(db, version)
+
+
 #: DEV-74 — a version's own rate keeps the places the database keeps.
 RATE_PLACES = Decimal("0.0001")
 RATE_NOT_POSITIVE = "Sadzba musí byť väčšia ako 0 € — prázdna znamená sadzbu z Nastavení."

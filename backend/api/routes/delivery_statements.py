@@ -45,7 +45,7 @@ from backend.schemas.delivery_statement import (
     WorkKindRead,
     WorkKindWrite,
 )
-from backend.services import billing_category, claude_agent, delivered_tokens
+from backend.services import billing_category, claude_agent, delivered_tokens, price_estimate
 from backend.services import delivery_statement as statements
 
 router = APIRouter(tags=["Súpis dodaných tokenov"])
@@ -130,7 +130,11 @@ def get_billing(
 
     def read(r: statements.BillingRow) -> BillingRowRead:
         p, count = r.preview, r.preview.count
+        # DEV-154: the orientačná cena given after Návrh, beside what the statement counts — how well it estimated.
+        estimate = price_estimate.stored(db, r.version.id)
         return BillingRowRead(
+            estimate_amount_eur=estimate.amount_eur if estimate else None,
+            estimate_spread_pct=estimate.spread_pct if estimate else None,
             version_id=r.version.id,
             version_number=r.version.version_number,
             flow_type=r.flow_type,

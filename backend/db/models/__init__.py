@@ -16,6 +16,7 @@ from backend.db.models.model_price import ModelPrice
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
+from backend.db.models.price_estimate import PriceEstimate, PriceSample
 from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.project_ci_watch import ProjectCiWatch
 from backend.db.models.project_type_change import ProjectTypeChange
@@ -59,6 +60,8 @@ __all__ = [
     "UserNote",
     "VersionDiscountChange",
     "VersionNote",
+    "PriceEstimate",
+    "PriceSample",
     "VersionRateChange",
     "Epic",
     "Feat",

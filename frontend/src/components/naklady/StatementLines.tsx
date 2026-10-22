@@ -4,10 +4,10 @@
 // worth; the total is the sum of the amounts.
 
 import type { StatementLine } from "@/services/api/deliveryStatements";
+import { formatEur } from "@/utils/format";
 
 const int = new Intl.NumberFormat("sk-SK");
-const eur = (v: string | number | null | undefined) =>
-  v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+const eur = formatEur;
 const pct = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 2 })} %`;
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} €`;
 

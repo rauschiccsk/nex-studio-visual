@@ -15,6 +15,7 @@ import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import { useAuthStore } from "@/store/authStore";
 import { mayOperateProject } from "@/services/permissions";
 import VersionSettingsSection from "@/components/version/VersionSettingsSection";
+import PriceEstimatePanel from "@/components/version/PriceEstimatePanel";
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
@@ -368,6 +369,9 @@ export default function VersionDetailPage() {
               </button>
             </div>
           )}
+
+          {/* DEV-154: the orientačná cena, once Návrh gave the version a plan — none before, none for a fix. */}
+          {version.status !== "planned" && <PriceEstimatePanel versionId={version.id} />}
 
           {/* ICCINT-100: jediná cesta v produkte, ako opraviť názov, číslo alebo dátum zadaný pri
               zakladaní. Dovtedy sa hodnota, ktorú si človek raz pomýlil, nedala opraviť inak než

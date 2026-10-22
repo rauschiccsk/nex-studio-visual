@@ -196,6 +196,9 @@ export interface BillingRow {
   issued: IssuedStatement | null;
   /** Issued, but counted today the amount would differ (other rates or delivery). */
   differs: boolean;
+  /** DEV-154 — the orientačná cena given after Návrh, beside what the statement says; null when there was none. */
+  estimate_amount_eur?: string | null;
+  estimate_spread_pct?: number | null;
   /** DEV-74 — the rates the version counts with now, and whether it has one of its own. */
   rate_code: string | null;
   rate_docs: string | null;

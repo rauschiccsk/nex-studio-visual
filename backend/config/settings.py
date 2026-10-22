@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # (off in tests: the app's real life cycle would send Telegram messages).
     build_reminder_check_seconds: int = 3600
     build_reminders_enabled: bool = True
+    # DEV-154: below this many measured versions the orientačná cena says it rests on too few to be firm.
+    price_estimate_min_samples: int = 5
     # DEV-86: NS Code — the largest file it shows (a bigger one says so instead of loading the browser), how many lines
     # a text search lists, and how much of each line.
     ns_code_max_file_bytes: int = 1_000_000

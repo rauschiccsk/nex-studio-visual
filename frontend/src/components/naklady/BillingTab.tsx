@@ -10,13 +10,13 @@ import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
+import { amountWords } from "@/lib/priceEstimate";
 import { WORK_KIND_OPTIONS } from "@/lib/workKind";
 import { getProjectBilling, type BillingOverview, type BillingRow } from "@/services/api/deliveryStatements";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { formatDate } from "@/utils/format";
+import { formatDate, formatEur } from "@/utils/format";
 
-const eur = (v: string | number | null | undefined) =>
-  v == null ? "—" : `${Number(v).toLocaleString("sk-SK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+const eur = formatEur;
 const day = (iso: string) => formatDate(iso);
 const sha = (v: string | null) => (v ? v.slice(0, 7) : "?");
 
@@ -148,6 +148,15 @@ export default function BillingTab({ slug }: { slug: string }) {
                 <div className="text-right">
                   <div className="text-sm font-semibold text-[var(--color-text-primary)]">{eur(amount)}</div>
                   {row.state === "ready" && <div className="text-[10px] text-[var(--color-text-muted)]">náhľad</div>}
+                  {row.estimate_amount_eur != null && (
+                    <div
+                      className="text-[10px] text-[var(--color-text-muted)]"
+                      title="Orientačná cena daná po Návrhu podľa plánu úloh — vedľa súpisu, aby bolo vidieť, ako odhad sedel."
+                    >
+                      orientačná cena{" "}
+                      {amountWords({ amount_eur: row.estimate_amount_eur, spread_pct: row.estimate_spread_pct })}
+                    </div>
+                  )}
                 </div>
               </div>
               {row.state !== "not_done" && (
