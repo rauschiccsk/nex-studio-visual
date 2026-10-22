@@ -1,6 +1,6 @@
 // The review-with-Poradca button (DEV-103, every decision card since DEV-106) — the card taken to Poradca as it
 // stands: the card is handed off and Poradca opens on its version, where the question composed from it goes out by
-// itself. See `@/lib/poradcaReview`.
+// itself. See `@/lib/poradcaReview`. DEV-135: the agent's question in Riadiace centrum goes the same way.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -17,11 +17,16 @@ export default function ReviewWithPoradcaButton({ versionId, card }: Props) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
+  const what =
+    card.kind === "agent_question"
+      ? `Poradca dostane otázku agenta s prosbou „${card.request}“ Odporúčanú odpoveď vložíš do poľa odpovede jedným klikom.`
+      : `Poradca dostane túto kartu s prosbou „${card.request}“ Odporúčanú voľbu ti označí.`;
+
   function review() {
     try {
       handOffReview(versionId, card);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Odovzdanie karty Poradcovi zlyhalo.");
+      setError(e instanceof Error ? e.message : "Odovzdanie Poradcovi zlyhalo.");
       return;
     }
     navigate(reviewAddress(versionId));
@@ -32,7 +37,7 @@ export default function ReviewWithPoradcaButton({ versionId, card }: Props) {
       <button
         type="button"
         onClick={review}
-        title={`Poradca dostane túto kartu s prosbou „${card.request}“ Odporúčanú voľbu ti označí.`}
+        title={what}
         className="flex items-center gap-1.5 rounded border border-[var(--color-border-default)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] hover:border-primary-500 hover:text-[var(--color-text-primary)]"
       >
         <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /> Overiť s Poradcom

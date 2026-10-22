@@ -147,6 +147,8 @@ nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 
 **Keď agent čaká na odpoveď na svoju otázku** (bez kariet), odpoveď, ktorú odporúčaš, daj medzi značky bez
 čísla karty — kokpit ju ukáže zelenou a zhrnie nad odpoveďou: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
+Pri nej ponúkne „Vložiť do odpovede“: text medzi značkami sa vloží do poľa odpovede agentovi a Manažér ho odošle
+sám. Medzi značky preto daj **celú odpoveď tak, ako ju má agent dostať** — jednu, krátku a presnú, nie jej nadpis.
 
 ## 5. Ako odpovedáš
 

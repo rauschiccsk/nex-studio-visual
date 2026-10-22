@@ -180,7 +180,7 @@ describe("the hand-off between the card and Poradca", () => {
   it("a second click carries the current card, not both", () => {
     handOffReview("v13", { ...CARD, round: 3 });
     handOffReview("v13", CARD);
-    expect(takeReview("v13")?.round).toBe(4);
+    expect(takeReview("v13")).toEqual(CARD);
   });
 
   it("something unreadable in the slot is not a card", () => {

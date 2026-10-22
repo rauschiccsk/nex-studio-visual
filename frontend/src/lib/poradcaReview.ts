@@ -9,11 +9,23 @@
 //
 // The answer comes back the way every answer does — the recommended choice marked for the card (DEV-83), an
 // instruction through „Vložiť do Riadiaceho centra" (DEV-22).
+//
+// DEV-135: the agent's question in Riadiace centrum (a blocked build waiting on the Manažér's answer) goes the same
+// way — Director 16.10.2026: „Chýba mi tu tlačidlo ktorým odošleme pre Poradcu.“ It is a card of its own kind: the
+// question, where the build stands, what the agent found, and the request; Poradca's recommended answer comes back
+// into the answer box through „Vložiť do odpovede“.
+
+import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
+import type { PipelineBoard, PipelineMessage } from "@/services/api/pipeline";
 
 /** The sentence the Director wrote under every card he took to Poradca — for a card with the Auditor's findings. */
 export const REVIEW_REQUEST = "Prekontroluj opodstatnenosť tohto nálezu a ako to vyriešiť.";
 /** DEV-106 — for a card the agent prepared: a choice between proposals, not a finding (Director 13.10.2026). */
 export const CHOICE_REQUEST = "Poraď mi, ktorú možnosť zvoliť a prečo.";
+/** DEV-135 — for the agent's question in Riadiace centrum. */
+const AGENT_QUESTION_REQUEST = "Poraď mi, ako agentovi odpovedať.";
+/** DEV-135 — for a database change the build waits to have approved (DEV-7): accepting it is the other answer. */
+const SCHEMA_QUESTION_REQUEST = "Poraď mi, či túto zmenu databázy prijať; ak nie, ako agentovi odpovedať.";
 /** The consultations that carry the Auditor's findings; the engine writes the source on every card (DEV-106). */
 const FINDING_SOURCES = new Set(["verifikacia_fix", "verifikacia_fail", "auditor_upfront"]);
 /** Marks the one visit to Poradca that came from the button. */
@@ -24,7 +36,8 @@ const SHORTENED = "… (skrátené — celé znenie je na karte)";
 const SLOT_PREFIX = "nex.poradca.review.";
 
 /** What the question is composed of — the card as the manager sees it. */
-export interface ReviewCard {
+interface DecisionReview {
+  kind?: "decision";
   /** „Rozhodnutie N z M" — the card's number among the decisions of this consultation. */
   position: number;
   total: number;
@@ -45,12 +58,28 @@ export interface ReviewCard {
   rationale?: string;
 }
 
+/** DEV-135 — the agent's question the build waits on, as the Manažér sees it in Riadiace centrum. */
+export interface AgentQuestionReview {
+  kind: "agent_question";
+  question: string;
+  /** Where the build stands and what it waits for. */
+  origin: string;
+  /** What the agent found before it asked — its report, or the change the build describes. */
+  explanation?: string;
+  request: string;
+}
+
+export type ReviewCard = DecisionReview | AgentQuestionReview;
+
 /** The request a card's question ends with: check the Auditor's finding, or advise which option to choose. */
 export function reviewRequestFor(source: string | undefined): string {
   return source && FINDING_SOURCES.has(source) ? REVIEW_REQUEST : CHOICE_REQUEST;
 }
 
 function compose(card: ReviewCard, explanation: string, detail: string): string {
+  if (card.kind === "agent_question") {
+    return [`Otázka agenta — ${card.question}\n${card.origin}`, explanation, card.request].filter(Boolean).join("\n\n");
+  }
   const head = [`Rozhodnutie ${card.position} z ${card.total} — ${card.question}`];
   if (card.round != null) {
     head.push(
@@ -88,7 +117,7 @@ function shorten(text: string, room: number): string {
  */
 export function reviewQuestion(card: ReviewCard, maxChars: number): string {
   let explanation = card.explanation?.trim() ?? "";
-  let detail = card.technicalDetail?.trim() ?? "";
+  let detail = card.kind === "agent_question" ? "" : (card.technicalDetail?.trim() ?? "");
   const over = () => compose(card, explanation, detail).length - maxChars;
   if (over() > 0) detail = shorten(detail, detail.length - over());
   if (over() > 0) explanation = shorten(explanation, explanation.length - over());
@@ -105,18 +134,23 @@ export function handOffReview(versionId: string, card: ReviewCard): void {
   try {
     window.localStorage.setItem(SLOT_PREFIX + versionId, JSON.stringify(card));
   } catch {
-    throw new Error("Prehliadač nedovolil odovzdať kartu Poradcovi — opýtaj sa ho v Poradcovi sám.");
+    throw new Error("Prehliadač nedovolil odovzdať to Poradcovi — opýtaj sa ho v Poradcovi sám.");
   }
 }
 
 function isCard(value: unknown): value is ReviewCard {
-  const c = value as Partial<ReviewCard> | null;
+  const c = value as Partial<DecisionReview> & Partial<AgentQuestionReview>;
+  if (
+    !c ||
+    typeof c.question !== "string" ||
+    !c.question.trim() ||
+    typeof c.request !== "string" ||
+    !c.request.trim()
+  ) {
+    return false;
+  }
+  if (c.kind === "agent_question") return typeof c.origin === "string";
   return (
-    !!c &&
-    typeof c.question === "string" &&
-    c.question.trim().length > 0 &&
-    typeof c.request === "string" &&
-    c.request.trim().length > 0 &&
     typeof c.position === "number" &&
     typeof c.total === "number" &&
     Array.isArray(c.options)
@@ -135,4 +169,52 @@ export function takeReview(versionId: string): ReviewCard | null {
   } catch {
     return null;
   }
+}
+
+const text = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+/** The newest message carrying a question that nobody answered after it — the question the build waits on. */
+function openQuestion(messages: PipelineMessage[]): PipelineMessage | null {
+  const sorted = [...messages].sort((a, b) => a.seq - b.seq);
+  const asked = sorted.filter((m) => text(m.payload?.question)).at(-1);
+  if (!asked) return null;
+  return sorted.some((m) => m.seq > asked.seq && m.author === "manazer") ? null : asked;
+}
+
+/**
+ * DEV-135 — the question the blocked build waits on, as a card for Poradca; `null` when the build waits on no
+ * question (an error, a check) or says none. The question is the agent's own words when the newest question in the
+ * board is still open, otherwise the sentence the build says (`next_action`); a database change carries the change
+ * the build describes.
+ */
+export function agentQuestionCard(board: PipelineBoard | null): AgentQuestionReview | null {
+  if (!board?.state) return null;
+  const state = board.state;
+  const reason = state.block_reason;
+  if (state.status !== "blocked" || (reason !== "agent_question" && reason !== "schema_approval")) return null;
+  const messages = board.recent_messages ?? [];
+  const phase = PHASE_LABELS[state.current_stage as BuildPhase] ?? state.current_stage;
+  if (reason === "schema_approval") {
+    const question = text(state.next_action);
+    if (!question) return null;
+    const change = [...messages].sort((a, b) => a.seq - b.seq).filter((m) => m.payload?.database_schema).at(-1);
+    return {
+      kind: "agent_question",
+      question,
+      origin: `Stavba stojí vo fáze ${phase} a čaká na schválenie zmeny databázy.`,
+      explanation: change ? text(change.content) || undefined : undefined,
+      request: SCHEMA_QUESTION_REQUEST,
+    };
+  }
+  const asked = openQuestion(messages);
+  const question = asked ? text(asked.payload?.question) : text(state.next_action);
+  if (!question) return null;
+  const found = asked ? text(asked.payload?.report) || text(asked.content) : "";
+  return {
+    kind: "agent_question",
+    question,
+    origin: `Stavba stojí vo fáze ${phase} a čaká na moju odpoveď.`,
+    explanation: found && found !== question ? found : undefined,
+    request: AGENT_QUESTION_REQUEST,
+  };
 }

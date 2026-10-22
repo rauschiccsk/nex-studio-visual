@@ -60,9 +60,15 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   }
 
   function insert() {
-    if (!scopeVersion || !message.instruction) return;
+    if (message.instruction) handOff(message.instruction);
+  }
+
+  // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
+  // Riadiace centrum that takes the Manažér's text now; nothing is sent.
+  function handOff(text: string) {
+    if (!scopeVersion) return;
     try {
-      handOffInstruction(scopeVersion.id, message.instruction);
+      handOffInstruction(scopeVersion.id, text);
     } catch (e: unknown) {
       setError({ message: e instanceof Error ? e.message : "Vloženie zlyhalo" });
       return;
@@ -121,7 +127,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
         </div>
       )}
 
-      {!running && <ChoiceSummary choices={choices} />}
+      {!running && <ChoiceSummary choices={choices} answer={{ insert: handOff, blocked: instructionBlocked }} />}
       {!running && message.content && (
         <SpecMarkdown
           codePaths={codePaths}

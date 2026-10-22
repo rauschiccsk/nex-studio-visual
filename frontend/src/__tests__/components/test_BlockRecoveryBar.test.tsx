@@ -11,6 +11,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
 const { postPipelineActionApi } = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ function renderBar(reason = "agent_question") {
   const onBoard = vi.fn();
   render(
     <BlockRecoveryBar board={board(reason)} versionId="v1" onBoard={onBoard} />,
+    { wrapper: MemoryRouter },
   );
   return { onBoard };
 }
@@ -101,6 +103,7 @@ describe("BlockRecoveryBar", () => {
         versionId="v1"
         onBoard={vi.fn()}
       />,
+      { wrapper: MemoryRouter },
     );
     expect(screen.getByRole("button", { name: /Odpovedať/ })).toBeDisabled();
     unmount();
@@ -111,6 +114,7 @@ describe("BlockRecoveryBar", () => {
         versionId="v1"
         onBoard={vi.fn()}
       />,
+      { wrapper: MemoryRouter },
     );
     expect(screen.getByRole("button", { name: /Skús znova/ })).toBeEnabled();
   });
@@ -128,6 +132,7 @@ describe("BlockRecoveryBar", () => {
         versionId="v1"
         onBoard={vi.fn()}
       />,
+      { wrapper: MemoryRouter },
     );
 
     expect(screen.getByText("Kontrola neprešla")).toBeInTheDocument();
@@ -139,7 +144,9 @@ describe("BlockRecoveryBar", () => {
     const b = board("check_failed");
     b.state!.next_action =
       "Kontrola po oprave neprešla — zlyhal kontajner test. Stavba hotová nie je.";
-    render(<BlockRecoveryBar board={b} versionId="v1" onBoard={vi.fn()} />);
+    render(<BlockRecoveryBar board={b} versionId="v1" onBoard={vi.fn()} />, {
+      wrapper: MemoryRouter,
+    });
 
     expect(screen.getByText(/zlyhal kontajner test/)).toBeInTheDocument();
   });
@@ -151,6 +158,7 @@ describe("BlockRecoveryBar", () => {
         versionId="v1"
         onBoard={vi.fn()}
       />,
+      { wrapper: MemoryRouter },
     );
     const button = screen.getByRole("button", { name: /Skús znova/ });
     expect(button).toBeEnabled();
@@ -168,7 +176,9 @@ describe("DEV-7 — a database change waiting for Ri", () => {
   it("the box under the approval card answers the agent — a „no, do it without it“, never a retry", async () => {
     renderBar("schema_approval");
     const box = screen.getByPlaceholderText(/ak so zmenou nesúhlasíš/);
-    fireEvent.change(box, { target: { value: "Bez nového stĺpca — e-mail vezmi z profilu." } });
+    fireEvent.change(box, {
+      target: { value: "Bez nového stĺpca — e-mail vezmi z profilu." },
+    });
     fireEvent.keyDown(box, { key: "Enter" });
 
     await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledTimes(1));
@@ -176,7 +186,8 @@ describe("DEV-7 — a database change waiting for Ri", () => {
       action: "answer",
       payload: { text: "Bez nového stĺpca — e-mail vezmi z profilu." },
     });
-    expect(screen.getByRole("button", { name: /Odpovedať|Odosielam/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Odpovedať|Odosielam/ }),
+    ).toBeInTheDocument();
   });
 });
-

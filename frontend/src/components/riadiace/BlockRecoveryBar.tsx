@@ -9,7 +9,8 @@
 // recovery:
 //   • an ERROR (agent_error / system_error / parse_exhaustion) → "Skús znova" (→ uprav, the engine's re-work
 //     recovery; a steer note is optional — a canned retry brief is sent when empty, since uprav needs a comment);
-//   • an agent QUESTION (agent_question) → "Odpovedať" (→ answer, the answer text is required).
+//   • an agent QUESTION (agent_question) → "Odpovedať" (→ answer, the answer text is required), and
+//     „Overiť s Poradcom" (DEV-135) — the question handed to Poradca, his recommended answer back in this box.
 // framework_issue (→ Dedo) and decision_needed (→ Decision Cards) are handled elsewhere and excluded here.
 //
 // Honest-by-construction (mirrors the other bars): renders NOTHING unless the pipeline is blocked on one of
@@ -22,6 +23,8 @@ import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
+import { agentQuestionCard } from "@/lib/poradcaReview";
+import ReviewWithPoradcaButton from "@/components/riadiace/ReviewWithPoradcaButton";
 
 import {
   postPipelineActionApi,
@@ -88,6 +91,8 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
     (reason && BLOCK_REASON_LABELS[reason]) ||
     "Niečo si vyžaduje tvoju pozornosť";
   const guidance = (state.next_action || "").trim();
+  // DEV-135: the question the build waits on, for Poradca — none for an error or a check.
+  const forPoradca = agentQuestionCard(board);
   // A question's answer is required; an error's steer is optional (a canned retry brief covers the empty case).
   const canSubmit =
     !submitting && (isError || isCheck || text.trim().length > 0);
@@ -222,6 +227,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         </div>
 
         <ErrorNote error={error} />
+        {forPoradca && <ReviewWithPoradcaButton versionId={versionId} card={forPoradca} />}
       </div>
     </div>
   );

@@ -5,7 +5,7 @@
 // orange means the card does not offer it — a paraphrase, or a card that changed meanwhile — so the manager is not
 // sent to look for an option that is not there. The icon carries the same meaning without the colour.
 import { Children, type ReactNode } from "react";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, Check, Send } from "lucide-react";
 
 import { choiceCard } from "@/lib/poradcaAnswer";
 import type { PoradcaChoice } from "@/types/poradca";
@@ -33,8 +33,17 @@ function ChoiceBadge({ choice }: { choice: PoradcaChoice }) {
   );
 }
 
+/**
+ * DEV-135 — the answer Poradca recommends for the agent's question goes into the answer box of Riadiace centrum; the
+ * Manažér sends it himself. `blocked` says why the box would not take it now.
+ */
+export interface AnswerInsert {
+  insert: (label: string) => void;
+  blocked: string | null;
+}
+
 /** Above the answer: what to pick, at one glance. */
-export function ChoiceSummary({ choices }: { choices: PoradcaChoice[] }) {
+export function ChoiceSummary({ choices, answer }: { choices: PoradcaChoice[]; answer?: AnswerInsert }) {
   if (!choices.length) return null;
   return (
     <div
@@ -48,6 +57,17 @@ export function ChoiceSummary({ choices }: { choices: PoradcaChoice[] }) {
           <ChoiceBadge choice={choice} />
           {choice.status === "not_on_card" && (
             <span className="text-xs text-[var(--color-state-warning-fg)]">{NOT_ON_CARD_NOTE}</span>
+          )}
+          {answer && !choice.card && choice.status === "answer" && (
+            <button
+              type="button"
+              onClick={() => answer.insert(choice.label)}
+              disabled={!!answer.blocked}
+              title={answer.blocked ?? "Vloží odpoveď do poľa odpovede v Riadiacom centre — odošleš ju sám."}
+              className="ml-1 inline-flex items-center gap-1 rounded border border-[var(--color-border-default)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:border-primary-500 hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Send className="h-3 w-3" aria-hidden /> Vložiť do odpovede
+            </button>
           )}
         </div>
       ))}
