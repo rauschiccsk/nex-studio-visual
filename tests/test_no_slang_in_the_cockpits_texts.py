@@ -80,3 +80,32 @@ def test_every_form_of_the_word_is_caught():
     for form in ("ka", "ky", "ku", "ke", "kám", "kou", "kami", "kách", "iek"):
         assert slang_in(f"text {stem}{form} text") == [1], stem + form
         assert slang_in(f"{(stem + form).upper()}") == [1], stem + form
+
+
+# --- DEV-178: what the blanket replacement left behind ------------------------------------------------------------
+#
+# The replacement of 15.10.2026 rewrote the slang word inside quotations too, and Poradca's charter told it not to use
+# slang with „aplikácia“ as both the word to use and the word to avoid — a rule with no example of what not to say. A
+# sentence that sets a word against itself is what such a replacement leaves; none is ever meant.
+
+#: A word set against itself („aplikácia“ against „aplikácia“), the second one possibly in a quotation.
+SELF_CONTRAST = re.compile(r"(?<!\w)(\w+),? nie [„\"]?\1(?!\w)")
+
+
+def test_no_text_sets_a_word_against_itself():
+    hits = [
+        f"{path.relative_to(ROOT)}:{n}"
+        for path, text in _texts()
+        for n, line in enumerate(text.splitlines(), 1)
+        if SELF_CONTRAST.search(line)
+    ]
+    assert hits == [], f"a word set against itself — what a blanket replacement leaves: {hits[:10]}"
+
+
+def test_a_word_set_against_itself_is_caught_and_a_real_contrast_is_not():
+    """Built from parts, so this guard's own file never reads as the damage it looks for."""
+    slang, word, nie = "a" + "ppka", "aplikácia", " nie "
+    assert SELF_CONTRAST.search(f'slang nepoužívaj ({word},{nie}„{word}").')
+    assert SELF_CONTRAST.search(f"{word}{nie}{word}")
+    assert not SELF_CONTRAST.search(f"slang nepoužívaj ({word},{nie}„{slang}“).")
+    assert not SELF_CONTRAST.search(f"{word},{nie}aplikácie")
