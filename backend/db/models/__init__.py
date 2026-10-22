@@ -9,7 +9,7 @@ from backend.db.models.customers import Customer
 from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.delivered_authorship import DeliveredAuthorship
 from backend.db.models.delivery_statement import DeliveryStatement
-from backend.db.models.deploy import DeployEvent
+from backend.db.models.deploy import DeployEvent, DeployRefusal
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.model_price import ModelPrice
@@ -38,6 +38,7 @@ __all__ = [
     "Credential",
     "Customer",
     "DeployEvent",
+    "DeployRefusal",
     "DedoProjectProposal",
     "DeliveryStatement",
     "ExternalCost",

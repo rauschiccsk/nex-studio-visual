@@ -22,6 +22,7 @@ the deploy backend points into; ``detail`` is a non-secret summary only.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -30,13 +31,14 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
-from backend.db.models.deploy import DeployEvent
+from backend.db.models.deploy import DeployEvent, DeployRefusal
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -69,6 +71,7 @@ from backend.services import deploy as deploy_service
 from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
+logger = logging.getLogger(__name__)
 
 
 def _map_value_error(exc: ValueError) -> HTTPException:
@@ -241,6 +244,31 @@ def list_customer_deploy_events(
 # ---------------------------------------------------------------------------
 
 
+def _keep_the_refusal(
+    db: Session, customer_id: UUID, version_number: str, environment: str, actor_id: UUID, reason: str
+) -> None:
+    """DEV-181 — the sentence a refused deploy told the Manažér, kept where Poradca reads it. Never fails the answer:
+    a refusal that cannot be kept is logged and the Manažér still gets the sentence."""
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        return
+    try:
+        db.add(
+            DeployRefusal(
+                customer_id=customer.id,
+                project_id=customer.project_id,
+                version_number=version_number,
+                environment=environment,
+                reason=reason[:4000],
+                actor_id=actor_id,
+            )
+        )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("the refusal of a deploy for customer %s could not be kept", customer_id, exc_info=True)
+
+
 @router.post("/customers/{customer_id}/deploy", response_model=DeployResult)
 async def deploy_customer(
     customer_id: UUID,
@@ -279,6 +307,7 @@ async def deploy_customer(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        _keep_the_refusal(db, customer_id, payload.version_number, payload.environment, current_user.id, str(exc))
         raise _map_value_error(exc) from exc
     db.refresh(event)
     return DeployResult(
@@ -508,6 +537,7 @@ async def adopt_instance(
         db.commit()
     except ValueError as exc:
         db.rollback()
+        _keep_the_refusal(db, customer_id, payload.version_number, payload.environment, current_user.id, str(exc))
         raise _map_value_error(exc) from exc
     db.refresh(event)
     return DeployResult(

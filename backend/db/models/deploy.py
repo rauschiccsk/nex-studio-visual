@@ -124,3 +124,21 @@ class DeployEvent(Base, UUIDMixin, TimestampMixin):
         CheckConstraint(_ck_in("event_type", EVENT_TYPE_VALUES), name="ck_deploy_events_event_type"),
         CheckConstraint(_ck_in("status", STATUS_VALUES), name="ck_deploy_events_status"),
     )
+
+
+class DeployRefusal(Base, UUIDMixin, TimestampMixin):
+    """A deploy the cockpit refused before it began — what the Manažér was told, kept (DEV-181).
+
+    22.10.2026 Career Asistent 1.1.0 could not be deployed to UAT: „Nasadenie sa nedá spustiť: Zákazníkovi chýbajú
+    povinné nastavenia: …“. The sentence lived on the screen only; Poradca could not read it and twice asked the
+    Director to copy it. A refusal is not a deploy, so it is kept apart from :class:`DeployEvent` — the matrix and the
+    acceptance gate read the events and must never take a refusal for what runs. Non-secret, like ``detail``."""
+
+    __tablename__ = "deploy_refusals"
+
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number = Column(String(50), nullable=False)
+    environment = Column(String(10), nullable=False)
+    reason = Column(Text, nullable=False)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

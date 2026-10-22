@@ -96,6 +96,14 @@ admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
      a začiatok popisu; číta ich tou istou službou ako stránka Zásobník. Charta: pred požiadavkou do Zásobníka
      zavolaj `zasobnik`; keď tam podobná už je, menuj ju (REQ-číslo) a novú nenavrhuj. 08.10.2026 Poradca
      ponúkol požiadavku o dobropisoch znova, hoci bola uložená ako REQ-1 — kliknutie by založilo duplikát.
+   - **Každá obrazovka projektu** (v4.68.0, DEV-181): Director 22.10.2026 „Poradca v projekte musí vidieť všetko“.
+     Pri Career Asistentovi 1.1.0 Poradca nevidel poznámky Audítora, celý popis požiadavky ani nasadenie na UAT
+     a Directora dvakrát prosil prekopírovať hlásenie. Nástroj `stavba` pri verdikte vypíše každú poznámku
+     Audítora (`payload.findings`); nové nástroje `poziadavka`, `verzie`, `zakaznici` (bežné hodnoty, tajomstvo len
+     „uložené/chýba“), `nasadenia` (aj nasadenie, ktoré kokpit odmietol — tabuľka `deploy_refusals`),
+     `plane_tikety`, `naklady` a `fakturacia` čítajú tie isté služby ako obrazovky. Stráž
+     `tests/test_poradca_sees_every_screen_of_the_project.py` porovná obrazovky projektu v ľavom menu so zoznamom
+     `tools.SCREENS`: nová obrazovka bez nástroja Poradcu (alebo bez zapísaného dôvodu v `tools.NOT_READ`) je chyba.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).

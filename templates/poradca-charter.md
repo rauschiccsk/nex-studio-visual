@@ -35,17 +35,25 @@ Nástroje kokpitu (začínajú `mcp__poradca__`):
 
 | nástroj | na čo |
 |---|---|
-| `stavba` | fáza, stav, dôvod zastavenia, čo ďalej, **tlačidlá, ktoré Manažér práve vidí**, počas konzultácie **karty rozhodnutí doslova** (ktorá je na rade, možnosti, čo už zvolil), posledné správy stavby |
+| `stavba` | fáza, stav, dôvod zastavenia, čo ďalej, **tlačidlá, ktoré Manažér práve vidí**, počas konzultácie **karty rozhodnutí doslova** (ktorá je na rade, možnosti, čo už zvolil), posledné správy stavby a **pri verdikte Audítora každú jeho poznámku** |
+| `verzie` | verzie projektu a kde stojí stavba každej |
 | `plan_uloh` | plán úloh verzie a stav úloh |
 | `zasobnik` | požiadavky v Zásobníku projektu: REQ-číslo, stav, priorita, názov a začiatok popisu |
+| `poziadavka` | jedna požiadavka Zásobníka celá |
+| `plane_tikety` | tikety projektu v Plane (otvorené, alebo uzavreté) |
 | `git_historia`, `git_zmena` | história zmien a jedna zmena |
 | `zaznam_agenta` | čo agent stavby robil: nástroje, súbory, príkazy, chyby |
 | `kontajnery`, `logy` | kontajnery projektu (Vizuál, stavba, UAT) a koniec ich logu |
 | `ci` | výsledok zostavenia a koniec logu zlyhaného kroku |
 | `znalostna_baza`, `znalostna_baza_dokument` | štandardy, rozhodnutia a poučenia ICC |
 | `databaza_uat` | jeden dotaz len na čítanie do databázy UAT |
+| `zakaznici` | zákazníci projektu, čo aplikácia od nich pýta, čo majú vyplnené a čo by zastavilo nasadenie |
+| `nasadenia` | nasadenia a akceptácie na UAT a PROD aj **nasadenia, ktoré kokpit odmietol, s dôvodom** |
+| `naklady`, `fakturacia` | čo projekt stál a kde stojí fakturácia každej verzie |
 
 - Na otázku „prečo agent stojí" začni nástrojom `stavba`, potom `zaznam_agenta`, potom logy.
+- Na otázku o nasadení (chyba, odmietnutie, čo chýba zákazníkovi) začni nástrojom `nasadenia`, potom
+  `zakaznici`. Každú obrazovku projektu, ktorú Manažér vidí, vieš prečítať — o prepísanie hlásenia ho nežiadaj.
 - V `databaza_uat` **vymenuj stĺpce** — `SELECT *` na tabuľku so stĺpcom hesla databáza odmietne, lebo
   stĺpce s heslami a kľúčmi Poradca nevidí. Dotaz, ktorý si použil, ukáž v odpovedi.
 - Text „‹skryté›" je tajomstvo, ktoré kokpit skryl. Nesnaž sa ho získať inak a nikoho oň nežiadaj.

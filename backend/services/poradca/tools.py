@@ -83,6 +83,20 @@ _BACKLOG_STATUS = {
 }
 _BACKLOG_PRIORITY = {"low": "nízka", "medium": "stredná", "high": "vysoká", "critical": "kritická"}
 
+#: DEV-181 — the other screens of a project.
+_REQUIREMENT_CHARS = 20_000
+_VERSIONS_LIMIT = 50
+_DEPLOYS_MAX = 50
+_TICKETS_LIMIT = 100
+_BILLING_STATE = {
+    "issued": "vystavené",
+    "ready": "dá sa vystaviť",
+    "needs_kind": "čaká na rozhodnutie o druhu práce",
+    "cannot": "nedá sa vystaviť",
+    "blocked": "nedá sa spočítať",
+    "not_done": "ešte sa stavia",
+}
+
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _UAT_DB_ROLE = "poradca_ro"
 
@@ -308,6 +322,7 @@ class PoradcaTools:
                     text = text[:_MESSAGE_CHARS] + " …"
                 when = local_time(msg.created_at).strftime("%d.%m. %H:%M") if msg.created_at else ""
                 lines.append(f"— [{when}] {msg.author} → {msg.recipient} ({msg.kind}, fáza {msg.stage}):\n{text}")
+                lines.extend(_finding_lines(msg))
             return "\n".join(lines)
 
     # ── zásobník ───────────────────────────────────────────────────────────────
@@ -572,6 +587,251 @@ class PoradcaTools:
             chosen = matches[0]
         return await uat_db.run_query(chosen, query, rows=_DB_ROWS, timeout_s=_DB_TIMEOUT_S)
 
+    # ── DEV-181: what the Manažér sees on the project's other screens ─────────
+
+    async def poziadavka(self, args: dict) -> str:
+        """One requirement of the Zásobník whole — ``zasobnik`` lists only the start of each."""
+        from backend.db.models.backlog import BacklogItem
+
+        cislo = _int_arg(args, "cislo", 0, 1_000_000)
+        with SessionLocal() as db:
+            item = db.execute(
+                select(BacklogItem).where(BacklogItem.project_id == self.project_id, BacklogItem.number == cislo)
+            ).scalar_one_or_none()
+            if item is None:
+                raise ToolError(f"Požiadavka REQ-{cislo} v Zásobníku projektu nie je.")
+            status = _BACKLOG_STATUS.get(item.status, item.status)
+            if item.version_id is not None:
+                version = db.get(Version, item.version_id)
+                if version is not None:
+                    status += f" {version.version_number}"
+            priority = _BACKLOG_PRIORITY.get(item.priority, item.priority)
+            lines = [f"REQ-{item.number} [{status}, priorita {priority}] {item.title}"]
+            if item.plane_identifier:
+                lines.append(f"Tiket v Plane: {item.plane_identifier}")
+            if item.rejection_reason:
+                lines.append(f"Dôvod zamietnutia: {item.rejection_reason}")
+            lines.append("")
+            lines.append((item.description or "(bez popisu)")[:_REQUIREMENT_CHARS])
+            return "\n".join(lines)
+
+    async def verzie(self, args: dict) -> str:
+        """The project's versions as the Verzie screen lists them — the newest first, with where each build stands."""
+        from backend.db.models.pipeline import PipelineState
+
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(Version, PipelineState)
+                .outerjoin(PipelineState, PipelineState.version_id == Version.id)
+                .where(Version.project_id == self.project_id)
+                .order_by(Version.created_at.desc())
+                .limit(_VERSIONS_LIMIT)
+            ).all()
+            if not rows:
+                return "Projekt nemá žiadnu verziu."
+            lines = [f"Verzie projektu ({len(rows)}, najnovšia prvá):"]
+            for version, state in rows:
+                line = f"{version.version_number} — {version.status}"
+                if state is not None:
+                    line += f"; stavba: fáza {state.current_stage}, stav {state.status}"
+                    if state.block_reason:
+                        line += f", dôvod zastavenia {state.block_reason}"
+                if version.release_date:
+                    line += f"; vydaná {version.release_date}"
+                lines.append(line)
+            return "\n".join(lines)
+
+    async def zakaznici(self, args: dict) -> str:
+        """The Zákazníci screen: the customers, what the app asks of each (its ``.env.example`` markers) and what each
+        has — plain values as the form shows them, a secret only as „uložené“ or „chýba“, never its value."""
+        from backend.db.models.customers import Customer
+        from backend.services import claude_agent, env_contract, uat_provisioner
+        from backend.services import customer as customer_service
+
+        with SessionLocal() as db:
+            project = self._project(db)
+            customers = (
+                db.execute(select(Customer).where(Customer.project_id == project.id).order_by(Customer.name))
+                .scalars()
+                .all()
+            )
+            root = claude_agent.PROJECTS_ROOT / project.slug
+            contract = env_contract.for_project(root)
+            template_keys = list(uat_provisioner._parse_env_file(root / ".env.example"))
+            lines = [f"Zákazníci projektu: {len(customers)}."]
+            if contract.problems:
+                lines.append("Chyby značiek v .env.example: " + "; ".join(contract.problems))
+            for c in customers:
+                stored = customer_service.secret_setting_keys(db, c)
+                lines.append("")
+                lines.append(f"{c.name} (skratka {c.slug}, subdoména {c.subdomain or c.slug})")
+                if c.notes:
+                    lines.append(f"  Poznámka: {c.notes}")
+                if c.integrations:
+                    lines.append("  Integrácie: zadané (obsah môže niesť prístupové údaje — nevypisuje sa)")
+                for s in contract.settings:
+                    if s.kind == env_contract.CUSTOMER_SECRET:
+                        have = "uložené" if s.key in stored else "chýba"
+                    elif s.kind == env_contract.CUSTOMER:
+                        have = (c.settings or {}).get(s.key) or "chýba"
+                    else:
+                        have = "dopĺňa kokpit pri nasadení"
+                    must = ", povinné" if s.required else ""
+                    lines.append(f"  {s.label} ({s.key}{must}): {have}")
+                values = env_contract.customer_values(
+                    contract, c.settings or {}, customer_service.read_secret_settings(db, c)
+                )
+                blockers = env_contract.deploy_blockers(contract, template_keys=template_keys, values=values)
+                lines.append(
+                    "  Nasadenie sa nedá spustiť: " + " ".join(blockers)
+                    if blockers
+                    else "  Nastavenia nasadenie nezastavia."
+                )
+            return "\n".join(lines)
+
+    async def nasadenia(self, args: dict) -> str:
+        """The UAT and PROD screens: per customer the deploys and acceptances (status, the sentence, the warnings)
+        and the deploys the cockpit refused, with the reason it told the Manažér — the newest first."""
+        from backend.db.models.customers import Customer
+        from backend.db.models.deploy import DeployEvent, DeployRefusal
+
+        prostredie = str(args.get("prostredie") or "").strip().lower()
+        if prostredie not in ("", "uat", "prod"):
+            raise ToolError("prostredie je uat alebo prod (bez neho obe).")
+        pocet = _int_arg(args, "pocet", 10, _DEPLOYS_MAX)
+        with SessionLocal() as db:
+            customers = (
+                db.execute(select(Customer).where(Customer.project_id == self.project_id).order_by(Customer.name))
+                .scalars()
+                .all()
+            )
+            if not customers:
+                return "Projekt nemá žiadneho zákazníka — nasadiť ho nie je kam."
+            lines: list[str] = []
+            for c in customers:
+                events = select(DeployEvent).where(DeployEvent.customer_id == c.id)
+                refusals = select(DeployRefusal).where(DeployRefusal.customer_id == c.id)
+                if prostredie:
+                    events = events.where(DeployEvent.environment == prostredie)
+                    refusals = refusals.where(DeployRefusal.environment == prostredie)
+                found = [
+                    (e.created_at, _deploy_line(e))
+                    for e in db.execute(events.order_by(DeployEvent.seq.desc()).limit(pocet)).scalars()
+                ] + [
+                    (r.created_at, _refusal_line(r))
+                    for r in db.execute(refusals.order_by(DeployRefusal.created_at.desc()).limit(pocet)).scalars()
+                ]
+                found.sort(key=lambda pair: pair[0], reverse=True)
+                lines.append(f"{c.name} ({c.slug}):")
+                lines.extend(f"  {text}" for _when, text in found[:pocet]) if found else lines.append("  nič")
+            return "\n".join(lines)
+
+    async def plane_tikety(self, args: dict) -> str:
+        """The Plane tikety screen: the tickets of the project's module in Plane, the newest change first."""
+        from backend.services import plane_tickets
+        from backend.services.plane_gateway import PlaneError
+
+        uzavrete = bool(args.get("uzavrete"))
+        with SessionLocal() as db:
+            project = self._project(db)
+            try:
+                found = await asyncio.to_thread(
+                    plane_tickets.project_tickets, db, plane_tickets.gateway(), project, closed=uzavrete
+                )
+            except PlaneError as exc:
+                raise ToolError(f"Plane neodpovedal: {exc}") from exc
+            if found.module is None:
+                return "Projekt nemá v Plane modul — tikety projektu sa v Plane nevedú."
+            if not found.tickets:
+                return f"V module {found.module} nie sú {'uzavreté' if uzavrete else 'otvorené'} tikety."
+            lines = [f"Tikety modulu {found.module} ({'uzavreté' if uzavrete else 'otvorené'}), najnovšia zmena prvá:"]
+            for ticket in found.tickets[:_TICKETS_LIMIT]:
+                line = f"{ticket.identifier} [{ticket.state}] {ticket.title}"
+                if ticket.requirement:
+                    line += f" — {ticket.requirement}"
+                if ticket.warning:
+                    line += f" (pozor: {ticket.warning})"
+                lines.append(line)
+            return "\n".join(lines)
+
+    async def naklady(self, args: dict) -> str:
+        """The Náklady screen: what each version cost and the project in total — in whole euros, as the screen."""
+        from backend.services import metrics as metrics_service
+
+        with SessionLocal() as db:
+            costs = metrics_service.compute_project_metrics(db, self._project(db))
+            lines = ["Náklady projektu (celé eurá, zaokrúhlené nahor ako na obrazovke):"]
+            for v in costs.by_version:
+                lines.append(f"{v.version_number} ({v.status}): {_euros(v.totals.agent_cost_total)}")
+            lines.append(f"Spolu: {_euros(costs.totals.agent_cost_total)}")
+            if not costs.totals.agent_cost_complete:
+                lines.append("Časť spotreby sa nedala oceniť — čísla sú len ocenená časť.")
+            return "\n".join(lines)
+
+    async def fakturacia(self, args: dict) -> str:
+        """The Fakturácia screen: every version and where it stands for invoicing. The screen keeps who wrote each
+        line it counted; here nothing is committed — the session closes without it."""
+        from backend.services import claude_agent
+        from backend.services import delivery_statement as statements
+
+        with SessionLocal() as db:
+            project = self._project(db)
+            rows = await asyncio.to_thread(
+                statements.billing_rows, db, project, claude_agent.PROJECTS_ROOT / project.slug
+            )
+            if not rows:
+                return "Projekt nemá žiadnu verziu na fakturáciu."
+            lines = ["Fakturácia projektu (najnovšia verzia prvá):"]
+            for r in rows:
+                line = f"{r.version.version_number}: {_BILLING_STATE.get(r.state, r.state)}"
+                if r.valid is not None:
+                    line += f", vystavené {r.valid.amount_eur} €"
+                elif r.preview.amounts is not None:
+                    line += f", na vystavenie {r.preview.amounts.total} €"
+                if r.reason:
+                    line += f" — {r.reason}"
+                lines.append(line)
+            return "\n".join(lines)
+
+
+def _finding_lines(msg: Any) -> list[str]:
+    """DEV-181 — the Auditor's notes of a verdict, each whole. The message text only counts them („ostávajú dve
+    neblokujúce poznámky“); the notes live in ``payload.findings`` and the Manažér reads them behind the verdict's
+    button. 22.10.2026 Poradca could not name the second note of Career Asistent 1.1.0 and sent the Director to look."""
+    if getattr(msg, "kind", None) != "verdict":
+        return []
+    lines = []
+    for f in (getattr(msg, "payload", None) or {}).get("findings") or []:
+        if not isinstance(f, dict) or not f.get("text"):
+            continue
+        how = "blokuje" if f.get("blocking") else "neblokuje"
+        if f.get("escapes_tests"):
+            how += ", skúšky ju nechytia"
+        lines.append(f"  poznámka Audítora ({how}): {f['text']}")
+    return lines
+
+
+def _euros(value: Optional[int]) -> str:
+    return "nedá sa oceniť" if value is None else f"{value} €"
+
+
+def _deploy_line(event: Any) -> str:
+    """One deploy or acceptance as the UAT / PROD screen shows it — the sentence and every warning."""
+    when = local_time(event.created_at).strftime("%d.%m. %H:%M") if event.created_at else ""
+    what = "akceptácia" if event.event_type == "accept" else "nasadenie"
+    line = f"[{when}] {event.environment.upper()} {what} {event.version_number}: {event.status}"
+    if event.detail:
+        line += f" — {event.detail[:_MESSAGE_CHARS]}"
+    for warning in event.warnings or []:
+        line += f"\n    upozornenie: {warning}"
+    return line
+
+
+def _refusal_line(refusal: Any) -> str:
+    """A deploy the cockpit refused before it began, with the sentence the Manažér got."""
+    when = local_time(refusal.created_at).strftime("%d.%m. %H:%M") if refusal.created_at else ""
+    return f"[{when}] {refusal.environment.upper()} nasadenie {refusal.version_number} ODMIETNUTÉ — {refusal.reason}"
+
 
 def _agent_steps(transcripts: Path, count: int, project_dir: str) -> str:
     """Latest steps of the build agent from Claude Code records — tool, target and error; not file content."""
@@ -775,4 +1035,93 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             t.databaza_uat,
             lambda a: f"UAT {a.get('zakaznik') or ''}".strip(),
         ),
+        # DEV-181 — „Poradca v projekte musí vidieť všetko“ (Director 22.10.2026): the project's other screens.
+        Tool(
+            "poziadavka",
+            "Jedna požiadavka Zásobníka celá — REQ-číslo, stav, priorita, celý popis, tiket v Plane, dôvod "
+            "zamietnutia.",
+            _schema({"cislo": {"type": "integer", "description": "Číslo požiadavky, napr. 2 pre REQ-2."}}, ["cislo"]),
+            t.poziadavka,
+            lambda a: f"REQ-{a.get('cislo', '')}",
+        ),
+        Tool(
+            "verzie",
+            "Verzie projektu ako ich ukazuje obrazovka Verzie — číslo, stav a kde stojí stavba každej, najnovšia prvá.",
+            _schema(),
+            t.verzie,
+            lambda a: "projekt",
+        ),
+        Tool(
+            "zakaznici",
+            "Obrazovka Zákazníci: zákazníci projektu, čo aplikácia od každého pýta (značky v .env.example), čo má "
+            "vyplnené (bežné hodnoty ako formulár, tajomstvo len „uložené“ alebo „chýba“) a čo by zastavilo nasadenie.",
+            _schema(),
+            t.zakaznici,
+            lambda a: "projekt",
+        ),
+        Tool(
+            "nasadenia",
+            "Obrazovky UAT a PROD: pri každom zákazníkovi nasadenia a akceptácie (stav, hlásenie, upozornenia) aj "
+            "nasadenia, ktoré kokpit odmietol, s vetou, ktorú dostal Manažér — najnovšie prvé.",
+            _schema(
+                {
+                    "prostredie": {"type": "string", "description": "uat alebo prod; bez neho obe."},
+                    "pocet": {
+                        "type": "integer",
+                        "description": f"Koľko záznamov na zákazníka (najviac {_DEPLOYS_MAX}).",
+                    },
+                }
+            ),
+            t.nasadenia,
+            lambda a: str(a.get("prostredie") or "UAT aj PROD"),
+        ),
+        Tool(
+            "plane_tikety",
+            "Obrazovka Plane tikety: tikety modulu projektu v Plane — identifikátor, stav, názov, požiadavka "
+            "Zásobníka; predvolene otvorené, s uzavrete=true uzavreté.",
+            _schema({"uzavrete": {"type": "boolean", "description": "Uzavreté namiesto otvorených."}}),
+            t.plane_tikety,
+            lambda a: "uzavreté" if a.get("uzavrete") else "otvorené",
+        ),
+        Tool(
+            "naklady",
+            "Obrazovka Náklady: čo stála každá verzia a projekt spolu, v celých eurách ako obrazovka.",
+            _schema(),
+            t.naklady,
+            lambda a: "projekt",
+        ),
+        Tool(
+            "fakturacia",
+            "Obrazovka Fakturácia: každá verzia a kde stojí pri fakturácii — vystavené, dá sa vystaviť, prečo nie.",
+            _schema(),
+            t.fakturacia,
+            lambda a: "projekt",
+        ),
     ]
+
+
+#: Files of the project — Poradca reads them with Read, Grep and Glob, not with a cockpit tool.
+FILES = "Read/Grep/Glob"
+
+#: DEV-181 — every screen of a project in the cockpit's menu and how Poradca reads what it shows. A screen added to
+#: the menu without a line here turns its guard red (``tests/test_poradca_sees_every_screen_of_the_project.py``):
+#: Director 22.10.2026 „Poradca v projekte musí vidieť všetko“.
+SCREENS: dict[str, tuple[str, ...]] = {
+    "Verzie": ("verzie", "stavba"),
+    "Zásobník": ("zasobnik", "poziadavka"),
+    "Plane tikety": ("plane_tikety",),
+    "Riadiace centrum": ("stavba", "plan_uloh", "zaznam_agenta"),
+    "Dokumenty": (FILES,),
+    "Repozitár": ("git_historia", "git_zmena", "ci"),
+    "NS Code": (FILES,),
+    "Zákazníci": ("zakaznici",),
+    "UAT": ("nasadenia", "kontajnery", "logy", "databaza_uat"),
+    "PROD": ("nasadenia",),
+    "Náklady": ("naklady",),
+    "Fakturácia": ("fakturacia",),
+}
+
+#: Screens of a project Poradca does not read, and why.
+NOT_READ: dict[str, str] = {
+    "Poradca": "rozhovor s Poradcom je on sám",
+}
