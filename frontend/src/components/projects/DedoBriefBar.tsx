@@ -30,6 +30,8 @@ import {
 } from "@/services/api/projects";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
+import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/riadiace/unsavedWork";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
 import { WARNING_CHROME } from "@/components/common/WarningActionBar";
 import type { WorkKind } from "@/lib/workKind";
@@ -78,6 +80,8 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   // Prečo sa obrazovka zmenila pod rukami. Držané oddelene od `error`: po odmietnutí nasleduje načítanie
   // nového zadania, ktoré `error` vyčistí — a vysvetlenie by zmizlo v tej istej chvíli ako dôvod.
   const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  // DEV-175: the engine founds no version over unsaved work — the Manažér saves or discards it here, then sends again.
+  const [unsaved, setUnsaved] = useState<UnsavedWorkRefusal | null>(null);
   // DEV-56: a fast fix starts only with the Manažér's work kind, as in the „Rýchla oprava“ dialog — the
   // delivered-token statement bills by it, and the cockpit never guesses it.
   const [workKind, setWorkKind] = useState<WorkKind | null>(null);
@@ -109,6 +113,12 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null) && numberOk;
 
   async function handleFailure(err: unknown, phrase: string): Promise<void> {
+    // Before the „proposal changed“ 409 below: this one is about the project's work, and the brief stays open.
+    const refusal = unsavedWorkOf(err);
+    if (refusal) {
+      setUnsaved(refusal);
+      return;
+    }
     if (err instanceof ApiError && err.status === 409) {
       setStaleNotice(err.message || "Zadanie sa medzitým zmenilo.");
       setError(null);
@@ -126,6 +136,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
     if (!canSend) return;
     setError(null);
     setStaleNotice(null);
+    setUnsaved(null);
     setBusy("send");
     try {
       const vysledok = needsNumber
@@ -243,6 +254,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
           </button>
         </div>
 
+        {unsaved && <UnsavedWorkPanel refusal={unsaved} />}
         <ErrorNote error={error} />
       </div>
     </div>

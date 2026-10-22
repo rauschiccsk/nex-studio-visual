@@ -273,3 +273,31 @@ describe("DedoProposalBar — a fast fix carries the work kind (DEV-56)", () => 
     expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
   });
 });
+
+// DEV-175: the engine's refusal to found a version over unsaved work — the same body the backend sends.
+function unsavedWorkRefusal(): ApiError {
+  return new ApiError(409, "conflict", {
+    detail: {
+      message: "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
+      project_id: "p-1",
+      unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
+    },
+  });
+}
+
+describe("DedoProposalBar — a fast fix refused for unsaved work (DEV-175)", () => {
+  it("⚠️ offers Uložiť / Zahodiť and keeps the proposal — not „the proposal changed“", async () => {
+    vi.mocked(sendDedoProposalApi).mockRejectedValue(unsavedWorkRefusal());
+    const onBoard = vi.fn();
+    render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={onBoard} />);
+
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
+    fireEvent.click(screen.getByRole("button", { name: /rýchlu opravu/i }));
+
+    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
+    expect(getPipelineBoardApi).not.toHaveBeenCalled();
+    expect(onBoard).not.toHaveBeenCalled();
+    expect(openVersionCockpit).not.toHaveBeenCalled();
+  });
+});

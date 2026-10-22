@@ -33,6 +33,10 @@ vi.mock("@/services/api/projects", () => ({
   getProjectDedoProposalApi: vi.fn(),
   rejectProjectDedoProposalApi: vi.fn(),
   sendProjectDedoProposalApi: vi.fn(),
+  // DEV-175: Uložiť / Zahodiť of a refused founding
+  commitGitApi: vi.fn(),
+  discardGitApi: vi.fn(),
+  getGitStatusApi: vi.fn(),
 }));
 
 const ZADANIE =
@@ -237,5 +241,36 @@ describe("Číslo novej verzie Manažér vidí pred založením (DEV-149)", () =
     vykresli(navrh());
 
     expect(screen.queryByLabelText("Číslo verzie")).not.toBeInTheDocument();
+  });
+});
+
+// DEV-175: the engine's refusal to found a version over unsaved work — the same body the backend sends.
+function unsavedWorkRefusal(): ApiError {
+  return new ApiError(409, "conflict", {
+    detail: {
+      message: "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
+      project_id: "p-1",
+      unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
+    },
+  });
+}
+
+describe("Neuložené zmeny projektu (DEV-175)", () => {
+  it.each([
+    ["fast_fix", /Spustiť rýchlu opravu/i],
+    ["new_version", /Založiť novú verziu/i],
+  ])("⚠️ %s: odmietnutie ponúkne Uložiť / Zahodiť a zadanie ostane otvorené", async (action, button) => {
+    vi.mocked(sendProjectDedoProposalApi).mockRejectedValue(unsavedWorkRefusal());
+    const { onProposal, onVersion } = vykresli(navrh({ proposed_action: action, version_number: "1.1.0" }));
+
+    if (action === "fast_fix") fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
+    // Nie „zadanie sa zmenilo“: to by ho načítalo znova a Manažér by nevedel, čo sa stalo.
+    expect(getProjectDedoProposalApi).not.toHaveBeenCalled();
+    expect(onProposal).not.toHaveBeenCalled();
+    expect(onVersion).not.toHaveBeenCalled();
   });
 });

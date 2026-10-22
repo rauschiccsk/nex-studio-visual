@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
+import { ApiError } from "@/services/api";
 
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
@@ -303,6 +304,30 @@ describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
     await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
 
     expect(await screen.findByText(/no semver version to patch/i)).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("⚠️ DEV-175: refused for unsaved work, the dialog offers Uložiť / Zahodiť and opens no build", async () => {
+    startFastFixApiMock.mockRejectedValue(
+      new ApiError(409, "conflict", {
+        detail: {
+          message:
+            "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
+          project_id: "p1",
+          unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
+        },
+      }),
+    );
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /^rýchla oprava$/i }));
+    await userEvent.type(screen.getByLabelText(/popis opravy/i), "x");
+    await userEvent.click(screen.getByRole("radio", { name: /oprava chyby v dodanom kóde/i }));
+    await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
+
+    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 });

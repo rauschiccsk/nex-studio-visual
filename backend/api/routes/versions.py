@@ -69,7 +69,7 @@ from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
 from backend.services import delivery_statement as statements
-from backend.services import metrics, pipeline_metrics
+from backend.services import metrics, pipeline_metrics, unsaved_work
 from backend.services import version as version_service
 
 router = APIRouter(tags=["Versions"])
@@ -175,7 +175,11 @@ def create_version(
     project they own (``created_by`` == self); ri/ha may create on any
     project — enforced by the ownership check below.
     """
-    authz.assert_project_id_access(db, current_user, project_id)
+    project = authz.assert_project_id_access(db, current_user, project_id)
+    # DEV-175: a version is founded only over saved work — the page asks first, the engine holds it.
+    refused = unsaved_work.refusal(project.id, project.source_path)
+    if refused:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
     try:
         version = version_service.create(db, project_id, payload, current_user.id)
         db.commit()

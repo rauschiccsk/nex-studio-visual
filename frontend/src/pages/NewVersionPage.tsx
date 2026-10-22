@@ -25,6 +25,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { appendZadanie, zadanieClashOf } from "@/components/version/zadanieClash";
+import { unsavedWorkOf } from "@/components/riadiace/unsavedWork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
@@ -371,9 +372,16 @@ export default function NewVersionPage() {
       // pole a nemal ako vedieť. Engine to teraz odmietne (409) a vráti, čo tam je; ukážeme mu to a nechá
       // rozhodnúť sa jeho. Hádať za neho je presne to, čo tú prácu zmazalo.
       const clash = zadanieClashOf(err);
+      // DEV-175: the engine founds no version over unsaved work; when the tree got dirty after the page looked, its
+      // answer carries what is unsaved — the guard above shows it with Uložiť / Zahodiť.
+      const refusal = unsavedWorkOf(err);
       if (clash) {
         // DEV-40: the conflict panel says it, with the text and the three choices — not a second red line.
         setExistingZadanie({ text: clash.existing, origin: "clash", message: clash.message });
+      } else if (refusal?.status) {
+        setGitStatus(refusal.status);
+      } else if (refusal) {
+        setFormError({ message: refusal.message });
       } else {
         setFormError(humanizeApiError(err, "Uloženie Zadania zlyhalo"));
       }

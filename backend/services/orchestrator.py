@@ -13906,6 +13906,22 @@ def _next_stage(stage: str, flow_type: str = "new_version") -> str:
     return order[min(idx + 1, len(order) - 1)]
 
 
+def _found_the_regular_version(db: Session, project_id: uuid.UUID, brief: str) -> Version:
+    """The regular version a fast fix moves to. DEV-175: founded without the check for unsaved work — it goes on
+    with the same brief, so the unsaved changes are that work, not someone else's."""
+    return version_service.create(
+        db,
+        project_id,
+        version_schemas.VersionCreate(
+            version_number=version_service.suggest_next_version_number(db, project_id),
+            name="Riadna verzia",
+            description=brief or None,
+        ),
+        # Autora nesie PROJEKT, nie verzia; `version_service.create` ho beztak zatiaľ neukladá.
+        db.get(Project, project_id).created_by,
+    )
+
+
 async def apply_action(
     db: Session,
     *,
@@ -14496,17 +14512,7 @@ async def apply_action(
             except Exception:  # noqa: BLE001 — chýbajúce Zadanie nie je dôvod prenos zastaviť
                 brief = ""
 
-        nova = version_service.create(
-            db,
-            stara.project_id,
-            version_schemas.VersionCreate(
-                version_number=version_service.suggest_next_version_number(db, stara.project_id),
-                name="Riadna verzia",
-                description=brief or None,
-            ),
-            # Autora nesie PROJEKT, nie verzia; `version_service.create` ho beztak zatiaľ neukladá.
-            db.get(Project, stara.project_id).created_by,
-        )
+        nova = _found_the_regular_version(db, stara.project_id, brief)
         if brief:
             version_service.write_zadanie(db, nova.id, brief)
 

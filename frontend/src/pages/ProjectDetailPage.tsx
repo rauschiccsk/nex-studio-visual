@@ -24,6 +24,8 @@ import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
+import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/riadiace/unsavedWork";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
 import type { WorkKind } from "@/lib/workKind";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
@@ -144,6 +146,8 @@ export default function ProjectDetailPage() {
   const [fastFixFromTest, setFastFixFromTest] = useState(false);
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
   const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
+  // DEV-175: the fix is a new version, founded only over saved work — save or discard it in the dialog, then start again.
+  const [fastFixUnsaved, setFastFixUnsaved] = useState<UnsavedWorkRefusal | null>(null);
   // DEV-50: a fast fix says up front whether it fixes our own error (never billed) or changes what was agreed.
   const [fastFixKind, setFastFixKind] = useState<WorkKind | null>(null);
 
@@ -221,6 +225,7 @@ export default function ProjectDetailPage() {
     if (!project || !directive || !fastFixKind || fastFixSubmitting) return;
     setFastFixSubmitting(true);
     setFastFixError(null);
+    setFastFixUnsaved(null);
     try {
       const res = await startFastFixApi(project.id, directive, fastFixKind);
       fastFixDraft.clear();
@@ -229,7 +234,9 @@ export default function ProjectDetailPage() {
       // step and the build started with the Manažér left on the previous version. One helper, both entries.
       await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
     } catch (e: unknown) {
-      setFastFixError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo"));
+      const refusal = unsavedWorkOf(e);
+      if (refusal) setFastFixUnsaved(refusal);
+      else setFastFixError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo"));
       setFastFixSubmitting(false);
     }
   };
@@ -288,6 +295,7 @@ export default function ProjectDetailPage() {
 
   const openFastFix = useCallback(() => {
     setFastFixError(null);
+    setFastFixUnsaved(null);
     setFastFixDirective(fastFixDraft.text);
     setFastFixFromTest(fastFixFromUat(slug));
     setFastFixKind(null);
@@ -888,6 +896,11 @@ export default function ProjectDetailPage() {
             <div className="mt-3">
               <WorkKindChoice name="fastfix-kind" value={fastFixKind} onChange={setFastFixKind} disabled={fastFixSubmitting} />
             </div>
+            {fastFixUnsaved && (
+              <div className="mt-3">
+                <UnsavedWorkPanel refusal={fastFixUnsaved} />
+              </div>
+            )}
             <ErrorNote
               error={fastFixError}
               className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2"

@@ -55,7 +55,7 @@ from backend.schemas.pipeline import (
     VizualPreviewRead,
 )
 from backend.services import agent_terminal as agent_terminal_service
-from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets
+from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets, unsaved_work
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
 from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
@@ -393,6 +393,10 @@ async def start_fast_fix(
     goes In Progress now and follows the deploys; one ticket starts one fix.
     """
     project = authz.assert_project_id_access(db, current_user, payload.project_id)
+    # DEV-175: a version is founded only over saved work.
+    refused = await run_blocking(unsaved_work.refusal, project.id, project.source_path, cap=unsaved_work.CHECK_CAP)
+    if refused:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
     ticket = await _fix_ticket(db, project, payload.plane_issue_id) if payload.plane_issue_id else None
 
     pre_count = db.execute(
@@ -741,7 +745,11 @@ async def send_dedo_proposal(
     # formulár vyplnil sám. Dedo naďalej stavbu spustiť NEVIE — jeho dvere taký endpoint nemajú.
     if action == "fast_fix":
         project_id = db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
-        authz.assert_project_id_access(db, current_user, project_id)
+        project = authz.assert_project_id_access(db, current_user, project_id)
+        # DEV-175: a version is founded only over saved work; the proposal stays open for after it is saved.
+        refused = await run_blocking(unsaved_work.refusal, project.id, project.source_path, cap=unsaved_work.CHECK_CAP)
+        if refused:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
         try:
             new_version = fast_fix_service.create_patch_version(
                 db, project_id=project_id, user_id=current_user.id, work_kind=body.work_kind

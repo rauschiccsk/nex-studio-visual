@@ -543,3 +543,27 @@ describe("NewVersionPage — the number comes from the cockpit's one rule (DEV-1
     expect(screen.getByPlaceholderText("0.1.0")).toHaveValue("3.0.0");
   });
 });
+
+describe("NewVersionPage — the engine refuses founding over unsaved work (DEV-175)", () => {
+  it("⚠️ a tree that got dirty after the page looked shows the guard with Uložiť / Zahodiť and blocks saving", async () => {
+    createVersionMock.mockRejectedValue(
+      new ApiError(409, "conflict", {
+        detail: {
+          message:
+            "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
+          project_id: "p1",
+          unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
+        },
+      }),
+    );
+
+    await renderPage();
+    await userEvent.type(await screen.findByPlaceholderText(/Opíš, čo má verzia priniesť/i), "Jedna veta.");
+    await userEvent.click(screen.getByRole("button", { name: /uložiť zadanie/i }));
+
+    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /uložiť zadanie/i })).toBeDisabled();
+    expect(writeZadanieMock).not.toHaveBeenCalled();
+  });
+});

@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core import authz
+from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -77,6 +78,7 @@ from backend.services import (
     project_adoption,
     project_memory,
     uat_provisioner,
+    unsaved_work,
     vizual_sandbox,
     workspace_owner,
 )
@@ -817,19 +819,9 @@ def get_git_status(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
     authz.authorize_project(current_user, project)
-    if not project.source_path:
-        return {"clean": True, "dirty_count": 0, "files": [], "truncated": False}
-    if not git_state_service.workspace_is_git_repo(project.source_path):
-        # A workspace with no git repository has nothing to guard — the same answer as a project with no
-        # source path, and for the same reason. This used to be a 400, which the New-Version screen turned
-        # into a permanently disabled "Uložiť Zadanie" with no stated reason and no way to clear it: the
-        # only controls that reset the error live in a panel that renders solely for a DIRTY tree, and a
-        # 400 leaves the status null, so that panel could never appear. Founding was blocked outright for
-        # every project whose workspace is not a checkout.
-        return {"clean": True, "dirty_count": 0, "files": [], "truncated": False, "not_a_repo": True}
     try:
-        # DEV-174: the cockpit's own files (agents' rules and skills, the task plan) are not the Manažér's unsaved work.
-        return git_state_service.working_tree_status(project.source_path, exclude=workspace_owner.COCKPIT_WRITES)
+        # DEV-175: the same answer every founding of a version is refused over.
+        return unsaved_work.status(project.source_path)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -1682,7 +1674,7 @@ async def send_dedo_proposal(
     obrazovke. A koná sa nad návrhom, ktorý MENUJE — nie nad „tým, čo je otvorené teraz" (409, keď ho
     Dedo medzitým nahradil).
     """
-    authz.assert_project_id_access(db, current_user, project_id)
+    project = authz.assert_project_id_access(db, current_user, project_id)
     try:
         proposal = dedo_proposal_service.for_decision(db, project_id, payload.proposal_id)
     except dedo_proposal_service.ProposalNotFound as exc:
@@ -1690,6 +1682,10 @@ async def send_dedo_proposal(
     except dedo_proposal_service.ProposalError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
+    # DEV-175: a version is founded only over saved work; the brief stays open for after the Manažér saved it.
+    refused = await run_blocking(unsaved_work.refusal, project.id, project.source_path, cap=unsaved_work.CHECK_CAP)
+    if refused:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
     verb = proposal.proposed_action
     try:
         if verb == "fast_fix":

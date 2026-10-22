@@ -8,6 +8,8 @@ import { useState } from "react";
 import { Loader2, X, Zap } from "lucide-react";
 
 import WorkKindChoice from "@/components/common/WorkKindChoice";
+import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
+import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/riadiace/unsavedWork";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { startFastFixApi } from "@/services/api/pipeline";
 import type { PlaneTicket } from "@/services/api/planeTickets";
@@ -33,12 +35,15 @@ export default function PlaneTicketFastFix({ ticket, project, onClose }: Props) 
   const [workKind, setWorkKind] = useState<WorkKind | null>(ticket.work_kind ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // DEV-175: the fix is a new version, founded only over saved work — save or discard it here, then start again.
+  const [unsaved, setUnsaved] = useState<UnsavedWorkRefusal | null>(null);
   const [started, setStarted] = useState<{ versionId: string; warning: string } | null>(null);
 
   async function start() {
     if (!workKind || !directive.trim() || busy) return;
     setBusy(true);
     setError("");
+    setUnsaved(null);
     try {
       const res = await startFastFixApi(project.id, directive.trim(), workKind, ticket.issue_id);
       if (res.plane_warning) {
@@ -48,7 +53,9 @@ export default function PlaneTicketFastFix({ ticket, project, onClose }: Props) 
       }
       await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
     } catch (e: unknown) {
-      setError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo").message);
+      const refusal = unsavedWorkOf(e);
+      if (refusal) setUnsaved(refusal);
+      else setError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo").message);
       setBusy(false);
     }
   }
@@ -95,6 +102,7 @@ export default function PlaneTicketFastFix({ ticket, project, onClose }: Props) 
         className={FIELD}
       />
       <WorkKindChoice name={`oprava-druh-${ticket.issue_id}`} value={workKind} onChange={setWorkKind} disabled={busy} />
+      {unsaved && <UnsavedWorkPanel refusal={unsaved} />}
       {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <button
