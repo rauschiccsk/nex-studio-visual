@@ -40,7 +40,8 @@ _KINDS = {
 
 #: ``# @<word> [required][: text]`` — any ``# @word`` is a marker, so a misspelt one is reported, not ignored.
 _MARKER = re.compile(r"^#\s*@([\w-]+)(?:\s+(required))?\s*(?::\s*(.*?))?\s*$")
-_VARIABLE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
+#: A variable's line — also what Poradca's copy of the template keeps of it (``secret_files.names_only``, DEV-177).
+VARIABLE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
 #: The quotes a manager-facing text may stand in — typographic, straight, or the two mixed („…" is common).
 _QUOTED = re.compile(r"^[„\"“](.*)[“”\"]$")
 
@@ -110,7 +111,7 @@ def parse(text: str) -> Contract:
                 else:
                     pending.append((number, _KINDS[word], required, label or ""))
             continue
-        variable = _VARIABLE.match(line)
+        variable = VARIABLE.match(line)
         if not variable:
             continue
         key = variable.group(1)

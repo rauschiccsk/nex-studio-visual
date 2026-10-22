@@ -166,6 +166,8 @@ Každá otázka = dočasný kontajner z obrazu backendu (`docker run --rm`), pod
   súborov na pracovné priečinky** — teda nie `/proc/self/environ` s tokenom;
 - pripojené len na čítanie: projekt (`/opt/projects/<slug>`, pracovný priečinok); pred každou otázkou
   sa strom prejde a **každý** súbor `.env*`, `*.pem`, `*.key`, `id_*`, `*.p12` sa prekryje prázdnym (B8);
+  vzor nastavení (`.env.example`, `.env.sample`, `.env.template`) sa prekryje kópiou len s menami premenných,
+  komentármi a značkami — bez hodnôt (DEV-177), aby Poradca vedel overiť značky `@customer` a `@public-url`;
 - na zápis len priečinok tohto rozhovoru, pripojený presne tam, kam claude ukladá záznam podľa pracovného
   priečinka (`…/projects/-opt-projects-<slug>`), aby `--resume` fungoval; **záznamy agenta stavby sa
   nepripájajú** (B3);

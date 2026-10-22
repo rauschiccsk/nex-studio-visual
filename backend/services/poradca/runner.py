@@ -425,6 +425,8 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
         launched_at = datetime.now(timezone.utc)
         container_dir, host_dir = sandbox.project_dirs(slug)
         overlays = await asyncio.to_thread(sandbox.overlay_paths, host_dir)
+        # DEV-177: the settings template is read with names, comments and markers — never a value.
+        templates = await asyncio.to_thread(sandbox.template_copies, host_dir, overlays, token)
 
         async def on_step(tool: str, target: str) -> None:
             await _record_step(entry, message_id, tool, target)
@@ -449,6 +451,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                     attachments=await asyncio.to_thread(sandbox.attachments_dir(conversation_id).is_dir),
                 ),
                 overlays=overlays,
+                templates=templates,
             )
             entry.container = sandbox.container_name(slug, token)
             content, usage = await asyncio.wait_for(

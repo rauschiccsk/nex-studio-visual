@@ -12,7 +12,8 @@ the build, because Poradca only reads:
   * **project read-only** — writes are refused by the kernel, not by a promise in the prompt;
   * **secret files overlaid with an empty file** (``.env*``, keys, certificates, …) and likewise every
     file with multiple hard links — a hard link is a second name for a file that may lie anywhere on the same
-    disk, and restricted mode cannot tell it from a regular file;
+    disk, and restricted mode cannot tell it from a regular file. A settings template (``.env.example``) is overlaid
+    with a copy holding only names, comments and markers (DEV-177) — Poradca checks the markers, never a value;
   * ``.git`` overlaid with an empty ``tmpfs`` — history is served by the ``git_historia`` tool from the backend;
   * **no Knowledge Base** — it is served by a tool with the rights of the person asking; a mounted directory
     would bypass them;
@@ -38,7 +39,7 @@ import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 from uuid import UUID, uuid4
 
 from backend.config.settings import settings
@@ -71,8 +72,8 @@ _USER = "1000:1000"
 #: no database — Poradca writes nothing and the backend serves it "from behind".
 _PASSTHROUGH_ENV: tuple[str, ...] = ("CLAUDE_CODE_OAUTH_TOKEN", "DISABLE_AUTOUPDATER", "LANG")
 
-#: Names of files that carry secrets — the one rule of :mod:`backend.services.secret_files`; overlaid with an empty
-#: file wherever in the project they lie (templates of an ``.env`` too — Poradca's stricter choice).
+#: Names of files that carry secrets — the one rule of :mod:`backend.services.secret_files`; overlaid wherever in the
+#: project they lie: with an empty file, a template of an ``.env`` with its copy without values (DEV-177).
 _SECRET_FILE_RE = secret_files.SECRET_FILE_RE
 
 #: Characters that start a new field or record in a docker ``--mount`` spec (comma, quotes) — and control
@@ -86,6 +87,9 @@ MAX_SOCKET_PATH = 107
 
 #: More overlays than this is a finding, not an ordinary project — the question rather fails with a reason.
 MAX_OVERLAYS = 2000
+
+#: A settings template bigger than this is not a template — it stays overlaid empty (DEV-177).
+MAX_TEMPLATE_BYTES = 256 * 1024
 
 #: Memory and process cap of the container — a question that only reads does not need more.
 _MEMORY = "2g"
@@ -247,6 +251,37 @@ def overlay_paths(project_dir: str) -> list[str]:
     return sorted(found)
 
 
+def template_copies(project_dir: str, overlays: list[str], token: str) -> dict[str, str]:
+    """DEV-177 — of the overlaid files, the settings templates (``secret_files.TEMPLATE_RE``) get a copy with names,
+    comments and markers only (:func:`secret_files.names_only`), written into THIS question's directory, which is
+    removed after it. Returns ``{relative path: copy}``; :func:`run_argv` overlays those with the copy, the rest empty.
+
+    Not copied — so overlaid empty as before: a hard-linked file (a second name for a file anywhere on the disk),
+    anything in ``private/`` (DEV-44 — what the Manažér attached stays unread), one bigger than
+    :data:`MAX_TEMPLATE_BYTES` and one that cannot be read."""
+    target = run_dir(token) / "vzory"
+    copies: dict[str, str] = {}
+    for index, rel in enumerate(overlays):
+        if not secret_files.is_template(os.path.basename(rel)) or rel.split(os.sep, 1)[0] == PRIVATE_DIR:
+            continue
+        full = os.path.join(project_dir, rel)
+        try:
+            st = os.lstat(full)
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1 or st.st_size > MAX_TEMPLATE_BYTES:
+                continue
+            with open(full, encoding="utf-8", errors="replace") as handle:
+                text = handle.read(MAX_TEMPLATE_BYTES + 1)
+            target.mkdir(exist_ok=True)
+            copy = target / str(index)
+            copy.write_text(secret_files.names_only(text), encoding="utf-8")
+            os.chmod(copy, 0o444)
+        except OSError as exc:
+            logger.warning("%s: settings template %s stays overlaid empty: %s", _LABEL, rel, exc)
+            continue
+        copies[rel] = str(copy)
+    return copies
+
+
 def prepare(conversation_id: UUID, token: str) -> tuple[Path, Path]:
     """Creates the conversation transcript directory and the socket directory of the question; returns their paths.
 
@@ -356,6 +391,7 @@ def run_argv(
     network: Optional[str],
     call: ClaudeCall,
     overlays: list[str],
+    templates: Optional[Mapping[str, str]] = None,
 ) -> list[str]:
     """The whole ``docker run`` of one question. What is not here, Poradca does not see.
 
@@ -370,6 +406,8 @@ def run_argv(
         host_dir, container_dir, str(session_dir(conversation_id)), str(run_dir(token)), str(empty_file())
     )
     _assert_mount_safe(*overlays)
+    templates = templates or {}
+    _assert_mount_safe(*templates.values())
     container_session_dir = f"{_CLAUDE_DIR}/projects/{build_sandbox.session_dir_name(container_dir)}"
     argv = [
         "docker",
@@ -405,7 +443,9 @@ def run_argv(
     if os.path.isdir(os.path.join(host_dir, ".git")):
         argv += ["--mount", f"type=tmpfs,destination={container_dir}/.git,tmpfs-mode=0555"]
     for rel in overlays:
-        argv += ["--mount", f"type=bind,source={empty_file()},target={container_dir}/{rel},readonly"]
+        # DEV-177: a settings template is overlaid with its copy without values, every other secret file with nothing.
+        source = templates.get(rel, str(empty_file()))
+        argv += ["--mount", f"type=bind,source={source},target={container_dir}/{rel},readonly"]
     if call.attachments:
         attached = attachments_dir(conversation_id)
         _assert_mount_safe(str(attached))
