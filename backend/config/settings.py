@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     kb_publish_timeout_seconds: int = 30
     kb_publish_interval_seconds: int = 300
     kb_publish_enabled: bool = True
+    # DEV-152: how often the cockpit looks for builds that wait on the Manažér longer than the interval in Nastavenia
+    # (off in tests: the app's real life cycle would send Telegram messages).
+    build_reminder_check_seconds: int = 3600
+    build_reminders_enabled: bool = True
     # DEV-86: NS Code — the largest file it shows (a bigger one says so instead of loading the browser), how many lines
     # a text search lists, and how much of each line.
     ns_code_max_file_bytes: int = 1_000_000

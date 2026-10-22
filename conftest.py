@@ -21,6 +21,7 @@ from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 # messages. Here, at the root, so both test trees see it (pytest reads a conftest only upwards from a test).
 settings.ci_watch_enabled = False
 settings.kb_publish_enabled = False
+settings.build_reminders_enabled = False
 
 
 @pytest.fixture(autouse=True)

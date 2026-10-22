@@ -200,6 +200,26 @@ async def _ci_watch_loop() -> None:
         await asyncio.sleep(settings.ci_watch_interval_seconds)
 
 
+async def _build_reminder_loop() -> None:
+    """DEV-152 — a build waiting on the Manažér longer than the interval in Nastavenia reminds him on Telegram.
+
+    Each pass has its own session; when a reminder went is in the database, so a restart never sends one twice."""
+    from backend.services import build_reminders
+
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                await build_reminders.remind_once(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("build reminder loop iteration failed")
+        await asyncio.sleep(settings.build_reminder_check_seconds)
+
+
 async def kb_publish_loop() -> None:
     """DEV-94 — sends the Knowledge Base's commits to GitHub, where the copy on MAGER reads it from.
 
@@ -333,6 +353,9 @@ async def lifespan(app: FastAPI):
     ci_watch_task: Optional[asyncio.Task] = None
     if settings.ci_watch_enabled:
         ci_watch_task = asyncio.create_task(_ci_watch_loop(), name="ci-watch")
+    build_reminder_task: Optional[asyncio.Task] = None
+    if settings.build_reminders_enabled:
+        build_reminder_task = asyncio.create_task(_build_reminder_loop(), name="build-reminders")
     kb_publish_task: Optional[asyncio.Task] = None
     if settings.kb_publish_enabled:
         kb_publish_task = asyncio.create_task(kb_publish_loop(), name="kb-publish")
@@ -355,6 +378,8 @@ async def lifespan(app: FastAPI):
             ci_watch_task.cancel()
         if kb_publish_task is not None:
             kb_publish_task.cancel()
+        if build_reminder_task is not None:
+            build_reminder_task.cancel()
         for t in (
             idle_task,
             retention_task,
@@ -362,6 +387,7 @@ async def lifespan(app: FastAPI):
             kb_index_task,
             ci_watch_task,
             kb_publish_task,
+            build_reminder_task,
         ):
             if t is None:
                 continue

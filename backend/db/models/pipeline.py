@@ -175,6 +175,9 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: the pipeline isn't waiting on the Manažér. (Column name kept as ``awaiting_director_since`` —
     #: CR-V2-004 renamed the operator label + status VALUE, not the live column, to avoid needless DDL churn.)
     awaiting_director_since = Column(TIMESTAMP(timezone=True), nullable=True)
+    #: DEV-152: when this build last reminded the Manažér on Telegram that it waits for him — kept here, so a
+    #: restart of the cockpit never sends one twice in an interval (:mod:`backend.services.build_reminders`).
+    last_reminder_at = Column(TIMESTAMP(timezone=True), nullable=True)
     #: E5 (CR-NS-043): accumulated total Manažér-wait time for this version (seconds). The status
     #: listener folds each finished wait interval (now − awaiting_director_since) in here on EXIT, so
     #: the metrics page has the lifetime total; a live open wait is added on top at read time. Starts

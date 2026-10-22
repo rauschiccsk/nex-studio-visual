@@ -57,6 +57,18 @@ class _Default:
 #: ``is_default=True``. Type hints are casted on read by the typed
 #: helpers further down.
 DEFAULT_SETTINGS: dict[str, _Default] = {
+    # ── Pripomienka čakajúcej stavby (DEV-152) ─────────────────────────
+    "build_reminder_after_days": _Default(
+        value="2",
+        value_type="int",
+        label="Pripomienka čakajúcej stavby",
+        unit="dní",
+        description=(
+            "Stavba, ktorá čaká na Manažéra dlhšie ako tento počet dní, mu pripomenie na Telegrame, od kedy čaká "
+            "a čo treba — a potom znova po každom ďalšom takom intervale, kým niekto nekoná. Stavbu, ktorú Manažér "
+            "pozastavil sám, nepripomína."
+        ),
+    ),
     # ── Poradca (ICCINT-167) ────────────────────────────────────────
     # How many Poradca questions may run at once in the whole cockpit. They all draw on one Claude subscription
     # with a weekly limit — the same one as the builds; the next question waits and the person sees why.
