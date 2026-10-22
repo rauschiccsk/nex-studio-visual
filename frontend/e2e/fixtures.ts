@@ -779,6 +779,50 @@ export function registerFixtures(): void {
   ]);
   answerUntyped("get", "/api/v1/version", { version: "4.43.26" });
   answer("get", "/api/v1/projects", { items: [PROJECT], total: 1, skip: 0, limit: 50 });
+  // DEV-150 — „Kde stojíme“ on the Prehľad: one project waiting on the Manažér with a long name, one at work, one still.
+  answer("get", "/api/v1/standing", {
+    projects: [
+      {
+        project_id: PROJECT.id,
+        name: "NEX Inbox pre MÁGERSTAV s dlhým menom, ktoré sa musí zalomiť",
+        slug: PROJECT.slug,
+        prod_version: "1.9.0",
+        open_versions: [
+          {
+            version_id: VERSION.id,
+            version_number: "1.10.0",
+            stage: "programovanie",
+            status: "blocked",
+            block_reason: "agent_question",
+            waiting_since: T1,
+            tasks_done: 7,
+            tasks_total: 16,
+            fast_fix: false,
+          },
+        ],
+      },
+      {
+        project_id: "22222222-2222-4222-8222-222222222222",
+        name: "Career Asistent",
+        slug: "career-asistent",
+        prod_version: null,
+        open_versions: [
+          {
+            version_id: "33333333-3333-4333-8333-333333333333",
+            version_number: "1.2.0",
+            stage: "navrh",
+            status: "agent_working",
+            block_reason: null,
+            waiting_since: null,
+            tasks_done: 0,
+            tasks_total: 0,
+            fast_fix: false,
+          },
+        ],
+      },
+      { project_id: "44444444-4444-4444-8444-444444444444", name: "NEX Genesis", slug: "nex-genesis", prod_version: "1.2.2", open_versions: [] },
+    ],
+  });
   answer("get", "/api/v1/projects/{project_id}", PROJECT);
   answer("get", "/api/v1/projects/{project_id}/versions", [VERSION, RELEASED]);
   answer("get", "/api/v1/projects/{project_id}/assignments", [
