@@ -30,7 +30,8 @@ export interface CustomerRead {
 /** DEV-72: one setting an app marks in its `.env.example`. */
 export interface CustomerSetting {
   key: string;
-  kind: "customer" | "customer_secret" | "public_url";
+  /** `public_url_admin` — a Web project's administration address (DEV-164). */
+  kind: "customer" | "customer_secret" | "public_url" | "public_url_admin";
   required: boolean;
   /** What the manager is told about it — the app's own words. */
   label: string;

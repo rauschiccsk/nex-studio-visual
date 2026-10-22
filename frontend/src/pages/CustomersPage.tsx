@@ -76,8 +76,10 @@ export default function CustomersPage() {
   const [notes, setNotes] = useState("");
   const [secret, setSecret] = useState("");
   // DEV-72: what the app asks of each customer (its `.env.example` markers) and what the form holds for them.
-  // `null` = not known (the request failed) — the form then behaves as before DEV-72.
+  // `null` = not known yet. DEV-164: a request that failed is said (`contractError`) — 22.10.2026 a 500 here showed a
+  // form without a single field of the app's, and the deploy kept asking for a setting the Manažér could not find.
   const [contract, setContract] = useState<CustomerSettingsContract | null>(null);
+  const [contractError, setContractError] = useState<string | null>(null);
   const [settingValues, setSettingValues] = useState<Record<string, string>>({});
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -115,17 +117,23 @@ export default function CustomersPage() {
   useEffect(() => {
     if (!slug) return;
     let alive = true;
+    setContractError(null);
     getCustomerSettingsContract(slug)
       .then((c) => alive && setContract(c))
-      .catch(() => alive && setContract(null));
+      .catch((err) => {
+        if (!alive) return;
+        setContract(null);
+        setContractError(err instanceof ApiError ? humanizeApiError(err, "Načítanie zlyhalo").message : "sieťová chyba");
+      });
     return () => {
       alive = false;
     };
   }, [slug]);
 
   // The „Tajný kľúč“ is the admin password only for an app that reads it (ADMIN_INITIAL_PASSWORD); for any other
-  // it would be stored and never used, so it is not offered. Unknown contract → offered, as before DEV-72.
-  const offersLegacySecret = contract === null || contract.legacy_admin;
+  // it would be stored and never used, so it is not offered. Not loaded yet → offered, as before DEV-72; failed to
+  // load → not offered: the form says it does not know what the app asks (DEV-164).
+  const offersLegacySecret = contractError === null && (contract === null || contract.legacy_admin);
 
   function resetForm() {
     setName("");
@@ -375,6 +383,13 @@ export default function CustomersPage() {
               </label>
             )}
           </div>
+          {contractError !== null && (
+            <p role="alert" className="text-[11px] text-[var(--color-state-error-fg)]">
+              Nastavenia, ktoré aplikácia pýta od zákazníka, sa nepodarilo načítať ({contractError}). Kým sa nenačítajú,
+              nedajú sa tu vyplniť a nasadenie, ktoré ich potrebuje, sa nespustí. Obnov stránku; keď chyba trvá, je v
+              kokpite.
+            </p>
+          )}
           <CustomerSettingsFields
             contract={contract}
             values={settingValues}

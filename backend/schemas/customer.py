@@ -222,7 +222,8 @@ class CustomerSettingRead(BaseModel):
     """One setting an app marks in its ``.env.example`` (DEV-72)."""
 
     key: str
-    kind: Literal["customer", "customer_secret", "public_url"]
+    # DEV-164: every kind ``env_contract`` reads — one missing here answered the customer form with a 500 (22.10.2026).
+    kind: Literal["customer", "customer_secret", "public_url", "public_url_admin"]
     required: bool
     label: str
 

@@ -25,7 +25,8 @@ interface Props {
 
 export default function CustomerSettingsFields({ contract, values, onValue, secrets, onSecret, storedSecrets }: Props) {
   const fields = customerSettings(contract);
-  const publicUrl = (contract?.settings ?? []).filter((s) => s.kind === "public_url");
+  // DEV-164: a Web project's administration has an address of its own — the cockpit fills it in like the web's.
+  const publicUrl = (contract?.settings ?? []).filter((s) => s.kind === "public_url" || s.kind === "public_url_admin");
   const problems = contract?.problems ?? [];
   if (fields.length === 0 && publicUrl.length === 0 && problems.length === 0) return null;
 

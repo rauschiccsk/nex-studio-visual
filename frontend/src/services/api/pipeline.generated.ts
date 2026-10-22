@@ -5212,7 +5212,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "customer" | "customer_secret" | "public_url";
+            kind: "customer" | "customer_secret" | "public_url" | "public_url_admin";
             /** Label */
             label: string;
             /** Required */

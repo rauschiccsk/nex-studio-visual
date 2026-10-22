@@ -12,6 +12,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import CustomersPage from "@/pages/CustomersPage";
+import { ApiError } from "@/services/api";
 import type { CustomerRead, CustomerSettingsContract } from "@/types/customer";
 
 const { listCustomersMock, createCustomerMock, updateCustomerMock, contractMock } = vi.hoisted(() => ({
@@ -107,6 +108,35 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     const payload = updateCustomerMock.mock.calls[0]![1];
     expect(payload.settings).toEqual({ BOOTSTRAP_ADMIN_EMAIL: "admin@icc.sk", SMTP_HOST: "" });
     expect(payload.secret_settings).toEqual({});
+  });
+
+  it("a Web project's administration address is filled in by the cockpit like the web's (DEV-164)", async () => {
+    contractMock.mockResolvedValue({
+      ...CAREER,
+      settings: [
+        ...CAREER.settings,
+        { key: "ADMIN_PUBLIC_URL", kind: "public_url_admin", required: false, label: "ADMIN_PUBLIC_URL" },
+      ],
+    });
+    listCustomersMock.mockResolvedValue([ICC]);
+    render(<CustomersPage />);
+    fireEvent.click(await screen.findByTitle("Upraviť zákazníka"));
+
+    expect(await screen.findByText(/\(APP_PUBLIC_URL, ADMIN_PUBLIC_URL\) dopĺňa kokpit sám/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("ADMIN_PUBLIC_URL")).not.toBeInTheDocument();
+  });
+
+  it("settings that could not be loaded are said, never passed off as an app that asks nothing (DEV-164)", async () => {
+    // 22.10.2026: the contract answered 500 and the form showed the old „Tajný kľúč“ and no field of the app's.
+    contractMock.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+    listCustomersMock.mockResolvedValue([ICC]);
+    render(<CustomersPage />);
+    fireEvent.click(await screen.findByTitle("Upraviť zákazníka"));
+
+    expect(
+      await screen.findByText(/^Nastavenia, ktoré aplikácia pýta od zákazníka, sa nepodarilo načítať \(.+\)\. /),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Tajný kľúč (pre zákazníka)")).not.toBeInTheDocument();
   });
 
   it("an app that reads the „Tajný kľúč“ keeps it", async () => {
