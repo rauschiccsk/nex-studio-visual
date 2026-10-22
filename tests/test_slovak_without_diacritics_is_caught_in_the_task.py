@@ -115,6 +115,30 @@ def test_the_scan_knows_the_project_by_its_repository(tmp_path):
     assert [(f.path, f.line) for f in found] == [("ops/backup.sh", 3)]
 
 
+OFFERS = 'describe("the offer list", () => {});\n\ndescribe("Ponuky", () => {});\n'
+
+
+def test_a_file_the_version_moved_is_its_new_code(tmp_path):
+    """Career Asistent 1.1.0 moved the tests of 1.0.0 from frontend/ to web/; git counts a move as no added line, so the
+    check saw none of „Ponuky“, „Dokumenty“ … and the Auditor opened a second round for them. Director 22.10.2026:
+    „Súhlasím“ — a file the version moves or copies is delivered at its new place, as new code of the version."""
+    work = tmp_path / "career-asistent"
+    _repo(work)
+    _commit(work, "frontend/src/test/offers.test.tsx", OFFERS)
+    _commit(work, "frontend/src/test/untouched.test.tsx", 'describe("Dokumenty", () => {});\n')
+    base = _git(work, "rev-parse", "HEAD")
+    (work / "web/src/test").mkdir(parents=True)
+    _git(work, "mv", "frontend/src/test/offers.test.tsx", "web/src/test/offers.test.tsx")
+    head = _commit(work, "web/src/test/copied.test.tsx", OFFERS)
+
+    found = source_language.scan(work, base, head)
+
+    assert [(f.path, f.line) for f in found] == [
+        ("web/src/test/copied.test.tsx", 3),
+        ("web/src/test/offers.test.tsx", 3),
+    ]
+
+
 # ── the list of words ────────────────────────────────────────────────────────────────────────────────────────────
 
 

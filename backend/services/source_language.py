@@ -4,11 +4,11 @@ Director 11.10.2026: „Všetko čo bude zobrazené v kokpite zostáva po sloven
 zákazníkovi pre zákazku, tak keď zákazníkovi odovzdávame zdrojové kódy, tam má byť všetko po anglicky.“
 
 The agent is told so in every coding brief; this module is the check that does not rest on the agent's judgement.
-It reads the lines a version ADDED (``base..head``, the same range the delivery statement counts) and reports Slovak
-text in the parts of source code a person never sees on a screen: comments, docstrings, and — in test files — the
-messages of assertions and the names of tests. String literals are left alone: they are the application's own text
-for its users, in the customer's language. Text in double or Slovak quotation marks inside a comment is left alone
-too — it quotes a screen text or a person.
+It reads the lines a version ADDED (``base..head``, the same range the delivery statement counts; a moved or copied
+file whole) and reports Slovak text in the parts of source code a person never sees on a screen: comments, docstrings,
+and — in test files — the messages of assertions and the names of tests. String literals are left alone: they are the
+application's own text for its users, in the customer's language. Text in double or Slovak quotation marks inside a
+comment is left alone too — it quotes a screen text or a person.
 
 Slovak written without diacritics is known by its words (DEV-183): ``slovak_words.txt`` beside this module lists Slovak
 words as they are written without diacritics, none of them an English word. What the rule cannot see (Slovak names in
@@ -93,16 +93,19 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def added_line_numbers(repo: Path, base: str, head: str) -> dict[str, set[int]]:
-    """Line numbers (in ``head``) of the lines added or changed between ``base`` and ``head``, per file."""
+    """Line numbers (in ``head``) of the lines added or changed between ``base`` and ``head``, per file.
+
+    DEV-183: a file the version moved or copied counts whole — it is delivered at its new place. Career Asistent 1.1.0
+    moved the tests of 1.0.0 from ``frontend/`` to ``web/``; counted as a move, not one of their lines was added, and
+    „Ponuky“, „Dokumenty“ … reached the Auditor. Director 22.10.2026: „Súhlasím“. (The delivery statement counts a move
+    by what changed in it — :mod:`delivered_tokens` has its own diff.)"""
     # core.quotepath=off: a path with non-ASCII letters arrives as written, not as an escaped, quoted string.
     diff = _git(
         repo,
         "-c",
         "core.quotepath=off",
         "diff",
-        "-M",
-        "-C",
-        "--find-copies-harder",
+        "--no-renames",
         "-U0",
         "--no-color",
         f"{base}..{head}",
