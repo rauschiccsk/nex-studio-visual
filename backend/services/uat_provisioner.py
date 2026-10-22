@@ -2126,6 +2126,73 @@ def _networks_as_list(raw: Any) -> list[str]:
     return []
 
 
+def cockpit_routing(
+    src_services: dict[str, Any], roles: dict[str, Optional[str]], name_base: str, host: str
+) -> dict[str, list[str]]:
+    """The Traefik labels the cockpit writes into an installation with one frontend — on its frontend and its backend
+    (DEV-164). An installation routed exactly so was routed by the cockpit; any other routing is its own."""
+    routes: dict[str, list[str]] = {}
+    fe, be = roles.get("frontend"), roles.get("backend")
+    if fe and fe in src_services:
+        routes[fe] = frontend_traefik_labels(name_base, detect_internal_port(src_services[fe], 80), host)
+    if be and be in src_services:
+        routes[be] = backend_traefik_labels(name_base, detect_internal_port(src_services[be], 8000), host)
+    return routes
+
+
+def _traefik_labels(svc: Any) -> list[str]:
+    return [
+        label
+        for label in _labels_as_list(svc.get("labels") if isinstance(svc, dict) else None)
+        if label.startswith("traefik.")
+    ]
+
+
+def web_frontends_into_installation(
+    bumped: dict[str, Any],
+    web_render: dict[str, Any],
+    *,
+    surfaces: tuple[project_surfaces.Surface, ...],
+    backend: Optional[str],
+    cockpits_routing: dict[str, list[str]],
+    project_slug: str,
+    version: str,
+) -> tuple[list[str], list[str]]:
+    """DEV-164 — an installation made before its project became a Web project gets the frontends it lacks.
+
+    22.10.2026 Career Asistent 1.1.0 was deployed to the UAT made for 1.0.0, when it had one frontend. A redeploy only
+    raises the version of what an installation has (ICCINT-133), so the public web never came and the administration
+    stayed on the main address. ``bumped`` is that raised compose; ``web_render`` what the cockpit writes into a new
+    installation of the project. The missing frontends come from it whole — their images tagged like every service the
+    redeploy raised (:func:`_bumpni_znacku`) — and the frontends and the backend take its
+    routing — the web the main address, the administration ``-admin``. Nothing else of the installation changes:
+    names, volumes, networks, secrets and the other services stay. Only a routing the cockpit wrote itself
+    (``cockpits_routing``, one frontend) is replaced; an installation with its own routing keeps it and gets nothing.
+
+    Returns ``(added, left_out)`` — the frontends added, and those left out for the installation's own routing."""
+    services = bumped.get("services") or {}
+    rendered = web_render.get("services") or {}
+    if len(surfaces) < 2:
+        return [], []
+    missing = [s.service for s in surfaces if s.service not in services and s.service in rendered]
+    if not missing:
+        return [], []
+    routed = {name: sorted(_traefik_labels(svc)) for name, svc in services.items() if _traefik_labels(svc)}
+    if routed != {name: sorted(labels) for name, labels in cockpits_routing.items()}:
+        return [], missing
+    for name in missing:
+        services[name] = copy.deepcopy(rendered[name])
+        if isinstance(services[name].get("image"), str):
+            services[name]["image"] = _bumpni_znacku(services[name]["image"], project_slug, version)
+    for name in [s.service for s in surfaces if s.service not in missing] + ([backend] if backend else []):
+        if name in services and name in rendered:
+            own = [label for label in _labels_as_list(services[name].get("labels")) if not label.startswith("traefik.")]
+            services[name]["labels"] = own + _traefik_labels(rendered[name])
+            _add_proxy_network(services[name])
+    bumped["services"] = services
+    return missing, []
+
+
 def has_own_routing(facts: Optional["InstanceFacts"]) -> bool:
     """Nesie si inštalácia vlastné smerovanie? (ICCINT-151)
 
@@ -2929,13 +2996,6 @@ def provision_uat(
     # mení sa VERZIA. To je celý zmysel prevzatia — začať spravovať to, čo tam je.
     if is_redeploy and compose_path.is_file() and env_path.is_file():
         chyba = services_missing_against_source(uat_dir, source)
-        if chyba:
-            # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama
-            # nedostane. Zamlčať to by znamenalo vrátiť sa k prestavbe zadnými dverami.
-            warnings.append(
-                f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
-                "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
-            )
         # DEV-67 — before anything is written: a variable the installation would run with may point where the
         # project keeps storage and the installation has none (NEX Inbox 1.7.0 moved its Genesis share).
         unmounted = paths_without_storage(
@@ -2961,6 +3021,58 @@ def provision_uat(
             source=source,
             project_path=project_path,
         )
+        # DEV-164: a project switched to Web after this installation was made gets its frontends now — the one
+        # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
+        surfaces = project_surfaces.surfaces_of_slug(project_path.name)
+        pridane: list[str] = []
+        if len(surfaces) > 1:
+            name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+            pridane, vynechane = web_frontends_into_installation(
+                povysene,
+                build_compose_for_instance(
+                    project_path=project_path,
+                    slug=uat_slug,
+                    project=project_slug,
+                    environment=environment,
+                    customer_slug=customer_slug,
+                    app=app,
+                    version=version,
+                    preserve_extra_hosts=False,
+                    loopback_base_port=loopback_base_port,
+                    private=private,
+                ),
+                surfaces=surfaces,
+                backend=roles["backend"],
+                cockpits_routing=cockpit_routing(src_services, roles, name_base, host),
+                project_slug=project_slug,
+                version=version,
+            )
+            if pridane:
+                adresy = {s.service: h for s, _router, h in frontend_routes(name_base, host, surfaces)}
+                warnings.append(
+                    "Webový projekt: do inštalácie pribudlo "
+                    + ", ".join(f"{meno} na adrese {adresy.get(meno, '?')}" for meno in pridane)
+                    + "; "
+                    + ", ".join(
+                        f"{s.service} je odteraz na adrese {adresy[s.service]}"
+                        for s in surfaces
+                        if s.service not in pridane
+                    )
+                    + "."
+                )
+            if vynechane:
+                warnings.append(
+                    f"Webový projekt: inštalácia má vlastné smerovanie, preto do nej {', '.join(vynechane)} "
+                    "nepribudol — doplň ho do inštalácie ručne."
+                )
+        chyba = [meno for meno in chyba if meno not in pridane]
+        if chyba:
+            # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama
+            # nedostane. Zamlčať to by znamenalo vrátiť sa k prestavbe zadnými dverami.
+            warnings.append(
+                f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
+                "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
+            )
         # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
         # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
         povodne = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
