@@ -55,9 +55,7 @@ from backend.schemas.project import (
     NEW_PROJECT_PRESETS,
     GitHubRepoNotFoundError,
     PortBlockSuggestResponse,
-    PortCheckResponse,
     PortConflictError,
-    PortSuggestResponse,
     ProjectCreate,
     ProjectCreatePresets,
     ProjectRead,
@@ -459,66 +457,6 @@ def list_projects(
         total=total,
         skip=skip,
         limit=limit,
-    )
-
-
-@router.get("/ports/check", response_model=PortCheckResponse)
-def check_port(
-    port: int = Query(..., description="Port number to check (10100–14999)."),
-    project_id: Optional[str] = Query(
-        default=None,
-        description="Exclude this project from the conflict check (for editing).",
-    ),
-    db: Session = Depends(get_db),
-) -> PortCheckResponse:
-    """Check whether a port is available in the ICC Port Registry range.
-
-    Answers from all three sources (projects table + declared reservations +
-    the host's published-port map). Returns 200 with ``state="unknown"`` when
-    the host could not be consulted — the caller is told plainly that the port
-    is unverified instead of being shown a green "available".
-    """
-    try:
-        verdict = port_registry_service.describe_port_availability(db, port, project_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-
-    return PortCheckResponse(
-        available=verdict.available,
-        conflict_project=(verdict.holder if verdict.source == "projects" else None),
-        state=verdict.state,
-        holder=verdict.holder,
-        source=verdict.source,
-        reason=verdict.reason,
-        warnings=list(verdict.warnings),
-    )
-
-
-@router.get("/ports/suggest", response_model=PortSuggestResponse)
-def suggest_port(
-    type: str = Query(
-        ...,
-        alias="type",
-        description="Port type: backend | frontend | db.",
-    ),
-    db: Session = Depends(get_db),
-) -> PortSuggestResponse:
-    """Suggest the next available port for the given type.
-
-    Refuses (503) rather than suggesting a port it cannot verify against the
-    host — an unverifiable suggestion is exactly how a port already published
-    by a neighbouring container gets handed out a second time.
-    """
-    try:
-        suggested = port_registry_service.suggest_next_port(db, type)
-    except port_registry_service.HostProbeError as exc:
-        raise _host_probe_unavailable(exc) from exc
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-
-    return PortSuggestResponse(
-        suggested_port=suggested,
-        warnings=port_registry_service.reserved_ranges_status(db).warnings,
     )
 
 

@@ -17,7 +17,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
 });
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 
-import { ConversationThread } from "@/components/riadiace/ConversationThread";
+import ConversationThread from "@/components/riadiace/ConversationThread";
 import SchvalitBar from "@/components/riadiace/SchvalitBar";
 import { useVizualChecksStore } from "@/store/vizualChecksStore";
 import type { PipelineBoard, PipelineMessage, VizualChecklist } from "@/services/api/pipeline";

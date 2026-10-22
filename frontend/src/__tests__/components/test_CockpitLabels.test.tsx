@@ -11,14 +11,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   BLOCK_REASON_LABELS,
-  DECISION_BANNER,
-  nextPhaseLabel,
-  PHASE_CODES,
   PHASE_LABELS,
   PHASE_ORDER,
-  V2_ROLE_LABELS,
 } from "@/components/cockpit/labels";
-import type { BuildPhase, V2Participant } from "@/components/cockpit/labels";
+import type { BuildPhase } from "@/components/cockpit/labels";
 import type { BlockReason } from "@/services/api/pipeline";
 
 describe("cockpit block_reason phrases", () => {
@@ -75,7 +71,7 @@ describe("v2 vocabulary collapse", () => {
     expect(PHASE_LABELS.done).toBe("Hotovo");
   });
 
-  it("PHASE_ORDER is the horizontal bar order and PHASE_CODES covers every phase", () => {
+  it("PHASE_ORDER is the horizontal bar order", () => {
     expect(PHASE_ORDER).toEqual([
       "priprava",
       "navrh",
@@ -84,45 +80,5 @@ describe("v2 vocabulary collapse", () => {
       "verifikacia",
       "done",
     ]);
-    for (const p of PHASE_ORDER) expect(PHASE_CODES[p]).toBeTruthy();
-  });
-
-  it("nextPhaseLabel returns the following phase (clamped at Hotovo)", () => {
-    expect(nextPhaseLabel("priprava")).toBe("Návrh");
-    // CR-1: Návrh → Vizuál → Programovanie.
-    expect(nextPhaseLabel("navrh")).toBe("Vizuál");
-    expect(nextPhaseLabel("vizual")).toBe("Programovanie");
-    expect(nextPhaseLabel("programovanie")).toBe("Verifikácia");
-    expect(nextPhaseLabel("verifikacia")).toBe("Hotovo");
-    expect(nextPhaseLabel("done")).toBe("Hotovo");
-  });
-
-  it("V2_ROLE_LABELS are exactly {AI Agent, Auditor, Manažér, system, Dedo} — no v1 roles", () => {
-    // ICCINT-12 adds `dedo` (our technical team, answering a framework_issue escalation) — a message
-    // participant, never an actor.
-    const roles: V2Participant[] = [
-      "ai_agent",
-      "auditor",
-      "manazer",
-      "system",
-      "dedo",
-    ];
-    expect(Object.keys(V2_ROLE_LABELS).sort()).toEqual([...roles].sort());
-    expect(V2_ROLE_LABELS.ai_agent).toBe("AI Agent");
-    expect(V2_ROLE_LABELS.auditor).toBe("Audítor");
-    expect(V2_ROLE_LABELS.manazer).toBe("Manažér");
-    expect(V2_ROLE_LABELS.dedo).toBe("Dedo");
-    for (const dead of ["coordinator", "designer", "customer", "implementer"]) {
-      expect(Object.keys(V2_ROLE_LABELS)).not.toContain(dead);
-    }
-  });
-});
-
-describe("decision-CTA banner palette", () => {
-  it("DECISION_BANNER is tone-aware (amber awaiting / red blocked), token-disciplined (no raw pastels)", () => {
-    expect(DECISION_BANNER.amber).toContain("var(--color-state-warning-bg)");
-    expect(DECISION_BANNER.red).toContain("var(--color-state-error-bg)");
-    expect(DECISION_BANNER.blue).toBeUndefined();
-    expect(DECISION_BANNER.green).toBeUndefined();
   });
 });

@@ -112,29 +112,6 @@ async def spawn_session(
     return row
 
 
-@router.get("/available-roles", response_model=dict[str, bool])
-def available_roles(
-    project_slug: str = Query(..., description="Project slug to check charter availability for."),
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> dict[str, bool]:
-    """Return per-role charter availability for ``project_slug``.
-
-    Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
-    ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
-    exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-    unknown project → 404. v4.0.35: owner-or-admin (a Junior only their own project).
-    """
-    authz.assert_project_slug_access(db, current_user, project_slug)
-    try:
-        return service.available_roles(project_slug)
-    except AgentTerminalError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        ) from exc
-
-
 @router.get("/sessions", response_model=list[AgentTerminalSessionRead])
 def list_sessions(
     current_user: User = Depends(require_shu_or_above),

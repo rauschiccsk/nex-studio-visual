@@ -12,7 +12,7 @@ import { getCiRunner, startCiRunner, type CiRunner } from "@/services/api/ciRunn
  * What it says and offers is the server's: the button is exactly what the start request accepts, never a guess here.
  */
 
-/** While the runner starts, how often the tab asks how far it got. */
+/** While the runner starts, how often the tab asks how far it got. @internal — exported for its test (DEV-155). */
 export const STARTING_POLL_MS = 5000;
 
 export default function CiRunnerPanel({ slug, refreshKey }: { slug: string; refreshKey: number }) {

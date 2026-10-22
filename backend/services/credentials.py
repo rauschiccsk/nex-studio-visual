@@ -32,7 +32,6 @@ from backend.db.models.credentials import Credential
 from backend.schemas.credentials import (
     CredentialContent,
     CredentialCreate,
-    CredentialUpdate,
 )
 
 
@@ -110,15 +109,6 @@ def create(db: Session, data: CredentialCreate) -> Credential:
 
     target.write_text(data.content, encoding="utf-8")
     target.chmod(0o600)
-    return cred
-
-
-def update(db: Session, credential_id: UUID, data: CredentialUpdate) -> Credential:
-    """Partial update — only title is mutable."""
-    cred = get_by_id(db, credential_id)
-    if data.title is not None:
-        cred.title = data.title
-    db.flush()
     return cred
 
 

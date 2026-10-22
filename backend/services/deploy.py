@@ -231,16 +231,6 @@ def is_accepted(db: Session, customer_id: UUID, version_number: str) -> bool:
     return db.execute(stmt).first() is not None
 
 
-def list_events(db: Session, customer_id: UUID) -> list[DeployEvent]:
-    """Every deploy/accept event for a customer, newest first (the audit trail).
-
-    Ordered by the monotonic ``seq`` (not ``created_at``, which is identical for
-    rows written in one transaction) so "newest first" is deterministic.
-    """
-    stmt = select(DeployEvent).where(DeployEvent.customer_id == customer_id).order_by(DeployEvent.seq.desc())
-    return list(db.execute(stmt).scalars().all())
-
-
 def list_project_events(db: Session, project_id: UUID) -> list[DeployEvent]:
     """Every deploy/accept event for a whole project, newest first (UAT/PROD matrix feed)."""
     stmt = select(DeployEvent).where(DeployEvent.project_id == project_id).order_by(DeployEvent.seq.desc())

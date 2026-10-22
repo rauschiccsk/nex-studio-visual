@@ -129,50 +129,6 @@ def _get_client() -> QdrantClient:
     return QdrantClient(url=_endpoint(settings.qdrant_url, "Qdrant"))
 
 
-def list_documents(tenant: str = "icc", page: int = 1, per_page: int = 20) -> Dict:
-    """List unique documents in a tenant collection with pagination."""
-    client = _get_client()
-    seen: Dict[str, Dict] = {}
-
-    offset = None
-    while True:
-        with _qdrant_call(tenant):
-            results, next_offset = client.scroll(
-                collection_name=tenant,
-                limit=100,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
-        for point in results:
-            payload = point.payload or {}
-            source = payload.get("source_file", payload.get("filename", ""))
-            if source and source not in seen:
-                seen[source] = {
-                    "source_file": source,
-                    "title": _make_title(source),
-                    "category": _extract_category(source),
-                    "total_chunks": payload.get("total_chunks", 1),
-                    "ingested_at": payload.get("ingested_at", ""),
-                }
-        if next_offset is None:
-            break
-        offset = next_offset
-
-    all_docs = sorted(seen.values(), key=lambda d: d["source_file"])
-    total = len(all_docs)
-    start = (page - 1) * per_page
-    end = start + per_page
-
-    return {
-        "documents": all_docs[start:end],
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "pages": (total + per_page - 1) // per_page,
-    }
-
-
 def get_document(tenant: str, source_file: str) -> Optional[Dict]:
     """Load full document by reconstructing from chunks."""
     client = _get_client()
@@ -298,81 +254,6 @@ def search(
             break
 
     return results
-
-
-def get_stats() -> Dict:
-    """Get document counts per tenant collection.
-
-    A tenant whose collection does not exist keeps reporting zeros — that is a
-    genuine "nothing indexed for this tenant yet". An UNREACHABLE Qdrant is a
-    different fact and now propagates as :class:`RagUnavailableError`: reporting
-    ``0 documents`` for a service we could not talk to is the same lie that made
-    search look empty rather than broken.
-    """
-    client = _get_client()
-    stats = {"tenants": {}}
-
-    for tenant in TENANTS:
-        try:
-            info = client.get_collection(tenant)
-            # Count unique documents
-            seen_sources = set()
-            offset = None
-            while True:
-                points, next_offset = client.scroll(
-                    collection_name=tenant,
-                    limit=100,
-                    offset=offset,
-                    with_payload=["source_file"],
-                    with_vectors=False,
-                )
-                for p in points:
-                    source = (p.payload or {}).get("source_file", "")
-                    if source:
-                        seen_sources.add(source)
-                if next_offset is None:
-                    break
-                offset = next_offset
-
-            stats["tenants"][tenant] = {
-                "points": info.points_count,
-                "documents": len(seen_sources),
-            }
-        except Exception as e:
-            failure = _qdrant_failure(e, tenant=tenant)
-            if failure.kind != "missing_index":
-                raise failure from e
-            logger.warning(f"Collection '{tenant}' not accessible: {failure.reason}")
-            stats["tenants"][tenant] = {"points": 0, "documents": 0}
-
-    return stats
-
-
-def get_categories(tenant: str = "icc") -> List[str]:
-    """Get unique categories from a tenant collection."""
-    client = _get_client()
-    categories = set()
-
-    offset = None
-    while True:
-        with _qdrant_call(tenant):
-            points, next_offset = client.scroll(
-                collection_name=tenant,
-                limit=100,
-                offset=offset,
-                with_payload=["source_file"],
-                with_vectors=False,
-            )
-        for p in points:
-            source = (p.payload or {}).get("source_file", "")
-            cat = _extract_category(source)
-            if cat:
-                categories.add(cat)
-        if next_offset is None:
-            break
-        offset = next_offset
-
-    return sorted(categories)
 
 
 def _make_title(source_file: str) -> str:

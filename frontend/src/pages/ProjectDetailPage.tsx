@@ -50,6 +50,7 @@ interface JustCreatedState {
 
 const STEPS = 7;
 
+/** @internal — exported for its test (DEV-155). */
 export function PipelineBar({ version }: { version: Version }) {
   const released = version.status === "released";
   // released = shipped = complete → every segment green.

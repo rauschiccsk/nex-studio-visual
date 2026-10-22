@@ -18,7 +18,6 @@ Scenarios:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 # ---------------------------------------------------------------------------
 # Scenario 1 — Create version (status=planned)
@@ -75,46 +74,6 @@ class TestDuplicateVersionNumber:
 class TestAutoActivateTrigger:
     """Creating an epic and patching to in_progress promotes version → active."""
 
-    def test_auto_activate_on_epic_in_progress(self, client, project):
-        # Create version v2.0 (status=planned)
-        resp = client.post(
-            f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "2.0.0"},
-        )
-        assert resp.status_code == 201, resp.text
-        version = resp.json()
-        version_id = version["id"]
-        assert version["status"] == "planned"
-
-        # Create an epic assigned to this version
-        resp = client.post(
-            "/api/v1/epics/",
-            json={
-                "project_id": str(project.id),
-                "version_id": version_id,
-                "title": "Epic for auto-activate",
-            },
-        )
-        assert resp.status_code == 201, resp.text
-        epic = resp.json()
-
-        # Version should still be planned (epic status is planned)
-        resp = client.get(f"/api/v1/versions/{version_id}")
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["status"] == "planned"
-
-        # Patch epic to in_progress → triggers auto-activate
-        resp = client.patch(
-            f"/api/v1/epics/{epic['id']}",
-            json={"status": "in_progress"},
-        )
-        assert resp.status_code == 200, resp.text
-
-        # Version should now be active
-        resp = client.get(f"/api/v1/versions/{version_id}")
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["status"] == "active"
-
 
 # ---------------------------------------------------------------------------
 # Scenario 4 — Release gate with unfinished epics
@@ -124,37 +83,6 @@ class TestAutoActivateTrigger:
 class TestReleaseGateBlocked:
     """POST /api/v1/versions/{id}/release with unfinished epics → 422."""
 
-    def test_release_blocked_by_unfinished_epics(self, client, project):
-        # Create version v3.0
-        resp = client.post(
-            f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "3.0.0"},
-        )
-        assert resp.status_code == 201, resp.text
-        version_id = resp.json()["id"]
-
-        # Assign 2 epics (both default to planned)
-        epic_ids = []
-        for title in ("Epic A", "Epic B"):
-            resp = client.post(
-                "/api/v1/epics/",
-                json={
-                    "project_id": str(project.id),
-                    "version_id": version_id,
-                    "title": title,
-                },
-            )
-            assert resp.status_code == 201, resp.text
-            epic_ids.append(resp.json()["id"])
-
-        # Attempt release — should fail (epics are planned, not done)
-        resp = client.post(f"/api/v1/versions/{version_id}/release")
-        assert resp.status_code == 422, resp.text
-        detail = resp.json()["detail"]
-        # Structured 422 includes blocking_epic_ids
-        assert "blocking_epic_ids" in detail
-        assert len(detail["blocking_epic_ids"]) == 2
-
 
 # ---------------------------------------------------------------------------
 # Scenario 5 — Release success
@@ -163,45 +91,6 @@ class TestReleaseGateBlocked:
 
 class TestReleaseSuccess:
     """All epics done → release gate passes → released + release_date."""
-
-    def test_release_after_all_epics_done(self, client, project):
-        # Create version
-        resp = client.post(
-            f"/api/v1/projects/{project.id}/versions",
-            json={"version_number": "4.0.0"},
-        )
-        assert resp.status_code == 201, resp.text
-        version_id = resp.json()["id"]
-
-        # Assign 2 epics
-        epic_ids = []
-        for title in ("Epic X", "Epic Y"):
-            resp = client.post(
-                "/api/v1/epics/",
-                json={
-                    "project_id": str(project.id),
-                    "version_id": version_id,
-                    "title": title,
-                },
-            )
-            assert resp.status_code == 201, resp.text
-            epic_ids.append(resp.json()["id"])
-
-        # Patch both epics to done
-        for eid in epic_ids:
-            resp = client.patch(
-                f"/api/v1/epics/{eid}",
-                json={"status": "done"},
-            )
-            assert resp.status_code == 200, resp.text
-
-        # Release — should succeed
-        resp = client.post(f"/api/v1/versions/{version_id}/release")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["status"] == "released"
-        assert body["release_date"] is not None
-        assert body["release_date"] == date.today().isoformat()
 
 
 # ---------------------------------------------------------------------------

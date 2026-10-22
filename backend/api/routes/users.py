@@ -96,20 +96,6 @@ def list_users(
     )
 
 
-@router.get("/{user_id}", response_model=UserRead)
-def get_user(
-    user_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_ri_role),
-) -> UserRead:
-    """Return a single user by primary key."""
-    try:
-        user = user_service.get_by_id(db, user_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-    return UserRead.model_validate(user)
-
-
 @router.post(
     "",
     response_model=UserRead,

@@ -343,7 +343,7 @@ function PlanNode(props: {
   );
 }
 
-export function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Props) {
+function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Props) {
   const navigate = useNavigate();
   const [plan, setPlan] = useState<TaskPlanResponse | null>(null);
   const [error, setError] = useState<HumanError | null>(null);

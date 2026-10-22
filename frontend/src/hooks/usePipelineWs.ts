@@ -38,6 +38,7 @@ const _WS_CLOSE_VERSION_GONE = 4004;
 
 /** The one plain-Slovak sentence for a permission refusal (mirrors the backend's 403 detail). Exported so
  *  every surface that must SAY it — Riadiace centrum, the sidebar entry — uses the same wording. */
+/** @internal — exported for its test (DEV-155). */
 export const PIPELINE_ACCESS_DENIED_MESSAGE = "Nemáš prístup k tomuto projektu.";
 const PIPELINE_VERSION_GONE_MESSAGE = "Táto verzia už neexistuje.";
 

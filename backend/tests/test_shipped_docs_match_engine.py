@@ -25,7 +25,7 @@ from backend.services.pipeline_status import _AWAITING, BLOCK_KINDS, STAGES
 _TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
 
 #: The charters that are actually SHIPPED into a new project (the retired v1 coordinator charter
-#: is deliberately NOT here — see :func:`test_coordinator_charter_is_not_shipped_and_is_marked_retired`).
+#: is deliberately NOT here — see :func:`test_the_retired_coordinator_charter_is_neither_shipped_nor_kept`).
 _SHIPPED_CHARTERS = sorted(charter for charter, _settings in _V2_AGENTS.values())
 
 
@@ -81,18 +81,12 @@ def test_universal_claude_md_teaches_all_five_phases() -> None:
     assert "## 2. Fázy (Príprava → Návrh → Vizuál → Programovanie → Verifikácia)" in doc
 
 
-def test_coordinator_charter_is_not_shipped_and_is_marked_retired() -> None:
-    """The v1 Koordinátor role is retired (CR-V2-005). The charter survives only as history, so it
-    must (a) never be scaffolded and (b) say so at the top — its old header claimed the opposite."""
+def test_the_retired_coordinator_charter_is_neither_shipped_nor_kept() -> None:
+    """The v1 Koordinátor role is retired (CR-V2-005). Its charter was kept as history with a retirement banner;
+    DEV-155 (22.10.2026) removed it — nothing read it, git keeps the history. It is never scaffolded either."""
     assert not any("coordinator" in charter for charter, _ in _V2_AGENTS.values())
     assert set(_V2_AGENTS) == {"ai-agent", "auditor"}
-
-    doc = _read("coordinator-charter.md")
-    head = doc[: doc.index("## 1.")]
-    assert "VYRADENÉ" in head and "NEPOUŽÍVAŤ" in head
-    # The retired procedures must be named as retired in the banner, not merely mandated below it.
-    for retired in ("Gate E", "Tiborov test", ".dedo-channel"):
-        assert retired in head, f"retirement banner does not mention {retired}"
+    assert not (_TEMPLATES / "coordinator-charter.md").exists()
 
 
 #: Words that turn a mention of a retired procedure into an explicit DENIAL ("there is no X"),

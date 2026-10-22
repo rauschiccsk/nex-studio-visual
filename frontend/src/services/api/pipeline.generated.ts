@@ -4,31 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/agent-terminal/available-roles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Available Roles
-         * @description Return per-role charter availability for ``project_slug``.
-         *
-         *     Since CR-V2-007 the spawn API is AI-Agent-only, so this reports just
-         *     ``{"ai-agent": <bool>}`` — true when ``.claude/agents/ai-agent/CLAUDE.md``
-         *     exists in the project (the set mirrors ``_VALID_ROLES``). An invalid slug or
-         *     unknown project → 404. v4.0.35: owner-or-admin (a Junior only their own project).
-         */
-        get: operations["available_roles_api_v1_agent_terminal_available_roles_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/agent-terminal/sessions": {
         parameters: {
             query?: never;
@@ -275,11 +250,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Backlog Item
-         * @description Return one backlog item.
-         */
-        get: operations["get_backlog_item_api_v1_backlog__item_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -325,74 +296,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/bugs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Bugs
-         * @description Return a paginated list of one project's bugs — if the caller owns it.
-         */
-        get: operations["list_bugs_api_v1_bugs_get"];
-        put?: never;
-        /**
-         * Create Bug
-         * @description Create a new bug.
-         *
-         *     ``bug_number`` is auto-assigned by the service layer as
-         *     ``MAX(bug_number) + 1`` for the supplied ``project_id``. Concurrent
-         *     creates that race on the same project surface as HTTP 409.
-         */
-        post: operations["create_bug_api_v1_bugs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/bugs/{bug_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Bug
-         * @description Return a single bug by primary key — if the caller owns its project.
-         */
-        get: operations["get_bug_api_v1_bugs__bug_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Bug
-         * @description Hard-delete a bug by primary key.
-         *
-         *     The single inbound FK (``bug_fix_tasks.bug_id``) uses
-         *     ``ON DELETE CASCADE``, so dependent bug-fix tasks are removed
-         *     automatically. ``status='wont_fix'`` via ``PATCH`` is the preferred
-         *     soft-disable path; delete is reserved for test fixtures / admin
-         *     tooling.
-         */
-        delete: operations["delete_bug_api_v1_bugs__bug_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Bug
-         * @description Partially update a bug's mutable fields.
-         *
-         *     ``id``, ``project_id``, ``bug_number``, ``created_by`` and
-         *     ``created_at`` are immutable; ``updated_at`` is refreshed by the ORM.
-         *     Fields omitted from the payload are left unchanged. When ``status``
-         *     transitions to ``resolved`` and ``resolved_at`` is not supplied
-         *     explicitly, the service stamps ``resolved_at = now()`` automatically.
-         */
-        patch: operations["update_bug_api_v1_bugs__bug_id__patch"];
-        trace?: never;
-    };
     "/api/v1/credentials": {
         parameters: {
             query?: never;
@@ -421,16 +324,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Credential */
-        get: operations["get_credential_api_v1_credentials__credential_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /** Delete Credential */
         delete: operations["delete_credential_api_v1_credentials__credential_id__delete"];
         options?: never;
         head?: never;
-        /** Update Credential */
-        patch: operations["update_credential_api_v1_credentials__credential_id__patch"];
+        patch?: never;
         trace?: never;
     };
     "/api/v1/credentials/{credential_id}/content": {
@@ -458,8 +359,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Customer */
-        get: operations["get_customer_api_v1_customers__customer_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -589,26 +489,6 @@ export interface paths {
          *     and a separate "PROD needs role ri" clause would be the one rule the simplification did not reach.
          */
         post: operations["deploy_customer_api_v1_customers__customer_id__deploy_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customers/{customer_id}/deploy-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Customer Deploy Events
-         * @description Return every deploy/accept event for one customer (newest first).
-         */
-        get: operations["list_customer_deploy_events_api_v1_customers__customer_id__deploy_events_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -881,196 +761,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/epics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Epics
-         * @description Return a paginated list of epics.
-         *
-         *     Results are ordered by ``number ASC`` (epic 1, epic 2, …) — owned by
-         *     the service layer, matching the hierarchical-numbering convention
-         *     (DESIGN.md §1.9) and the ``EpicList`` UI.
-         *
-         *     Ownership (v4.0.35): when ``project_id`` is supplied the caller must own that project
-         *     (ri/ha see all). A Junior (``shu``) MUST supply ``project_id`` — an unscoped list across
-         *     all projects would leak other owners' epics, so it is rejected with HTTP 400.
-         */
-        get: operations["list_epics_api_v1_epics_get"];
-        put?: never;
-        /**
-         * Create Epic
-         * @description Create a new epic.
-         *
-         *     ``number`` is auto-assigned by the service layer as
-         *     ``MAX(number) + 1`` for the supplied ``project_id`` (starts at ``1``
-         *     for the first epic). ``status`` defaults to ``planned`` via the
-         *     Pydantic schema / DB ``server_default`` when omitted.
-         *     Concurrent-create races
-         *     on the same project surface as HTTP 409. Missing or invalid foreign
-         *     keys (``project_id``, ``version_id``) are rejected by the DB-level FK
-         *     and surface as HTTP 422.
-         *
-         *     Ownership (v4.0.35): the parent project (``payload.project_id``) must be owned by the
-         *     caller (ri/ha may create under any project); a Junior placing an epic under someone
-         *     else's project gets HTTP 403.
-         */
-        post: operations["create_epic_api_v1_epics_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/epics/{epic_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Epic
-         * @description Return a single epic by primary key.
-         */
-        get: operations["get_epic_api_v1_epics__epic_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Epic
-         * @description Hard-delete an epic by primary key.
-         *
-         *     The single inbound FK (``feats.epic_id``) uses ``ON DELETE CASCADE``
-         *     — dependent feats (and the tasks under them, via
-         *     ``tasks.feat_id ON DELETE CASCADE``) are removed automatically at
-         *     the DB level. No RESTRICT dependency check is required.
-         *
-         *     Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
-         */
-        delete: operations["delete_epic_api_v1_epics__epic_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Epic
-         * @description Partially update an epic's mutable fields.
-         *
-         *     Only ``title`` and ``status`` are mutable. ``id``,
-         *     ``project_id``, ``number`` and ``created_at`` are immutable — the
-         *     epic identity and its position within the project must not be
-         *     rewritten after the fact; ``updated_at`` is refreshed by the ORM on
-         *     flush via ``onupdate=func.now()``. Fields omitted from the payload
-         *     are left unchanged.
-         *
-         *     Ownership (v4.0.35): the caller must own the epic's project (ri/ha see all).
-         */
-        patch: operations["update_epic_api_v1_epics__epic_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/feats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Feats
-         * @description Return a paginated list of feats.
-         *
-         *     Results are ordered by ``number ASC`` (feat 1, feat 2, …) — owned
-         *     by the service layer, matching the hierarchical-numbering
-         *     convention (DESIGN.md §1.9) and the ``EpicList`` UI.
-         *
-         *     Ownership (v4.0.35): when ``epic_id`` is supplied the caller must own that epic's project
-         *     (ri/ha see all). A Junior (``shu``) MUST supply ``epic_id`` — an unscoped list across all
-         *     projects would leak other owners' feats, so it is rejected with HTTP 400.
-         */
-        get: operations["list_feats_api_v1_feats_get"];
-        put?: never;
-        /**
-         * Create Feat
-         * @description Create a new feat.
-         *
-         *     ``number`` is auto-assigned by the service layer as
-         *     ``MAX(number) + 1`` for the supplied ``epic_id`` (starts at ``1``
-         *     for the first feat in an epic). ``status`` and ``description``
-         *     default to ``todo`` / ``""`` via the Pydantic schema / DB
-         *     ``server_default`` when omitted. ``task_count`` and
-         *     ``auto_fix_count`` are server-managed counters seeded to ``0`` by
-         *     the DB ``server_default`` and are not accepted on input.
-         *     Concurrent-create races on the same epic surface as HTTP 409.
-         *     Missing or invalid ``epic_id`` foreign keys are rejected by the
-         *     DB-level FK and surface as HTTP 422.
-         *
-         *     Ownership (v4.0.35): the parent epic (``payload.epic_id``) must belong to a project the
-         *     caller owns (ri/ha may create under any epic); a Junior placing a feat under someone
-         *     else's epic gets HTTP 403.
-         */
-        post: operations["create_feat_api_v1_feats_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/feats/{feat_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Feat
-         * @description Return a single feat by primary key.
-         */
-        get: operations["get_feat_api_v1_feats__feat_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Feat
-         * @description Hard-delete a feat by primary key.
-         *
-         *     Inbound FKs — ``tasks.feat_id`` (``ON DELETE CASCADE``),
-         *     ``delegations.feat_id`` (``ON DELETE SET NULL``) and
-         *     ``auto_fix_attempts.feat_id`` (``ON DELETE CASCADE``) — are all
-         *     handled at the DB level, so dependent rows are either removed or
-         *     NULL-ed automatically on flush. No RESTRICT dependency check is
-         *     required.
-         *
-         *     Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
-         */
-        delete: operations["delete_feat_api_v1_feats__feat_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Feat
-         * @description Partially update a feat's mutable fields.
-         *
-         *     Only ``title``, ``description``, ``status``, ``estimated_minutes``
-         *     and ``actual_minutes`` are mutable. ``id``, ``epic_id``,
-         *     ``number``, ``task_count``, ``auto_fix_count`` and ``created_at``
-         *     are immutable — the feat identity, its position within the epic
-         *     and the server-managed counters must not be rewritten after the
-         *     fact; ``updated_at`` is refreshed by the ORM on flush via
-         *     ``onupdate=func.now()``. Fields omitted from the payload are left
-         *     unchanged.
-         *
-         *     CR-V2-016: the old STATUS.md / HISTORY.md write side-effect on a
-         *     feat→done transition is RETIRED. Those DB-driven files were a second,
-         *     independent writer of project status / history; the single source of
-         *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
-         *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
-         *
-         *     Ownership (v4.0.35): the caller must own the feat's project (ri/ha see all).
-         */
-        patch: operations["update_feat_api_v1_feats__feat_id__patch"];
-        trace?: never;
-    };
     "/api/v1/knowledge/categories": {
         parameters: {
             query?: never;
@@ -1314,34 +1004,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pipeline/{version_id}/debug-terminal": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Open Debug Terminal
-         * @description Break-glass: attach an interactive Manažér terminal to the headless agent session (CR-V2-015).
-         *
-         *     Resumes the existing ``orchestrator_session.claude_session_id`` for ``(project, role)`` into a
-         *     Manažér-owned ``agent_terminal_sessions`` row so the standard AgentTerminal WS can stream it. This is an
-         *     OUT-OF-BAND human break-glass ONLY — the first-class Manažér↔AI-Agent channel is the read-only tab +
-         *     the engine relay (:func:`post_relay`). To preserve the single-writer invariant (SPIKE-IO Model B), the
-         *     debug-attach PTY is **gated so it cannot open while the engine is driving the session** (an open
-         *     write-capable PTY mid-turn would be a second concurrent writer). When the engine IS driving, this
-         *     returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
-         */
-        post: operations["open_debug_terminal_api_v1_pipeline__version_id__debug_terminal_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/pipeline/{version_id}/dedo-proposal/reject": {
         parameters: {
             query?: never;
@@ -1444,26 +1106,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pipeline/{version_id}/messages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Messages
-         * @description Paginated message log (oldest→newest).
-         */
-        get: operations["list_messages_api_v1_pipeline__version_id__messages_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/pipeline/{version_id}/relay": {
         parameters: {
             query?: never;
@@ -1505,6 +1147,8 @@ export interface paths {
          *     is a design preview (mock data, no secrets), keyed on the unguessable version UUID;
          *     ``read_vizual_mockup`` is path-scoped to ``docs/.../visual/`` (no arbitrary file read). 404 when no mockup
          *     exists → the board's ``vizual_url`` then points at the live Vite sandbox instead.
+         *
+         *     Called by: the cockpit's Vizuál iframe — the board hands out this URL as ``vizual_url``.
          */
         get: operations["get_vizual_mockup_api_v1_pipeline__version_id__vizual_mockup_get"];
         put?: never;
@@ -1796,16 +1440,7 @@ export interface paths {
          *     frontend can render a "cannot display" placeholder. v4.0.43: owner-or-admin on ``slug``.
          */
         get: operations["get_project_spec_content_api_v1_project_specs_content_get"];
-        /**
-         * Update Project Spec Content
-         * @description Overwrite a single ``.md`` file. v4.0.43: owner-OR-``ri`` (was ``ri`` only) — the project owner or
-         *     an ``ri`` may fix a typo; a Medior does not gain edits on projects it doesn't own.
-         *
-         *     The file must already exist — this endpoint does **not** create new
-         *     documents. New spec docs are produced by the agents (Designer /
-         *     Implementer / Auditor) directly in the project repo.
-         */
-        put: operations["update_project_spec_content_api_v1_project_specs_content_put"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1955,55 +1590,6 @@ export interface paths {
          * @description What the new-project form starts with (DEV-37) — the options the Manažér used to tick every time.
          */
         get: operations["get_create_presets_api_v1_projects_create_presets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/ports/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Check Port
-         * @description Check whether a port is available in the ICC Port Registry range.
-         *
-         *     Answers from all three sources (projects table + declared reservations +
-         *     the host's published-port map). Returns 200 with ``state="unknown"`` when
-         *     the host could not be consulted — the caller is told plainly that the port
-         *     is unverified instead of being shown a green "available".
-         */
-        get: operations["check_port_api_v1_projects_ports_check_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/ports/suggest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Suggest Port
-         * @description Suggest the next available port for the given type.
-         *
-         *     Refuses (503) rather than suggesting a port it cannot verify against the
-         *     host — an unverifiable suggestion is exactly how a port already published
-         *     by a neighbouring container gets handed out a second time.
-         */
-        get: operations["suggest_port_api_v1_projects_ports_suggest_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2333,26 +1919,6 @@ export interface paths {
          *     * **404** — projekt alebo cieľový používateľ neexistuje.
          */
         post: operations["reassign_project_api_v1_projects__project_id__reassign_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/surfaces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Project Surfaces
-         * @description The project's frontends — folder, service, port, login and address of each.
-         */
-        get: operations["get_project_surfaces_api_v1_projects__project_id__surfaces_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2722,26 +2288,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{slug}/deploy-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Project Deploy Events
-         * @description Return every deploy/accept event for the project ``slug`` (newest first).
-         */
-        get: operations["list_project_deploy_events_api_v1_projects__slug__deploy_events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{slug}/deploy-matrix": {
         parameters: {
             query?: never;
@@ -2899,26 +2445,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/rag/categories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Categories
-         * @description Get unique categories for a tenant. Restricted categories hidden for non-ri.
-         */
-        get: operations["get_categories_api_v1_rag_categories_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/rag/document": {
         parameters: {
             query?: never;
@@ -2963,26 +2489,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/rag/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Documents
-         * @description List documents from Qdrant with pagination. Restricted categories hidden for non-ri.
-         */
-        get: operations["list_documents_api_v1_rag_list_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/rag/search": {
         parameters: {
             query?: never;
@@ -2995,26 +2501,6 @@ export interface paths {
          * @description Search knowledge base in Qdrant. Restricted categories hidden for non-ri.
          */
         get: operations["search_api_v1_rag_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/rag/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Stats
-         * @description Stats per tenant collection.
-         */
-        get: operations["get_stats_api_v1_rag_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3108,122 +2594,6 @@ export interface paths {
          *     expected to only PATCH registered keys).
          */
         patch: operations["update_system_setting_api_v1_system_settings__key__patch"];
-        trace?: never;
-    };
-    "/api/v1/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Tasks
-         * @description Return a paginated list of tasks.
-         *
-         *     Results are ordered by ``number ASC`` (task 1, task 2, …) — owned
-         *     by the service layer, matching the hierarchical-numbering
-         *     convention (DESIGN.md §1.9) and the ``TaskItem`` UI.
-         *
-         *     Ownership (v4.0.35): when ``feat_id`` is supplied the caller must own that feat's project
-         *     (ri/ha see all). A Junior (``shu``) MUST supply ``feat_id`` — an unscoped list across all
-         *     projects would leak other owners' tasks, so it is rejected with HTTP 400.
-         */
-        get: operations["list_tasks_api_v1_tasks_get"];
-        put?: never;
-        /**
-         * Create Task
-         * @description Create a new task.
-         *
-         *     ``number`` is auto-assigned by the service layer as
-         *     ``MAX(number) + 1`` for the supplied ``feat_id`` (starts at ``1``
-         *     for the first task in a feat). ``status`` and ``description``
-         *     default to ``todo`` / ``""`` via the Pydantic schema / DB
-         *     ``server_default`` when omitted. ``task_type`` is required — there
-         *     is no server default. Concurrent-create races on the same feat
-         *     surface as HTTP 409. Missing or invalid ``feat_id`` foreign keys are
-         *     rejected by the DB-level FK and surface as HTTP 422.
-         *
-         *     Ownership (v4.0.35): the parent feat (``payload.feat_id``) must belong to a project the
-         *     caller owns (ri/ha may create under any feat); a Junior placing a task under someone
-         *     else's feat gets HTTP 403.
-         */
-        post: operations["create_task_api_v1_tasks_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Task
-         * @description Return a single task by primary key.
-         */
-        get: operations["get_task_api_v1_tasks__task_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Task
-         * @description Hard-delete a task by primary key.
-         *
-         *     Inbound FKs — ``delegations.task_id`` (``ON DELETE SET NULL``) and
-         *     ``execution_logs.task_id`` (``ON DELETE SET NULL``) — are handled
-         *     at the DB level, so dependent rows are NULL-ed automatically on
-         *     flush. No RESTRICT dependency check is required.
-         *
-         *     Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
-         */
-        delete: operations["delete_task_api_v1_tasks__task_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Task
-         * @description Partially update a task's mutable fields.
-         *
-         *     Only ``title``, ``description``, ``task_type``, ``status``,
-         *     ``estimated_minutes``, ``actual_minutes`` and ``checklist_type``
-         *     are mutable. ``id``, ``feat_id``, ``number`` and ``created_at``
-         *     are immutable — the task identity and its position within the feat
-         *     must not be rewritten after the fact; ``updated_at`` is refreshed
-         *     by the ORM on flush via ``onupdate=func.now()``. Fields omitted
-         *     from the payload are left unchanged.
-         *
-         *     CR-V2-016: the old STATUS.md / HISTORY.md write side-effect on a
-         *     task→done transition is RETIRED. Those DB-driven files were a second,
-         *     independent writer of project status / history; the single source of
-         *     truth is now the AI Agent's own ``MEMORY.md`` plus the Vývoj phase
-         *     tabs (R-DOUBLEWRITE). This endpoint is now a pure DB update.
-         *
-         *     Ownership (v4.0.35): the caller must own the task's project (ri/ha see all).
-         */
-        patch: operations["update_task_api_v1_tasks__task_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/uploads/screenshot": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upload Screenshot
-         * @description Save a screenshot PNG and return its stored filename.
-         */
-        post: operations["upload_screenshot_api_v1_uploads_screenshot_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/user-agent-settings": {
@@ -3332,19 +2702,7 @@ export interface paths {
          */
         get: operations["list_user_sessions_api_v1_user_sessions_get"];
         put?: never;
-        /**
-         * Create User Session
-         * @description Create a new user session.
-         *
-         *     ``token_version`` defaults to ``0`` via the Pydantic schema
-         *     (mirroring the DB ``server_default='0'``) when omitted.
-         *     ``last_seen_at`` is optional — when ``None``, the kwarg is dropped
-         *     so the DB-level ``server_default=func.now()`` kicks in; supplying
-         *     an explicit timestamp lets import / migration flows back-date
-         *     sessions. An invalid or missing ``user_id`` FK reference is
-         *     rejected by the DB-level FK and surfaces as HTTP 422.
-         */
-        post: operations["create_user_session_api_v1_user_sessions_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3358,11 +2716,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get User Session
-         * @description Return a single user session by primary key.
-         */
-        get: operations["get_user_session_api_v1_user_sessions__user_session_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -3379,23 +2733,7 @@ export interface paths {
         delete: operations["delete_user_session_api_v1_user_sessions__user_session_id__delete"];
         options?: never;
         head?: never;
-        /**
-         * Update User Session
-         * @description Partially update a user session's mutable fields.
-         *
-         *     Only ``token_version`` and ``last_seen_at`` may be changed — session
-         *     identity is anchored to the user for its lifetime, so ``user_id``
-         *     is immutable. ``id`` and ``created_at`` are likewise immutable;
-         *     ``updated_at`` is auto-stamped by the ORM on flush via
-         *     ``onupdate=func.now()``. Fields omitted from the payload are left
-         *     unchanged.
-         *
-         *     Typical call sites:
-         *         * Authenticated request → refresh ``last_seen_at``.
-         *         * Logout → bump ``token_version`` to invalidate every
-         *           outstanding JWT issued against this session (DESIGN.md §1.1).
-         */
-        patch: operations["update_user_session_api_v1_user_sessions__user_session_id__patch"];
+        patch?: never;
         trace?: never;
     };
     "/api/v1/users": {
@@ -3432,11 +2770,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get User
-         * @description Return a single user by primary key.
-         */
-        get: operations["get_user_api_v1_users__user_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -3552,24 +2886,7 @@ export interface paths {
         get: operations["get_version_api_v1_versions__version_id__get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Version
-         * @description Permanently delete a version.
-         *
-         *     Only allowed when the version has no EPICs (Task Plan is empty) and
-         *     its status is not ``released``. Released versions are permanent
-         *     artefacts of project history and may not be deleted.
-         *
-         *     Error mapping:
-         *
-         *     * **404** — the version does not exist.
-         *     * **409** — the version is ``released``, or it still has one or more
-         *       EPICs attached (Task Plan not empty).
-         *
-         *     v4.0.35: owner-or-admin — a Junior may delete only their OWN
-         *     project's version; ri/ha may delete any.
-         */
-        delete: operations["delete_version_api_v1_versions__version_id__delete"];
+        delete?: never;
         options?: never;
         head?: never;
         /**
@@ -3731,92 +3048,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/versions/{version_id}/release": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Release Version
-         * @description Release the version — the DESIGN.md §4.0 Rule 5 release gate.
-         *
-         *     Delegates to :func:`backend.services.version.release`, which checks
-         *     that every EPIC assigned to the version has ``status='done'``. On
-         *     success: ``status`` becomes ``released``, ``release_date`` is stamped
-         *     to ``date.today()`` and the updated row is returned.
-         *
-         *     Error mapping:
-         *
-         *     * **404** — the version does not exist.
-         *     * **409** — the version is already in the ``released`` state
-         *       (forward-only transition guard; DESIGN.md §4.0 Rule 3).
-         *     * **422** — one or more EPICs are still ``planned`` /
-         *       ``in_progress``. The detail payload is structured as ``{"message":
-         *       "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
-         *       ``VersionsPage`` UI can render the blockers inline.
-         *
-         *     v4.0.35: owner-or-admin — a Junior may release only their OWN
-         *     project's version; ri/ha may release any.
-         */
-        post: operations["release_version_api_v1_versions__version_id__release_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/versions/{version_id}/reset-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reset Plan
-         * @description Delete the entire task plan for a version (all EPICs, Feats and Tasks).
-         *
-         *     Hard-deletes every Epic under this version. Feats and Tasks are removed
-         *     via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-admin —
-         *     a Junior may reset only their OWN project's version.
-         */
-        post: operations["reset_plan_api_v1_versions__version_id__reset_plan_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/versions/{version_id}/reset-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reset Tasks
-         * @description Reset all tasks in a version back to ``todo`` status.
-         *
-         *     Sets every Task under every Epic of this version to ``todo``, and
-         *     recomputes Feat / Epic statuses accordingly. Does not delete any records.
-         *     v4.0.35: owner-or-admin — a Junior may reset only their OWN project's version.
-         */
-        post: operations["reset_tasks_api_v1_versions__version_id__reset_tasks_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/versions/{version_id}/task-categories": {
         parameters: {
             query?: never;
@@ -3932,6 +3163,8 @@ export interface paths {
         /**
          * Health Check
          * @description Health check endpoint — delegates to the health module.
+         *
+         *     Called by: the container's HEALTHCHECK (``backend.scripts.healthcheck``) and Dedo's check after a deploy.
          */
         get: operations["health_check_health_get"];
         put?: never;
@@ -4367,220 +3600,6 @@ export interface components {
              * Format: binary
              */
             file: string;
-        };
-        /** Body_upload_screenshot_api_v1_uploads_screenshot_post */
-        Body_upload_screenshot_api_v1_uploads_screenshot_post: {
-            /**
-             * File
-             * Format: binary
-             */
-            file: string;
-        };
-        /**
-         * BugCreate
-         * @description Payload for creating a new bug.
-         *
-         *     ``id``, ``bug_number``, ``created_at`` and ``updated_at`` are
-         *     server-generated and therefore excluded — ``bug_number`` is
-         *     auto-assigned as ``max(bug_number) + 1`` per project by the service
-         *     layer.  ``status`` and ``source`` default to the values set by the
-         *     DB-level ``server_default`` so callers may omit them.  Nullable
-         *     columns default to ``None``.
-         */
-        BugCreate: {
-            /**
-             * Commit Hash
-             * @description Commit that resolved the bug.
-             */
-            commit_hash?: string | null;
-            /**
-             * Created By
-             * Format: uuid
-             * @description User who registered the bug.
-             */
-            created_by: string;
-            /**
-             * Description
-             * @description Steps to reproduce, expected vs actual behaviour.
-             */
-            description: string;
-            /**
-             * Environment
-             * @description Environment where the bug was observed, e.g. 'production'.
-             */
-            environment?: string | null;
-            /**
-             * Project Id
-             * Format: uuid
-             * @description Project the bug is reported against.
-             */
-            project_id: string;
-            /**
-             * Reported By
-             * @description Customer name or internal user name who reported the bug.
-             */
-            reported_by?: string | null;
-            /**
-             * Resolved At
-             * @description Timestamp when the bug was resolved; set when status→resolved.
-             */
-            resolved_at?: string | null;
-            /**
-             * Severity
-             * @description Bug severity: critical | major | minor.
-             * @enum {string}
-             */
-            severity: "critical" | "major" | "minor";
-            /**
-             * Source
-             * @description Where the bug originated: internal | customer.
-             * @default internal
-             * @enum {string}
-             */
-            source: "internal" | "customer";
-            /**
-             * Status
-             * @description Lifecycle status: new | accepted | in_progress | resolved | wont_fix.
-             * @default new
-             * @enum {string}
-             */
-            status: "new" | "accepted" | "in_progress" | "resolved" | "wont_fix";
-            /**
-             * Title
-             * @description Short bug title.
-             */
-            title: string;
-            /**
-             * Version Id
-             * @description Release version the bug is assigned to. Required by the service layer per DESIGN.md §4.0 Rule 2 — passing ``None`` raises HTTP 422. Typed as Optional only because the underlying DB column is nullable for legacy rows (``ON DELETE RESTRICT`` constraint).
-             */
-            version_id?: string | null;
-        };
-        /**
-         * BugRead
-         * @description Serialised representation of a bug row.
-         *
-         *     Mirrors every column on :class:`backend.db.models.bugs.Bug`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``BugRead.model_validate(obj)``.
-         */
-        BugRead: {
-            /** Bug Number */
-            bug_number: number;
-            /** Commit Hash */
-            commit_hash?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Created By
-             * Format: uuid
-             */
-            created_by: string;
-            /** Description */
-            description: string;
-            /** Environment */
-            environment?: string | null;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /** Reported By */
-            reported_by?: string | null;
-            /** Resolved At */
-            resolved_at?: string | null;
-            /**
-             * Severity
-             * @enum {string}
-             */
-            severity: "critical" | "major" | "minor";
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "internal" | "customer";
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "new" | "accepted" | "in_progress" | "resolved" | "wont_fix";
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version Id */
-            version_id?: string | null;
-        };
-        /**
-         * BugUpdate
-         * @description Partial update for an existing bug.
-         *
-         *     ``id``, ``project_id``, ``bug_number``, ``created_by`` and
-         *     ``created_at`` are immutable: the bug identity and audit columns
-         *     must not be rewritten after the fact.  ``updated_at`` is managed by
-         *     the ORM via ``onupdate=func.now()`` and must not be set by clients.
-         *     All remaining fields are optional to support PATCH-style semantics.
-         *     ``resolved_at`` is typically set automatically by the service layer
-         *     when ``status`` transitions to ``resolved`` but is exposed here for
-         *     backfill / correction flows.
-         */
-        BugUpdate: {
-            /**
-             * Commit Hash
-             * @description Updated commit hash that resolved the bug.
-             */
-            commit_hash?: string | null;
-            /**
-             * Description
-             * @description Updated bug description.
-             */
-            description?: string | null;
-            /**
-             * Environment
-             * @description Updated environment.
-             */
-            environment?: string | null;
-            /**
-             * Reported By
-             * @description Updated reporter name.
-             */
-            reported_by?: string | null;
-            /**
-             * Resolved At
-             * @description Updated resolved_at timestamp.
-             */
-            resolved_at?: string | null;
-            /**
-             * Severity
-             * @description Updated severity: critical | major | minor.
-             */
-            severity?: ("critical" | "major" | "minor") | null;
-            /**
-             * Source
-             * @description Updated source: internal | customer.
-             */
-            source?: ("internal" | "customer") | null;
-            /**
-             * Status
-             * @description Updated status: new | accepted | in_progress | resolved | wont_fix.
-             */
-            status?: ("new" | "accepted" | "in_progress" | "resolved" | "wont_fix") | null;
-            /**
-             * Title
-             * @description Updated bug title.
-             */
-            title?: string | null;
         };
         /**
          * CalibrationRead
@@ -5140,14 +4159,6 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-        };
-        /**
-         * CredentialUpdate
-         * @description Partial update — only the title is mutable; file_path is identity.
-         */
-        CredentialUpdate: {
-            /** Title */
-            title?: string | null;
         };
         /**
          * CustomerCreate
@@ -6028,119 +5039,6 @@ export interface components {
             request?: number | string | null;
         };
         /**
-         * EpicCreate
-         * @description Payload for creating a new epic.
-         *
-         *     ``id``, ``number``, ``created_at`` and ``updated_at`` are
-         *     server-generated and therefore excluded — ``number`` is
-         *     auto-assigned as ``max(number) + 1`` per project by the service
-         *     layer (see DESIGN.md §2.6 ``POST /projects/{id}/epics``).
-         *     ``status`` defaults to the value set by the DB-level
-         *     ``server_default`` (``planned``) so callers may omit it.
-         *     ``version_id`` is typed as ``Optional`` so
-         *     the schema can also serve patch-style payload helpers, but the
-         *     service layer (DESIGN.md §4.0 Rule 2) **requires** a non-null value
-         *     on create and raises ``ValueError("version_id required for new
-         *     epics")`` otherwise — the router converts that to HTTP 422.  The
-         *     underlying DB column is nullable only so that ``ON DELETE
-         *     RESTRICT`` remains expressible for legacy rows.
-         */
-        EpicCreate: {
-            /**
-             * Plain Description
-             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md). The Epic has no technical ``description`` — this is its ONLY prose. Nullable; ``None`` when the AI partner emitted no one-liner.
-             */
-            plain_description?: string | null;
-            /**
-             * Project Id
-             * Format: uuid
-             * @description Project the epic belongs to.
-             */
-            project_id: string;
-            /**
-             * Status
-             * @description Lifecycle status: planned | in_progress | done.
-             * @default planned
-             * @enum {string}
-             */
-            status: "planned" | "in_progress" | "done";
-            /**
-             * Title
-             * @description Short epic title.
-             */
-            title: string;
-            /**
-             * Version Id
-             * @description Release version the epic is assigned to. Required by the service layer per DESIGN.md §4.0 Rule 2 — passing ``None`` raises HTTP 422. Typed as Optional only because the underlying DB column is nullable for legacy rows (``ON DELETE RESTRICT`` constraint).
-             */
-            version_id?: string | null;
-        };
-        /**
-         * EpicRead
-         * @description Serialised representation of an epic row.
-         *
-         *     Mirrors every column on :class:`backend.db.models.tasks.Epic`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``EpicRead.model_validate(obj)``.
-         */
-        EpicRead: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Number */
-            number: number;
-            /** Plain Description */
-            plain_description?: string | null;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "planned" | "in_progress" | "done";
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version Id */
-            version_id?: string | null;
-        };
-        /**
-         * EpicUpdate
-         * @description Partial update for an existing epic.
-         *
-         *     ``id``, ``project_id``, ``number`` and ``created_at`` are immutable:
-         *     the epic identity and its position within the project must not be
-         *     rewritten after the fact.  ``updated_at`` is managed by the ORM via
-         *     ``onupdate=func.now()`` and must not be set by clients.
-         *     All remaining fields are optional to support PATCH-style semantics.
-         */
-        EpicUpdate: {
-            /**
-             * Status
-             * @description Updated lifecycle status: planned | in_progress | done.
-             */
-            status?: ("planned" | "in_progress" | "done") | null;
-            /**
-             * Title
-             * @description Updated epic title.
-             */
-            title?: string | null;
-        };
-        /**
          * ExternalCostCreate
          * @description Payload for creating an entry. ``project_id`` comes from the route path and ``created_by`` from
          *     the authenticated user — neither is client-supplied.
@@ -6281,151 +5179,6 @@ export interface components {
              * Format: uuid
              */
             version_id: string;
-        };
-        /**
-         * FeatCreate
-         * @description Payload for creating a new feat.
-         *
-         *     ``id``, ``number``, ``created_at`` and ``updated_at`` are
-         *     server-generated and therefore excluded — ``number`` is
-         *     auto-assigned as ``max(number) + 1`` per epic by the service layer
-         *     (see DESIGN.md §2.6 ``POST /epics/{id}/feats``).  ``status`` and
-         *     ``description`` default to the values set by the DB-level
-         *     ``server_default`` (``todo`` and ``''`` respectively) so callers may
-         *     omit them.  ``actual_minutes``, ``task_count`` and ``auto_fix_count``
-         *     are server-managed (measured from delegation duration / maintained
-         *     by the service layer as counters) and are not accepted here.
-         *     Nullable columns default to ``None``.
-         */
-        FeatCreate: {
-            /**
-             * Description
-             * @description Detailed feat description. Defaults to an empty string.
-             * @default
-             */
-            description: string;
-            /**
-             * Epic Id
-             * Format: uuid
-             * @description Epic the feat belongs to.
-             */
-            epic_id: string;
-            /**
-             * Estimated Minutes
-             * @description Architect's estimated duration in minutes.
-             */
-            estimated_minutes?: number | null;
-            /**
-             * Plain Description
-             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none.
-             */
-            plain_description?: string | null;
-            /**
-             * Status
-             * @description Lifecycle status: todo | in_progress | done | failed.
-             * @default todo
-             * @enum {string}
-             */
-            status: "todo" | "in_progress" | "done" | "failed";
-            /**
-             * Title
-             * @description Short feat title.
-             */
-            title: string;
-        };
-        /**
-         * FeatRead
-         * @description Serialised representation of a feat row.
-         *
-         *     Mirrors every column on :class:`backend.db.models.tasks.Feat`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``FeatRead.model_validate(obj)``.
-         */
-        FeatRead: {
-            /** Actual Minutes */
-            actual_minutes?: number | null;
-            /** Auto Fix Count */
-            auto_fix_count: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Description */
-            description: string;
-            /**
-             * Epic Id
-             * Format: uuid
-             */
-            epic_id: string;
-            /** Estimated Minutes */
-            estimated_minutes?: number | null;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Number */
-            number: number;
-            /** Plain Description */
-            plain_description?: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "todo" | "in_progress" | "done" | "failed";
-            /** Task Count */
-            task_count: number;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /**
-         * FeatUpdate
-         * @description Partial update for an existing feat.
-         *
-         *     ``id``, ``epic_id``, ``number`` and ``created_at`` are immutable:
-         *     the feat identity and its position within the epic must not be
-         *     rewritten after the fact.  ``updated_at`` is managed by the ORM via
-         *     ``onupdate=func.now()`` and must not be set by clients.
-         *     ``task_count`` and ``auto_fix_count`` are server-managed counters
-         *     maintained by the service layer and are therefore not exposed for
-         *     direct edits.  ``actual_minutes`` is typically set automatically
-         *     from delegation duration but is exposed here for backfill /
-         *     correction flows — consistent with the handling of ``resolved_at``
-         *     in :mod:`backend.schemas.bug`.  All remaining fields are optional to
-         *     support PATCH-style semantics.
-         */
-        FeatUpdate: {
-            /**
-             * Actual Minutes
-             * @description Updated measured duration in minutes.
-             */
-            actual_minutes?: number | null;
-            /**
-             * Description
-             * @description Updated feat description.
-             */
-            description?: string | null;
-            /**
-             * Estimated Minutes
-             * @description Updated architect estimate in minutes.
-             */
-            estimated_minutes?: number | null;
-            /**
-             * Status
-             * @description Updated lifecycle status: todo | in_progress | done | failed.
-             */
-            status?: ("todo" | "in_progress" | "done" | "failed") | null;
-            /**
-             * Title
-             * @description Updated feat title.
-             */
-            title?: string | null;
         };
         /**
          * FrontendLinkRead
@@ -6708,65 +5461,10 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** PaginatedResponse[BugRead] */
-        PaginatedResponse_BugRead_: {
-            /** Items */
-            items: components["schemas"]["BugRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
-        /** PaginatedResponse[EpicRead] */
-        PaginatedResponse_EpicRead_: {
-            /** Items */
-            items: components["schemas"]["EpicRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
-        /** PaginatedResponse[FeatRead] */
-        PaginatedResponse_FeatRead_: {
-            /** Items */
-            items: components["schemas"]["FeatRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
-        /** PaginatedResponse[PipelineMessageRead] */
-        PaginatedResponse_PipelineMessageRead_: {
-            /** Items */
-            items: components["schemas"]["PipelineMessageRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
         /** PaginatedResponse[ProjectRead] */
         PaginatedResponse_ProjectRead_: {
             /** Items */
             items: components["schemas"]["ProjectRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
-        };
-        /** PaginatedResponse[TaskRead] */
-        PaginatedResponse_TaskRead_: {
-            /** Items */
-            items: components["schemas"]["TaskRead"][];
             /** Limit */
             limit: number;
             /** Skip */
@@ -7548,56 +6246,6 @@ export interface components {
             warnings?: string[];
         };
         /**
-         * PortCheckResponse
-         * @description Response for port availability check.
-         *
-         *     ``available`` is the historical boolean; ``state`` is the honest answer.
-         *     Availability is resolved against the cockpit's ``projects`` table, the
-         *     declared reservations AND the host's own published-port map, so a port a
-         *     neighbouring container is serving on no longer reads as free. When the
-         *     host cannot be consulted the state is ``unknown`` — the UI must render
-         *     that distinctly from ``taken`` and must NOT present it as available.
-         */
-        PortCheckResponse: {
-            /**
-             * Available
-             * @description True only when the port is provably free on every source.
-             */
-            available: boolean;
-            /**
-             * Conflict Project
-             * @description Name of the project occupying this port, if any.
-             */
-            conflict_project?: string | null;
-            /**
-             * Holder
-             * @description Who holds the port: project name, container name, or reserved range.
-             */
-            holder?: string | null;
-            /**
-             * Reason
-             * @description Human-readable explanation, always present for taken/unknown.
-             */
-            reason?: string | null;
-            /**
-             * Source
-             * @description Which source decided: projects | host | probe | reserved.
-             */
-            source?: string | null;
-            /**
-             * State
-             * @description free = provably free; taken = held; unknown = could not be verified.
-             * @default free
-             * @enum {string}
-             */
-            state: "free" | "taken" | "unknown";
-            /**
-             * Warnings
-             * @description Configuration warnings, e.g. reserved ranges not configured.
-             */
-            warnings?: string[];
-        };
-        /**
          * PortConflictError
          * @description Error detail returned when a requested port is already allocated.
          */
@@ -7617,22 +6265,6 @@ export interface components {
              * @description The conflicting port number.
              */
             port: number;
-        };
-        /**
-         * PortSuggestResponse
-         * @description Response for port suggestion.
-         */
-        PortSuggestResponse: {
-            /**
-             * Suggested Port
-             * @description The first free port in the ICC range.
-             */
-            suggested_port: number;
-            /**
-             * Warnings
-             * @description Configuration warnings gathered while resolving the suggestion.
-             */
-            warnings?: string[];
         };
         /**
          * PriceEstimateRead
@@ -8111,14 +6743,6 @@ export interface components {
             count: number;
             /** Documents */
             documents: components["schemas"]["ProjectSpecDoc"][];
-        };
-        /**
-         * ProjectSpecUpdate
-         * @description Request body for ``PUT /api/v1/project-specs/content``.
-         */
-        ProjectSpecUpdate: {
-            /** Content */
-            content: string;
         };
         /** ProjectStanding */
         ProjectStanding: {
@@ -8609,201 +7233,6 @@ export interface components {
             task_ids: string[];
         };
         /**
-         * TaskCreate
-         * @description Payload for creating a new task.
-         *
-         *     ``id``, ``number``, ``created_at`` and ``updated_at`` are
-         *     server-generated and therefore excluded — ``number`` is
-         *     auto-assigned as ``max(number) + 1`` per feat by the service layer
-         *     (see DESIGN.md §1.6 — display ``{epic.number}.{feat.number}.{number}``).
-         *     ``description`` and ``status`` default to the values set by the
-         *     DB-level ``server_default`` (``''`` and ``todo`` respectively) so
-         *     callers may omit them.  Nullable columns default to ``None``.
-         *     ``actual_minutes`` is typically set automatically from delegation
-         *     duration but is accepted on creation to support backfill /
-         *     import flows — consistent with :mod:`backend.schemas.bug_fix_task`.
-         */
-        TaskCreate: {
-            /**
-             * Actual Minutes
-             * @description Measured duration in minutes; typically set after completion.
-             */
-            actual_minutes?: number | null;
-            /**
-             * Billing Category
-             * @description DEV-75: bug | request | gift; None = the version's category.
-             */
-            billing_category?: ("bug" | "request" | "gift") | null;
-            /**
-             * Checklist Type
-             * @description Checklist type injected into the CC delegation context (e.g. 'model', 'schema', 'service', 'router', 'frontend').
-             */
-            checklist_type?: string | null;
-            /**
-             * Description
-             * @description Detailed task description. Defaults to an empty string.
-             * @default
-             */
-            description: string;
-            /**
-             * Estimated Minutes
-             * @description Architect's estimated duration in minutes.
-             */
-            estimated_minutes?: number | null;
-            /**
-             * Feat Id
-             * Format: uuid
-             * @description Feat the task belongs to.
-             */
-            feat_id: string;
-            /**
-             * Plain Description
-             * @description Plain-language, jargon-free one-liner for the STEP 3 Plán úloh rail (step3-plan-design.md) — distinct from the technical ``description``. Nullable; ``None`` when the AI partner emitted none.
-             */
-            plain_description?: string | null;
-            /**
-             * Priority
-             * @description Task priority: normal | high | urgent.
-             * @default normal
-             * @enum {string}
-             */
-            priority: "normal" | "high" | "urgent";
-            /**
-             * Status
-             * @description Lifecycle status: todo | in_progress | done | failed.
-             * @default todo
-             * @enum {string}
-             */
-            status: "todo" | "in_progress" | "done" | "failed";
-            /**
-             * Task Type
-             * @description Task type: backend | frontend | migration | test | docs.
-             * @enum {string}
-             */
-            task_type: "backend" | "frontend" | "migration" | "test" | "docs";
-            /**
-             * Title
-             * @description Short task title.
-             */
-            title: string;
-        };
-        /**
-         * TaskRead
-         * @description Serialised representation of a task row.
-         *
-         *     Mirrors every column on :class:`backend.db.models.tasks.Task`.
-         *     ``from_attributes=True`` enables construction directly from an ORM
-         *     instance via ``TaskRead.model_validate(obj)``.
-         */
-        TaskRead: {
-            /** Actual Minutes */
-            actual_minutes?: number | null;
-            /** Checklist Type */
-            checklist_type?: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Description */
-            description: string;
-            /** Estimated Minutes */
-            estimated_minutes?: number | null;
-            /**
-             * Feat Id
-             * Format: uuid
-             */
-            feat_id: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Number */
-            number: number;
-            /** Plain Description */
-            plain_description?: string | null;
-            /**
-             * Priority
-             * @default normal
-             * @enum {string}
-             */
-            priority: "normal" | "high" | "urgent";
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "todo" | "in_progress" | "done" | "failed";
-            /**
-             * Task Type
-             * @enum {string}
-             */
-            task_type: "backend" | "frontend" | "migration" | "test" | "docs";
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /**
-         * TaskUpdate
-         * @description Partial update for an existing task.
-         *
-         *     ``id``, ``feat_id``, ``number`` and ``created_at`` are immutable:
-         *     the task identity and its position within the feat must not be
-         *     rewritten after the fact.  ``updated_at`` is managed by the ORM via
-         *     ``onupdate=func.now()`` and must not be set by clients.  All
-         *     remaining fields are optional to support PATCH-style semantics.
-         *     ``actual_minutes`` is typically set automatically from delegation
-         *     duration but is exposed here for backfill / correction flows —
-         *     consistent with :mod:`backend.schemas.feat` and
-         *     :mod:`backend.schemas.bug_fix_task`.
-         */
-        TaskUpdate: {
-            /**
-             * Actual Minutes
-             * @description Updated measured duration in minutes.
-             */
-            actual_minutes?: number | null;
-            /**
-             * Checklist Type
-             * @description Updated checklist type.
-             */
-            checklist_type?: string | null;
-            /**
-             * Description
-             * @description Updated task description.
-             */
-            description?: string | null;
-            /**
-             * Estimated Minutes
-             * @description Updated architect estimate in minutes.
-             */
-            estimated_minutes?: number | null;
-            /**
-             * Priority
-             * @description Updated task priority: normal | high | urgent.
-             */
-            priority?: ("normal" | "high" | "urgent") | null;
-            /**
-             * Status
-             * @description Updated lifecycle status: todo | in_progress | done | failed.
-             */
-            status?: ("todo" | "in_progress" | "done" | "failed") | null;
-            /**
-             * Task Type
-             * @description Updated task type: backend | frontend | migration | test | docs.
-             */
-            task_type?: ("backend" | "frontend" | "migration" | "test" | "docs") | null;
-            /**
-             * Title
-             * @description Updated task title.
-             */
-            title?: string | null;
-        };
-        /**
          * UatCheckRead
          * @description DEV-91 — what the manager recorded for one change in UAT: tried, or does not work (with what happened).
          */
@@ -9179,35 +7608,6 @@ export interface components {
             username: string;
         };
         /**
-         * UserSessionCreate
-         * @description Payload for creating a new user session.
-         *
-         *     ``id``, ``created_at`` and ``updated_at`` are server-generated and
-         *     therefore excluded.  ``token_version`` and ``last_seen_at`` mirror
-         *     the DB-level ``server_default`` values (``0`` and ``NOW()``
-         *     respectively); ``last_seen_at`` is optional here so callers may
-         *     delegate to the database default.
-         */
-        UserSessionCreate: {
-            /**
-             * Last Seen At
-             * @description Timestamp of the most recent authenticated request. ``None`` defers to the DB-level ``NOW()`` default.
-             */
-            last_seen_at?: string | null;
-            /**
-             * Token Version
-             * @description Monotonically increasing counter; bumped on logout to invalidate all outstanding JWTs issued for this session.
-             * @default 0
-             */
-            token_version: number;
-            /**
-             * User Id
-             * Format: uuid
-             * @description User the session belongs to.
-             */
-            user_id: string;
-        };
-        /**
          * UserSessionRead
          * @description Serialised representation of a user session row.
          *
@@ -9249,28 +7649,6 @@ export interface components {
              * @description Login name of the session's owner, resolved by the list route. The Relácie tab shows one row per session and offers 'Odvolať' on each; without this it printed the raw ``user_id`` UUID to anyone who cannot list users (``GET /users`` is ri-only), so a Medior decided whether to cut someone's session without knowing whose it was. ``None`` when the owner row is gone.
              */
             username?: string | null;
-        };
-        /**
-         * UserSessionUpdate
-         * @description Partial update for an existing user session.
-         *
-         *     ``id`` and ``created_at`` are immutable.  ``updated_at`` is managed
-         *     by the ORM via ``onupdate=func.now()`` and must not be set by
-         *     clients.  ``user_id`` is an immutable FK — a session belongs to
-         *     exactly one user for its lifetime.  All remaining fields are
-         *     optional to support PATCH-style semantics.
-         */
-        UserSessionUpdate: {
-            /**
-             * Last Seen At
-             * @description Updated last-seen timestamp.
-             */
-            last_seen_at?: string | null;
-            /**
-             * Token Version
-             * @description Updated token-version counter (typically bumped on logout to rotate outstanding JWTs).
-             */
-            token_version?: number | null;
         };
         /**
          * UserUpdate
@@ -9920,40 +8298,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    available_roles_api_v1_agent_terminal_available_roles_get: {
-        parameters: {
-            query: {
-                /** @description Project slug to check charter availability for. */
-                project_slug: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_sessions_api_v1_agent_terminal_sessions_get: {
         parameters: {
             query?: never;
@@ -10283,37 +8627,6 @@ export interface operations {
             };
         };
     };
-    get_backlog_item_api_v1_backlog__item_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     delete_backlog_item_api_v1_backlog__item_id__delete: {
         parameters: {
             query?: never;
@@ -10444,178 +8757,6 @@ export interface operations {
             };
         };
     };
-    list_bugs_api_v1_bugs_get: {
-        parameters: {
-            query: {
-                /** @description The project whose bugs to list. REQUIRED — the caller is authorized against it. It used to be an optional filter, so omitting it returned every project's bugs to anyone the role gate let through: a list that fails OPEN, raising nothing and returning more. */
-                project_id: string;
-                /** @description Filter by lifecycle status (new | accepted | in_progress | resolved | wont_fix). */
-                status?: ("new" | "accepted" | "in_progress" | "resolved" | "wont_fix") | null;
-                /** @description Filter by severity (critical | major | minor). */
-                severity?: ("critical" | "major" | "minor") | null;
-                /** @description Filter by source (internal | customer). */
-                source?: ("internal" | "customer") | null;
-                /** @description Filter by the registering user's id. */
-                created_by?: string | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_BugRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_bug_api_v1_bugs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BugCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BugRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_bug_api_v1_bugs__bug_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                bug_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BugRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_bug_api_v1_bugs__bug_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                bug_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_bug_api_v1_bugs__bug_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                bug_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BugUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BugRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_credentials_api_v1_credentials_get: {
         parameters: {
             query?: never;
@@ -10669,37 +8810,6 @@ export interface operations {
             };
         };
     };
-    get_credential_api_v1_credentials__credential_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CredentialRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     delete_credential_api_v1_credentials__credential_id__delete: {
         parameters: {
             query?: never;
@@ -10717,41 +8827,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_credential_api_v1_credentials__credential_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CredentialUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CredentialRead"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -10817,37 +8892,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialContent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_customer_api_v1_customers__customer_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CustomerRead"];
                 };
             };
             /** @description Validation Error */
@@ -11050,37 +9094,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeployResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_customer_deploy_events_api_v1_customers__customer_id__deploy_events_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeployEventRead"][];
                 };
             };
             /** @description Validation Error */
@@ -11472,338 +9485,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_epics_api_v1_epics_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by the project the epic belongs to. Hits the ``ix_epics_project_id`` index — the core Tasks-page query (DESIGN.md §3.1 ``TasksPage``). */
-                project_id?: string | null;
-                /** @description Filter by lifecycle status (``planned`` | ``in_progress`` | ``done``). */
-                status?: ("planned" | "in_progress" | "done") | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_EpicRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_epic_api_v1_epics_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EpicCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpicRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_epic_api_v1_epics__epic_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                epic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpicRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_epic_api_v1_epics__epic_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                epic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_epic_api_v1_epics__epic_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                epic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EpicUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpicRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_feats_api_v1_feats_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by the epic the feat belongs to. Hits the ``ix_feats_epic_id`` index — the core ``GET /epics/{id}/feats`` query (DESIGN.md §2.6) and the ``EpicList`` per-epic feat display (DESIGN.md §3.1). */
-                epic_id?: string | null;
-                /** @description Filter by lifecycle status (``todo`` | ``in_progress`` | ``done`` | ``failed``). Hits the ``ix_feats_status`` index. */
-                status?: ("todo" | "in_progress" | "done" | "failed") | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_FeatRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_feat_api_v1_feats_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_feat_api_v1_feats__feat_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feat_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_feat_api_v1_feats__feat_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feat_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_feat_api_v1_feats__feat_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feat_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatRead"];
                 };
             };
             /** @description Validation Error */
@@ -12329,40 +10010,6 @@ export interface operations {
             };
         };
     };
-    open_debug_terminal_api_v1_pipeline__version_id__debug_terminal_post: {
-        parameters: {
-            query: {
-                /** @description orchestrator agent role to attach to */
-                role: string;
-            };
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentTerminalSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     reject_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_reject_post: {
         parameters: {
             query?: never;
@@ -12519,40 +10166,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrivateFilesRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_messages_api_v1_pipeline__version_id__messages_get: {
-        parameters: {
-            query?: {
-                skip?: number;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_PipelineMessageRead_"];
                 };
             };
             /** @description Validation Error */
@@ -13203,46 +10816,6 @@ export interface operations {
             };
         };
     };
-    update_project_spec_content_api_v1_project_specs_content_put: {
-        parameters: {
-            query: {
-                /** @description Project slug */
-                slug: string;
-                /** @description Path within the project */
-                path: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectSpecUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_project_specs_api_v1_project_specs_list_get: {
         parameters: {
             query?: never;
@@ -13412,72 +10985,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectCreatePresets"];
-                };
-            };
-        };
-    };
-    check_port_api_v1_projects_ports_check_get: {
-        parameters: {
-            query: {
-                /** @description Port number to check (10100–14999). */
-                port: number;
-                /** @description Exclude this project from the conflict check (for editing). */
-                project_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PortCheckResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    suggest_port_api_v1_projects_ports_suggest_get: {
-        parameters: {
-            query: {
-                /** @description Port type: backend | frontend | db. */
-                type: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PortSuggestResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13929,37 +11436,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_HandoverResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_project_surfaces_api_v1_projects__project_id__surfaces_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SurfaceRead"][];
                 };
             };
             /** @description Validation Error */
@@ -14549,37 +12025,6 @@ export interface operations {
             };
         };
     };
-    list_project_deploy_events_api_v1_projects__slug__deploy_events_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeployEventRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_deploy_matrix_api_v1_projects__slug__deploy_matrix_get: {
         parameters: {
             query?: never;
@@ -14873,38 +12318,6 @@ export interface operations {
             };
         };
     };
-    get_categories_api_v1_rag_categories_get: {
-        parameters: {
-            query?: {
-                /** @description Tenant collection */
-                tenant?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_document_api_v1_rag_document_get: {
         parameters: {
             query: {
@@ -14959,42 +12372,6 @@ export interface operations {
             };
         };
     };
-    list_documents_api_v1_rag_list_get: {
-        parameters: {
-            query?: {
-                /** @description Tenant collection (icc, andros, dev) */
-                tenant?: string;
-                /** @description Page number */
-                page?: number;
-                /** @description Items per page */
-                per_page?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     search_api_v1_rag_search_get: {
         parameters: {
             query: {
@@ -15027,26 +12404,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_stats_api_v1_rag_stats_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };
@@ -15164,209 +12521,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemSettingRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_tasks_api_v1_tasks_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by the feat the task belongs to. Hits the ``ix_tasks_feat_id`` index — the core ``GET /feats/{id}/tasks`` query (DESIGN.md §2.6) and the ``FeatCard`` per-feat task display (DESIGN.md §3.1). */
-                feat_id?: string | null;
-                /** @description Filter by lifecycle status (``todo`` | ``in_progress`` | ``done`` | ``failed``). Hits the ``ix_tasks_status`` index. */
-                status?: ("todo" | "in_progress" | "done" | "failed") | null;
-                /** @description Filter by task type (``backend`` | ``frontend`` | ``migration`` | ``test`` | ``docs``). */
-                task_type?: ("backend" | "frontend" | "migration" | "test" | "docs") | null;
-                /** @description Number of rows to skip. */
-                skip?: number;
-                /** @description Maximum rows to return. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_TaskRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_task_api_v1_tasks_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_task_api_v1_tasks__task_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_task_api_v1_tasks__task_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_task_api_v1_tasks__task_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upload_screenshot_api_v1_uploads_screenshot_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_screenshot_api_v1_uploads_screenshot_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */
@@ -15544,70 +12698,6 @@ export interface operations {
             };
         };
     };
-    create_user_session_api_v1_user_sessions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserSessionCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_session_api_v1_user_sessions__user_session_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     delete_user_session_api_v1_user_sessions__user_session_id__delete: {
         parameters: {
             query?: never;
@@ -15625,41 +12715,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_user_session_api_v1_user_sessions__user_session_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserSessionUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserSessionRead"];
-                };
             };
             /** @description Validation Error */
             422: {
@@ -15725,37 +12780,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_api_v1_users__user_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15914,35 +12938,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["VersionRead"];
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_version_api_v1_versions__version_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -16241,103 +13236,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PriceEstimateRead"] | null;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    release_version_api_v1_versions__version_id__release_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reset_plan_api_v1_versions__version_id__reset_plan_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reset_tasks_api_v1_versions__version_id__reset_tasks_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

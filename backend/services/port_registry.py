@@ -560,50 +560,6 @@ def _blocked_ports(db: Session) -> tuple[set[int], ReservedRangesStatus]:
     return blocked, reserved
 
 
-def suggest_next_port(db: Session, port_type: str) -> int:
-    """Find the first free port in the registry range for *port_type*.
-
-    "Free" means free on all three sources (see the module docstring), not
-    merely absent from the ``projects`` table.
-
-    Parameters
-    ----------
-    db:
-        Active SQLAlchemy session.
-    port_type:
-        One of :data:`PORT_TYPES`.
-
-    Returns
-    -------
-    int
-        The lowest available port in the range.
-
-    Raises
-    ------
-    ValueError
-        If *port_type* is invalid or no free port remains.
-    HostProbeError
-        If the host's published-port map cannot be read. No port is suggested
-        in that case — an unverifiable suggestion is how ports get double-booked.
-    """
-    if port_type not in PORT_TYPES:
-        raise ValueError(f"Invalid port type '{port_type}'. Must be one of: {', '.join(PORT_TYPES)}.")
-
-    blocked, _reserved = _blocked_ports(db)
-    range_min, range_max = _port_range(db)
-
-    for port in range(range_min, range_max + 1):
-        # The bind probe too, not only the three sets. `describe_port_availability` applies it, so
-        # without it the suggester would hand out a port its own validator then rejects — and worse,
-        # a NON-docker holder (a systemd service on the host, the backend running host-mode in local
-        # dev or the CI test job) is invisible to the docker port map and would be silently
-        # double-booked. Sources must agree, or "free" means two different things on one screen.
-        if port not in blocked and not _bind_probe_says_taken(port):
-            return port
-
-    raise ValueError(f"No free ports available in range {range_min}–{range_max}.")
-
-
 def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
     """Return all allocated ports grouped by type.
 

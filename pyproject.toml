@@ -16,13 +16,9 @@ alembic = "^1.14"
 pydantic = "^2.10"
 pydantic-settings = "^2.7"
 python-jose = {version = "^3.3", extras = ["cryptography"]}
-# bcrypt is the module auth ACTUALLY imports (backend/services/auth.py, user.py). It is here only as
-# passlib's extra, so "remove the unused passlib" would silently take bcrypt with it and break every
-# login. Declared directly, so the dependency that matters stands on its own name.
+# bcrypt is the module auth ACTUALLY imports (backend/services/auth.py, user.py). It used to come only as
+# passlib's extra; declared directly, so removing the unused passlib (DEV-155) left every login standing.
 bcrypt = "^5.0"
-# passlib itself: no module imports it (grep: zero hits outside this file). Kept ONLY because dropping
-# it is a lockfile change with a login-shaped blast radius, and this is not the commit for that.
-passlib = {version = "^1.7", extras = ["bcrypt"]}
 python-multipart = "^0.0.20"
 httpx = "^0.28.1"
 qdrant-client = "^1.12"
@@ -40,11 +36,12 @@ pytest = "^8.3"
 pytest-cov = "^6.1"
 pytest-asyncio = "^0.24"
 ruff = "^0.11"
-python-frontmatter = "^1.3.0"
-reportlab = "^4.5.1"
 vulture = "^2.16"
 pytest-xdist = "^3.8"
 pytest-testmon = "^2.2"
+# The screenshot tests draw their images with it (tests/test_poradca_sees_pasted_screenshots.py). It used to come
+# only through reportlab; declared directly when DEV-155 removed reportlab.
+pillow = "^12.2"
 
 [build-system]
 requires = ["poetry-core"]
@@ -67,7 +64,6 @@ markers = [
     "asyncio: marks tests as asyncio coroutines",
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning:passlib",
 ]
 addopts = "-ra --strict-markers"
 

@@ -24,7 +24,7 @@ import type {
 // generated PipelineStage/PipelineActor enums to v2, so ROLE_LABELS below now keys on the
 // 3 participants and the phase maps on the 4 phases, and the v1 Coordinator/
 // triage/regate label maps + the 11-stage STAGE_ORDER family are removed (see the NOTEs
-// below). The tone palette (TONE_*/StatusTone/DECISION_BANNER) is intact (salvaged).
+// below). The tone palette (TONE_*/StatusTone) is intact (salvaged).
 
 // The v2 build phase machine value (mirrors design §2.1; `done` is the terminal phase). CR-1
 // (nex-studio-visual) inserts `vizual` (the live-preview phase) between `navrh` and `programovanie`.
@@ -52,51 +52,6 @@ export const PHASE_ORDER: BuildPhase[] = [
   "verifikacia",
   "done",
 ];
-
-// Raw machine code per phase — usable as a hover tooltip alongside the label.
-export const PHASE_CODES: Record<BuildPhase, string> = {
-  priprava: "priprava",
-  navrh: "navrh",
-  vizual: "vizual",
-  programovanie: "programovanie",
-  verifikacia: "verifikacia",
-  done: "done",
-};
-
-// The v2 pipeline participant machine value — exactly three (design §1/§4.1): the AI
-// Agent does the whole build, the Auditor independently verifies, the Manažér approves.
-// (No Coordinator / Designer / Customer / Implementer — those v1 roles collapse into
-// the single AI Agent; `system` stays for system-authored notices.)
-//
-// ICCINT-12 adds `dedo` — the NEX Studio technical team, who answers an agent's
-// `framework_issue` escalation (a bug in NEX Studio itself, which the Manažér cannot fix).
-// A message author/recipient only: Dedo is never `current_actor`, never on turn.
-export type V2Participant =
-  "ai_agent" | "auditor" | "manazer" | "system" | "dedo";
-
-// Slovak label per v2 participant — the 3-role vocabulary. Replaces the v1 7-role
-// ROLE_LABELS for v2 surfaces (who's-up status, the AI Agent header, message bubbles).
-export const V2_ROLE_LABELS: Record<V2Participant, string> = {
-  ai_agent: "AI Agent",
-  auditor: "Audítor",
-  manazer: "Manažér",
-  system: "Systém",
-  // "Dedo" verbatim — the product already calls him that everywhere the Manažér can see it
-  // (the escalation channel file, the Telegram ping), so a second name for one person would
-  // be the confusing choice here, not the friendly one.
-  dedo: "Dedo",
-};
-
-// Human label of the phase that follows `phase` (clamped at the terminal `done`). Drives
-// the "Schváliť → spustí sa ďalšia fáza (…)" consequence line on the v2 board.
-export function nextPhaseLabel(phase: BuildPhase): string {
-  const idx = PHASE_ORDER.indexOf(phase);
-  const next =
-    idx >= 0
-      ? PHASE_ORDER[Math.min(idx + 1, PHASE_ORDER.length - 1)]
-      : undefined;
-  return next ? PHASE_LABELS[next] : PHASE_LABELS[phase];
-}
 
 // Slovak label per pipeline participant — the v2 3-role vocabulary (AI Agent / Auditor / Manažér + the
 // system author). ``manazer`` is the human operator; ``system`` authors notices. (No Coordinator / Designer
@@ -221,16 +176,6 @@ export const TONE_BANNER: Record<StatusTone, string> = {
     "border-[var(--color-border-default)] bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]",
 };
 
-// CR-2 (v0.7.3): the HIGH-CONTRAST sticky decision CTA banner — used (instead of the low-key TONE_BANNER) only
-// when status is awaiting_manazer / blocked, so a "your turn" board never reads as "stuck". Solid state-token
-// bg + fg + a left accent in the same fg (token-disciplined: the shared --color-state-* pairs carry light+dark,
-// no raw pastels). Tone-aware so it stays inside the unified palette (CR-NS-028): amber = awaiting, red = blocked.
-export const DECISION_BANNER: Partial<Record<StatusTone, string>> = {
-  amber:
-    "bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)] border-[var(--color-state-warning-fg)]",
-  red: "bg-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)] border-[var(--color-state-error-fg)]",
-};
-
 // Honest verification (audit honest #6): a version can be `verified === true` yet its verification could NOT
 // actually be CONFIRMED — the PASS was never anchored to a commit (`unbound` / `hotovo_unbound`, signed while
 // the repo was unreadable) or the repo can't be read right now (`repo_unreadable`). For those three the honest
@@ -292,7 +237,7 @@ export function verificationDrifted(
 
 // NOTE (CR-V2-021): the v1 ``STAGE_ORDER`` / ``FAST_FIX_STAGE_ORDER`` / ``stageOrderForFlow`` /
 // ``REGATE_TARGETS`` / ``nextStageLabel`` (the 11-stage waterfall order + gate_g re-gate targets) are
-// REMOVED — the v2 Vývoj board uses the 4-phase :data:`PHASE_ORDER` + :func:`nextPhaseLabel` instead.
+// REMOVED — the v2 Vývoj board uses the 4-phase :data:`PHASE_ORDER` instead.
 
 // ─── Stav VERZIE ──────────────────────────────────────────────────────────────
 //

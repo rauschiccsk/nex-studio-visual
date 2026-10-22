@@ -387,15 +387,11 @@ def test_http_create_persists_and_never_echoes_secret(client, db_session):
     assert "credential_id" not in body
     assert _SECRET not in resp.text
 
-    # The GET list / detail likewise never echo the secret.
+    # The list likewise never echoes the secret.
     lst = client.get(f"/api/v1/projects/{project.slug}/customers")
     assert lst.status_code == 200
     assert _SECRET not in lst.text
     assert lst.json()[0]["has_secret"] is True
-
-    detail = client.get(f"/api/v1/customers/{body['id']}")
-    assert detail.status_code == 200
-    assert _SECRET not in detail.text
 
 
 def test_http_create_unknown_project_404(client, db_session):

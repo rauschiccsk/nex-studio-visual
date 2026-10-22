@@ -43,6 +43,7 @@ export type InputOwner = "rozhovor" | "odpoved" | "karta";
  * adds fails the type check here until someone decides where its text goes. A default is how it broke: on
  * 08.10.2026 `decision_needed` fell through to the chat, and Poradca's instruction for a Decision Card was
  * sent as a chat message instead.
+ * @internal — exported for its test (DEV-155).
  */
 export const BLOCKED_INPUT_OWNER: Record<BlockReason, InputOwner | null> = {
   agent_question: "odpoved",

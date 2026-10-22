@@ -8,7 +8,7 @@ const KEEP_MS = 60_000;
 const kept = new Map<string, { at: number; paths: ReadonlySet<string> }>();
 const asking = new Map<string, Promise<ReadonlySet<string> | null>>();
 
-/** Forget the kept lists — for tests. */
+/** Forget the kept lists — for tests. @internal — exported for its test (DEV-155). */
 export function forgetCodePaths(): void {
   kept.clear();
   asking.clear();

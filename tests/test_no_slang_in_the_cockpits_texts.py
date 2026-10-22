@@ -52,7 +52,7 @@ def slang_in(text: str) -> list[int]:
 
 def test_the_guard_reads_every_text_of_the_repository():
     found = {p.relative_to(ROOT).parts[0] for p, _ in _texts()}
-    assert {"backend", "frontend", "templates", "docs", "scripts", "tests", "migrations", "mockup"} <= found, (
+    assert {"backend", "frontend", "templates", "docs", "scripts", "tests", "migrations"} <= found, (
         f"the guard read only {sorted(found)}"
     )
 

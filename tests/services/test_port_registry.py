@@ -25,7 +25,6 @@ from backend.services.port_registry import (
     describe_port_availability,
     get_all_allocated_ports,
     reserved_ranges_status,
-    suggest_next_port,
     suggest_next_port_block,
 )
 
@@ -136,39 +135,6 @@ class TestCheckPortAvailable:
 
 class TestSuggestNextPort:
     """Tests for suggest_next_port()."""
-
-    def test_suggests_min_when_no_ports_allocated(self, db_session):
-        """First suggestion should be the range minimum."""
-        result = suggest_next_port(db_session, "backend")
-        assert result == PORT_RANGE_MIN
-
-    def test_skips_allocated_ports(self, db_session):
-        """Suggestion skips already-allocated ports."""
-        _make_project(db_session, backend_port=10100, frontend_port=10101, db_port=10102)
-        result = suggest_next_port(db_session, "backend")
-        assert result == 10103
-
-    def test_skips_cross_type_allocation(self, db_session):
-        """Suggestion for 'backend' skips ports used by frontend or db."""
-        _make_project(db_session, frontend_port=10100)
-        result = suggest_next_port(db_session, "backend")
-        assert result == 10101
-
-    def test_invalid_type_raises(self, db_session):
-        with pytest.raises(ValueError, match="Invalid port type"):
-            suggest_next_port(db_session, "invalid")
-
-    def test_all_valid_types(self, db_session):
-        """All three port types return a valid suggestion."""
-        for port_type in ("backend", "frontend", "db"):
-            result = suggest_next_port(db_session, port_type)
-            assert PORT_RANGE_MIN <= result <= PORT_RANGE_MAX
-
-    def test_suggests_gap_port(self, db_session):
-        """When 10100 is taken but 10101 is free, suggests 10101."""
-        _make_project(db_session, backend_port=10100)
-        result = suggest_next_port(db_session, "backend")
-        assert result == 10101
 
 
 # ==================================================================
@@ -406,10 +372,6 @@ class TestHostAwareAvailability:
         assert verdict.state == "taken"
         assert verdict.source == "host"
 
-    def test_suggest_next_port_skips_host_held_port(self, db_session, host_ports):
-        host_ports[PORT_RANGE_MIN] = "some-neighbour"
-        assert suggest_next_port(db_session, "backend") == PORT_RANGE_MIN + 1
-
     def test_suggest_block_skips_host_held_block(self, db_session, host_ports):
         """A single host-held port disqualifies the whole block it sits in."""
         host_ports[PORT_RANGE_MIN + 5] = "some-neighbour"
@@ -456,12 +418,6 @@ class TestHostProbeFailureIsNotFree:
         _break_host_probe(monkeypatch, "daemon unreachable")
         verdict = describe_port_availability(db_session, 10123)
         assert "daemon unreachable" in verdict.reason
-
-    def test_suggest_next_port_refuses(self, db_session, monkeypatch):
-        """No suggestion at all beats a suggestion we cannot vouch for."""
-        _break_host_probe(monkeypatch)
-        with pytest.raises(HostProbeError):
-            suggest_next_port(db_session, "backend")
 
     def test_suggest_block_refuses(self, db_session, monkeypatch):
         _break_host_probe(monkeypatch)
@@ -619,12 +575,6 @@ class TestReservedRanges:
         assert verdict.state == "taken"
         assert verdict.source == "reserved"
         assert verdict.holder == "10200-10209"
-
-    def test_reserved_port_is_not_suggested(self, db_session):
-        """Previously suggest_next_port ignored reservations entirely — it
-        would hand out a port that create-time validation then rejected."""
-        _set_reserved(db_session, f"{PORT_RANGE_MIN}-{PORT_RANGE_MIN + 3}")
-        assert suggest_next_port(db_session, "backend") == PORT_RANGE_MIN + 4
 
     def test_reserved_block_is_not_suggested(self, db_session):
         _set_reserved(db_session, f"{PORT_RANGE_MIN + 2}-{PORT_RANGE_MIN + 2}")

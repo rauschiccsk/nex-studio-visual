@@ -156,16 +156,6 @@ class TestUserRouter:
         resp = router_client.post("/api/v1/users", json=payload)
         assert resp.status_code == 422
 
-    def test_get_by_id(self, router_client):
-        created = router_client.post("/api/v1/users", json=_payload()).json()
-        resp = router_client.get(f"/api/v1/users/{created['id']}")
-        assert resp.status_code == 200
-        assert resp.json()["id"] == created["id"]
-
-    def test_get_missing_returns_404(self, router_client):
-        resp = router_client.get(f"/api/v1/users/{uuid.uuid4()}")
-        assert resp.status_code == 404
-
     def test_list_envelope_and_pagination(self, router_client):
         for _ in range(3):
             router_client.post("/api/v1/users", json=_payload()).raise_for_status()
@@ -249,15 +239,15 @@ class TestUserRouter:
     def test_delete_hard_removes_user(self, router_client):
         """DELETE is a hard delete (Director directive 2026-05-13).
 
-        After the call the row is gone — GET returns 404 and a new user
+        After the call the row is gone — the directory no longer lists it and a new user
         can immediately reuse the same email / username.
         """
         created = router_client.post("/api/v1/users", json=_payload()).json()
         resp = router_client.delete(f"/api/v1/users/{created['id']}")
         assert resp.status_code == 204
-        # Row must be gone — GET returns 404.
-        get_resp = router_client.get(f"/api/v1/users/{created['id']}")
-        assert get_resp.status_code == 404
+        # Row must be gone — the directory no longer lists it.
+        listed = router_client.get("/api/v1/users", params={"limit": 100}).json()["items"]
+        assert created["id"] not in [u["id"] for u in listed]
 
     def test_delete_releases_email_and_username_for_reuse(self, router_client):
         """After hard delete the email + username are free for a new user

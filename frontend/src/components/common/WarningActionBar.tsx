@@ -7,10 +7,6 @@
 //
 // The caller keeps what genuinely differs: its copy, its icons, and what the action does. Only the shape is
 // shared. `variant` covers the two real placements rather than leaking Tailwind strings through props.
-//
-// NOT forced onto every amber surface: AuditorUpfrontReview shares these COLOUR TOKENS but not this
-// structure (no action, no error, no header/body split), so it imports `WARNING_CHROME` alone. Sharing
-// tokens is DRY; sharing a shape that does not fit would be abstraction for its own sake.
 
 import type { ReactNode } from "react";
 import { CircleAlert, type LucideIcon } from "lucide-react";

@@ -58,7 +58,7 @@ interface Props {
   owner?: InputOwner | null;
 }
 
-export function ConversationComposer({
+function ConversationComposer({
   onRelay,
   disabled,
   frameworkBlocked,

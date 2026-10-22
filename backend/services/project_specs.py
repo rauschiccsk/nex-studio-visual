@@ -250,35 +250,9 @@ def read_content(slug: str, path_within_project: str) -> tuple[str, bool]:
         return "", False
 
 
-def write_content(slug: str, path_within_project: str, content: str) -> None:
-    """Overwrite a single ``.md`` file. Used by the Director (ri) edit flow.
-
-    Write/edit remains restricted to Markdown — non-Markdown editing is
-    out of scope for v1 (Director can SSH for those). Same path
-    validation as :func:`read_content`. The file must already exist —
-    this endpoint is **edit only**, not create. New documents are
-    produced by the agents, not by the UI.
-
-    Raises:
-        ProjectSpecsError: invalid slug / path / extension or file not
-            found.
-    """
-    abs_path = _resolve_write_path(slug, path_within_project)
-    if not abs_path.is_file():
-        raise ProjectSpecsError(
-            f"File not found (cannot create via UI): {slug}/{path_within_project}",
-        )
-    abs_path.write_text(content, encoding="utf-8")
-
-
 def _resolve_read_path(slug: str, path_within_project: str) -> Path:
     """Validate + resolve for reads. Accepts any file extension."""
     return _resolve_doc_path(slug, path_within_project, require_md=False)
-
-
-def _resolve_write_path(slug: str, path_within_project: str) -> Path:
-    """Validate + resolve for writes. Restricts to ``.md`` files."""
-    return _resolve_doc_path(slug, path_within_project, require_md=True)
 
 
 def _resolve_doc_path(slug: str, path_within_project: str, *, require_md: bool) -> Path:

@@ -15,12 +15,10 @@
  *   - The cap is a RATCHET: it may only ever go DOWN. Raising it to make a red build green is a
  *     threshold downgrade — fix the warning instead.
  *
- * Baseline (5 warnings, 2026-07-28) — lower `--max-warnings` as these are fixed:
- *   1. src/components/cockpit/PhaseArtifact.tsx:27  react-refresh/only-export-components
- *   2. src/contexts/ThemeContext.tsx:40             react-refresh/only-export-components
- *   3. src/contexts/ThemeContext.tsx:137            react-refresh/only-export-components
- *   4. src/pages/KnowledgeBasePage.tsx:350          unused eslint-disable directive
- *   5. src/pages/NewVersionPage.tsx:126             react-hooks/exhaustive-deps
+ * Baseline (5 warnings, 2026-07-28; 3 since DEV-155, 22.10.2026) — lower `--max-warnings` as these are fixed:
+ *   1. src/contexts/ThemeContext.tsx:40             react-refresh/only-export-components
+ *   2. src/contexts/ThemeContext.tsx:137            react-refresh/only-export-components
+ *   3. src/pages/KnowledgeBasePage.tsx:382          unused eslint-disable directive
  */
 import js from "@eslint/js";
 import globals from "globals";

@@ -48,12 +48,10 @@ class TestRiDeletesUser:
         )
         assert resp.status_code == 204
 
-        # Row is gone — GET returns 404.
-        get_resp = client.get(
-            f"/api/v1/users/{target_id}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert get_resp.status_code == 404
+        # Row is gone — the directory no longer lists it.
+        listed = client.get("/api/v1/users", params={"limit": 100}, headers={"Authorization": f"Bearer {token}"})
+        assert listed.status_code == 200
+        assert target_id not in [u["id"] for u in listed.json()["items"]]
 
     def test_username_and_email_freed_for_reuse(self, client, db_session):
         """After hard delete the username + email are free again.

@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes.agent_terminal import router as agent_terminal_router
 from backend.api.routes.auth import router as auth_router
 from backend.api.routes.backlog import router as backlog_router
-from backend.api.routes.bugs import router as bugs_router
 from backend.api.routes.ci_runner import router as ci_runner_router
 from backend.api.routes.ci_runs import router as ci_runs_router
 from backend.api.routes.credentials import router as credentials_router
@@ -21,9 +20,7 @@ from backend.api.routes.customers import router as customers_router
 from backend.api.routes.dedo import router as dedo_router
 from backend.api.routes.delivery_statements import router as delivery_statements_router
 from backend.api.routes.deploy import router as deploy_router
-from backend.api.routes.epics import router as epics_router
 from backend.api.routes.external_cost import router as external_cost_router
-from backend.api.routes.feats import router as feats_router
 from backend.api.routes.health import health_check as _health_check_handler
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
@@ -40,8 +37,6 @@ from backend.api.routes.rag import router as rag_router
 from backend.api.routes.release_notes import router as release_notes_router
 from backend.api.routes.standing import router as standing_router
 from backend.api.routes.system_settings import router as system_settings_router
-from backend.api.routes.tasks import router as tasks_router
-from backend.api.routes.uploads import router as uploads_router
 from backend.api.routes.user_agent_settings import router as user_agent_settings_router
 from backend.api.routes.user_layout import router as user_layout_router
 from backend.api.routes.user_notes import router as user_notes_router
@@ -425,10 +420,6 @@ app.include_router(knowledge_router, prefix="/api/v1/knowledge")
 app.include_router(project_specs_router, prefix="/api/v1/project-specs")
 app.include_router(rag_router, prefix="/api/v1/rag")
 app.include_router(credentials_router, prefix="/api/v1/credentials")
-app.include_router(epics_router, prefix="/api/v1/epics")
-app.include_router(feats_router, prefix="/api/v1/feats")
-app.include_router(tasks_router, prefix="/api/v1/tasks")
-app.include_router(bugs_router, prefix="/api/v1/bugs")
 app.include_router(backlog_router, prefix="/api/v1/backlog")
 # The versions router intentionally mounts under the bare ``/api/v1`` prefix
 # because it spans two URL families (``/projects/{id}/versions`` and
@@ -443,14 +434,12 @@ app.include_router(standing_router, prefix="/api/v1")  # DEV-150 „Kde stojíme
 app.include_router(version_notes_router, prefix="/api/v1")  # DEV-151 „Kde sme skončili“
 app.include_router(price_estimate_router, prefix="/api/v1")  # DEV-154 orientačná cena verzie
 # The deploy router (CR-V2-026) also mounts under the bare ``/api/v1`` prefix
-# because it spans two URL families (``/projects/{slug}/deploy-events`` and
-# ``/customers/{id}/deploy`` | ``/accept``) — see design §3 Deploy & Customers.
+# because its routes sit under ``/customers/{id}/deploy`` | ``/accept`` — see design §3 Deploy & Customers.
 app.include_router(deploy_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
 # The external-cost router (CR-V2-063) feeds the same Náklady screen as the metrics router and shares
 # its ``/projects/{slug}/…`` path family, so it mounts under the same bare ``/api/v1`` prefix.
 app.include_router(external_cost_router, prefix="/api/v1")
-app.include_router(uploads_router, prefix="/api/v1")
 # Public (no-auth) per-version changelog — the *Aktualizácie* feature. Mounted
 # under the bare ``/api/v1`` prefix; the route path is ``/release-notes``.
 app.include_router(release_notes_router, prefix="/api/v1")
@@ -476,7 +465,10 @@ app.include_router(dedo_router, prefix="/api/v1/dedo")
 
 @app.get("/health")
 def health_check() -> dict:
-    """Health check endpoint — delegates to the health module."""
+    """Health check endpoint — delegates to the health module.
+
+    Called by: the container's HEALTHCHECK (``backend.scripts.healthcheck``) and Dedo's check after a deploy.
+    """
     return _health_check_handler()
 
 

@@ -18,9 +18,9 @@
 import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { PipelineBoard, PipelineMessage } from "@/services/api/pipeline";
 
-/** The sentence the Director wrote under every card he took to Poradca — for a card with the Auditor's findings. */
+/** The sentence the Director wrote under every card he took to Poradca — for a card with the Auditor's findings. @internal — exported for its test (DEV-155). */
 export const REVIEW_REQUEST = "Prekontroluj opodstatnenosť tohto nálezu a ako to vyriešiť.";
-/** DEV-106 — for a card the agent prepared: a choice between proposals, not a finding (Director 13.10.2026). */
+/** DEV-106 — for a card the agent prepared: a choice between proposals, not a finding (Director 13.10.2026). @internal — exported for its test (DEV-155). */
 export const CHOICE_REQUEST = "Poraď mi, ktorú možnosť zvoliť a prečo.";
 /** DEV-135 — for the agent's question in Riadiace centrum. */
 const AGENT_QUESTION_REQUEST = "Poraď mi, ako agentovi odpovedať.";

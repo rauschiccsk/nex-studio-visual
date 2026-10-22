@@ -39,7 +39,6 @@ from backend.schemas.rag import KbIndexStatusRead
 from backend.services import kb_index_sync
 from backend.utils.kb_access import (
     filter_kb_documents,
-    get_allowed_kb_categories,
     is_path_allowed,
 )
 
@@ -136,40 +135,6 @@ async def get_document(
     return doc
 
 
-@router.get("/list")
-async def list_documents(
-    tenant: str = Query("icc", description="Tenant collection (icc, andros, dev)"),
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """List documents from Qdrant with pagination. Restricted categories hidden for non-ri."""
-    try:
-        result = reader.list_documents(tenant=tenant, page=page, per_page=per_page)
-    except RagUnavailableError as exc:
-        raise _unavailable(exc) from exc
-
-    if not has_full_kb_access(user) and isinstance(result, dict) and "documents" in result:
-        result["documents"] = [d for d in result["documents"] if not _is_restricted(d.get("category", ""))]
-
-    # RBAC: filter by Shuhari role
-    if isinstance(result, dict) and "documents" in result:
-        result["documents"] = filter_kb_documents(result["documents"], user, db)
-        result["count"] = len(result["documents"])
-
-    return result
-
-
-@router.get("/stats")
-async def get_stats(user: User = Depends(get_current_user)):
-    """Stats per tenant collection."""
-    try:
-        return reader.get_stats()
-    except RagUnavailableError as exc:
-        raise _unavailable(exc) from exc
-
-
 @router.get("/index-status", response_model=KbIndexStatusRead)
 async def get_index_status(user: User = Depends(get_current_user)) -> KbIndexStatusRead:
     """Sedí RAG index so Znalostnou bázou? (ICCINT-111)
@@ -192,26 +157,3 @@ async def get_index_status(user: User = Depends(get_current_user)) -> KbIndexSta
         last_indexed_at=porovnanie.last_indexed_at,
         sample=list((*porovnanie.missing, *porovnanie.stale, *porovnanie.orphaned))[:10],
     )
-
-
-@router.get("/categories")
-async def get_categories(
-    tenant: str = Query("icc", description="Tenant collection"),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Get unique categories for a tenant. Restricted categories hidden for non-ri."""
-    try:
-        cats = reader.get_categories(tenant=tenant)
-    except RagUnavailableError as exc:
-        raise _unavailable(exc) from exc
-
-    if not has_full_kb_access(user):
-        cats = [c for c in cats if not _is_restricted(c)]
-
-    # RBAC: filter categories by Shuhari role
-    allowed = get_allowed_kb_categories(user, db)
-    if "*" not in allowed:
-        cats = [c for c in cats if any(c.startswith(a.rstrip("/")) for a in allowed)]
-
-    return {"categories": cats}

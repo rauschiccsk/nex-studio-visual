@@ -36,7 +36,7 @@ export interface ThemeContextValue {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build the localStorage key scoped to the given username. */
+/** Build the localStorage key scoped to the given username. @internal — exported for its test (DEV-155). */
 export function darkModeKey(username: string): string {
   return `nex_dark_${username}`;
 }

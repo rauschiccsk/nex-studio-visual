@@ -1,11 +1,11 @@
 // SpecMarkdown — the ONE shared Markdown renderer for spec / transcript bodies (spine STEP 2).
 //
-// Extracted from the byte-identical copy-paste that lived in BOTH ConversationThread and PhaseArtifact
+// Extracted from the byte-identical copy-paste that lived in BOTH ConversationThread and a phase view since removed
 // (fenced code → the shared CodeBlock; everything else default GFM). Kept deliberately NARROW: it renders
 // ONLY the duplicated ReactMarkdown+remarkGfm+MARKDOWN_COMPONENTS core and does NOT bundle any prose
-// wrapper/padding — the consumers' wrappers are NOT identical (chat bubbles carry no padding; the phase
-// artifact adds ``px-4 py-3``), so each consumer keeps its own wrapper and passes it via the optional
-// ``className``. Consumers: SpecifikaciaPage, ConversationThread (body + question), PhaseArtifact.
+// wrapper/padding — the consumers' wrappers are NOT identical (chat bubbles carry no padding, others do), so
+// each consumer keeps its own wrapper and passes it via the optional ``className``. Consumers: SpecifikaciaPage,
+// ConversationThread (body + question), PlanUlohRail, PoradcaAnswer.
 
 import { createElement, useMemo, type ComponentProps } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";

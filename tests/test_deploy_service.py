@@ -615,23 +615,6 @@ async def test_different_customers_run_different_versions(db_session):
     assert deploy_service.current_version(db_session, cust_b.id, "uat") == "0.2.0"
 
 
-@pytest.mark.asyncio
-async def test_list_events_and_project_events(db_session):
-    user = _make_user(db_session)
-    project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "0.1.0")
-    customer = _make_customer(db_session, project)
-    runner = _FakeRunner()
-
-    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
-    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
-
-    customer_events = deploy_service.list_events(db_session, customer.id)
-    assert {e.event_type for e in customer_events} == {"deploy", "accept"}
-    project_events = deploy_service.list_project_events(db_session, project.id)
-    assert len(project_events) == 2
-
-
 # ---------------------------------------------------------------------------
 # HTTP route tests (deploy router) — manual actions, gate, secret-never-echoed
 # ---------------------------------------------------------------------------
@@ -732,25 +715,6 @@ def test_http_uat_deploy_then_accept_then_prod(client, db_session, _fake_default
     )
     assert prod.status_code == 200, prod.text
     assert prod.json()["bumped_to"] == "1.0.0"
-
-
-def test_http_deploy_events_log(client, db_session, _fake_default_runner):
-    _auth_ri(client, db_session)
-    user = _make_user(db_session)
-    project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "0.1.0")
-    customer = _make_customer(db_session, project)
-    db_session.commit()
-
-    client.post(f"/api/v1/customers/{customer.id}/deploy", json={"version_number": "0.1.0", "environment": "uat"})
-
-    proj_log = client.get(f"/api/v1/projects/{project.slug}/deploy-events")
-    assert proj_log.status_code == 200
-    assert any(e["event_type"] == "deploy" for e in proj_log.json())
-
-    cust_log = client.get(f"/api/v1/customers/{customer.id}/deploy-events")
-    assert cust_log.status_code == 200
-    assert len(cust_log.json()) == 1
 
 
 def test_http_deploy_response_never_echoes_secret(client, db_session, _fake_default_runner):

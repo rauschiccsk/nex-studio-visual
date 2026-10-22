@@ -165,11 +165,10 @@ _registry_lock = asyncio.Lock()
 
 
 def _validate_debug_attach_role(role: str) -> None:
-    """Path-safety + debug-attach gate: accept any legitimate orchestrator role.
+    """Path-safety gate: accept any legitimate orchestrator role.
 
-    Shared by `_resolve_agent_spec` (spawn + auto-resume) and the debug-terminal
-    endpoint. The AI-Agent-only SPAWN restriction is enforced separately at the
-    spawn-API entry (`AgentTerminalSpawnRequest`), NOT here (CR-V2-007 / CR-NS-039 BE decouple).
+    Used by `_resolve_agent_spec` (spawn + auto-resume). The AI-Agent-only SPAWN restriction is enforced separately at
+    the spawn-API entry (`AgentTerminalSpawnRequest`), NOT here (CR-V2-007 / CR-NS-039 BE decouple).
     """
     if role not in _DEBUG_ATTACH_ROLES:
         raise AgentTerminalError(f"Invalid role: {role!r}")
@@ -198,21 +197,6 @@ def _resolve_agent_spec(slug: str, role: str) -> Path:
             f"Agent spec missing for {slug}/{role}: expected {spec}",
         )
     return spec
-
-
-def available_roles(slug: str) -> dict[str, bool]:
-    """Return charter availability per valid role for ``slug``.
-
-    Non-raising spec-path check (mirrors :func:`_resolve_agent_spec`):
-    ``{role: <CLAUDE.md exists>}`` for every role in :data:`_VALID_ROLES`.
-    Raises :class:`AgentTerminalError` on an invalid slug or missing project
-    directory (the router maps that to a 404).
-    """
-    _validate_slug(slug)
-    project_root = PROJECTS_ROOT / slug
-    if not project_root.is_dir():
-        raise AgentTerminalError(f"Project not found: {slug}")
-    return {role: _agent_spec_path(project_root, role).is_file() for role in _VALID_ROLES}
 
 
 # ---------------------------------------------------------------------------

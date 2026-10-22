@@ -7,7 +7,7 @@ import type { NodeSpend } from "@/types/task-plan";
 const nf = (digits: number) =>
   new Intl.NumberFormat("sk-SK", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/** „1 token“, „3 tokeny“, „850 tokenov“, „12,3 tis. tokenov“, „3,1 mil. tokenov“. */
+/** „1 token“, „3 tokeny“, „850 tokenov“, „12,3 tis. tokenov“, „3,1 mil. tokenov“. @internal — exported for its test (DEV-155). */
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${nf(1).format(n / 1_000_000)} mil. tokenov`;
   if (n >= 1_000) return `${nf(1).format(n / 1_000)} tis. tokenov`;

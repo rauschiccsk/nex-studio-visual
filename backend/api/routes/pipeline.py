@@ -1,7 +1,6 @@
 """REST + WebSocket router for the Orchestration Cockpit (F-007 §6, CR-NS-018 Phase 3).
 
 * ``GET    /pipeline/{version_id}``          → board (state + last N messages)
-* ``GET    /pipeline/{version_id}/messages`` → paginated message log
 * ``POST   /pipeline/{version_id}/action``   → Director action → orchestrator,
   then broadcasts ``state_changed`` + ``message_added`` to live board sockets.
 * ``POST   /pipeline/{version_id}/dedo-proposal/send|reject`` → ICCINT-24: the Manažér sends (through the
@@ -30,13 +29,10 @@ from backend.core import authz
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.foundation import User
-from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
-from backend.schemas.agent_terminal import AgentTerminalSessionRead
-from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import (
     AgentSession,
     BoardTask,
@@ -54,11 +50,9 @@ from backend.schemas.pipeline import (
     PipelineStateRead,
     VizualPreviewRead,
 )
-from backend.services import agent_terminal as agent_terminal_service
 from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets, unsaved_work
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
-from backend.services.agent_terminal import AgentTerminalError, SessionConflictError
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
 from backend.services.plane_gateway import PlaneError
@@ -543,43 +537,13 @@ def get_vizual_mockup(version_id: uuid.UUID, db: Session = Depends(get_db)) -> H
     mockup — walkable with NO backend and NO login — instead of the auth-gated raw FE Vite scaffold. The mockup
     is a design preview (mock data, no secrets), keyed on the unguessable version UUID;
     ``read_vizual_mockup`` is path-scoped to ``docs/.../visual/`` (no arbitrary file read). 404 when no mockup
-    exists → the board's ``vizual_url`` then points at the live Vite sandbox instead."""
+    exists → the board's ``vizual_url`` then points at the live Vite sandbox instead.
+
+    Called by: the cockpit's Vizuál iframe — the board hands out this URL as ``vizual_url``."""
     html = orchestrator.read_vizual_mockup(db, version_id)
     if html is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Vizuál mockup for this version.")
     return HTMLResponse(content=html)
-
-
-@router.get("/{version_id}/messages", response_model=PaginatedResponse[PipelineMessageRead])
-def list_messages(
-    version_id: uuid.UUID,
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> PaginatedResponse[PipelineMessageRead]:
-    """Paginated message log (oldest→newest)."""
-    authz.assert_version_access(db, current_user, version_id)
-    total = db.execute(
-        select(func.count()).select_from(PipelineMessage).where(PipelineMessage.version_id == version_id)
-    ).scalar_one()
-    rows = (
-        db.execute(
-            select(PipelineMessage)
-            .where(PipelineMessage.version_id == version_id)
-            .order_by(PipelineMessage.seq.asc())
-            .offset(skip)
-            .limit(limit)
-        )
-        .scalars()
-        .all()
-    )
-    return PaginatedResponse[PipelineMessageRead](
-        items=[PipelineMessageRead.model_validate(m) for m in rows],
-        total=total,
-        skip=skip,
-        limit=limit,
-    )
 
 
 async def _apply_and_publish(
@@ -927,78 +891,6 @@ async def post_relay(
         pipeline_runner.schedule_dispatch(version_id, directive)
 
     return PipelineRelayResponse(deferred=result.deferred, board=_board(db, version_id))
-
-
-@router.post("/{version_id}/debug-terminal", response_model=AgentTerminalSessionRead)
-async def open_debug_terminal(
-    version_id: uuid.UUID,
-    role: str = Query(..., description="orchestrator agent role to attach to"),
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> AgentTerminalSessionRead:
-    """Break-glass: attach an interactive Manažér terminal to the headless agent session (CR-V2-015).
-
-    Resumes the existing ``orchestrator_session.claude_session_id`` for ``(project, role)`` into a
-    Manažér-owned ``agent_terminal_sessions`` row so the standard AgentTerminal WS can stream it. This is an
-    OUT-OF-BAND human break-glass ONLY — the first-class Manažér↔AI-Agent channel is the read-only tab +
-    the engine relay (:func:`post_relay`). To preserve the single-writer invariant (SPIKE-IO Model B), the
-    debug-attach PTY is **gated so it cannot open while the engine is driving the session** (an open
-    write-capable PTY mid-turn would be a second concurrent writer). When the engine IS driving, this
-    returns 409; otherwise it attaches (and ``write_input`` is still per-keystroke-guarded as a backstop).
-    """
-    authz.assert_version_access(db, current_user, version_id)
-
-    # Debug-attach accepts the orchestrator roles (CR-V2-007: ai-agent / auditor) — NOT just the
-    # spawn-API's AI-Agent-only set. Validate up front so a bad role is a clean 422, not a misleading 404.
-    try:
-        agent_terminal_service._validate_debug_attach_role(role)
-    except AgentTerminalError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-
-    slug = orchestrator._project_slug_for_version(db, version_id)
-    # CR-V2-007: the debug-attach param is a charter-path slug (hyphen, ``ai-agent``); the
-    # OrchestratorSession.role column holds the DB value (underscore, ``ai_agent``). Bridge them via the
-    # single orchestrator mapper so the two spellings never diverge.
-    db_role = orchestrator.db_role_for_charter_slug(role)
-    orch = db.execute(
-        select(OrchestratorSession).where(
-            OrchestratorSession.project_slug == slug,
-            OrchestratorSession.role == db_role,
-        )
-    ).scalar_one_or_none()
-    if orch is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No orchestrator session for role '{role}' in project '{slug}'",
-        )
-
-    # CR-V2-015 single-writer gate (SPIKE-IO Model B): refuse to open a write-capable break-glass PTY while
-    # the engine is currently driving this ``claude_session_id`` (an active ``invoke_claude`` turn). Opening
-    # one mid-turn would create a second concurrent writer that corrupts session memory. The first-class
-    # channel during an active turn is the engine relay (POST /relay), not a raw PTY.
-    if orchestrator.is_session_engine_busy(orch.claude_session_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Engine is driving this session — debug-attach refused mid-turn. "
-                "Use the AI Agent relay to message it, or attach when the build is idle."
-            ),
-        )
-
-    try:
-        row = await agent_terminal_service.spawn(
-            user_id=current_user.id,
-            role=role,
-            project_slug=slug,
-            db=db,
-            claude_session_id=orch.claude_session_id,
-        )
-    except SessionConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except AgentTerminalError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    return AgentTerminalSessionRead.model_validate(row)
 
 
 async def _apply_ws_presence_frame(version_id: uuid.UUID, websocket: WebSocket, raw: str) -> None:

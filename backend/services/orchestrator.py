@@ -248,14 +248,6 @@ def _agent_charter_path(slug: str, role: str) -> Path:
     return claude_agent.PROJECTS_ROOT / slug / ".claude" / "agents" / _charter_slug_for_role(role) / "CLAUDE.md"
 
 
-def db_role_for_charter_slug(slug: str) -> str:
-    """Map a charter-path slug (hyphen) to its DB role value (underscore) — inverse of
-    :func:`_charter_slug_for_role`. ``ai-agent`` → ``ai_agent``; ``auditor`` → ``auditor``. Used at the
-    debug-attach boundary, which speaks charter-path slugs but looks up the underscore-keyed
-    ``OrchestratorSession.role`` (CR-V2-007). Unknown slugs pass through unchanged."""
-    return _DB_ROLE_FROM_SLUG.get(slug, slug)
-
-
 #: Per-message hook for incremental broadcast (CR-NS-018): the orchestrator calls it
 #: right after recording a dispatch-path message; the runner commits + broadcasts that
 #: one message (the engine stays WS-free). Defined here so ``claude_agent`` stays model-free.

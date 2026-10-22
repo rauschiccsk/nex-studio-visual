@@ -42,16 +42,17 @@ import { ApiError, TOKEN_STORAGE_KEY } from "@/services/api";
 import { refreshApi, sessionHoldApi } from "@/services/api/auth";
 import { useAuthStore } from "@/store/authStore";
 
-/** How often we re-evaluate whether the token needs renewing. */
+/** How often we re-evaluate whether the token needs renewing. @internal — exported for its test (DEV-155). */
 export const KEEPALIVE_CHECK_INTERVAL_MS = 30_000; // 30s
 /**
  * "Recently active" for a legacy token WITHOUT an ``iat`` claim, where "since the
  * token was issued" cannot be known: the last user input was within this window.
+ * @internal — exported for its test (DEV-155).
  */
 export const KEEPALIVE_ACTIVITY_WINDOW_MS = 5 * 60_000; // 5 min
-/** How often an untouched tab may ask the server whether a build keeps it alive. */
+/** How often an untouched tab may ask the server whether a build keeps it alive. @internal — exported for its test (DEV-155). */
 export const KEEPALIVE_HOLD_CHECK_INTERVAL_MS = 5 * 60_000; // 5 min
-/** Renew once this fraction of the token's lifetime (exp - iat) has elapsed. */
+/** Renew once this fraction of the token's lifetime (exp - iat) has elapsed. @internal — exported for its test (DEV-155). */
 export const KEEPALIVE_RENEW_FRACTION = 0.75;
 /**
  * Fallback renewal lead for legacy tokens that carry no ``iat`` claim (issued
@@ -62,6 +63,7 @@ const KEEPALIVE_FALLBACK_LEAD_MS = 5 * 60_000; // 5 min
  * Backoff after a renewal that did NOT get through (backend restarting, a 502, a network
  * blip). Doubles per consecutive failure up to the cap, so a long outage does not mean a
  * refresh call every 30s — while a brief one costs at most one extra minute.
+ * @internal — exported for its test (DEV-155).
  */
 export const KEEPALIVE_RETRY_BASE_MS = 60_000; // 1 min
 const KEEPALIVE_RETRY_MAX_MS = 10 * 60_000; // 10 min

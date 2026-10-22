@@ -92,21 +92,6 @@ def list_backlog(
     )
 
 
-@router.get("/{item_id}", response_model=BacklogItemRead)
-def get_backlog_item(
-    item_id: UUID,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> BacklogItemRead:
-    """Return one backlog item."""
-    try:
-        item = backlog_service.get_by_id(db, item_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-    authz.assert_project_id_access(db, current_user, item.project_id)
-    return BacklogItemRead.model_validate(item)
-
-
 @router.post(
     "",
     response_model=BacklogItemRead,

@@ -31,12 +31,6 @@ class CredentialCreate(BaseModel):
     content: str = Field(default="", description="Initial file content (UTF-8 markdown).")
 
 
-class CredentialUpdate(BaseModel):
-    """Partial update — only the title is mutable; file_path is identity."""
-
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-
-
 class CredentialRead(BaseModel):
     """Serialised credentials registry row."""
 

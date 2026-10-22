@@ -127,15 +127,6 @@ class TestCredentialsCRUD:
         assert (target.stat().st_mode & 0o777) == 0o600
         assert target.read_text(encoding="utf-8") == "# AWS\nkey=xyz"
 
-    def test_get_metadata_round_trip(self, router_client):
-        created = router_client.post(
-            "/api/v1/credentials",
-            json={"title": "T1", "filename": "T1.md", "content": "x"},
-        ).json()
-        resp = router_client.get(f"/api/v1/credentials/{created['id']}")
-        assert resp.status_code == 200
-        assert resp.json()["title"] == "T1"
-
     def test_get_content_returns_disk_content(self, router_client):
         created = router_client.post(
             "/api/v1/credentials",
@@ -164,18 +155,6 @@ class TestCredentialsCRUD:
         assert target.read_text(encoding="utf-8") == "new content"
         assert (target.stat().st_mode & 0o777) == 0o600
 
-    def test_patch_title_only(self, router_client):
-        created = router_client.post(
-            "/api/v1/credentials",
-            json={"title": "Old", "filename": "T4.md", "content": "x"},
-        ).json()
-        resp = router_client.patch(
-            f"/api/v1/credentials/{created['id']}",
-            json={"title": "New"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["title"] == "New"
-
     def test_delete_removes_row_and_file(self, router_client, credentials_root):
         created = router_client.post(
             "/api/v1/credentials",
@@ -187,14 +166,10 @@ class TestCredentialsCRUD:
         resp = router_client.delete(f"/api/v1/credentials/{created['id']}")
         assert resp.status_code == 204
         assert not target.exists()
-        assert router_client.get(f"/api/v1/credentials/{created['id']}").status_code == 404
+        assert created["id"] not in [c["id"] for c in router_client.get("/api/v1/credentials").json()]
 
 
 class TestCredentialsValidation:
-    def test_create_404_for_missing_id(self, router_client):
-        resp = router_client.get(f"/api/v1/credentials/{uuid.uuid4()}")
-        assert resp.status_code == 404
-
     def test_create_409_for_existing_filename(self, router_client):
         router_client.post(
             "/api/v1/credentials",

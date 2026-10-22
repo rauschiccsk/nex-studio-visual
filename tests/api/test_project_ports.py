@@ -117,104 +117,6 @@ def _make_project(db_session, creator, **overrides) -> Project:
     return project
 
 
-class TestPortCheck:
-    """GET /api/v1/projects/ports/check?port=N"""
-
-    def test_available_port(self, router_client):
-        """A port with no allocations should be reported as available."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10150})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["available"] is True
-        assert body["conflict_project"] is None
-
-    def test_unavailable_port(self, router_client, db_session, creator):
-        """A port allocated to an existing project should be unavailable."""
-        proj = _make_project(db_session, creator, backend_port=10150)
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10150})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["available"] is False
-        assert body["conflict_project"] == proj.name
-
-    def test_unavailable_cross_type(self, router_client, db_session, creator):
-        """A frontend port should conflict when checked against any type."""
-        proj = _make_project(db_session, creator, frontend_port=10200)
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10200})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["available"] is False
-        assert body["conflict_project"] == proj.name
-
-    def test_same_project_excluded(self, router_client, db_session, creator):
-        """A project's own port should be available when project_id is passed."""
-        proj = _make_project(db_session, creator, backend_port=10160)
-        resp = router_client.get(
-            "/api/v1/projects/ports/check",
-            params={"port": 10160, "project_id": str(proj.id)},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["available"] is True
-        assert body["conflict_project"] is None
-
-    def test_below_range(self, router_client):
-        """Ports below 10100 should be rejected (422)."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10099})
-        assert resp.status_code == 422
-
-    def test_above_range(self, router_client):
-        """Ports above 14999 should be rejected (422)."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 15000})
-        assert resp.status_code == 422
-
-    def test_boundary_min(self, router_client):
-        """Port 10100 (range minimum) should be accepted."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10100})
-        assert resp.status_code == 200
-        assert resp.json()["available"] is True
-
-    def test_boundary_max(self, router_client):
-        """Port 14999 (range maximum) should be accepted."""
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 14999})
-        assert resp.status_code == 200
-        assert resp.json()["available"] is True
-
-    def test_missing_port_param(self, router_client):
-        """Omitting the required port param should return 422."""
-        resp = router_client.get("/api/v1/projects/ports/check")
-        assert resp.status_code == 422
-
-
-class TestPortSuggest:
-    """GET /api/v1/projects/ports/suggest?type=T"""
-
-    @pytest.mark.parametrize("port_type", ["backend", "frontend", "db"])
-    def test_suggest_returns_port_in_range(self, router_client, port_type):
-        """Suggestion for each valid type should return a port in 10100–14999."""
-        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": port_type})
-        assert resp.status_code == 200
-        port = resp.json()["suggested_port"]
-        assert 10100 <= port <= 14999
-
-    def test_suggest_skips_allocated(self, router_client, db_session, creator):
-        """The suggested port should skip already-allocated ports."""
-        _make_project(db_session, creator, backend_port=10100)
-        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
-        assert resp.status_code == 200
-        assert resp.json()["suggested_port"] != 10100
-
-    def test_suggest_invalid_type(self, router_client):
-        """An invalid port type should return 422."""
-        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "redis"})
-        assert resp.status_code == 422
-
-    def test_suggest_missing_type_param(self, router_client):
-        """Omitting the required type param should return 422."""
-        resp = router_client.get("/api/v1/projects/ports/suggest")
-        assert resp.status_code == 422
-
-
 class TestSuggestPortBlockEndpoint:
     """GET /api/v1/projects/ports/suggest-block"""
 
@@ -252,29 +154,11 @@ class TestPortEndpointsConsultTheHost:
     ``nex-manager-frontend`` was publishing 0.0.0.0:10111.
     """
 
-    def test_check_reports_host_held_port_as_taken(self, router_client, host_ports):
-        host_ports[10111] = "nex-manager-frontend"
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10111})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["available"] is False
-        assert body["state"] == "taken"
-        assert body["source"] == "host"
-        assert body["holder"] == "nex-manager-frontend"
-        # No cockpit project owns it, so there is no project name to report.
-        assert body["conflict_project"] is None
-
     def test_suggest_block_skips_host_held_block(self, router_client, host_ports):
         host_ports[10100] = "some-neighbour"
         resp = router_client.get("/api/v1/projects/ports/suggest-block")
         assert resp.status_code == 200
         assert resp.json()["base"] == 10110
-
-    def test_suggest_skips_host_held_port(self, router_client, host_ports):
-        host_ports[10100] = "some-neighbour"
-        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
-        assert resp.status_code == 200
-        assert resp.json()["suggested_port"] == 10101
 
     def test_unconfigured_reservations_are_surfaced_to_the_operator(self, router_client):
         """The empty ``reserved_port_ranges`` default is no longer inert."""
@@ -296,18 +180,6 @@ class TestPortEndpointsFailClosed:
         monkeypatch.setattr(port_registry, "_docker_published_ports", _raise)
         port_registry.invalidate_host_port_cache()
         return port_registry
-
-    def test_check_returns_unknown_not_available(self, router_client, broken_probe):
-        resp = router_client.get("/api/v1/projects/ports/check", params={"port": 10123})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["state"] == "unknown"
-        assert body["available"] is False
-        assert "daemon unreachable" in body["reason"]
-
-    def test_suggest_refuses_with_503(self, router_client, broken_probe):
-        resp = router_client.get("/api/v1/projects/ports/suggest", params={"type": "backend"})
-        assert resp.status_code == 503
 
     def test_suggest_block_refuses_with_503(self, router_client, broken_probe):
         resp = router_client.get("/api/v1/projects/ports/suggest-block")

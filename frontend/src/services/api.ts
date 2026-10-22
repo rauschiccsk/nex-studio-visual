@@ -3,10 +3,10 @@
  *
  * Since E1 Phase B4 (CR-NS-051) the generic machinery lives in `nex-shared`
  * (`createApiClient`); this module is a THIN WRAPPER that supplies the
- * NEX-Studio-specific configuration and keeps the historical public surface
- * (`api`, `request`, `ApiError`, `RequestOptions`, `registerAuthCallback`,
- * `TOKEN_STORAGE_KEY`, `getCurrentUser`, `logoutUser`) so the ~16 feature
- * modules under `services/api/*` and the `authStore` keep importing it unchanged.
+ * NEX-Studio-specific configuration and keeps the public surface the feature
+ * modules under `services/api/*` and the `authStore` import (`api`, `ApiError`,
+ * `TOKEN_STORAGE_KEY`, `fetchBlob`, `downloadFile`). The user and the logout live in
+ * `services/api/auth.ts` (DEV-155 removed the unused copies that stood here).
  *
  * What stays NEX-Studio-specific (config, not in the lib):
  *   1. Base URL resolution from `VITE_API_BASE_URL` (bake-time) → `/api/v1`.
@@ -17,14 +17,10 @@
  * wrapper relies on it (the previous local `extractErrorMessage` was identical).
  */
 
-import { createApiClient, ApiError, registerAuthCallback } from "nex-shared";
-import type { RequestOptions } from "nex-shared";
+import { createApiClient, ApiError } from "nex-shared";
 
-// Re-export the lib primitives under the historical paths so existing imports
-// (`import { ApiError, RequestOptions, registerAuthCallback } from "@/services/api"`)
-// keep resolving.
-export { ApiError, registerAuthCallback };
-export type { RequestOptions };
+// Re-export the lib error under the historical path (`import { ApiError } from "@/services/api"`).
+export { ApiError };
 
 /** localStorage key holding the JWT access token (see ProtectedRoute). */
 export const TOKEN_STORAGE_KEY = "nex_studio_token";
@@ -116,42 +112,6 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-// ---------------------------------------------------------------------------
-// Convenience auth helpers — thin wrappers over the verb helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Convenience type mirroring ``AuthUser`` from ``api/auth.ts``.
- *
- * Duplicated here as a lightweight structural type to avoid importing from the
- * feature module (which would make the base client depend on a feature layer).
- */
-export interface CurrentUser {
-  id: string;
-  username: string;
-  email: string;
-  role: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Fetch the currently authenticated user's profile (`GET /auth/me`). */
-export function getCurrentUser(options?: RequestOptions): Promise<CurrentUser> {
-  return api.get<CurrentUser>("/auth/me", options);
-}
-
-/**
- * Invalidate the current session on the backend (`POST /auth/logout`). Uses
- * ``skipAuthRedirect`` to prevent the 401 interceptor from firing when the
- * token is already expired at the moment the user clicks logout.
- */
-export function logoutUser(): Promise<void> {
-  return api.post<void>("/auth/logout", undefined, {
-    skipAuthRedirect: true,
-  });
 }
 
 export default api;

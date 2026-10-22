@@ -14,7 +14,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.api.dependencies import get_rag_indexer
-from backend.api.routes.epics import router as epics_router
 from backend.api.routes.versions import router as versions_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User, UserSession
@@ -60,7 +59,6 @@ def build_app(db_session, *, current_user: User) -> FastAPI:
     """Mount version and epic routers on a private app with DI overrides."""
     app = FastAPI()
     app.include_router(versions_router, prefix="/api/v1")
-    app.include_router(epics_router, prefix="/api/v1/epics")
 
     def _override_get_db():
         yield db_session
@@ -99,7 +97,7 @@ def project(db_session, ri_user) -> Project:
 
 @pytest.fixture()
 def client(db_session, ri_user):
-    """TestClient with versions + epics routers and SAVEPOINT-isolated DB."""
+    """TestClient with the versions router and SAVEPOINT-isolated DB."""
     app = build_app(db_session, current_user=ri_user)
     with TestClient(app) as c:
         yield c

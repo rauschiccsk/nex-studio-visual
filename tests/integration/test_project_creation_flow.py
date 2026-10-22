@@ -2,12 +2,12 @@
 
 E2E scenario:
     1. POST /api/v1/auth/login (admin/Nex123)   -> 200 + JWT
-    2. GET  /api/v1/projects/ports/check         -> port availability (10100-14999)
-    3. Mock GitHub API to validate repo_url
-    4. POST /api/v1/projects (valid ports + repo) -> 201
-    5. GET  /api/v1/projects/{id}                -> verify created
-    6. Verify no project_members table query (service layer)
-    7. POST /api/v1/projects (duplicate slug)    -> 409 slug uniqueness
+    2. Mock GitHub API to validate repo_url
+    3. POST /api/v1/projects (valid ports + repo) -> 201
+    4. GET  /api/v1/projects/{id}                -> verify created
+    5. Verify no project_members table query (service layer)
+    6. POST /api/v1/projects (duplicate slug)    -> 409 slug uniqueness
+    A port another project holds is refused at creation (409).
 """
 
 from __future__ import annotations
@@ -46,21 +46,7 @@ class TestProjectCreationFlow:
         admin_user_id = login_data["user"]["id"]
 
         # ------------------------------------------------------------------
-        # Step 2: Check port availability (10100-14999 range)
-        # ------------------------------------------------------------------
-        for port in (10100, 10101, 10102):
-            port_resp = integration_client.get(
-                "/api/v1/projects/ports/check",
-                params={"port": port},
-                headers=admin_headers,
-            )
-            assert port_resp.status_code == 200
-            port_data = port_resp.json()
-            assert port_data["available"] is True
-            assert port_data["conflict_project"] is None
-
-        # ------------------------------------------------------------------
-        # Step 3: Create project with valid ports + GitHub repo (mocked)
+        # Step 2: Create project with valid ports + GitHub repo (mocked)
         # ------------------------------------------------------------------
         with (
             patch(
@@ -102,7 +88,7 @@ class TestProjectCreationFlow:
         assert project_data["created_by"] == admin_user_id
 
         # ------------------------------------------------------------------
-        # Step 4: Verify project exists via GET
+        # Step 3: Verify project exists via GET
         # ------------------------------------------------------------------
         get_resp = integration_client.get(
             f"/api/v1/projects/{project_id}",
@@ -115,7 +101,7 @@ class TestProjectCreationFlow:
         assert fetched["backend_port"] == 10100
 
         # ------------------------------------------------------------------
-        # Step 5: Verify project appears in list
+        # Step 4: Verify project appears in list
         # ------------------------------------------------------------------
         list_resp = integration_client.get(
             "/api/v1/projects",
@@ -127,7 +113,7 @@ class TestProjectCreationFlow:
         assert "nex-integration-test" in slugs
 
         # ------------------------------------------------------------------
-        # Step 6: Verify no project_members table query
+        # Step 5: Verify no project_members table query
         # (project creation does NOT auto-create membership rows;
         #  the service layer only inserts into the projects table)
         # ------------------------------------------------------------------
@@ -137,7 +123,7 @@ class TestProjectCreationFlow:
         assert "members" not in project_data
 
         # ------------------------------------------------------------------
-        # Step 7: Verify slug uniqueness is enforced
+        # Step 6: Verify slug uniqueness is enforced
         # ------------------------------------------------------------------
         with (
             patch(
@@ -203,17 +189,23 @@ class TestProjectCreationFlow:
             )
         assert create_resp.status_code == 201
 
-        # Now those ports should be occupied
+        # Now those ports are occupied: a second project asking for one of them is refused.
         for port in (10110, 10111):
-            check_resp = integration_client.get(
-                "/api/v1/projects/ports/check",
-                params={"port": port},
+            second = integration_client.post(
+                "/api/v1/projects",
+                json={
+                    "name": f"Second {port}",
+                    "slug": f"second-{port}",
+                    "type": "standard",
+                    "auth_mode": "password",
+                    "description": "Wants a port that is taken",
+                    "backend_port": port,
+                    "created_by": admin_user_id,
+                },
                 headers=admin_headers,
             )
-            assert check_resp.status_code == 200
-            data = check_resp.json()
-            assert data["available"] is False
-            assert data["conflict_project"] == "Port Check Project"
+            assert second.status_code == 409, second.text
+            assert str(port) in second.text
 
     def test_kb_writes_are_isolated_to_tmp(self, integration_client, _isolate_create_project_kb):
         """Fix 1: the KB writer the create/delete flow resolves is rooted at the

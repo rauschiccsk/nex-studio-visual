@@ -4,20 +4,12 @@
  * Covers:
  *   - JWT Bearer token injection from localStorage
  *   - 401 response interceptor (clears token + calls registered callback)
- *   - ``getCurrentUser()`` convenience helper
- *   - ``logoutUser()`` convenience helper
- *   - ``registerAuthCallback`` wiring
+ *   - ``registerAuthCallback`` wiring (from ``nex-shared``, the registry the client uses)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  api,
-  ApiError,
-  TOKEN_STORAGE_KEY,
-  registerAuthCallback,
-  getCurrentUser,
-  logoutUser,
-} from "@/services/api";
+import { registerAuthCallback } from "nex-shared";
+import { api, ApiError, TOKEN_STORAGE_KEY } from "@/services/api";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -32,18 +24,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: new Headers({ "content-type": "application/json" }),
     text: () => Promise.resolve(JSON.stringify(body)),
     json: () => Promise.resolve(body),
-  } as unknown as Response;
-}
-
-/** Create a 204 No Content response. */
-function noContentResponse(): Response {
-  return {
-    ok: true,
-    status: 204,
-    statusText: "No Content",
-    headers: new Headers(),
-    text: () => Promise.resolve(""),
-    json: () => Promise.reject(new Error("no body")),
   } as unknown as Response;
 }
 
@@ -213,63 +193,6 @@ describe("401 response interceptor", () => {
     // localStorage should still be cleared despite callback error.
     expect(window.localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
     expect(window.location.assign).toHaveBeenCalled();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  getCurrentUser helper                                              */
-/* ------------------------------------------------------------------ */
-
-describe("getCurrentUser", () => {
-  it("sends GET /api/v1/auth/me with token", async () => {
-    const user = {
-      id: "aaa",
-      username: "admin",
-      email: "admin@test.com",
-      role: "ri",
-      is_active: true,
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    };
-
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, "valid-token");
-    fetchMock.mockResolvedValueOnce(jsonResponse(user));
-
-    const result = await getCurrentUser();
-
-    expect(result).toEqual(user);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toContain("/api/v1/auth/me");
-    expect(init.method).toBe("GET");
-    expect(init.headers.Authorization).toBe("Bearer valid-token");
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  logoutUser helper                                                  */
-/* ------------------------------------------------------------------ */
-
-describe("logoutUser", () => {
-  it("sends POST /api/v1/auth/logout with skipAuthRedirect", async () => {
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, "valid-token");
-    fetchMock.mockResolvedValueOnce(noContentResponse());
-
-    await logoutUser();
-
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toContain("/api/v1/auth/logout");
-    expect(init.method).toBe("POST");
-  });
-
-  it("does not trigger 401 redirect on expired token during logout", async () => {
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, "expired-token");
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({ detail: "Not authenticated" }, 401),
-    );
-
-    // Should throw ApiError but NOT redirect (skipAuthRedirect).
-    await expect(logoutUser()).rejects.toThrow(ApiError);
-    expect(window.location.assign).not.toHaveBeenCalled();
   });
 });
 

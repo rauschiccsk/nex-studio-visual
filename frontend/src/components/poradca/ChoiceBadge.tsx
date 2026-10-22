@@ -10,6 +10,7 @@ import { AlertTriangle, Check, Send } from "lucide-react";
 import { choiceCard } from "@/lib/poradcaAnswer";
 import type { PoradcaChoice } from "@/types/poradca";
 
+/** @internal — exported for its test (DEV-155). */
 export const NOT_ON_CARD_NOTE = "Takú možnosť karta nemá — skontroluj kartu";
 
 const GREEN =

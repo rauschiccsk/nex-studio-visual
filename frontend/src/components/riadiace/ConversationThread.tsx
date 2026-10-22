@@ -63,7 +63,7 @@ interface Props {
   versionId?: string;
 }
 
-export function ConversationThread({ messages, activity, working, versionId }: Props) {
+function ConversationThread({ messages, activity, working, versionId }: Props) {
   // DEV-88 — a file of the project the agent names is a link into NS Code, at the line it names.
   const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? undefined);
   const codePaths = useCodePaths(projectSlug);

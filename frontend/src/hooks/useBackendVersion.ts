@@ -14,7 +14,7 @@
  */
 import { useEffect, useState } from "react";
 
-/** Adresa, na ktorej backend vydáva svoju verziu. Jedno miesto — stráž sa pýta na to isté. */
+/** Adresa, na ktorej backend vydáva svoju verziu. Jedno miesto — stráž sa pýta na to isté. @internal — exported for its test (DEV-155). */
 export const CESTA_NA_VERZIU = "/api/v1/version";
 
 export function useBackendVersion(): string | null {

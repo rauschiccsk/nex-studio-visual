@@ -72,78 +72,8 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Feat
 from backend.schemas.feat import (
     FeatCreate,
-    FeatStatus,
     FeatUpdate,
 )
-
-
-def list_feats(
-    db: Session,
-    *,
-    epic_id: Optional[UUID] = None,
-    status: Optional[FeatStatus] = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[Feat]:
-    """Return feats filtered by the supplied criteria.
-
-    Results are ordered by ``number ASC`` so feats appear in their
-    stable, human-readable numbering order (feat 1, feat 2, …) — this
-    matches the hierarchical-numbering convention documented in
-    DESIGN.md §1.9 and the ``EpicList`` UI (DESIGN.md §3.1).
-
-    Args:
-        db: Active SQLAlchemy session.
-        epic_id: Optional epic filter — restrict to feats belonging to
-            a specific epic (the core ``GET /epics/{id}/feats`` query,
-            DESIGN.md §2.6).
-        status: Optional lifecycle-status filter (``todo`` |
-            ``in_progress`` | ``done`` | ``failed``).
-        limit: Maximum number of rows to return.
-        offset: Number of rows to skip.
-
-    Returns:
-        List of :class:`Feat` instances.
-    """
-    stmt = select(Feat)
-    if epic_id is not None:
-        stmt = stmt.where(Feat.epic_id == epic_id)
-    if status is not None:
-        stmt = stmt.where(Feat.status == status)
-    stmt = stmt.order_by(Feat.number.asc()).limit(limit).offset(offset)
-    return list(db.execute(stmt).scalars().all())
-
-
-def count_feats(
-    db: Session,
-    *,
-    epic_id: Optional[UUID] = None,
-    status: Optional[FeatStatus] = None,
-) -> int:
-    """Return the total number of feats matching the given filters.
-
-    Mirrors the ``epic_id`` / ``status`` filters of :func:`list_feats`
-    so a paginated response can report the unfiltered total alongside
-    the current page of items (same pattern as
-    :func:`~backend.services.epic.count_epics` and
-    :func:`~backend.services.bug.count_bugs`).
-
-    Args:
-        db: Active SQLAlchemy session.
-        epic_id: Optional epic filter — restrict the count to feats
-            belonging to a specific epic.
-        status: Optional lifecycle-status filter (``todo`` |
-            ``in_progress`` | ``done`` | ``failed``).
-
-    Returns:
-        Total number of rows matching the filters.
-    """
-    stmt = select(func.count()).select_from(Feat)
-    if epic_id is not None:
-        stmt = stmt.where(Feat.epic_id == epic_id)
-    if status is not None:
-        stmt = stmt.where(Feat.status == status)
-    return int(db.execute(stmt).scalar_one())
 
 
 def get_by_id(db: Session, feat_id: UUID) -> Feat:

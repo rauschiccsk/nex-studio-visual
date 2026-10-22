@@ -626,48 +626,6 @@ def release(db: Session, version_id: UUID) -> Version:
     return version
 
 
-def delete(db: Session, version_id: UUID) -> None:
-    """Delete a version permanently.
-
-    Safety checks (applied in order):
-
-    1. Version must exist (``ValueError`` → HTTP 404 if not).
-    2. Status must not be ``released`` — released versions are immutable
-       artefacts of project history (``ValueError`` → HTTP 409).
-    3. The version must have no EPICs (``epic_count == 0``) — an EPIC
-       constitutes a Task Plan entry; deleting a version with attached
-       EPICs would silently orphan planning data.  The DB-level
-       ``ON DELETE RESTRICT`` on ``epics.version_id`` provides a
-       second-line defence, but the pre-check gives a friendlier error
-       message (``ValueError`` → HTTP 409).
-
-    Bugs are not checked separately because a BUG without an EPIC
-    attached to the same version is unusual and the DB RESTRICT on
-    ``bugs.version_id`` covers that edge.
-
-    Args:
-        db: Active SQLAlchemy session.
-        version_id: Primary key of the version to delete.
-
-    Raises:
-        ValueError: If the version does not exist, is ``released``, or
-            still has at least one EPIC.
-    """
-    # Re-use get_by_id so we get a proper 404 path on missing rows.
-    version = get_by_id(db, version_id)
-
-    if version.status == "released":
-        raise ValueError(f"Cannot delete released version {version_id}")
-
-    epic_count_stmt = select(func.count(Epic.id)).where(Epic.version_id == version_id)
-    epic_count = db.execute(epic_count_stmt).scalar_one()
-    if epic_count > 0:
-        raise ValueError(f"Cannot delete version {version_id}: it has {epic_count} EPIC(s) (Task Plan not empty)")
-
-    db.delete(version)
-    db.flush()
-
-
 def build_finished(db: Session, version: Version) -> bool:
     """Is the version finished — its build ended, or it was released (a released one may predate the pipeline)?
 

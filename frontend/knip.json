@@ -1,7 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["src/__tests__/**/*.{ts,tsx}", "e2e/**/*.ts"],
-  "project": ["src/**/*.{ts,tsx,css}", "e2e/**/*.ts"],
+  "project": ["src/**/*.{ts,tsx,css}!", "!src/__tests__/**!", "e2e/**/*.ts"],
+  "ignore": ["src/services/api/pipeline.generated.ts"],
   "ignoreBinaries": ["poetry"],
   "rules": { "duplicates": "off" }
 }

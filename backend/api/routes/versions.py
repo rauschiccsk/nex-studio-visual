@@ -20,15 +20,7 @@ than a single resource prefix:
   BUGs eagerly loaded for the ``VersionDetailPage`` UI. Authenticated
   users only.
 * ``PATCH  /versions/{version_id}`` → partial update of mutable fields.
-  ``ri`` role only. Note: the gated ``planned → released`` transition
-  goes through :func:`release_version`, **not** through PATCH —
-  status-only patches are reserved for backfill / correction flows
-  (DESIGN.md §4.0 Rule 5).
-* ``POST   /versions/{version_id}/release`` → the DESIGN.md §4.0 Rule 5
-  release gate. Sets ``status = 'released'`` and ``release_date = today``
-  on success, returns HTTP 422 with the list of blocking EPIC IDs when
-  one or more EPICs are still ``planned`` / ``in_progress``. ``ri`` role
-  only.
+  ``ri`` role only.
 
 v4.0.35 (project-ownership authorization): the per-route role annotations
 above are superseded — EVERY endpoint here now floors at any authenticated
@@ -56,7 +48,7 @@ import re
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -101,21 +93,6 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
-
-
-def _parse_blocking_ids(message: str) -> list[str]:
-    """Extract the list of blocking EPIC ids embedded in a ``release`` ValueError.
-
-    The service formats the message as ``"... blocking EPICs (status !=
-    'done'): [<uuid1>, <uuid2>, ...]"`` (see
-    :func:`backend.services.version.release`). This helper isolates the
-    bracketed segment so the router can return both the human-readable
-    message *and* a machine-readable id list in the 422 detail payload.
-    """
-    match = _BLOCKING_IDS_RE.search(message)
-    if not match:
-        return []
-    return [part.strip() for part in match.group(1).split(",") if part.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -256,40 +233,6 @@ def update_version(
         raise _map_value_error(exc) from exc
     db.refresh(version)
     return VersionRead.model_validate(version)
-
-
-@router.delete(
-    "/versions/{version_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_version(
-    version_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_shu_or_above),
-) -> Response:
-    """Permanently delete a version.
-
-    Only allowed when the version has no EPICs (Task Plan is empty) and
-    its status is not ``released``. Released versions are permanent
-    artefacts of project history and may not be deleted.
-
-    Error mapping:
-
-    * **404** — the version does not exist.
-    * **409** — the version is ``released``, or it still has one or more
-      EPICs attached (Task Plan not empty).
-
-    v4.0.35: owner-or-admin — a Junior may delete only their OWN
-    project's version; ri/ha may delete any.
-    """
-    authz.assert_version_access(db, current_user, version_id)
-    try:
-        version_service.delete(db, version_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        raise _map_value_error(exc) from exc
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 class _TaskPlanResponse(BaseModel):
@@ -593,122 +536,3 @@ def peek_zadanie(
     except ValueError as exc:
         raise _map_value_error(exc) from exc
     return _ZadaniePeekResponse(content=content, relative_path=rel)
-
-
-@router.post("/versions/{version_id}/reset-tasks", status_code=status.HTTP_200_OK)
-def reset_tasks(
-    version_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_shu_or_above),
-) -> dict:
-    """Reset all tasks in a version back to ``todo`` status.
-
-    Sets every Task under every Epic of this version to ``todo``, and
-    recomputes Feat / Epic statuses accordingly. Does not delete any records.
-    v4.0.35: owner-or-admin — a Junior may reset only their OWN project's version.
-    """
-    authz.assert_version_access(db, current_user, version_id)
-    epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
-    epic_ids = [e.id for e in epics]
-    if not epic_ids:
-        return {"reset": 0}
-
-    feats = db.execute(select(Feat).where(Feat.epic_id.in_(epic_ids))).scalars().all()
-    feat_ids = [f.id for f in feats]
-
-    task_count = 0
-    if feat_ids:
-        tasks = db.execute(select(Task).where(Task.feat_id.in_(feat_ids))).scalars().all()
-        for t in tasks:
-            t.status = "todo"
-            task_count += 1
-        db.flush()
-
-    for f in feats:
-        f.status = "todo"
-    for e in epics:
-        e.status = "planned"
-    db.commit()
-
-    return {"reset": task_count}
-
-
-@router.post("/versions/{version_id}/reset-plan", status_code=status.HTTP_200_OK)
-def reset_plan(
-    version_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_shu_or_above),
-) -> dict:
-    """Delete the entire task plan for a version (all EPICs, Feats and Tasks).
-
-    Hard-deletes every Epic under this version. Feats and Tasks are removed
-    via ``ON DELETE CASCADE`` at the DB level. v4.0.35: owner-or-admin —
-    a Junior may reset only their OWN project's version.
-    """
-    authz.assert_version_access(db, current_user, version_id)
-    epics = db.execute(select(Epic).where(Epic.version_id == version_id)).scalars().all()
-    count = len(epics)
-    for e in epics:
-        db.delete(e)
-    db.commit()
-    return {"deleted_epics": count}
-
-
-@router.post(
-    "/versions/{version_id}/release",
-    response_model=VersionRead,
-)
-def release_version(
-    version_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_shu_or_above),
-) -> VersionRead:
-    """Release the version — the DESIGN.md §4.0 Rule 5 release gate.
-
-    Delegates to :func:`backend.services.version.release`, which checks
-    that every EPIC assigned to the version has ``status='done'``. On
-    success: ``status`` becomes ``released``, ``release_date`` is stamped
-    to ``date.today()`` and the updated row is returned.
-
-    Error mapping:
-
-    * **404** — the version does not exist.
-    * **409** — the version is already in the ``released`` state
-      (forward-only transition guard; DESIGN.md §4.0 Rule 3).
-    * **422** — one or more EPICs are still ``planned`` /
-      ``in_progress``. The detail payload is structured as ``{"message":
-      "...", "blocking_epic_ids": ["<uuid>", ...]}`` so the
-      ``VersionsPage`` UI can render the blockers inline.
-
-    v4.0.35: owner-or-admin — a Junior may release only their OWN
-    project's version; ri/ha may release any.
-    """
-    authz.assert_version_access(db, current_user, version_id)
-    try:
-        version = version_service.release(db, version_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        message = str(exc)
-        lowered = message.lower()
-        if "not found" in lowered:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=message,
-            ) from exc
-        if "already released" in lowered:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=message,
-            ) from exc
-        # Blocking-EPICs path — return a structured 422 so clients can
-        # render the blockers without re-parsing the human message.
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "message": message,
-                "blocking_epic_ids": _parse_blocking_ids(message),
-            },
-        ) from exc
-    db.refresh(version)
-    return VersionRead.model_validate(version)

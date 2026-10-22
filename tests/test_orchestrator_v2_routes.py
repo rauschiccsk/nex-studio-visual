@@ -21,7 +21,6 @@ from sqlalchemy import select
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
-from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
@@ -195,17 +194,6 @@ def test_fast_fix_route_no_finished_base_400(client, db_session):
 # ── messages pagination ─────────────────────────────────────────────────────────
 
 
-def test_messages_paginated(client, db_session):
-    version = _make_version(db_session, client._ri)
-    client.post(f"/api/v1/pipeline/{version.id}/action", json={"action": "start"})
-    r = client.get(f"/api/v1/pipeline/{version.id}/messages?skip=0&limit=1")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["total"] >= 1
-    assert len(body["items"]) == 1
-    assert body["skip"] == 0 and body["limit"] == 1
-
-
 # ── post-action fans out state_changed + message_added to a live socket ──────────
 
 
@@ -259,40 +247,6 @@ def test_non_ri_forbidden(db_session, monkeypatch):
 
 
 # ── debug-terminal resumes the existing orchestrator session ────────────────────
-
-
-def test_debug_terminal_resumes_orchestrator_session(client, db_session, monkeypatch):
-    from backend.db.models.agent_terminal import AgentTerminalSession
-    from backend.services import agent_terminal as agent_terminal_module
-
-    version = _make_version(db_session, client._ri)
-    slug = db_session.get(Project, db_session.get(Version, version.id).project_id).slug
-    orch_uuid = uuid.uuid4()
-    db_session.add(OrchestratorSession(project_slug=slug, role="ai_agent", claude_session_id=orch_uuid))
-    db_session.flush()
-
-    captured = {}
-
-    async def _fake_spawn(*, user_id, role, project_slug, db, claude_session_id=None):
-        captured["claude_session_id"] = claude_session_id
-        captured["role"] = role
-        captured["project_slug"] = project_slug
-        row = AgentTerminalSession(
-            user_id=user_id, role=role, project_slug=project_slug, pid=4321, claude_session_id=claude_session_id
-        )
-        db.add(row)
-        db.flush()
-        return row
-
-    monkeypatch.setattr(agent_terminal_module, "spawn", _fake_spawn)
-
-    r = client.post(f"/api/v1/pipeline/{version.id}/debug-terminal?role=ai-agent")
-    assert r.status_code == 200, r.text
-    # the EXISTING orchestrator UUID is resumed, not a fresh one
-    assert captured["claude_session_id"] == orch_uuid
-    assert captured["role"] == "ai-agent"
-    assert captured["project_slug"] == slug
-    assert r.json()["role"] == "ai-agent"
 
 
 def test_debug_terminal_no_orchestrator_session_404(client, db_session):

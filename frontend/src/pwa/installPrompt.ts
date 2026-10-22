@@ -134,6 +134,7 @@ export async function runInstallPrompt(): Promise<InstallPromptOutcome> {
  * Returns `false` when writing FAILED. Storage can also fail SILENTLY (throws nothing
  * and stores nothing), so the write is verified by reading back, not by the absence of
  * an exception.
+ * @internal — exported for its test (DEV-155).
  */
 export function markInstalled(): boolean {
   try {
@@ -182,7 +183,7 @@ function hasPromptApi(): boolean {
   return "onbeforeinstallprompt" in window && w.onbeforeinstallprompt !== undefined;
 }
 
-/** FOR tests only: resets the module state. */
+/** FOR tests only: resets the module state. @internal — exported for its test (DEV-155). */
 export function __resetInstallCapture(): void {
   deferred = null;
   dismissed = false;

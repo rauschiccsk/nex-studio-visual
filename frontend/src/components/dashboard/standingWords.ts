@@ -9,7 +9,7 @@ import { formatDayMonth } from "@/utils/format";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** „dnes“, „1 deň“, „3 dni“, „5 dní“ — how long a build has waited. */
+/** „dnes“, „1 deň“, „3 dni“, „5 dní“ — how long a build has waited. @internal — exported for its test (DEV-155). */
 export function daysWords(since: string, now: number = Date.now()): string {
   const days = Math.max(0, Math.floor((now - new Date(since).getTime()) / DAY_MS));
   if (days === 0) return "dnes";
@@ -41,6 +41,7 @@ export function nextWords(v: OpenVersionStanding): string {
 /**
  * „z“ or „zo“ before a number, as it is read: z piatich, zo šiestich, zo šestnástich, zo sto. The preposition takes
  * „zo“ before the sounds s, z, š, ž — the first word of the number decides.
+ * @internal — exported for its test (DEV-155).
  */
 export function zOrZo(n: number): string {
   const starts = (first: number) => [4, 6, 7].includes(first);

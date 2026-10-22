@@ -4,6 +4,7 @@
  * server, so a secret, an ignored file or a path that does not exist stays plain text.
  */
 
+/** @internal — exported for its test (DEV-155). */
 export interface CodePathHit {
   start: number;
   end: number;
@@ -11,7 +12,7 @@ export interface CodePathHit {
   line: number | null;
 }
 
-/** The address NS Code opens a file at (DEV-86). */
+/** The address NS Code opens a file at (DEV-86). @internal — exported for its test (DEV-155). */
 export function nsCodeHref(path: string, line: number | null): string {
   const params = new URLSearchParams({ path });
   if (line) params.set("line", String(line));
@@ -23,7 +24,7 @@ export function nsCodeHref(path: string, line: number | null): string {
 // and `:line` after it.
 const CANDIDATE = /(\/opt\/projects\/([\w.-]+)\/)?((?:[\w@-][\w.@-]*\/)*[\w@-](?:[\w.@-]*[\w@-])?)(?::(\d+))?/g;
 
-/** The files of the project the text names, as NS Code shows them. */
+/** The files of the project the text names, as NS Code shows them. @internal — exported for its test (DEV-155). */
 export function findCodePaths(text: string, shown: ReadonlySet<string>, projectSlug?: string): CodePathHit[] {
   const hits: CodePathHit[] = [];
   for (const m of text.matchAll(CANDIDATE)) {

@@ -13,7 +13,7 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
 import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
-import { PlanUlohRail } from "@/components/riadiace/PlanUlohRail";
+import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 import DeployBlockNotice from "@/components/deploy/DeployBlockNotice";
 import { getTaskPlan } from "@/services/api/versions";
 import type { CiStatus, PipelineBoard, PipelineState } from "@/services/api/pipeline";

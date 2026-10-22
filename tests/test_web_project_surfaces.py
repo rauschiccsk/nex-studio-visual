@@ -239,8 +239,7 @@ def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_sessi
         BASE + 5,
         owner.id,
     )
-    surfaces = client.get(f"/api/v1/projects/{project.id}/surfaces").json()
-    assert [s["name"] for s in surfaces] == ["admin", "web"]
+    assert [s.name for s in ps.surfaces_of(project)] == ["admin", "web"]
 
 
 @pytest.mark.parametrize(

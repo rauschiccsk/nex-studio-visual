@@ -48,9 +48,7 @@ from backend.schemas.user import (
     UserUpdate,
 )
 from backend.schemas.user_session import (
-    UserSessionCreate,
     UserSessionRead,
-    UserSessionUpdate,
 )
 from backend.schemas.version import (
     VersionCreate,
@@ -90,9 +88,7 @@ __all__ = [
     "UserRead",
     "UserRole",
     "UserUpdate",
-    "UserSessionCreate",
     "UserSessionRead",
-    "UserSessionUpdate",
     "VersionCreate",
     "VersionRead",
     "VersionStatus",

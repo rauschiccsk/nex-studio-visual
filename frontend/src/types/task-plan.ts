@@ -12,7 +12,7 @@ import type { BillingCategory } from "@/lib/billingCategory";
 /** Epic lifecycle status (``epics.status``). */
 type EpicNodeStatus = "planned" | "in_progress" | "done";
 
-/** Feat / Task lifecycle status (``feats.status`` / ``tasks.status``). */
+/** Feat / Task lifecycle status (``feats.status`` / ``tasks.status``). @internal — exported for its test (DEV-155). */
 export type TaskNodeStatus = "todo" | "in_progress" | "done" | "failed";
 
 /**

@@ -276,10 +276,6 @@ class _FakeReader:
         }
 
     @staticmethod
-    def get_stats():
-        return {"tenants": {"icc": {"points": 5, "documents": 2}}}
-
-    @staticmethod
     def get_categories(*, tenant):  # noqa: ARG004
         return ["icc", "shuhari", "credentials", "projects"]
 
@@ -339,46 +335,6 @@ class TestRagRouter:
         )
         assert resp.status_code == 200
         assert resp.json()["source_file"] == "credentials/SECRET.md"
-
-    def test_list_filters_for_shu(self, db_session, fake_reader):
-        shu = _make_user(db_session, "shu")
-        client = _build_client(db_session, shu)
-        resp = client.get("/api/v1/rag/list")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert all(d["category"] != "credentials" for d in body["documents"])
-
-    def test_stats_passthrough(self, db_session, fake_reader):
-        ri = _make_user(db_session, "ri")
-        client = _build_client(db_session, ri)
-        resp = client.get("/api/v1/rag/stats")
-        assert resp.status_code == 200
-        assert resp.json()["tenants"]["icc"]["documents"] == 2
-
-    def test_categories_credentials_hidden_for_shu(self, db_session, fake_reader):
-        shu = _make_user(db_session, "shu")
-        client = _build_client(db_session, shu)
-        resp = client.get("/api/v1/rag/categories")
-        assert resp.status_code == 200
-        cats = resp.json()["categories"]
-        assert "credentials" not in cats
-        # shu's kb_access baseline grants icc/ — must be in result
-        assert "icc" in cats
-        # projects/ is ri/ha-only baseline, shu without project membership
-        # should not see it
-        assert "projects" not in cats
-
-    def test_categories_full_for_ri(self, db_session, fake_reader):
-        ri = _make_user(db_session, "ri")
-        client = _build_client(db_session, ri)
-        resp = client.get("/api/v1/rag/categories")
-        assert resp.status_code == 200
-        cats = resp.json()["categories"]
-        # ri has full KB access — both _is_restricted and kb_access filters
-        # are skipped, so every category from the reader passes through.
-        assert "credentials" in cats
-        assert "icc" in cats
-        assert "projects" in cats
 
 
 # ---------------------------------------------------------------------------
@@ -471,9 +427,6 @@ class TestRagRouterReportsOutages:
     @pytest.mark.parametrize(
         ("path", "params"),
         [
-            ("/api/v1/rag/list", {}),
-            ("/api/v1/rag/stats", {}),
-            ("/api/v1/rag/categories", {}),
             ("/api/v1/rag/document", {"source_file": "icc/DECISIONS.md"}),
         ],
     )

@@ -8,7 +8,7 @@ import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-librar
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
-import { PlanUlohRail } from "@/components/riadiace/PlanUlohRail";
+import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
 import { setTaskCategories } from "@/services/api/deliveryStatements";
 import { getTaskPlan } from "@/services/api/versions";
 import type { PipelineBoard } from "@/services/api/pipeline";

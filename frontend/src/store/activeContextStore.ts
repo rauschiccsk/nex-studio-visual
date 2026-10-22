@@ -45,6 +45,7 @@ import { persist } from "zustand/middleware";
 
 /** localStorage key for *username*'s pin. ``undefined`` → the anonymous slot,
  *  which is never written by a signed-in user and so is always empty. */
+/** @internal — exported for its test (DEV-155). */
 export function activeContextKey(username: string | undefined): string {
   return `nex-active-context:${username ?? "anonymous"}`;
 }

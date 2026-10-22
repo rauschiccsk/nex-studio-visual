@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { ConversationThread } from "@/components/riadiace/ConversationThread";
+import ConversationThread from "@/components/riadiace/ConversationThread";
 import type { PipelineMessage } from "@/services/api/pipeline";
 
 function agentMsg(payload: Record<string, unknown> | null, content = "Jednoriadkové zhrnutie."): PipelineMessage {

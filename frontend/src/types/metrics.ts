@@ -15,6 +15,7 @@ interface UsageTotals {
 // `phase` = a build phase (measured), `external` = the manually entered row, `system` = un-phased
 // engine tokens (agent-only: no human equivalent exists, so its human figures are always null).
 // ICCINT-167: + "poradca" — Poradca answers (measured, without a human comparison).
+/** @internal — exported for its test (DEV-155). */
 export type CostRowKind = "phase" | "external" | "poradca" | "system";
 
 interface Unpriced {

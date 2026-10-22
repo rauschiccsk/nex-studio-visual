@@ -19,7 +19,7 @@ vi.mock("@/services/api/projectFiles", () => ({ uploadPrivateFileApi, listPrivat
 
 import AttachFileButton from "@/components/riadiace/AttachFileButton";
 import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
-import { ConversationComposer } from "@/components/riadiace/ConversationComposer";
+import ConversationComposer from "@/components/riadiace/ConversationComposer";
 import PrivateFilesPanel from "@/components/riadiace/PrivateFilesPanel";
 import { withAttachedLine } from "@/components/riadiace/privateFiles";
 import { ApiError } from "@/services/api";

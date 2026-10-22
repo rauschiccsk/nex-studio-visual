@@ -120,6 +120,7 @@ export interface DeployMatrixRow {
  * `Literal`, FastAPI emits it as an OpenAPI enum and `npm run codegen` carries it here. Adding a cause on
  * the backend therefore makes `DeployBlockNotice`'s switch fail type-check until it is handled — which is
  * the point (an unhandled cause used to render a confidently wrong explanation).
+ * @internal — exported for its test (DEV-155).
  */
 export type DeployBlockCause = components["schemas"]["DeployBlock"]["cause"];
 

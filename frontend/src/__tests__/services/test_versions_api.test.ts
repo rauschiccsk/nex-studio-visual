@@ -12,7 +12,6 @@ import {
   getVersion,
   createVersion,
   updateVersion,
-  releaseVersion,
   readZadanie,
 } from "@/services/api/versions";
 import type {
@@ -159,20 +158,3 @@ describe("updateVersion", () => {
   });
 });
 
-describe("releaseVersion", () => {
-  it("sends POST /versions/{id}/release", async () => {
-    const released = makeVersion({
-      status: "released",
-      release_date: "2026-04-16",
-    });
-    fetchMock.mockResolvedValueOnce(jsonResponse(released));
-
-    const result = await releaseVersion("ver-1");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/v1/versions/ver-1/release");
-    expect(init.method).toBe("POST");
-    expect(result).toEqual(released);
-  });
-});

@@ -79,78 +79,9 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Epic
 from backend.schemas.epic import (
     EpicCreate,
-    EpicStatus,
     EpicUpdate,
 )
 from backend.services import version as version_service
-
-
-def list_epics(
-    db: Session,
-    *,
-    project_id: Optional[UUID] = None,
-    status: Optional[EpicStatus] = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[Epic]:
-    """Return epics filtered by the supplied criteria.
-
-    Results are ordered by ``number ASC`` so epics appear in their
-    stable, human-readable numbering order (epic 1, epic 2, …) — this
-    matches the hierarchical-numbering convention documented in
-    DESIGN.md §1.9 and the ``EpicList`` UI (DESIGN.md §3.1).
-
-    Args:
-        db: Active SQLAlchemy session.
-        project_id: Optional project filter — restrict to epics
-            belonging to a specific project (the core Tasks-page query,
-            DESIGN.md §3.1 ``TasksPage``).
-        status: Optional lifecycle-status filter (``planned`` |
-            ``in_progress`` | ``done``).
-        limit: Maximum number of rows to return.
-        offset: Number of rows to skip.
-
-    Returns:
-        List of :class:`Epic` instances.
-    """
-    stmt = select(Epic)
-    if project_id is not None:
-        stmt = stmt.where(Epic.project_id == project_id)
-    if status is not None:
-        stmt = stmt.where(Epic.status == status)
-    stmt = stmt.order_by(Epic.number.asc()).limit(limit).offset(offset)
-    return list(db.execute(stmt).scalars().all())
-
-
-def count_epics(
-    db: Session,
-    *,
-    project_id: Optional[UUID] = None,
-    status: Optional[EpicStatus] = None,
-) -> int:
-    """Return the total number of epics matching the given filters.
-
-    Mirrors the ``project_id`` / ``status`` filters of
-    :func:`list_epics` so a paginated response can report the unfiltered
-    total alongside the current page of items (same pattern as
-    :func:`~backend.services.bug.count_bugs` and
-    :func:`~backend.services.design_document.count_design_documents`).
-
-    Args:
-        db: Active SQLAlchemy session.
-        project_id: Optional project filter.
-        status: Optional lifecycle-status filter (``planned`` |
-            ``in_progress`` | ``done``).
-
-    Returns:
-        Total number of rows matching the filters.
-    """
-    stmt = select(func.count()).select_from(Epic)
-    if project_id is not None:
-        stmt = stmt.where(Epic.project_id == project_id)
-    if status is not None:
-        stmt = stmt.where(Epic.status == status)
-    return int(db.execute(stmt).scalar_one())
 
 
 def get_by_id(db: Session, epic_id: UUID) -> Epic:

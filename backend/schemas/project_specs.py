@@ -76,9 +76,3 @@ class ProjectSpecContent(BaseModel):
         default=True,
         description="False if the file is binary and cannot be rendered as text.",
     )
-
-
-class ProjectSpecUpdate(BaseModel):
-    """Request body for ``PUT /api/v1/project-specs/content``."""
-
-    content: str

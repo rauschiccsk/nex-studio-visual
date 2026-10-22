@@ -1,11 +1,8 @@
 """REST router for the per-customer Deploy subsystem (v2.0.0, CR-V2-026).
 
 Implements design §3 (Deploy & Customers) — DEPLOY-6/8/9/10. Like the customers
-router, it straddles two URL families, so it mounts with the bare ``/api/v1``
-prefix in :mod:`backend.main`:
+router, it mounts with the bare ``/api/v1`` prefix in :mod:`backend.main`:
 
-* ``GET  /projects/{slug}/deploy-events``        → a project's deploy/accept log (matrix feed).
-* ``GET  /customers/{customer_id}/deploy-events`` → one customer's deploy/accept log.
 * ``POST /customers/{customer_id}/deploy``        → Nasadiť: deploy a verified version (uat | prod).
 * ``POST /customers/{customer_id}/accept``        → Akceptovať: record a UAT acceptance (opens PROD).
 
@@ -214,29 +211,6 @@ def get_uat_guide(
             for c in customers
         ],
     )
-
-
-@router.get("/projects/{slug}/deploy-events", response_model=list[DeployEventRead])
-def list_project_deploy_events(
-    slug: str,
-    db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
-) -> list[DeployEvent]:
-    """Return every deploy/accept event for the project ``slug`` (newest first)."""
-    authz.assert_project_slug_access(db, _current_user, slug)
-    project = _resolve_project(db, slug)
-    return deploy_service.list_project_events(db, project.id)
-
-
-@router.get("/customers/{customer_id}/deploy-events", response_model=list[DeployEventRead])
-def list_customer_deploy_events(
-    customer_id: UUID,
-    db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
-) -> list[DeployEvent]:
-    """Return every deploy/accept event for one customer (newest first)."""
-    authz.assert_customer_access(db, _current_user, customer_id)
-    return deploy_service.list_events(db, customer_id)
 
 
 # ---------------------------------------------------------------------------

@@ -186,33 +186,10 @@ class TestSearchReportsRealReason:
 
 
 class TestOtherEntryPointsReportOutages:
-    def test_list_documents_unreachable_raises_typed_error(self, stub_client):
-        stub_client.scroll.side_effect = _unreachable()
-        with pytest.raises(RagUnavailableError):
-            reader.list_documents(tenant="icc")
-
     def test_get_document_unreachable_raises_typed_error(self, stub_client):
         stub_client.scroll.side_effect = _unreachable()
         with pytest.raises(RagUnavailableError):
             reader.get_document(tenant="icc", source_file="icc/X.md")
-
-    def test_get_categories_unreachable_raises_typed_error(self, stub_client):
-        stub_client.scroll.side_effect = _unreachable()
-        with pytest.raises(RagUnavailableError):
-            reader.get_categories(tenant="icc")
-
-    def test_stats_missing_collection_still_reports_zeros(self, stub_client):
-        """Absent collection = genuinely nothing indexed — keep the tolerant path."""
-        stub_client.get_collection.side_effect = _missing_collection()
-        stats = reader.get_stats()
-        assert stats["tenants"]["icc"] == {"points": 0, "documents": 0}
-
-    def test_stats_unreachable_raises_instead_of_reporting_zeros(self, stub_client):
-        """Zeros for a service we could not reach is the same lie as an empty search."""
-        stub_client.get_collection.side_effect = _unreachable()
-        with pytest.raises(RagUnavailableError) as excinfo:
-            reader.get_stats()
-        assert excinfo.value.kind == "unreachable"
 
 
 # ---------------------------------------------------------------------------

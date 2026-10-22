@@ -278,30 +278,3 @@ def test_read_content_missing_file(fake_projects_root: Path) -> None:
 
 
 # ── write_content ──────────────────────────────────────────────────────
-
-
-def test_write_content_overwrites_existing_md(fake_projects_root: Path) -> None:
-    _seed_project(fake_projects_root, "nex-inbox", {"docs/specs/x.md": "original"})
-    svc.write_content("nex-inbox", "docs/specs/x.md", "edited")
-    content, _ = svc.read_content("nex-inbox", "docs/specs/x.md")
-    assert content == "edited"
-
-
-def test_write_content_rejects_non_md(fake_projects_root: Path) -> None:
-    """Edit endpoint is Markdown-only (Director scope: typo fixes on
-    spec docs, not editing data files). View is fine, write isn't.
-    """
-    _seed_project(fake_projects_root, "nex-inbox", {"docs/import/data.csv": "a,b\n1,2"})
-    with pytest.raises(ProjectSpecsError, match=r"\.md"):
-        svc.write_content("nex-inbox", "docs/import/data.csv", "x")
-
-
-def test_write_content_refuses_to_create_new(fake_projects_root: Path) -> None:
-    (fake_projects_root / "nex-inbox" / "docs").mkdir(parents=True)
-    with pytest.raises(ProjectSpecsError, match="cannot create"):
-        svc.write_content("nex-inbox", "docs/new.md", "x")
-
-
-def test_write_content_rejects_traversal(fake_projects_root: Path) -> None:
-    with pytest.raises(ProjectSpecsError, match="traversal"):
-        svc.write_content("nex-inbox", "docs/../escape.md", "x")

@@ -37,14 +37,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
-from backend.core.security import get_current_user, require_shu_or_above
+from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
 from backend.schemas.project_specs import (
     ProjectSpecContent,
     ProjectSpecListResponse,
-    ProjectSpecUpdate,
 )
 from backend.services import project_specs as project_specs_service
 from backend.services.project_specs import ProjectSpecsError
@@ -103,29 +102,3 @@ def get_project_spec_content(
         content=content,
         is_text=is_text,
     )
-
-
-@router.put("/content", status_code=status.HTTP_200_OK)
-def update_project_spec_content(
-    payload: ProjectSpecUpdate,
-    slug: str = Query(..., description="Project slug"),
-    path: str = Query(..., description="Path within the project"),
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> dict[str, str]:
-    """Overwrite a single ``.md`` file. v4.0.43: owner-OR-``ri`` (was ``ri`` only) — the project owner or
-    an ``ri`` may fix a typo; a Medior does not gain edits on projects it doesn't own.
-
-    The file must already exist — this endpoint does **not** create new
-    documents. New spec docs are produced by the agents (Designer /
-    Implementer / Auditor) directly in the project repo.
-    """
-    authz.assert_project_slug_access(db, current_user, slug)
-    try:
-        project_specs_service.write_content(slug, path, payload.content)
-    except ProjectSpecsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    return {"relative_path": f"{slug}/{path}", "status": "updated"}

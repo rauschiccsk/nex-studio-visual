@@ -30,7 +30,6 @@ Coverage:
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import pytest
 from fastapi import FastAPI
@@ -409,63 +408,3 @@ class TestUpdateVersion:
 # ---------------------------------------------------------------------------
 # POST /versions/{version_id}/release — release gate (ri only)
 # ---------------------------------------------------------------------------
-
-
-class TestReleaseVersion:
-    def test_release_success_returns_200(self, ri_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        # No EPICs → release gate trivially passes (DESIGN.md §4.0 Rule 5).
-
-        resp = ri_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["status"] == "released"
-        assert body["release_date"] == date.today().isoformat()
-        assert body["id"] == str(version.id)
-
-    def test_release_with_all_done_epics_succeeds(self, ri_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        _make_epic(db_session, project=project, version=version, number=1, status_="done")
-        _make_epic(db_session, project=project, version=version, number=2, status_="done")
-
-        resp = ri_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["status"] == "released"
-
-    def test_release_blocked_returns_422_with_blocking_ids(self, ri_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        _make_epic(db_session, project=project, version=version, number=1, status_="done")
-        in_progress = _make_epic(db_session, project=project, version=version, number=2, status_="in_progress")
-        planned = _make_epic(db_session, project=project, version=version, number=3, status_="planned")
-
-        resp = ri_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 422, resp.text
-        detail = resp.json()["detail"]
-        assert isinstance(detail, dict)
-        assert "blocking EPICs" in detail["message"]
-        blocking = detail["blocking_epic_ids"]
-        assert isinstance(blocking, list)
-        assert str(in_progress.id) in blocking
-        assert str(planned.id) in blocking
-
-    def test_release_already_released_returns_409(self, ri_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        # Release once — succeeds (no EPICs).
-        ri_client.post(f"/api/v1/versions/{version.id}/release").raise_for_status()
-
-        resp = ri_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 409
-
-    def test_release_missing_returns_404(self, ri_client):
-        resp = ri_client.post(f"/api/v1/versions/{uuid.uuid4()}/release")
-        assert resp.status_code == 404
-
-    def test_release_non_ri_user_returns_403(self, ha_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        resp = ha_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 403
-
-    def test_release_unauthenticated_returns_401(self, anon_client, db_session, project):
-        version = _make_version(db_session, project=project, version_number="1.0.0")
-        resp = anon_client.post(f"/api/v1/versions/{version.id}/release")
-        assert resp.status_code == 401

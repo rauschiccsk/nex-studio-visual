@@ -72,52 +72,8 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.schemas.task import (
     TaskCreate,
-    TaskStatus,
-    TaskType,
     TaskUpdate,
 )
-
-
-def list_tasks(
-    db: Session,
-    *,
-    feat_id: Optional[UUID] = None,
-    status: Optional[TaskStatus] = None,
-    task_type: Optional[TaskType] = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[Task]:
-    """Return tasks filtered by the supplied criteria.
-
-    Results are ordered by ``number ASC`` so tasks appear in their
-    stable, human-readable numbering order (task 1, task 2, …) — this
-    matches the hierarchical-numbering convention documented in
-    DESIGN.md §1.9 and the ``TaskItem`` UI (DESIGN.md §3.1).
-
-    Args:
-        db: Active SQLAlchemy session.
-        feat_id: Optional feat filter — restrict to tasks belonging to
-            a specific feat (the core ``GET /feats/{id}/tasks`` query,
-            DESIGN.md §2.6).
-        status: Optional lifecycle-status filter (``todo`` |
-            ``in_progress`` | ``done`` | ``failed``).
-        task_type: Optional type filter (``backend`` | ``frontend`` |
-            ``migration`` | ``test`` | ``docs``).
-        limit: Maximum number of rows to return.
-        offset: Number of rows to skip.
-
-    Returns:
-        List of :class:`Task` instances.
-    """
-    stmt = select(Task)
-    if feat_id is not None:
-        stmt = stmt.where(Task.feat_id == feat_id)
-    if status is not None:
-        stmt = stmt.where(Task.status == status)
-    if task_type is not None:
-        stmt = stmt.where(Task.task_type == task_type)
-    stmt = stmt.order_by(Task.number.asc()).limit(limit).offset(offset)
-    return list(db.execute(stmt).scalars().all())
 
 
 def get_next_todo_task(db: Session, version_id: UUID) -> Optional[Task]:
@@ -139,43 +95,6 @@ def get_next_todo_task(db: Session, version_id: UUID) -> Optional[Task]:
         .limit(1)
     )
     return db.execute(stmt).scalar_one_or_none()
-
-
-def count_tasks(
-    db: Session,
-    *,
-    feat_id: Optional[UUID] = None,
-    status: Optional[TaskStatus] = None,
-    task_type: Optional[TaskType] = None,
-) -> int:
-    """Return the total number of tasks matching the given filters.
-
-    Mirrors the ``feat_id`` / ``status`` / ``task_type`` filters of
-    :func:`list_tasks` so a paginated response can report the unfiltered
-    total alongside the current page of items (same pattern as
-    :func:`~backend.services.feat.count_feats` and
-    :func:`~backend.services.epic.count_epics`).
-
-    Args:
-        db: Active SQLAlchemy session.
-        feat_id: Optional feat filter — restrict the count to tasks
-            belonging to a specific feat.
-        status: Optional lifecycle-status filter (``todo`` |
-            ``in_progress`` | ``done`` | ``failed``).
-        task_type: Optional type filter (``backend`` | ``frontend`` |
-            ``migration`` | ``test`` | ``docs``).
-
-    Returns:
-        Total number of rows matching the filters.
-    """
-    stmt = select(func.count()).select_from(Task)
-    if feat_id is not None:
-        stmt = stmt.where(Task.feat_id == feat_id)
-    if status is not None:
-        stmt = stmt.where(Task.status == status)
-    if task_type is not None:
-        stmt = stmt.where(Task.task_type == task_type)
-    return int(db.execute(stmt).scalar_one())
 
 
 def get_by_id(db: Session, task_id: UUID) -> Task:

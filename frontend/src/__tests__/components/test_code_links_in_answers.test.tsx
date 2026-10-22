@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
-import { ConversationThread } from "@/components/riadiace/ConversationThread";
+import ConversationThread from "@/components/riadiace/ConversationThread";
 import { forgetCodePaths } from "@/hooks/useCodePaths";
 import type { PipelineMessage } from "@/services/api/pipeline";
 import { getCodeFiles } from "@/services/api/nsCode";

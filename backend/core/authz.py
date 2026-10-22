@@ -36,7 +36,6 @@ from sqlalchemy.orm import Session
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 
 #: The one account that sees and may do everything, in every project. An ACCOUNT, not a role: giving
@@ -131,39 +130,6 @@ def assert_version_access(db: Session, user: User, version_id: UUID) -> Version:
         raise _not_found("Verzia")
     authorize_project(user, _get_project(db, version.project_id))
     return version
-
-
-def assert_epic_access(db: Session, user: User, epic_id: UUID) -> Epic:
-    epic = db.get(Epic, epic_id)
-    if epic is None:
-        raise _not_found("Epik")
-    authorize_project(user, _get_project(db, epic.project_id))
-    return epic
-
-
-def assert_feat_access(db: Session, user: User, feat_id: UUID) -> Feat:
-    feat = db.get(Feat, feat_id)
-    if feat is None:
-        raise _not_found("Funkcia")
-    epic = db.get(Epic, feat.epic_id)
-    if epic is None:
-        raise _not_found("Epik")
-    authorize_project(user, _get_project(db, epic.project_id))
-    return feat
-
-
-def assert_task_access(db: Session, user: User, task_id: UUID) -> Task:
-    task = db.get(Task, task_id)
-    if task is None:
-        raise _not_found("Úloha")
-    feat = db.get(Feat, task.feat_id)
-    if feat is None:
-        raise _not_found("Funkcia")
-    epic = db.get(Epic, feat.epic_id)
-    if epic is None:
-        raise _not_found("Epik")
-    authorize_project(user, _get_project(db, epic.project_id))
-    return task
 
 
 def assert_customer_access(db: Session, user: User, customer_id: UUID) -> Customer:

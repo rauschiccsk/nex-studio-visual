@@ -11,12 +11,13 @@ export type VersionVerdict = "current" | "reload" | "offer" | "unknown";
 /**
  * Absolute ceiling of automatic reloads per window launch.
  * Overrides everything else - see `decide()`.
+ * @internal — exported for its test (DEV-155).
  */
 export const MAX_AUTO_RELOADS = 2;
 
-/** Fingerprint for which the app has already reloaded once. */
+/** Fingerprint for which the app has already reloaded once. @internal — exported for its test (DEV-155). */
 export const GUARD_KEY = "nex_pwa_reload_guard";
-/** How many automatic reloads have already happened in this window. */
+/** How many automatic reloads have already happened in this window. @internal — exported for its test (DEV-155). */
 export const COUNT_KEY = "nex_pwa_reload_count";
 
 export interface VersionInput {

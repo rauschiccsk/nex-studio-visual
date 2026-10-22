@@ -6,7 +6,6 @@ two URL families, so (like the versions router) it is mounted with the bare
 
 * ``GET    /projects/{slug}/customers``      → list a project's customers.
 * ``POST   /projects/{slug}/customers``      → register a customer (the form).
-* ``GET    /customers/{customer_id}``        → one customer.
 * ``PATCH  /customers/{customer_id}``        → partial update / secret rotation.
 * ``DELETE /customers/{customer_id}``        → delete (also removes its secret).
 
@@ -143,21 +142,6 @@ def create_customer(
 # ---------------------------------------------------------------------------
 # Customer-scoped endpoints
 # ---------------------------------------------------------------------------
-
-
-@router.get("/customers/{customer_id}", response_model=CustomerRead)
-def get_customer(
-    customer_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> CustomerRead:
-    # v4.0.35: owner-or-admin — a Junior may read a customer only under their OWN project.
-    authz.assert_customer_access(db, current_user, customer_id)
-    try:
-        customer = customer_service.get_by_id(db, customer_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-    return _to_read(customer, db)
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerRead)

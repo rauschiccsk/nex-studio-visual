@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { ConversationComposer } from "@/components/riadiace/ConversationComposer";
+import ConversationComposer from "@/components/riadiace/ConversationComposer";
 
 const noopRelay = vi.fn(async () => ({ deferred: false }));
 

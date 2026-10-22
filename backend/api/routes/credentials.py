@@ -22,7 +22,6 @@ from backend.schemas.credentials import (
     CredentialContentUpdate,
     CredentialCreate,
     CredentialRead,
-    CredentialUpdate,
 )
 from backend.services import credentials as credentials_service
 
@@ -46,19 +45,6 @@ def list_credentials(
 ) -> list[CredentialRead]:
     """List every credentials registry row (newest first)."""
     return [CredentialRead.model_validate(c) for c in credentials_service.list_credentials(db)]
-
-
-@router.get("/{credential_id}", response_model=CredentialRead)
-def get_credential(
-    credential_id: UUID,
-    _ri: User = Depends(require_ri_role),
-    db: Session = Depends(get_db),
-) -> CredentialRead:
-    try:
-        cred = credentials_service.get_by_id(db, credential_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-    return CredentialRead.model_validate(cred)
 
 
 @router.get("/{credential_id}/content", response_model=CredentialContent)
@@ -99,23 +85,6 @@ def create_credential(
 ) -> CredentialRead:
     try:
         cred = credentials_service.create(db, payload)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        raise _map_value_error(exc) from exc
-    db.refresh(cred)
-    return CredentialRead.model_validate(cred)
-
-
-@router.patch("/{credential_id}", response_model=CredentialRead)
-def update_credential(
-    credential_id: UUID,
-    payload: CredentialUpdate,
-    _ri: User = Depends(require_ri_role),
-    db: Session = Depends(get_db),
-) -> CredentialRead:
-    try:
-        cred = credentials_service.update(db, credential_id, payload)
         db.commit()
     except ValueError as exc:
         db.rollback()

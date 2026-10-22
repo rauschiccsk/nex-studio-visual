@@ -31,6 +31,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.db.models.customers import Customer
+from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
@@ -493,12 +494,14 @@ class TestGraduationGatedOnDeploySuccess:
         # Still resolvable under its original number for a retry (the deploy is repeatable).
         assert deploy_service._resolve_version(db_session, project.id, "0.1.0").id == version_id
         # The failure is in the audit log as a 'failed' prod deploy event.
-        prod_events = [
-            e
-            for e in deploy_service.list_events(db_session, customer.id)
-            if e.environment == "prod" and e.event_type == "deploy"
-        ]
-        assert prod_events and prod_events[0].status == "failed"
+        prod_events = db_session.execute(
+            select(DeployEvent.status).where(
+                DeployEvent.customer_id == customer.id,
+                DeployEvent.environment == "prod",
+                DeployEvent.event_type == "deploy",
+            )
+        ).all()
+        assert [status for (status,) in prod_events] == ["failed"]
 
     def test_a_project_already_past_1_0_0_keeps_its_own_number(self, client, db_session, fake_deploy_runner):
         """⚠️ Prvé ostré nasadenie NESMIE projekt označiť nižším číslom, než aký kód nesie (ICCINT-151).

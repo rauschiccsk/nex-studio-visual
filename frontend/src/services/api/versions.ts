@@ -9,7 +9,6 @@
  *   - ``GET    /projects/{projectId}/zadanie-na-disku`` → peekZadanieOnDisk
  *   - ``GET    /versions/{id}/nastavenia``             → getVersionSettings
  *   - ``PATCH  /versions/{id}``                        → updateVersion
- *   - ``POST   /versions/{id}/release``                → releaseVersion
  */
 
 import api from "../api";
@@ -111,16 +110,6 @@ export function updateVersion(
   data: VersionUpdate,
 ): Promise<Version> {
   return api.patch<Version>(`/versions/${id}`, data);
-}
-
-/**
- * Trigger the release gate for a version.
- *
- * Sets ``status = 'released'`` and ``release_date = today`` on success.
- * Returns HTTP 422 when blocking EPICs remain.
- */
-export function releaseVersion(id: string): Promise<Version> {
-  return api.post<Version>(`/versions/${id}/release`);
 }
 
 /**

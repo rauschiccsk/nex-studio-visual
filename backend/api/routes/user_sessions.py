@@ -1,67 +1,15 @@
-"""REST router for :class:`~backend.db.models.foundation.UserSession`.
+"""REST router for :class:`~backend.db.models.foundation.UserSession` — the Relácie tab of Nastavenia.
 
-Exposes the standard CRUD surface for user sessions (DESIGN.md §1.1
-"Auth pattern" / ``user_sessions`` table) — the per-user JWT lifecycle
-anchor that backs the ``authStore`` rotation logic and the "Active
-sessions" UI on the settings page:
+Sessions are made by the login (``backend/services/auth.py``, ``backend/services/user.py``); this router lists them
+and revokes one:
 
-* ``GET    /``                    → paginated list (filter by
-  ``user_id``).
-* ``GET    /{user_session_id}``   → single user session by primary
-  key.
-* ``POST   /``                    → create a new user session.
-* ``PATCH  /{user_session_id}``   → partial update of the mutable
-  (``token_version`` / ``last_seen_at``) fields.
-* ``DELETE /{user_session_id}``   → hard-delete a user session
-  (HTTP 204).
+* ``GET    /``                    → paginated list (filter by ``user_id``), each row naming its owner.
+* ``DELETE /{user_session_id}``   → hard-delete a session (HTTP 204) — the „Odvolať" button; every JWT issued
+  against it is rejected on the next verification.
 
-All endpoints are synchronous ``def`` — pg8000 is a synchronous driver
-and FastAPI dispatches sync endpoints to a thread pool automatically.
-The router delegates every persistence operation to
-:mod:`backend.services.user_session` and handles commit / rollback
-itself so the service layer remains transaction-agnostic.
-
-The router is prefix-less; the mount prefix
-(``/api/v1/user-sessions``) is applied in ``backend/main.py`` via
-``app.include_router`` (Task 4.27).
-
-Design notes (per DESIGN.md §1.1 "Auth pattern", ``user_sessions``
-table and §6 REST API Architecture):
-
-* ``id``, ``created_at`` and ``updated_at`` are server-managed and
-  therefore immutable. ``user_id`` is the session's parent reference —
-  a session belongs to exactly one user for its lifetime, so the FK
-  is immutable. ``user_id`` uses ``ON DELETE CASCADE`` at the DB
-  level so every session is removed automatically when its parent
-  :class:`~backend.db.models.foundation.User` is dropped.
-  :class:`~backend.schemas.user_session.UserSessionUpdate` deliberately
-  omits all immutable / server-managed fields, and the service's
-  allow-list enforces that contract defensively.
-* ``token_version`` is a monotonically increasing counter used by the
-  ``tv`` JWT claim to invalidate all outstanding tokens on logout.
-  ``PATCH`` bumps the counter on logout so every JWT issued against
-  the session is rejected on the next verification.
-* ``last_seen_at`` is refreshed on every authenticated request — the
-  auth middleware will resolve the session, call ``PATCH`` with the
-  new timestamp, and rely on the ``updated_at`` ``onupdate`` trigger
-  to stamp the audit column. The column defaults to ``NOW()`` at
-  insert time via the DB-level ``server_default``.
-* ``user_sessions`` has **no UNIQUE constraints beyond the PK** — a
-  user may hold many concurrent sessions (multi-device login,
-  browser + Electron, etc.). ``POST`` therefore performs no pre-flush
-  natural-key check. An invalid or missing ``user_id`` FK reference
-  is rejected by the DB-level FK and surfaces as HTTP 422.
-* List filter (``user_id``) matches the indexed column
-  (``ix_user_sessions_user_id``) and covers the natural lookup
-  path — "show every session for this user" (settings page / admin
-  tooling / force-logout feature).
-* List ordering (``created_at DESC``) is owned by the service so the
-  most recently opened sessions appear first — matching the "Active
-  sessions" UI convention where the current session typically sits at
-  the top.
-* ``user_sessions`` has no inbound FKs, so :func:`delete_user_session`
-  needs no RESTRICT dependency check — simply drop the row. This is
-  the canonical "logout" / "session expired" cleanup path.
+DEV-155 (22.10.2026) removed the create, read-one and patch routes, which no screen called. The router is prefix-less;
+``backend/main.py`` mounts it at ``/api/v1/user-sessions``. Sync ``def`` endpoints (pg8000 is synchronous); the router
+owns commit / rollback, the service only flushes.
 """
 
 from __future__ import annotations
@@ -78,9 +26,7 @@ from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.user_session import (
-    UserSessionCreate,
     UserSessionRead,
-    UserSessionUpdate,
 )
 from backend.services import user_session as user_session_service
 
@@ -166,78 +112,6 @@ def list_user_sessions(
         skip=skip,
         limit=limit,
     )
-
-
-@router.get("/{user_session_id}", response_model=UserSessionRead)
-def get_user_session(
-    user_session_id: UUID,
-    db: Session = Depends(get_db),
-) -> UserSessionRead:
-    """Return a single user session by primary key."""
-    try:
-        session_row = user_session_service.get_by_id(db, user_session_id)
-    except ValueError as exc:
-        raise _map_value_error(exc) from exc
-    return UserSessionRead.model_validate(session_row)
-
-
-@router.post(
-    "",
-    response_model=UserSessionRead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_user_session(
-    payload: UserSessionCreate,
-    db: Session = Depends(get_db),
-) -> UserSessionRead:
-    """Create a new user session.
-
-    ``token_version`` defaults to ``0`` via the Pydantic schema
-    (mirroring the DB ``server_default='0'``) when omitted.
-    ``last_seen_at`` is optional — when ``None``, the kwarg is dropped
-    so the DB-level ``server_default=func.now()`` kicks in; supplying
-    an explicit timestamp lets import / migration flows back-date
-    sessions. An invalid or missing ``user_id`` FK reference is
-    rejected by the DB-level FK and surfaces as HTTP 422.
-    """
-    try:
-        session_row = user_session_service.create(db, payload)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        raise _map_value_error(exc) from exc
-    db.refresh(session_row)
-    return UserSessionRead.model_validate(session_row)
-
-
-@router.patch("/{user_session_id}", response_model=UserSessionRead)
-def update_user_session(
-    user_session_id: UUID,
-    payload: UserSessionUpdate,
-    db: Session = Depends(get_db),
-) -> UserSessionRead:
-    """Partially update a user session's mutable fields.
-
-    Only ``token_version`` and ``last_seen_at`` may be changed — session
-    identity is anchored to the user for its lifetime, so ``user_id``
-    is immutable. ``id`` and ``created_at`` are likewise immutable;
-    ``updated_at`` is auto-stamped by the ORM on flush via
-    ``onupdate=func.now()``. Fields omitted from the payload are left
-    unchanged.
-
-    Typical call sites:
-        * Authenticated request → refresh ``last_seen_at``.
-        * Logout → bump ``token_version`` to invalidate every
-          outstanding JWT issued against this session (DESIGN.md §1.1).
-    """
-    try:
-        session_row = user_session_service.update(db, user_session_id, payload)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        raise _map_value_error(exc) from exc
-    db.refresh(session_row)
-    return UserSessionRead.model_validate(session_row)
 
 
 @router.delete(
