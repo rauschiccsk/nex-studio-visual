@@ -26,7 +26,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.services import ci_status, claude_agent, orchestrator
+from backend.services import build_leftovers, ci_status, claude_agent, orchestrator
 from backend.services.pipeline_status import PipelineStatusBlock
 
 
@@ -43,11 +43,12 @@ def _commit(work: Path, name: str, subject: str) -> str:
 
 def _repo(work: Path, origin: Path | None) -> None:
     """A checkout on ``main`` with one commit; with ``origin``, that commit is already on it — as after the
-    project's creation."""
+    project's creation, whose ``.gitignore`` names the build's leftovers (DEV-176), so the cockpit adds no commit."""
     work.mkdir(parents=True)
     _git(work, "init", "-q", "-b", "main")
     _git(work, "config", "user.email", "studio@isnex.eu")
     _git(work, "config", "user.name", "NEX Studio")
+    (work / ".gitignore").write_text(f"{build_leftovers.PATTERN}\n", encoding="utf-8")
     _commit(work, "README.md", "chore: start")
     if origin is not None:
         subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)

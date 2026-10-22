@@ -60,6 +60,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    build_leftovers,
     build_provenance,
     ci_runs,
     ci_status,
@@ -5362,6 +5363,13 @@ async def _push_after_task(project_root: Path) -> Optional[str]:
     on side branches and wrote „všetko prešlo“, and six commits with code never ran the full CI. The first push
     came only with a passed verification. Returns ``None`` when the branch is on GitHub (or there is no GitHub to
     push to), else why it is not — for the manager. Never raises: the next task's push carries this one too."""
+    # DEV-176: a project that still tracks build leftovers loses them in one commit, which goes with the work.
+    try:
+        leftovers = await run_blocking(build_leftovers.keep_out_of_git, project_root, cap=GIT_PUSH_CAP)
+    except BlockingWorkTimedOut:
+        leftovers = f"upratanie pozostatkov stavby neskončilo do {GIT_PUSH_CAP} s"
+    if leftovers:
+        logger.warning("%s: %s", project_root.name, leftovers)
     try:
         pushed, _branch, why = await run_blocking(_push_branch, project_root, cap=GIT_PUSH_CAP)
     except BlockingWorkTimedOut:
