@@ -7,11 +7,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { ReactNode } from "react";
-import {
-  ThemeProvider,
-  useTheme,
-  darkModeKey,
-} from "@/contexts/ThemeContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { darkModeKey } from "@/contexts/theme";
+import { useTheme } from "@/hooks/useTheme";
 
 function wrapper(username: string) {
   return function Wrapper({ children }: { children: ReactNode }) {

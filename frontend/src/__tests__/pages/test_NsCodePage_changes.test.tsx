@@ -40,7 +40,7 @@ vi.mock("@/components/nscode/CodeDiff", () => ({
     </div>
   ),
 }));
-vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ isDark: false, toggleDark: vi.fn() }) }));
+vi.mock("@/hooks/useTheme", () => ({ useTheme: () => ({ isDark: false, toggleDark: vi.fn() }) }));
 
 const context = {
   selectedProject: { slug: "nex-inbox", name: "NEX Inbox" },

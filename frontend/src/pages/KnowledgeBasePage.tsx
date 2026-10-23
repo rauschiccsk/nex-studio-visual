@@ -379,7 +379,6 @@ export default function KnowledgeBasePage() {
         loadDocContent(doc);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documents]);
 
   useEffect(() => {

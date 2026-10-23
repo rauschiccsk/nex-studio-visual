@@ -8,17 +8,14 @@
  *
  * WARNINGS POLICY — errors fail, warnings are ratcheted:
  *   - Any error fails the gate (eslint exits 1). Not negotiable.
- *   - Warnings are capped at the baseline by `--max-warnings 5` in the `lint` npm script, so a new
- *     warning turns CI red instead of quietly joining the pile. The baseline was NOT set to 0
- *     because the 5 warnings below live in `src/**` components owned elsewhere; capping first
- *     stops the growth today, fixing them lowers the cap tomorrow.
+ *   - Warnings are capped by `--max-warnings` in the `lint` npm script, so a new warning turns CI red
+ *     instead of quietly joining the pile. The cap started at the 5 warnings of 2026-07-28 and was
+ *     lowered as they were fixed; it is 0 now.
  *   - The cap is a RATCHET: it may only ever go DOWN. Raising it to make a red build green is a
  *     threshold downgrade — fix the warning instead.
  *
- * Baseline (5 warnings, 2026-07-28; 3 since DEV-155, 22.10.2026) — lower `--max-warnings` as these are fixed:
- *   1. src/contexts/ThemeContext.tsx:40             react-refresh/only-export-components
- *   2. src/contexts/ThemeContext.tsx:137            react-refresh/only-export-components
- *   3. src/pages/KnowledgeBasePage.tsx:382          unused eslint-disable directive
+ * Baseline (5 warnings, 2026-07-28; 3 since DEV-155, 22.10.2026; 0 since DEV-199, 23.10.2026) — the cap is 0: a
+ * warning fails the gate like an error.
  */
 import js from "@eslint/js";
 import globals from "globals";

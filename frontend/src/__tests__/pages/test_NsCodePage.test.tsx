@@ -26,7 +26,7 @@ vi.mock("@/components/nscode/CodeEditor", () => ({
     </pre>
   ),
 }));
-vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ isDark: true, toggleDark: vi.fn() }) }));
+vi.mock("@/hooks/useTheme", () => ({ useTheme: () => ({ isDark: true, toggleDark: vi.fn() }) }));
 
 const context = { selectedProject: { slug: "nex-inbox", name: "NEX Inbox" } as { slug: string; name: string } | null };
 vi.mock("@/store/activeContextStore", () => ({

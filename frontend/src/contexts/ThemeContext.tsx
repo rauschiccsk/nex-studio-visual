@@ -9,37 +9,19 @@
  * On every change the ``dark`` CSS class is added/removed from
  * ``<html>`` so Tailwind ``dark:`` variants activate immediately
  * (``darkMode: "class"``).
+ *
+ * Only the provider lives here; the context object and the storage key are in ``theme.ts``, the hook in
+ * ``hooks/useTheme.ts`` (DEV-199).
  */
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface ThemeContextValue {
-  /** Whether dark mode is currently active. */
-  isDark: boolean;
-  /** Toggle between light and dark mode. */
-  toggleDark: () => void;
-}
+import { darkModeKey, ThemeContext, type ThemeContextValue } from "./theme";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Build the localStorage key scoped to the given username. @internal — exported for its test (DEV-155). */
-export function darkModeKey(username: string): string {
-  return `nex_dark_${username}`;
-}
 
 /** Read persisted dark-mode preference for *username*. Defaults to dark. */
 function readPersistedDark(username: string | undefined): boolean {
@@ -62,12 +44,6 @@ function applyDarkClass(isDark: boolean): void {
     root.classList.remove("dark");
   }
 }
-
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -123,21 +99,4 @@ export function ThemeProvider({ username, children }: ThemeProviderProps) {
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
-/**
- * Access the current theme context.
- *
- * Must be called inside ``<ThemeProvider>``.
- */
-export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext);
-  if (ctx === undefined) {
-    throw new Error("useTheme must be used within a <ThemeProvider>");
-  }
-  return ctx;
 }

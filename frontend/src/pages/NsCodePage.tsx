@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useWideScreen } from "nex-shared";
 
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme } from "@/hooks/useTheme";
 import {
   buildTree,
   fileKind,

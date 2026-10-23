@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
-vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ isDark: false, toggleDark: vi.fn() }) }));
+vi.mock("@/hooks/useTheme", () => ({ useTheme: () => ({ isDark: false, toggleDark: vi.fn() }) }));
 
 import Topbar from "@/components/layout/Topbar";
 

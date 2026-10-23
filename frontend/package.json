@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint . --max-warnings 3",
+    "lint": "eslint . --max-warnings 0",
     "deadcode": "knip --no-config-hints && knip --production",
     "test": "vitest run",
     "test:e2e": "playwright test",
