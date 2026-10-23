@@ -2903,10 +2903,11 @@ export interface paths {
          *
          *     .. note::
          *
-         *        This endpoint is **not** the gated release transition. Patching
-         *        ``status = 'released'`` here bypasses the release gate (DESIGN.md
-         *        §4.0 Rule 5) and is reserved for backfill / correction flows;
-         *        production callers must use :func:`release_version`.
+         *        This endpoint is **not** how a version is released — the first
+         *        PROD deploy releases it
+         *        (:func:`backend.services.deploy._graduate_version_in_place`). Patching
+         *        ``status = 'released'`` here is reserved for backfill / correction
+         *        flows.
          */
         patch: operations["update_version_api_v1_versions__version_id__patch"];
         trace?: never;

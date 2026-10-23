@@ -82,9 +82,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
 
     Mirrors the ICC error-handling pattern: ``not found`` → 404,
     duplicates / conflicts → 409, everything else (constraint / FK /
-    validation failures) → 422. Used by every endpoint *except*
-    :func:`release_version`, which has bespoke handling for the blocking
-    -EPICs case (HTTP 422 with structured payload).
+    validation failures) → 422. Used by every endpoint of this router.
     """
     message = str(exc)
     lowered = message.lower()
@@ -219,10 +217,11 @@ def update_version(
 
     .. note::
 
-       This endpoint is **not** the gated release transition. Patching
-       ``status = 'released'`` here bypasses the release gate (DESIGN.md
-       §4.0 Rule 5) and is reserved for backfill / correction flows;
-       production callers must use :func:`release_version`.
+       This endpoint is **not** how a version is released — the first
+       PROD deploy releases it
+       (:func:`backend.services.deploy._graduate_version_in_place`). Patching
+       ``status = 'released'`` here is reserved for backfill / correction
+       flows.
     """
     authz.assert_version_access(db, current_user, version_id)
     try:

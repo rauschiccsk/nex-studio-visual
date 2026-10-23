@@ -1602,11 +1602,9 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
       * otherwise ⇒ rename ``version.version_number = target``.
 
     In all cases the version is marked released (``status='released'`` + ``release_date`` today):
-    a first-prod graduation IS the release. The two fields are set directly rather than routed
-    through ``version_service.release`` — graduation already cleared the deploy gates
-    (``version_verified`` + ``is_accepted``), so coupling to ``release``'s ``done``-state
-    precondition would be wrong. ``version.name`` / ``version.description`` are left untouched
-    (keep the built version's own identity — §8 anti-destructive).
+    a first-prod graduation IS the release. The two fields are set directly — graduation already
+    cleared the deploy gates (``version_verified`` + ``is_accepted``). ``version.name`` /
+    ``version.description`` are left untouched (keep the built version's own identity — §8 anti-destructive).
     """
     old_number = version.version_number  # capture BEFORE the rename — drives the §4 note dir-move
     if version.version_number != target:

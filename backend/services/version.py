@@ -63,7 +63,6 @@ Management and §4.0 Version Lifecycle Rules, and
 from __future__ import annotations
 
 import re
-from datetime import date
 from pathlib import Path
 from typing import Optional
 from uuid import UUID
@@ -560,60 +559,6 @@ def _move_founding_zadanie(db: Session, version: Version, new_version_number: st
     old.parent.rename(new.parent)
 
 
-def release(db: Session, version_id: UUID) -> Version:
-    """Release a version — the DESIGN.md §4.0 Rule 5 release gate.
-
-    Fetches every EPIC assigned to the version and checks that they all
-    have ``status = 'done'``. If one or more EPICs are still in
-    ``planned`` or ``in_progress`` the transition is rejected with a
-    :class:`ValueError` whose message contains the list of blocking
-    EPIC IDs (the router converts this to HTTP 409 with a structured
-    payload — see DESIGN.md §2.6 ``POST /versions/{id}/release``).
-
-    On success the service sets ``status = 'released'`` and
-    ``release_date = today`` (local ``date.today()``). Idempotent
-    protection: a version already in ``released`` state cannot be
-    re-released (``ValueError``); a version still in ``planned`` state
-    can be released directly provided the gate passes (no intermediate
-    ``active`` transition required — e.g. for hot-patch releases with
-    zero EPICs).
-
-    Args:
-        db: Active SQLAlchemy session.
-        version_id: Identifier of the version to release.
-
-    Returns:
-        The released :class:`Version` (status ``released``,
-        ``release_date`` set to today) after flush.
-
-    Raises:
-        ValueError: If the version does not exist, is already in
-            ``released`` state, or has one or more EPICs with
-            ``status != 'done'``.
-    """
-    version = get_by_id(db, version_id)
-
-    if version.status == "released":
-        raise ValueError(f"Version {version_id} is already released")
-
-    blocking_stmt = (
-        select(Epic.id).where(Epic.version_id == version_id, Epic.status != "done").order_by(Epic.number.asc())
-    )
-    blocking_ids = [row[0] for row in db.execute(blocking_stmt).all()]
-    if blocking_ids:
-        blocking_str = ", ".join(str(eid) for eid in blocking_ids)
-        raise ValueError(f"Cannot release version {version_id}: blocking EPICs (status != 'done'): [{blocking_str}]")
-
-    version.status = "released"
-    version.release_date = date.today()
-    # E2 (CR-NS-041): additively realize this version's included backlog items (included → realized +
-    # realized_at). Runs AFTER the blocking-epic gate above — purely additive, never affects the release
-    # decision. No-op when the project has no backlog / none assigned to this version.
-    backlog_service.realize_for_version(db, version_id)
-    db.flush()
-    return version
-
-
 def build_finished(db: Session, version: Version) -> bool:
     """Is the version finished — its build ended, or it was released (a released one may predate the pipeline)?
 
@@ -642,7 +587,11 @@ def mark_done(db: Session, version_id: UUID) -> Version:
     version = get_by_id(db, version_id)
     if version.status in ("planned", "active"):
         version.status = "done"
-        db.flush()
+    # DEV-185: the version's included requests are realized when its build finishes — the one ending every build
+    # passes. Until 23.10.2026 only ``release`` did it, which only a route nobody called reached, so no request was
+    # ever realized. Idempotent: only ``included`` requests move.
+    backlog_service.realize_for_version(db, version_id)
+    db.flush()
     return version
 
 

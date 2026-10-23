@@ -1,6 +1,6 @@
 """Service layer for :class:`~backend.db.models.backlog.BacklogItem` (E2, CR-NS-041).
 
-Synchronous CRUD + lifecycle transitions used by the backlog router and the version-release path. All
+Synchronous CRUD + lifecycle transitions used by the backlog router and the end of a build. All
 methods take ``db: Session`` first and only ``flush()`` — commit is the caller's job. Errors are
 ``ValueError`` so the router maps them to HTTP. Mirrors :mod:`backend.services.epic` (per-project
 ``MAX(number)+1`` numbering). The backlog NEVER creates Epics/Tasks.
@@ -144,7 +144,7 @@ def assign_to_version(db: Session, item_id: UUID, version_id: UUID) -> BacklogIt
 def realize_for_version(db: Session, version_id: UUID) -> int:
     """Transition this version's ``included`` items → ``realized`` + stamp ``realized_at`` (E2 History).
 
-    Called by the version-release path AFTER its blocking-epic gate — additive, never blocks a release.
+    Called by :func:`backend.services.version.mark_done` when a build finishes (DEV-185) — additive, never blocks it.
     Returns the number of items realized.
     """
     result = db.execute(

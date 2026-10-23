@@ -412,76 +412,6 @@ class TestListVersions:
 class TestRelease:
     """``release`` gate: reject if any EPIC not ``done``, else stamp release."""
 
-    def test_release_no_epics_succeeds(self, db_session):
-        """A version with zero EPICs passes the gate (empty AND is true)."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
-
-        released = service.release(db_session, version.id)
-
-        assert released.status == "released"
-        assert released.release_date == date.today()
-
-    def test_release_all_epics_done_succeeds(self, db_session):
-        """Every EPIC at ``done`` → release succeeds."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
-        _make_epic(db_session, project=project, version=version, number=1, status="done")
-        _make_epic(db_session, project=project, version=version, number=2, status="done")
-
-        released = service.release(db_session, version.id)
-
-        assert released.status == "released"
-        assert released.release_date == date.today()
-
-    def test_release_blocked_lists_blocking_epics(self, db_session):
-        """Non-``done`` EPICs are reported in the ``ValueError`` message."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
-
-        done_epic = _make_epic(db_session, project=project, version=version, number=1, status="done")
-        in_progress_epic = _make_epic(
-            db_session,
-            project=project,
-            version=version,
-            number=2,
-            status="in_progress",
-        )
-        planned_epic = _make_epic(db_session, project=project, version=version, number=3, status="planned")
-
-        with pytest.raises(ValueError) as excinfo:
-            service.release(db_session, version.id)
-
-        message = str(excinfo.value)
-        assert "blocking EPICs" in message
-        # Blocking EPICs appear, the done EPIC does not.
-        assert str(in_progress_epic.id) in message
-        assert str(planned_epic.id) in message
-        assert str(done_epic.id) not in message
-
-        # Version state was NOT mutated — still ``planned``, no release_date.
-        db_session.expire(version)
-        assert version.status == "planned"
-        assert version.release_date is None
-
-    def test_release_already_released_raises(self, db_session):
-        """Re-releasing a released version is rejected."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
-        service.release(db_session, version.id)
-
-        with pytest.raises(ValueError, match="already released"):
-            service.release(db_session, version.id)
-
-    def test_release_missing_raises(self, db_session):
-        """``release`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
-            service.release(db_session, uuid.uuid4())
-
 
 # ---------------------------------------------------------------------------
 # auto_activate — the DESIGN.md §4.0 Rule 4 lifecycle helper
@@ -520,7 +450,8 @@ class TestAutoActivate:
         user = _make_user(db_session)
         project = _make_project(db_session, user=user)
         version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
-        service.release(db_session, version.id)
+        version.status = "released"
+        db_session.flush()
 
         result = service.auto_activate(db_session, version.id)
 

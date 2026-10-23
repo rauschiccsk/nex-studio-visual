@@ -1,13 +1,14 @@
-"""Backlog API + lifecycle + realize-on-release (E2, CR-NS-041).
+"""Backlog API + lifecycle + realize when the build finishes (E2, CR-NS-041; DEV-185).
 
 Covers CRUD, per-project REQ-N numbering, assign-to-version (+ cross-project guard), reject,
-delete-only-when-open, read/write access split (shu reads, ha writes), and the additive
-realize-on-release hook in the version service.
+delete-only-when-open, read/write access split (shu reads, ha writes), and the realization of a
+version's included requests when its build finishes.
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI
@@ -21,7 +22,6 @@ from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.schemas.backlog import BacklogItemCreate
 from backend.services import backlog as backlog_service
-from backend.services import version as version_service
 
 
 def _make_user(db_session: Any, role: str = "ha") -> User:
@@ -213,32 +213,52 @@ def test_backlog_scoped_to_owner(db_session):
     )
 
 
-# ── realize-on-release (additive hook in version.release) ────────────────────
+# ── realize when the build finishes (DEV-185) ─────────────────────────────────
 
 
-def test_realize_on_release(db_session):
+def test_a_finished_build_realizes_its_versions_requests(db_session):
+    """DEV-185 (23.10.2026): requests were realized only by ``version.release``, which only a route nobody called
+    reached — five live requests sat „included" in finished versions and „Realizované" stayed empty. They are
+    realized where every build ends: the one settle of Hotovo, the Manažér's sign-off and a fast fix's alike."""
+    from backend.db.models.pipeline import PipelineState
+    from backend.services import orchestrator
+
     user = _make_user(db_session, "ha")
     project = _make_project(db_session, user)
     version = _make_version(db_session, project)
+    other = _make_version(db_session, project)
 
     included = backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="ship-me"))
     backlog_service.assign_to_version(db_session, included.id, version.id)
-    # an open item NOT assigned to this version — must stay open after release
+    elsewhere = backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="next one"))
+    backlog_service.assign_to_version(db_session, elsewhere.id, other.id)
     untouched = backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="later"))
+    # Realized by an earlier finish of this version — a later finish (a fast fix) must not move its date.
+    earlier = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+    shipped = backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="shipped before"))
+    backlog_service.assign_to_version(db_session, shipped.id, version.id)
+    shipped.status, shipped.realized_at = "realized", earlier
+    state = PipelineState(
+        version_id=version.id,
+        flow_type="new_version",
+        current_stage="programovanie",
+        current_actor="ai_agent",
+        status="awaiting_manazer",
+        next_action="x",
+    )
+    db_session.add(state)
     db_session.flush()
 
-    # release the version (no blocking epics) → realize hook fires
-    version_service.release(db_session, version.id)
+    orchestrator._settle_build_done(db_session, state, "Hotovo.")
     db_session.flush()
 
-    db_session.refresh(included)
-    db_session.refresh(untouched)
-    assert included.status == "realized"
+    for item in (included, elsewhere, untouched, shipped):
+        db_session.refresh(item)
+    assert (included.status, elsewhere.status, untouched.status) == ("realized", "included", "open")
     assert included.realized_at is not None
-    # CR-NS-042 polish: the bulk UPDATE stamps updated_at too (Core UPDATE doesn't fire the ORM onupdate),
-    # in the SAME statement as realized_at → identical timestamps.
+    assert (shipped.status, shipped.realized_at) == ("realized", earlier)
+    # The bulk UPDATE stamps updated_at in the same statement as realized_at (a Core UPDATE fires no ORM onupdate).
     assert included.updated_at == included.realized_at
-    assert untouched.status == "open"  # additive — only this version's included items transition
 
 
 def test_realize_for_version_returns_count(db_session):
