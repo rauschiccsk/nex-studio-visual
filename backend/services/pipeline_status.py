@@ -626,6 +626,10 @@ class ParseFailure:
     #: :class:`ClaudeAgentError`. The honest crash/timeout notification (Fix 3) references it so the
     #: operator/Dedo can read the cause. ``None`` when no log dir was configured for the turn.
     log_path: Optional[str] = None
+    #: DEV-209: the engine could not give the turn the environment the project declares (a service it does not
+    #: supply) — the reason, in the engine's words. Not the agent's failure and not transient: never retried,
+    #: never told to the Manažér as a crash; the build round stops as the cockpit's problem for Dedo.
+    environment_refused: Optional[str] = None
 
 
 ParseResult = Union[PipelineStatusBlock, ParseFailure]

@@ -60,6 +60,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    build_db,
     build_leftovers,
     build_provenance,
     ci_runs,
@@ -2439,6 +2440,20 @@ async def _settle_framework_issue(
     durable in the DB + the append-only message log, so the escalation is never lost even if the channel
     mount is absent or Telegram hiccups."""
     dedo_message = (result.question or result.summary or "").strip()
+    return await _block_for_dedo(db, state, dedo_message=dedo_message, stage=stage, on_message=on_message)
+
+
+async def _block_for_dedo(
+    db: Session,
+    state: PipelineState,
+    *,
+    dedo_message: str,
+    stage: str,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """Stop the build as a problem only NEX Studio's fix can clear — the agent's §15 escalation
+    (:func:`_settle_framework_issue`) and the engine's own (DEV-209: a turn it cannot equip) alike: blocked /
+    ``framework_issue``, the Manažér's plain notice, and the message delivered to Dedo."""
     state.status = "blocked"
     state.block_reason = "framework_issue"
     state.next_action = (
@@ -4532,6 +4547,17 @@ async def invoke_agent(
             envelope_loss_kind="timeout",
             log_path=getattr(exc, "log_path", None),
         )
+    except build_db.UnsupportedProjectService as exc:
+        # DEV-209: the engine refused to equip the turn — before any agent ran, so nothing to audit and nothing
+        # a retry would change. 23.10.2026 this was filed as a crash: retried, then told to the Manažér as „Agent
+        # stratil spojenie / spadol … Môžeš pokračovať“, and every „Pokračovať“ failed the same way.
+        turn_metrics.record(exc.usage, perf_counter() - _started)
+        return ParseFailure(
+            f"build environment refused: {exc}",
+            usage=turn_metrics.usage_payload(),
+            timing=turn_metrics.timing_payload(),
+            environment_refused=str(exc),
+        )
     except ClaudeAgentError as exc:
         # A failed invocation still burned wall-clock (and counts as an attempt) — record it so the
         # turn's timing/parse_attempts reflect retries; no usage (no envelope was returned) (WS-D).
@@ -4787,7 +4813,7 @@ async def invoke_agent_with_parse_retry(
     if not (isinstance(result, ParseFailure) and result.envelope_loss_kind):
         dedo_message.mark_delivered(db, dedo_rows)
     attempts = 0
-    while isinstance(result, ParseFailure) and attempts < _PARSE_RETRIES:
+    while isinstance(result, ParseFailure) and not result.environment_refused and attempts < _PARSE_RETRIES:
         attempts += 1
         remaining = int(budget - (perf_counter() - turn_start))
         if remaining < _MIN_RETRY_BUDGET_S:
@@ -13977,6 +14003,19 @@ async def _run_build_round(
                     on_message=on_message,
                 )
             if isinstance(result, ParseFailure):
+                if result.environment_refused:
+                    # DEV-209: the cockpit cannot equip the turn — its problem, for Dedo, with the engine's reason.
+                    # The task stays in_progress: it never started, and resuming after the fix runs it.
+                    return await _block_for_dedo(
+                        db,
+                        state,
+                        dedo_message=(
+                            f"Úloha #{_task_full_number(db, task)} „{task.title}“ sa nezačala — kokpit nevie dať ťahu "
+                            f"Programovania prostredie, ktoré projekt deklaruje: {result.environment_refused}"
+                        ),
+                        stage="programovanie",
+                        on_message=on_message,
+                    )
                 if result.lost_work is not None:
                     # Lost-work audit (R-BLAST safeguard #3): the AI Agent's envelope was lost (timeout/crash)
                     # but the commit audit ran (inside invoke_agent). Work may have committed — surface "review

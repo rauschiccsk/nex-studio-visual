@@ -84,10 +84,12 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlsplit
 
 import yaml
 
 from backend.services.claude_agent import ClaudeAgentError
+from backend.services.uat_provisioner import TEST_DATABASE_ENV_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +235,12 @@ class BuildDatabase:
     database: str
     url: str = field(repr=False)
     password: str = field(repr=False, default="")
+    #: DEV-209 — the project's OTHER database services (its tests' own ``test-db``): the same one database answers
+    #: under their names too. Each is a DNS record on the build network, so each obeys :data:`_DOCKER_ALIAS_RE`.
+    other_aliases: tuple[str, ...] = ()
+    #: DEV-209 — ``TEST_DATABASE_URL`` for the turn when the project has a test runner that asks for one (the same
+    #: content rule as :func:`uat_provisioner.is_test_runner_service`): this database, the runner's driver and host.
+    test_url: Optional[str] = field(repr=False, default=None)
 
     @property
     def safe_url(self) -> str:
@@ -404,17 +412,26 @@ def _names_itself_postgres(image: str) -> bool:
     return _repository(image).startswith(_POSTGRES_IMAGE_PREFIX)
 
 
-def _postgres_service(services: dict[str, dict]) -> Optional[tuple[str, dict, str]]:
-    """``(name, service, image)`` of the project's database, or ``None`` if it declares none (yet).
+def _postgres_services(services: dict[str, dict]) -> list[tuple[str, dict, str]]:
+    """``(name, service, image)`` of every database the project declares, in the compose file's order.
 
     Only an image on the ALLOW-LIST counts. Anything else is not a database as far as this module is
     concerned — it is an off-the-shelf service the engine does not supply, and it fails loudly by name.
+    DEV-209: a project may declare more than one — NEX Manager 1.4.0 gave its tests a ``test-db`` of their own
+    beside the app's ``db``; the turn's one database answers for all of them.
     """
+    found = []
     for name, service in services.items():
         image = _is_off_the_shelf(service)
         if image and is_supported_postgres_image(image):
-            return name, service, image
-    return None
+            found.append((name, service, image))
+    return found
+
+
+def _postgres_service(services: dict[str, dict]) -> Optional[tuple[str, dict, str]]:
+    """``(name, service, image)`` of the project's database — the first one —, or ``None`` if it declares none (yet)."""
+    found = _postgres_services(services)
+    return found[0] if found else None
 
 
 def rejected_postgres_images(services: dict[str, dict]) -> list[tuple[str, str]]:
@@ -428,14 +445,23 @@ def rejected_postgres_images(services: dict[str, dict]) -> list[tuple[str, str]]
 
 
 def unsupported_services(services: dict[str, dict]) -> list[str]:
-    """Names of off-the-shelf services the engine does not supply — everything but the one Postgres.
+    """Names of off-the-shelf services the engine does not supply — everything but the project's Postgres databases.
 
     Returned as a list rather than raised here so the decision (and its message) lives at ONE call site
     and the rule itself stays a pure function the tests can drive project by project.
     """
-    postgres = _postgres_service(services)
-    postgres_name = postgres[0] if postgres else None
-    return [name for name, service in services.items() if name != postgres_name and _is_off_the_shelf(service)]
+    databases = {name for name, _service, _image in _postgres_services(services)}
+    return [name for name, service in services.items() if name not in databases and _is_off_the_shelf(service)]
+
+
+def _test_runner_url(services: dict[str, dict]) -> Optional[str]:
+    """The ``TEST_DATABASE_URL`` the project's test runner declares (a PostgreSQL URL), or ``None``."""
+    for service in services.values():
+        url = _service_environment(service).get(TEST_DATABASE_ENV_KEY)
+        scheme, sep, _rest = (url or "").partition("://")
+        if sep and scheme.startswith("postgres"):
+            return url
+    return None
 
 
 def _declared_driver(services: dict[str, dict]) -> str:
@@ -452,7 +478,10 @@ def _declared_driver(services: dict[str, dict]) -> str:
         scheme, sep, _rest = (url or "").partition("://")
         if sep and scheme.startswith("postgres"):
             return scheme
-    return DEFAULT_DRIVER
+    # DEV-209: a project whose app reads its URL from ``.env`` declares the driver only where its tests ask for
+    # their database — NEX Manager names ``pg8000`` there and has no ``asyncpg`` at all.
+    test_url = _test_runner_url(services)
+    return test_url.partition("://")[0] if test_url else DEFAULT_DRIVER
 
 
 def _slug_identifier(slug: str) -> str:
@@ -509,6 +538,12 @@ def plan_database(*, slug: str, host_project_dir: str, token: str) -> BuildDatab
         name, service, image = postgres
         alias = name if _DOCKER_ALIAS_RE.match(name) else DEFAULT_ALIAS
         env = _service_environment(service)
+    # DEV-209: the project's other databases are this one too — a name that is not one DNS label is no alias.
+    other_aliases = tuple(
+        other
+        for other, _service, _image in _postgres_services(services)
+        if other != alias and _DOCKER_ALIAS_RE.match(other)
+    )
 
     fallback = _slug_identifier(slug)
     user = env.get("POSTGRES_USER") or ""
@@ -520,6 +555,13 @@ def plan_database(*, slug: str, host_project_dir: str, token: str) -> BuildDatab
     # hex string needs no percent-encoding anywhere.
     password = secrets.token_hex(16)
     driver = _declared_driver(services)
+    test_url = None
+    declared = _test_runner_url(services)
+    if declared:
+        # The runner's own driver and host, when the host is one of the names this database answers to.
+        host = urlsplit(declared).hostname
+        test_host = host if host in (alias, *other_aliases) else alias
+        test_url = f"{declared.partition('://')[0]}://{user}:{password}@{test_host}:{POSTGRES_PORT}/{database}"
 
     return BuildDatabase(
         slug=slug,
@@ -531,6 +573,8 @@ def plan_database(*, slug: str, host_project_dir: str, token: str) -> BuildDatab
         database=database,
         password=password,
         url=f"{driver}://{user}:{password}@{alias}:{POSTGRES_PORT}/{database}",
+        other_aliases=other_aliases,
+        test_url=test_url,
     )
 
 
@@ -637,6 +681,7 @@ def container_run_argv(plan: BuildDatabase) -> list[str]:
         plan.network,
         "--network-alias",
         plan.alias,
+        *(arg for other in plan.other_aliases for arg in ("--network-alias", other)),
         "-e",
         f"POSTGRES_USER={plan.user}",
         "-e",
@@ -716,11 +761,12 @@ def _assert_runnable(plan: BuildDatabase) -> None:
             f"{_LABEL}: refusing to run {plan.image!r} — only the official Docker Hub ``postgres`` image is "
             f"started by the engine (it runs as root, with the docker socket's authority behind it)"
         )
-    if not _DOCKER_ALIAS_RE.match(plan.alias):
-        raise BuildDatabaseUnavailable(
-            f"{_LABEL}: refusing the network alias {plan.alias!r} — an alias is a DNS record on the build's "
-            f"only network, so it must be a single lowercase label with no dots"
-        )
+    for alias in (plan.alias, *plan.other_aliases):
+        if not _DOCKER_ALIAS_RE.match(alias):
+            raise BuildDatabaseUnavailable(
+                f"{_LABEL}: refusing the network alias {alias!r} — an alias is a DNS record on the build's "
+                f"only network, so it must be a single lowercase label with no dots"
+            )
 
 
 async def start(plan: BuildDatabase) -> BuildDatabase:

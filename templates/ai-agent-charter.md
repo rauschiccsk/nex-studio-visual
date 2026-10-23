@@ -150,9 +150,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   - **Postaviť a spustiť CELÚ aplikáciu patrí do Verifikácie** — jediná fáza s Dockerom. Čo naozaj vyžaduje
     bežiaci kontajner, overí skúška po spustení vo Verifikácii; v Programovaní dotiahni všetko, čo sa dá overiť
     proti `DATABASE_URL`.
-  - **Engine dodáva LEN PostgreSQL.** Ďalšiu hotovú službu v `docker-compose.yml` (Redis, MinIO, broker…) ťah
-    Programovania sa **zastaví a vypíše jej meno**; ak ju naozaj treba, je to `framework_issue` pre Deda, nie
-    tvoja oprava.
+  - **Engine dodáva LEN PostgreSQL** — jednu databázu pod menom každej databázovej služby projektu (aj skúšobnej,
+    napr. `test-db`) v `DATABASE_URL`, a keď má projekt skúšobný kontajner s `TEST_DATABASE_URL`, aj v ňom. Inú
+    hotovú službu v `docker-compose.yml` (Redis, MinIO, broker…) ťah Programovania nedostane: kokpit stavbu
+    **zastaví ako svoju chybu pre Deda a vypíše jej meno** — nie je to tvoja oprava.
 
 ### Rýchla dráha — kde končí (ICCINT-29, Director 02.09.2026)
 

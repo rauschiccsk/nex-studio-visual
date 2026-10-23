@@ -917,6 +917,11 @@ def build_run_argv(
     if database is not None:
         # BY VALUE, deliberately — the docstring argues why by-name would be the dangerous option here.
         argv += ["-e", f"DATABASE_URL={database.url}"]
+        if database.test_url:
+            # DEV-209: the same database, as the project's test runner asks for it — by value for the same reason.
+            from backend.services.uat_provisioner import TEST_DATABASE_ENV_KEY
+
+            argv += ["-e", f"{TEST_DATABASE_ENV_KEY}={database.test_url}"]
     argv += [
         "-w",
         container_project_dir,
