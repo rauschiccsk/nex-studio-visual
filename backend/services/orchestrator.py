@@ -76,6 +76,7 @@ from backend.services import (
     fast_fix,
     git_push,
     host_docker_guard,
+    instance_data_dirs,
     predeploy_backup,
     preview_switch,
     project_surfaces,
@@ -6397,6 +6398,17 @@ async def _run_uat_deploy(
         if not backup.ok:
             return InstanceDeployResult(False, backup.detail)
         backup_note = f" {backup.detail}" if backup.detail else ""
+    # DEV-197 — the folders the installation keeps its data in exist before it starts, owned by the application:
+    # Docker would make a missing one as root and the application could not write into it. The running version still
+    # serves, so a refusal here costs nothing.
+    try:
+        _made, folders_failed = await run_blocking(
+            instance_data_dirs.prepare, compose, deploy_host=deploy_host, cap=DATA_DIRS_CAP
+        )
+    except BlockingWorkTimedOut:
+        folders_failed = f"priečinky pre dáta sa nepodarilo pripraviť do {DATA_DIRS_CAP} s"
+    if folders_failed:
+        return InstanceDeployResult(False, folders_failed + backup_note)
     deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
     # From here the new version is on the machine: whatever fails later, the containers it replaced are gone and a
     # migration may have run — the compose on the target must stay the new one (DEV-68). Every report from here on
@@ -7433,6 +7445,8 @@ class _SmokeStack:
 BUILD_PROVENANCE_CAP = 60
 #: Ceiling on exporting the verified commit for a deploy's build (DEV-139) — git archive of the tracked tree.
 VERIFIED_BUILD_CAP = 180
+#: Ceiling on making an installation's data folders on its machine (DEV-197) — one short container, ssh if remote.
+DATA_DIRS_CAP = 150
 
 #: DEV-65: how long the source-language check of a version may take (git diff + reading the changed files).
 SOURCE_LANGUAGE_CAP = 120
