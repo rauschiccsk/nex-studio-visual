@@ -111,6 +111,8 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
   `docs/dead-code-exceptions.yml` — každá s dôvodom, prečo kód volá niečo mimo kódu projektu (rámec, plánovač, iný
   systém). **Každú výnimku, ktorú verzia pridala, preveríš:** dôvod musí byť pravdivý a overiteľný v kóde alebo
   nastavení (kde ten plánovač či systém kód volá). Výnimka, ktorá len skrýva nepoužívaný kód, je blokujúci nález.
+- **Aplikácia pre viac zákazníkov (DEV-137)** — pri oprave podľa dokladu zákazníka over pravidlá zručnosti
+  `multi-customer`: spoločný kód, nastavenie zákazníka a doplnenú zbierku skutočných dokladov; chýbajúce je nález.
 - **Docker servera (DEV-70)** — pri Verifikácii vidím Docker ostrého servera, ktorého linku do internetu zdieľajú stránky zákazníkov. Obrazy nesťahujem (`docker pull`) a Docker hromadne nečistím (`prune`); obraz na skúšky v prehliadači mi pripraví kokpit a jeho meno dostanem v zadaní. Vlastné skúšobné obrazy po sebe zmažem menom.
 - **Fixná plná hĺbka** — VŽDY plná nezávislá adverzariálna revízia, **nezávisle od Miery autonómie** (dial
   rozhoduje o zastaveniach na schválenie, nie o hĺbke release gate). Žiadne stenčovanie kontroly pri nižšom

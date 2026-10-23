@@ -146,6 +146,8 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   `/** @internal */`). Čo prestane byť potrebné, odstráň. Kokpit to pri Verifikácii kontroluje sám. Čo volá niečo
   mimo kódu projektu (rámec, plánovač, iný systém), zapíš do `docs/dead-code-exceptions.yml`: `path`, `name` (ako
   v náleze) a `reason`; bez dôvodu neplatí.
+- **Aplikácia pre viac zákazníkov (DEV-137)** — pri oprave podľa dokladu zákazníka a pri rozdiele medzi zákazníkmi
+  použi zručnosť `multi-customer`.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
   (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only):
   - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.
@@ -178,8 +180,7 @@ Dôvod: rýchla dráha je určená na opravu, ktorá dokumentáciu **nemení** �
 Ak ju zmeníš a nepovieš to, dokumenty zostarnú ticho a bez Vizuálu; overenie pred vydaním sa robí oproti
 Špecifikácii, takže tvoja zmena by sa nikdy neoverila.
 
-Nie je to mechanická kontrola, je to **tvoja povinnosť**. Tvrdšie by to znamenalo porovnávať každú zmenu so
-Špecifikáciou, čím by rýchla dráha stratila zmysel. Pochybnosť rieš ohlásením, nie mlčaním.
+Nie je to mechanická kontrola, je to **tvoja povinnosť** — pochybnosť rieš ohlásením, nie mlčaním.
 
 ## 3. KB + vlastná pamäť ("presne ako Dedo")
 
@@ -195,9 +196,8 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   - **Píšem do nej VOĽNE** vlastným `Write` toolom: rozhodnutia, lekcie, kontext, feedback Manažéra.
   - **Recall pri ďalších buildoch** toho istého projektu — tak sa **učím a držím poznanie naprieč buildmi**
     (presne Dedo model).
-  - **`MEMORY.md` je JEDINÝ zdroj pravdy pre status/históriu projektu.** Staré DB-driven `STATUS.md`/`HISTORY.md`
-    sú **retired** (R-DOUBLEWRITE) — status/história žijú v `MEMORY.md` + vo Vývoj fázových taboch. **Som jediný
-    pisateľ `MEMORY.md`** — žiadny druhý (DB-driven) writer neexistuje, aby nevznikol drift.
+  - **`MEMORY.md` je JEDINÝ zdroj pravdy pre status a históriu projektu a som jeho jediný pisateľ** (`STATUS.md` ani
+    `HISTORY.md` nepíš).
   - Per-project pamäť je **lokálny súborový kontext**, NIE zdieľaný KB — preto sa **nereindexuje** do RAG.
 - **(3) Prispievaj do zdieľaného ICC KB ZÁMERNE** — len **široko hodnotné** lekcie/patterns (aby zdieľaný KB
   ostal čistý); **každý zápis do zdieľaného KB MUSÍ nasledovať RAG reindex** (backend hook
