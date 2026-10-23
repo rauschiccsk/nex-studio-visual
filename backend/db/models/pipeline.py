@@ -240,6 +240,14 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: history lives in the ``author='dedo'`` message the unblock writes.
     resume_after_framework_fix = Column(Boolean, nullable=False, server_default="false")
 
+    #: DEV-201 — since when the version, passed by the Auditor, waits for the CI of its last commit to finish. While
+    #: set, the version is not passed (:func:`~backend.services.orchestrator._verifikacia_passed`): no Hotovo, by hand
+    #: or by the fast fix's own sign-off, and no deploy. The cockpit's CI watcher settles it
+    #: (:func:`~backend.services.orchestrator.settle_ci_waits`); a COLUMN, so a restart of the cockpit loses nothing
+    #: and :func:`~backend.services.orchestrator.determine_available_actions` stays state-only. Cleared when a turn
+    #: starts.
+    ci_pending_since = Column(TIMESTAMP(timezone=True), nullable=True)
+
     #: ICCINT-25 — "build the Decision Cards again", after the ONE turn that was meant to build them did not
     #: come back (the model briefly unreachable, an unparseable answer). The engine's fail-open is right, but
     #: it used to be a ONE-WAY door: a transient failure permanently downgraded the Manažér from deciding one
@@ -463,3 +471,5 @@ def _clear_framework_resume_on_work(target, value, oldvalue, initiator):
     if value == oldvalue or value != "agent_working":
         return
     target.resume_after_framework_fix = False
+    # DEV-201: a turn that starts (a fix, a re-run of Verifikácia) makes the wait for the old commit's CI moot.
+    target.ci_pending_since = None

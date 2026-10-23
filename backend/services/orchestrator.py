@@ -812,7 +812,9 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     elif stage == "verifikacia":
         # Verifikácia is the Auditor's phase: the Manažér ratifies the Auditor's verdict (``verdict``) and,
         # at the dial-governed end stop, signs off with ``schvalit`` → Hotovo.
-        actions.update({"verdict", "schvalit"})
+        actions.add("verdict")
+        if state.ci_pending_since is None:  # DEV-201: Hotovo waits for the CI of the last commit
+            actions.add("schvalit")
 
     # CR-1 (nex-studio-visual): a CONVERSATION build sitting AT the ``vizual`` stage still needs the
     # build-launch verb — a conversation build's ``schvalit`` is DROPPED by the board post-filter (it never
@@ -3157,7 +3159,15 @@ def _verifikacia_passed(db: Session, version_id: uuid.UUID) -> bool:
     directive — an 'Uprav' or an escalation Decision Card, CR-V2-054). If that latest message is a ``return``
     (a fix pending), a PASS can NO LONGER sign off — a FRESH adversarial Auditor re-run must produce a new
     PASS first. This forces the fresh re-judge the deep analysis called for (a stale PASS can never cross an
-    escalation)."""
+    escalation).
+
+    DEV-201: no PASS counts while the version waits for the CI of its last commit (``ci_pending_since``) — the manual
+    sign-off, the fast fix's own one and the deploy all ask here."""
+    waiting = db.execute(
+        select(PipelineState.ci_pending_since).where(PipelineState.version_id == version_id)
+    ).scalar_one_or_none()
+    if waiting is not None:
+        return False
     latest = db.execute(
         select(PipelineMessage)
         .where(
@@ -6846,11 +6856,25 @@ GIT_PUSH_CAP = 90
 
 CI_RUN_APPEAR_TIMEOUT = 120
 CI_RUN_APPEAR_INTERVAL = 10
-#: And how long to then wait for that run to FINISH. A run in flight is not evidence of health either — the
-#: 0.1.7 run that let a red version through was still queued when the engine looked, and failed 10 minutes
-#: later. Real CI here takes 5-10 minutes; 20 leaves room without stalling a build for good.
-CI_RUN_FINISH_TIMEOUT = 1200
+#: And how long to then wait, inside the Auditor's turn, for that run to FINISH. A run in flight is not evidence of
+#: health either — the 0.1.7 run that let a red version through was still queued when the engine looked, and failed 10
+#: minutes later. DEV-201: a run still going after this short wait no longer lets the version pass „bez výsledku“ —
+#: the version waits for it in its state (``ci_pending_since``) and the CI watcher settles it (:func:`settle_ci_waits`).
+#: NEX Inbox's CI took up to 100 minutes on 23.10.2026; holding the turn for that would block every deploy of the
+#: cockpit (``/health/busy``) and die with a restart.
+CI_RUN_FINISH_TIMEOUT = 300
 CI_RUN_FINISH_INTERVAL = 30
+
+#: What the Riadiace centrum says once the Auditor passed the version (and its CI let it).
+VERIFIKACIA_PASS_NEXT_ACTION = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
+#: DEV-201 — what it says while the version waits for the CI of its last commit, and why Hotovo is refused meanwhile.
+CI_PENDING_NEXT_ACTION = (
+    "Verifikácia PASS — čaká na kontrolu na GitHube ({runs}); Hotovo pôjde schváliť, keď dobehne. "
+    "Kokpit to dorieši sám."
+)
+CI_PENDING_REFUSAL = (
+    "Hotovo zatiaľ nie: verzia čaká na kontrolu na GitHube — keď dobehne, kokpit ju pustí sám, alebo vráti na opravu."
+)
 
 #: How many runs to read for ONE commit (ICCINT-129). A commit triggers one run per workflow — nex-inbox
 #: has two, most repos have one to three. The cap is not a judgement about how many matter; it only keeps
@@ -6940,8 +6964,12 @@ async def _ci_status_for_head(
     *,
     on_wait: Optional[Callable[[str], Awaitable[None]]] = None,
     release_tag: Optional[str] = None,
+    patient: bool = True,
 ) -> tuple[str, str]:
-    """CI verdict for the commit the Auditor is about to bless — ``("green"|"red"|"unknown", detail)``.
+    """CI verdict for the commit the Auditor is about to bless — ``("green"|"red"|"unknown"|"pending", detail)``.
+
+    DEV-201: ``pending`` — runs still going after the wait; the version then waits for them in its state. ``patient``
+    False (the CI watcher, every minute) asks GitHub once and never sleeps.
 
     ICCINT-64: NEX Studio HAD this check and lost it. ``_run_release_publish`` (v1) pushed and watched CI
     before a release; v2 moved deploy out of the pipeline and that function was orphaned — defined, never
@@ -6997,7 +7025,7 @@ async def _ci_status_for_head(
     # measure the logic rather than the clock) an interval-summing loop never reaches its own ceiling — it
     # spins for ever. Mine did, on the first run.
     tag_workflows = ci_status.postupy_spustene_znackou(project_root, release_tag) if release_tag else []
-    tries_left = max(1, CI_RUN_APPEAR_TIMEOUT // max(CI_RUN_APPEAR_INTERVAL, 1))
+    tries_left = max(1, CI_RUN_APPEAR_TIMEOUT // max(CI_RUN_APPEAR_INTERVAL, 1)) if patient else 1
     rows: list[dict] = []
     while True:
         looked, failure = await _look()
@@ -7015,7 +7043,7 @@ async def _ci_status_for_head(
     # Second wait: for them to FINISH. A queued or running job says nothing about whether the code is
     # sound — but a run that has ALREADY failed is the answer, and waiting for its siblings could only
     # let a red decay into the ``unknown`` that does not block.
-    tries_left = max(1, CI_RUN_FINISH_TIMEOUT // max(CI_RUN_FINISH_INTERVAL, 1))
+    tries_left = max(1, CI_RUN_FINISH_TIMEOUT // max(CI_RUN_FINISH_INTERVAL, 1)) if patient else 0
     announced = False
     while True:
         stav, detail = ci_status.verdikt(rows)
@@ -7049,12 +7077,94 @@ async def _ci_status_for_head(
             f"{CI_RUN_APPEAR_TIMEOUT} s — verzia prešla bez jeho výsledku",
         )
     if stav == "unknown" and pending:
-        return (
-            "unknown",
-            f"CI po {CI_RUN_FINISH_TIMEOUT // 60} min ešte bežalo "
-            f"({', '.join(ci_status.pomenuj_beh(r) for r in pending)}) — verzia prešla bez jeho výsledku",
-        )
+        return "pending", ", ".join(ci_status.pomenuj_beh(r) for r in pending)
     return stav, detail
+
+
+def _record_ci_red_verdict(db: Session, version_id: uuid.UUID, ci_detail: str) -> PipelineMessage:
+    """The Auditor's PASS floored by red CI — its OWN verdict message, not just a note (ICCINT-64).
+
+    :func:`_verifikacia_passed` reads the payload of the LATEST verdict, so a PASS left standing would still sign off
+    to Hotovo however hard the caller blocks the state. One writer for the gate and the CI watcher (DEV-201)."""
+    return _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="FAIL",
+        payload={
+            "phase": "verifikacia",
+            "verdict": "FAIL",
+            "engine_override": "ci_red",
+            "ci": ci_detail,
+            "findings": [
+                f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, "
+                "kým sú kontroly projektu červené."
+            ],
+        },
+    )
+
+
+async def settle_ci_waits(db: Session, *, on_message: Optional[MessageCallback] = None) -> list[PipelineState]:
+    """DEV-201 — settle every version that waits for the CI of its last commit; returns the states it changed.
+
+    Called by the cockpit's CI watcher every minute (``pipeline_runner.settle_ci_waits``). One question to GitHub per
+    waiting version, no sleeping:
+
+    * still running, or GitHub cannot be read → the version goes on waiting (``unknown`` is not „v poriadku“ — the
+      gate saw the runs, so they are there to be waited for);
+    * red → the same FAIL as a red the gate sees in time: the floored verdict, then the fix loop
+      (:func:`_settle_verifikacia_verdict`);
+    * green → the PASS counts: ``schvalit`` is offered, and a fast fix at a non-stopping dial signs itself off
+      (:func:`_settle_phase_boundary`), exactly as the turn would have;
+    * waiting longer than ``ci_pending_cap_hours`` → the wait ends as green does, and says so, never in silence.
+    """
+    settled: list[PipelineState] = []
+    cap = timedelta(hours=settings.ci_pending_cap_hours)
+    waiting = db.execute(select(PipelineState).where(PipelineState.ci_pending_since.is_not(None))).scalars().all()
+    for state in waiting:
+        version_id = state.version_id
+        root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+        version_number = db.get(Version, version_id).version_number
+        ci_state, ci_detail = await _ci_status_for_head(
+            root, release_tag=_release_tag_at_head(root, version_number), patient=False
+        )
+        overdue = datetime.now(timezone.utc) - state.ci_pending_since > cap
+        if ci_state in ("pending", "unknown") and not overdue:
+            continue
+        state.ci_pending_since = None
+        if ci_state == "red":
+            floored = _record_ci_red_verdict(db, version_id, ci_detail)
+            if on_message is not None:
+                await on_message(floored)
+            await _settle_verifikacia_verdict(db, state, verdict="FAIL", on_message=on_message)
+        else:
+            content = (
+                f"Kontroly projektu dobehli: {ci_detail}"
+                if ci_state == "green"
+                else f"Kontroly projektu nedobehli ani po {settings.ci_pending_cap_hours} h ({ci_detail}) — verzia na "
+                "ich výsledok už nečaká; pozri ich v Repozitári."
+            )
+            note = _record_message(
+                db,
+                version_id=version_id,
+                stage="verifikacia",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content=content,
+                payload={"phase": "verifikacia", "ci": ci_detail, "ci_red": False},
+            )
+            if on_message is not None:
+                await on_message(note)
+            state.status = "awaiting_manazer"
+            state.next_action = VERIFIKACIA_PASS_NEXT_ACTION
+            _settle_phase_boundary(db, state)
+        db.flush()
+        settled.append(state)
+    return settled
 
 
 # ICCINT-64: the v1 ``_run_release_publish`` (push → resolve the CI run → ``gh run watch`` → block on red)
@@ -10923,6 +11033,8 @@ async def _settle_verifikacia_verdict(
     if verdict == "PASS" and not runtime_floor_red:
         preview_red = await _floor_preview_decisions(db, version_id, on_message=on_message)
     ci_red = False
+    # DEV-201: the wait of an earlier round says nothing about this one.
+    state.ci_pending_since = None
     if verdict == "PASS" and not runtime_floor_red and not preview_red:
 
         async def _announce_ci_wait(which: str) -> None:
@@ -10950,30 +11062,26 @@ async def _settle_verifikacia_verdict(
         )
         ci_red = ci_state == "red"
         if ci_red:
-            # The caller has ALREADY recorded the PASS, so flooring it needs its OWN verdict message — not just
-            # a note. :func:`_verifikacia_passed` reads the payload of the LATEST verdict, so a PASS left
-            # standing would still sign off to Hotovo however hard this function blocks the state here.
-            floored = _record_message(
+            floored = _record_ci_red_verdict(db, version_id, ci_detail)
+            if on_message is not None:
+                await on_message(floored)
+        elif ci_state == "pending":
+            # DEV-201: the runs are still going after the wait — the version waits for them in its state, not in this
+            # turn, and the CI watcher settles it (:func:`settle_ci_waits`). No PASS counts meanwhile.
+            state.ci_pending_since = datetime.now(timezone.utc)
+            waiting = _record_message(
                 db,
                 version_id=version_id,
                 stage="verifikacia",
-                author="auditor",
+                author="system",
                 recipient="manazer",
-                kind="verdict",
-                content="FAIL",
-                payload={
-                    "phase": "verifikacia",
-                    "verdict": "FAIL",
-                    "engine_override": "ci_red",
-                    "ci": ci_detail,
-                    "findings": [
-                        f"ENGINE OVERRIDE (ICCINT-64): {ci_detail} — verzia sa nedá vyhlásiť za overenú, "
-                        "kým sú kontroly projektu červené."
-                    ],
-                },
+                kind="notification",
+                content=f"Kontroly projektu ešte bežia ({ci_detail}) — verzia nedostane Hotovo, kým nedobehnú; "
+                "kokpit ich výsledok dorieši sám.",
+                payload={"phase": "verifikacia", "ci": ci_detail, "ci_pending": True},
             )
             if on_message is not None:
-                await on_message(floored)
+                await on_message(waiting)
         elif ci_detail:
             # Green (or a run still going) — record WHAT was checked. The 0.1.6 verdict carried no CI evidence
             # at all, which is why nobody could tell the check had never run.
@@ -10989,7 +11097,9 @@ async def _settle_verifikacia_verdict(
             )
     if verdict == "PASS" and not runtime_floor_red and not preview_red and not ci_red:
         state.status = "awaiting_manazer"
-        state.next_action = "Verifikácia PASS — schváľ na Hotovo (nasadenie je samostatná akcia per zákazník)."
+        state.next_action = (
+            CI_PENDING_NEXT_ACTION.format(runs=ci_detail) if state.ci_pending_since else VERIFIKACIA_PASS_NEXT_ACTION
+        )
         db.flush()
         return state
     # FAIL (or a PASS string floored to FAIL by the runtime floor) → bounded fix loop.
@@ -14530,6 +14640,8 @@ async def apply_action(
         # ONLY through a recorded Auditor PASS verdict at Verifikácia — never a silent sign-off. (v1's
         # "no-silent-done-without-UAT" gate is superseded: deploy is OUT of the pipeline — per-customer,
         # D6/OQ-3 — so Hotovo means "verified", not "deployed". The verification invariant is preserved.)
+        if state.current_stage == "verifikacia" and state.ci_pending_since is not None:
+            raise OrchestratorError(CI_PENDING_REFUSAL)
         if state.current_stage == "verifikacia" and not _verifikacia_passed(db, version_id):
             raise OrchestratorError(
                 "Hotovo nedovolené: Auditor ešte nevydal PASS vo Verifikácii — najprv over verdiktom PASS."

@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     ci_watch_interval_seconds: int = 60
     ci_watch_enabled: bool = True
     ci_watch_retry_hours: int = 6
+    # DEV-201: how long a version passed by the Auditor waits for the CI of its last commit before the wait is given up
+    # (said out loud). Measured 23.10.2026: NEX Inbox's CI took up to 100 minutes, its jobs waiting for the only runner.
+    ci_pending_cap_hours: int = 6
     # DEV-94: what the cockpit writes into the Knowledge Base goes to GitHub — how long one exchange with GitHub may
     # take, and how often commits that did not get there are sent again (off in tests: it would reach for GitHub).
     kb_publish_timeout_seconds: int = 30

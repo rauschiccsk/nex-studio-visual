@@ -184,7 +184,7 @@ async def _ci_watch_loop() -> None:
 
     Each pass has its own session and commits per project; a failed pass is logged and the loop goes on — the next
     pass asks again, and what was told is in the database, so nothing is told twice."""
-    from backend.services import ci_watch
+    from backend.services import ci_watch, pipeline_runner
 
     while True:
         try:
@@ -197,6 +197,18 @@ async def _ci_watch_loop() -> None:
             raise
         except Exception:
             logger.exception("CI watch loop iteration failed")
+        # DEV-201: the versions waiting for the CI of their last commit are settled here — on their own session, so a
+        # failure of the Telegram half above never keeps a version waiting.
+        try:
+            db = SessionLocal()
+            try:
+                await pipeline_runner.settle_ci_waits(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("settling the versions waiting for CI failed")
         await asyncio.sleep(settings.ci_watch_interval_seconds)
 
 

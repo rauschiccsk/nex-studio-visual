@@ -129,6 +129,29 @@ async def _broadcast_message(version_id: uuid.UUID, msg: PipelineMessage) -> Non
     )
 
 
+async def settle_ci_waits(db) -> None:
+    """DEV-201 — settle the versions that wait for the CI of their last commit, then show it and go on.
+
+    Called by the cockpit's CI watcher loop every minute. What :func:`orchestrator.settle_ci_waits` wrote is committed
+    first, then sent to the open screens (the state, every new message); a version the red CI sent back to work (a fast
+    fix's own fix loop) gets its turn scheduled, as a Manažér's action would."""
+    written: list[PipelineMessage] = []
+
+    async def _keep(msg: PipelineMessage) -> None:
+        written.append(msg)
+
+    settled = await orchestrator.settle_ci_waits(db, on_message=_keep)
+    if not settled:
+        return
+    db.commit()
+    for msg in written:
+        await _broadcast_message(msg.version_id, msg)
+    for state in settled:
+        await _broadcast_state(state.version_id, state)
+        if state.status == "agent_working":
+            schedule_dispatch(state.version_id)
+
+
 def _message_callback(db, version_id: uuid.UUID):
     """Build the incremental-broadcast hook (CR-NS-018): commit + broadcast one message
     the moment it's recorded, so bubbles appear as each agent finishes — not batched at

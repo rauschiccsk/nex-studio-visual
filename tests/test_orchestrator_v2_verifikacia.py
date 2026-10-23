@@ -2022,20 +2022,23 @@ async def test_an_undeterminable_ci_never_blocks(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_ci_that_never_finishes_passes_but_says_so(db_session, monkeypatch):
-    """A run still going after the whole budget passes — we cannot stall a build for ever — but the record
-    must say that, so nobody can read it as "the checks were green"."""
+async def test_a_ci_that_never_finishes_in_the_wait_leaves_the_version_waiting(db_session, monkeypatch):
+    """A run still going after the wait used to pass „bez jeho výsledku“ — NEX Inbox 1.10.1 got Hotovo that way on
+    23.10.2026 while its CI was failing. DEV-201 (Director: „Áno, súhlasím, implementuj DEV-201“): the PASS stands but
+    does not count, the version waits for the run (tests/test_a_version_waits_for_its_ci.py) — and the record says so,
+    never silent as for green."""
     _no_ci_waiting(monkeypatch)
     _fake_ci(monkeypatch, status="in_progress", conclusion=None)
 
     last = await _pass_verdict(db_session, monkeypatch)
 
     assert last.content == "PASS"
-    notes = [m for m in _msgs(db_session, last.version_id) if m.kind == "notification" and "ci" in (m.payload or {})]
-    assert notes, "o kontrolách musí ostať zápis aj vtedy, keď sa výsledku nedočkáme"
-    assert "ešte bežalo" in str(notes[-1].payload["ci"]), (
-        "zápis musí povedať, že sa čakalo a nedočkalo — nie mlčať ako pri zelenom"
+    assert orchestrator._verifikacia_passed(db_session, last.version_id) is False, (
+        "beh, ktorý ešte beží, nič nepotvrdil"
     )
+    notes = [m for m in _msgs(db_session, last.version_id) if (m.payload or {}).get("ci_pending")]
+    assert notes, "o kontrolách musí ostať zápis aj vtedy, keď sa výsledku zatiaľ nedočkáme"
+    assert "ešte bežia" in notes[-1].content, "zápis musí povedať, že sa na výsledok čaká — nie mlčať ako pri zelenom"
 
 
 def test_the_remote_url_is_read_in_both_shapes():
