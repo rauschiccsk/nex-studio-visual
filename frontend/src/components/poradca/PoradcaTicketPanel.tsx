@@ -3,7 +3,7 @@
 // module, so the same thing is not filed twice. A ticket of the cockpit goes to Andros Dedo; a ticket of the project
 // carries its work kind and Poradca's proposal — the next version or a fast fix — and starts nothing (DEV-29).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 
 import WorkKindChoice from "@/components/common/WorkKindChoice";
@@ -40,6 +40,7 @@ export default function PoradcaTicketPanel({ messageId, onFounded, onClose }: Pr
   const [responsible, setResponsible] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const actions = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +62,13 @@ export default function PoradcaTicketPanel({ messageId, onFounded, onClose }: Pr
       cancelled = true;
     };
   }, [messageId]);
+
+  // DEV-202 — the preview opens below the answer; under a long one its buttons were below the screen's edge and the
+  // Director had to scroll to find „Založiť tiket“ (23.10.2026). Once the preview (or why it failed) is drawn, the
+  // view moves just enough for the buttons to be seen.
+  useEffect(() => {
+    if (draft || error) actions.current?.scrollIntoView?.({ block: "nearest" });
+  }, [draft, error]);
 
   const project = draft?.kind === "project";
   const context = draft?.context ?? [];
@@ -215,7 +223,7 @@ export default function PoradcaTicketPanel({ messageId, onFounded, onClose }: Pr
         </>
       )}
       {error && <p className="text-xs text-[var(--color-status-error)]">{error}</p>}
-      <div className="flex flex-wrap items-center gap-2">
+      <div ref={actions} className="flex flex-wrap items-center gap-2">
         {draft && !draft.plane_identifier && (
           <button
             type="button"
