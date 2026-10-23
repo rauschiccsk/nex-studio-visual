@@ -2,7 +2,7 @@
 
 Mirrors :mod:`backend.db.models.tasks.Task`.  Field names, max lengths
 and default values match the SQLAlchemy model exactly so that
-``TaskRead.model_validate(task_orm_instance)`` round-trips cleanly.
+a payload maps onto the model one to one.
 
 Task-type and status values correspond to the ``ck_tasks_task_type`` and
 ``ck_tasks_status`` CHECK constraints on the ``tasks`` table
@@ -10,22 +10,16 @@ Task-type and status values correspond to the ``ck_tasks_task_type`` and
 ``todo | in_progress | done | failed`` respectively).  The ORM columns
 are ``String`` types guarded by DB-level CHECKs rather than Python
 Enums, so ``Literal`` is the narrowest faithful representation —
-consistent with the approach used in :mod:`backend.schemas.bug_fix_task`,
-:mod:`backend.schemas.feat`, :mod:`backend.schemas.epic`,
-:mod:`backend.schemas.bug`,
+consistent with :mod:`backend.schemas.feat`, :mod:`backend.schemas.epic`,
 :mod:`backend.schemas.project` and :mod:`backend.schemas.user`.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
-
-# Re-export so routers can import TaskPriority from this module.
-__all__ = ["TaskCreate", "TaskUpdate", "TaskRead", "TaskType", "TaskStatus", "TaskPriority"]
+from pydantic import BaseModel, Field
 
 # Mirrors the CHECK constraint
 # ``task_type IN ('backend', 'frontend', 'migration', 'test', 'docs')``
@@ -57,9 +51,6 @@ class TaskCreate(BaseModel):
     ``description`` and ``status`` default to the values set by the
     DB-level ``server_default`` (``''`` and ``todo`` respectively) so
     callers may omit them.  Nullable columns default to ``None``.
-    ``actual_minutes`` is typically set automatically from delegation
-    duration but is accepted on creation to support backfill /
-    import flows — consistent with :mod:`backend.schemas.bug_fix_task`.
     """
 
     feat_id: UUID = Field(
@@ -95,10 +86,6 @@ class TaskCreate(BaseModel):
         default=None,
         description="Architect's estimated duration in minutes.",
     )
-    actual_minutes: Optional[int] = Field(
-        default=None,
-        description="Measured duration in minutes; typically set after completion.",
-    )
     checklist_type: Optional[str] = Field(
         default=None,
         max_length=30,
@@ -115,80 +102,3 @@ class TaskCreate(BaseModel):
         default=None,
         description="DEV-75: bug | request | gift; None = the version's category.",
     )
-
-
-class TaskUpdate(BaseModel):
-    """Partial update for an existing task.
-
-    ``id``, ``feat_id``, ``number`` and ``created_at`` are immutable:
-    the task identity and its position within the feat must not be
-    rewritten after the fact.  ``updated_at`` is managed by the ORM via
-    ``onupdate=func.now()`` and must not be set by clients.  All
-    remaining fields are optional to support PATCH-style semantics.
-    ``actual_minutes`` is typically set automatically from delegation
-    duration but is exposed here for backfill / correction flows —
-    consistent with :mod:`backend.schemas.feat` and
-    :mod:`backend.schemas.bug_fix_task`.
-    """
-
-    title: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=500,
-        description="Updated task title.",
-    )
-    description: Optional[str] = Field(
-        default=None,
-        description="Updated task description.",
-    )
-    task_type: Optional[TaskType] = Field(
-        default=None,
-        description="Updated task type: backend | frontend | migration | test | docs.",
-    )
-    status: Optional[TaskStatus] = Field(
-        default=None,
-        description="Updated lifecycle status: todo | in_progress | done | failed.",
-    )
-    estimated_minutes: Optional[int] = Field(
-        default=None,
-        description="Updated architect estimate in minutes.",
-    )
-    actual_minutes: Optional[int] = Field(
-        default=None,
-        description="Updated measured duration in minutes.",
-    )
-    checklist_type: Optional[str] = Field(
-        default=None,
-        max_length=30,
-        description="Updated checklist type.",
-    )
-    priority: Optional[TaskPriority] = Field(
-        default=None,
-        description="Updated task priority: normal | high | urgent.",
-    )
-
-
-class TaskRead(BaseModel):
-    """Serialised representation of a task row.
-
-    Mirrors every column on :class:`backend.db.models.tasks.Task`.
-    ``from_attributes=True`` enables construction directly from an ORM
-    instance via ``TaskRead.model_validate(obj)``.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    feat_id: UUID
-    number: int
-    title: str = Field(..., min_length=1, max_length=500)
-    description: str
-    plain_description: Optional[str] = None
-    task_type: TaskType
-    status: TaskStatus
-    estimated_minutes: Optional[int] = None
-    actual_minutes: Optional[int] = None
-    checklist_type: Optional[str] = Field(default=None, max_length=30)
-    priority: TaskPriority = "normal"
-    created_at: datetime
-    updated_at: datetime

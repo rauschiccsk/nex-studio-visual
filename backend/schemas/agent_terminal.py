@@ -44,7 +44,6 @@ class AgentTerminalSessionRead(BaseModel):
     ended_at: Optional[datetime]
     exit_code: Optional[int]
     terminated_by: Optional[TerminatedBy]
-    last_activity_at: datetime
 
 
 class AgentTerminalSpawnRequest(BaseModel):

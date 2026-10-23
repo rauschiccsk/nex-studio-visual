@@ -11,7 +11,7 @@ than a single resource prefix:
 * ``GET    /projects/{project_id}/versions`` → list every version of a
   project, the newest version number first, compared as numbers (DESIGN.md §2.6 ``GET
   /projects/{id}/versions``). Each row carries the
-  ``epic_count`` / ``epics_done`` / ``bug_count`` aggregates that drive
+  ``epic_count`` / ``epics_done`` aggregates that drive
   the ``VersionsPage`` UI cards. Authenticated users only.
 * ``POST   /projects/{project_id}/versions`` → create a new version.
   Status defaults to ``planned`` (DESIGN.md §4.0 Rule 1). ``ri`` role
@@ -112,8 +112,8 @@ def list_versions(
     """Return every version belonging to ``project_id``.
 
     Results put the newest version number first, compared as numbers
-    (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done`` /
-    ``bug_count`` aggregates the ``VersionsPage`` UI cards consume —
+    (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done``
+    aggregates the ``VersionsPage`` UI cards consume —
     see DESIGN.md §2.6 ``GET /projects/{id}/versions``.
 
     No pagination envelope: the version list per project is bounded by
@@ -182,8 +182,8 @@ def get_version(
 ) -> VersionRead:
     """Return a single version by primary key.
 
-    The service eagerly loads ``epics`` and ``bugs`` via ``selectinload``
-    so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
+    The service eagerly loads ``epics`` via ``selectinload``
+    so the ``VersionDetailPage`` UI can render the EPIC groups
     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
 
     v4.0.35: owner-or-admin — a Junior may read only their OWN

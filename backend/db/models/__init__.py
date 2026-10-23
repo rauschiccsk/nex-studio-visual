@@ -3,7 +3,6 @@
 from backend.db.models.agent_terminal import AgentTerminalSession
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
-from backend.db.models.bugs import Bug
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
 from backend.db.models.dedo_proposal import DedoProjectProposal
@@ -36,7 +35,6 @@ __all__ = [
     "Base",
     "UUIDMixin",
     "TimestampMixin",
-    "Bug",
     "Credential",
     "Customer",
     "DeployEvent",

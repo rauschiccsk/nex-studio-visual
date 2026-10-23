@@ -91,15 +91,6 @@ class TestFeatModel:
         db_session.expire(feat)
         assert feat.status == "todo"
 
-    def test_task_count_defaults_zero(self, db_session):
-        """task_count should default to 0 via server_default."""
-        feat = _make_feat(db_session)
-        db_session.add(feat)
-        db_session.flush()
-
-        db_session.expire(feat)
-        assert feat.task_count == 0
-
     def test_auto_fix_count_defaults_zero(self, db_session):
         """auto_fix_count should default to 0 via server_default."""
         feat = _make_feat(db_session)

@@ -146,7 +146,6 @@ const baseVersion: Version = {
   updated_at: "2026-06-01T00:00:00Z",
   epic_count: 0,
   epics_done: 0,
-  bug_count: 0,
 };
 
 const patchVersion: Version = { ...baseVersion, id: "v2", version_number: "v0.6.1", name: "Rýchla oprava", status: "planned" };

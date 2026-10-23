@@ -10,10 +10,10 @@ lifecycle helpers specified in DESIGN.md §4.0 Version Lifecycle Rules:
   task (9.3).
 * ``create`` defaults ``status`` to ``planned`` and rejects duplicate
   ``(project_id, version_number)`` pairs with :class:`ValueError`.
-* ``get_by_id`` eager-loads ``epics`` and ``bugs`` for the detail view.
+* ``get_by_id`` eager-loads ``epics`` for the detail view.
 * ``list_versions`` orders by ``version_number DESC`` and attaches the
-  three aggregate counts (``epic_count``, ``epics_done``,
-  ``bug_count``) consumed by :class:`VersionRead`.
+  two aggregate counts (``epic_count``, ``epics_done``) consumed by
+  :class:`VersionRead`.
 * ``update`` allow-list: only mutable fields are applied; immutable
   ``project_id`` / ``id`` / ``created_at`` stay intact across updates.
   ``version_number`` rename rejects collisions within the same project.
@@ -34,7 +34,6 @@ from datetime import date, timedelta
 
 import pytest
 
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -101,29 +100,6 @@ def _make_epic(
     db_session.add(epic)
     db_session.flush()
     return epic
-
-
-def _make_bug(
-    db_session,
-    *,
-    project: Project,
-    version: Version,
-    user: User,
-    bug_number: int,
-) -> Bug:
-    """Create and persist a Bug attached to a version."""
-    bug = Bug(
-        project_id=project.id,
-        version_id=version.id,
-        bug_number=bug_number,
-        title=f"Bug {bug_number}",
-        description="Steps to reproduce.",
-        severity="minor",
-        created_by=user.id,
-    )
-    db_session.add(bug)
-    db_session.flush()
-    return bug
 
 
 def _payload(version_number: str = "1.0.0", **overrides) -> VersionCreate:
@@ -235,24 +211,21 @@ class TestGetById:
         with pytest.raises(ValueError, match="not found"):
             service.get_by_id(db_session, uuid.uuid4())
 
-    def test_get_by_id_eager_loads_epics_and_bugs(self, db_session):
-        """EPIC and BUG collections are populated in one round-trip."""
+    def test_get_by_id_eager_loads_epics(self, db_session):
+        """The EPIC collection is populated in one round-trip."""
         user = _make_user(db_session)
         project = _make_project(db_session, user=user)
         version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
 
         epic_a = _make_epic(db_session, project=project, version=version, number=1)
         epic_b = _make_epic(db_session, project=project, version=version, number=2)
-        bug_a = _make_bug(db_session, project=project, version=version, user=user, bug_number=1)
 
         # Expire so we hit the DB rather than the identity map.
         db_session.expire_all()
 
         fetched = service.get_by_id(db_session, version.id)
         epic_ids = {e.id for e in fetched.epics}
-        bug_ids = {b.id for b in fetched.bugs}
         assert epic_ids == {epic_a.id, epic_b.id}
-        assert bug_ids == {bug_a.id}
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +369,7 @@ class TestListVersions:
         assert numbers[-1] == "1.0.0"
 
     def test_list_attaches_aggregate_counts(self, db_session):
-        """Each returned Version carries ``epic_count`` / ``epics_done`` / ``bug_count``."""
+        """Each returned Version carries ``epic_count`` / ``epics_done``."""
         user = _make_user(db_session)
         project = _make_project(db_session, user=user)
         version = service.create(db_session, project.id, _payload("1.0.0"), user.id)
@@ -404,18 +377,15 @@ class TestListVersions:
         _make_epic(db_session, project=project, version=version, number=1, status="done")
         _make_epic(db_session, project=project, version=version, number=2, status="in_progress")
         _make_epic(db_session, project=project, version=version, number=3, status="planned")
-        _make_bug(db_session, project=project, version=version, user=user, bug_number=1)
-        _make_bug(db_session, project=project, version=version, user=user, bug_number=2)
 
         rows = service.list_versions(db_session, project.id)
         assert len(rows) == 1
         row = rows[0]
         assert row.epic_count == 3
         assert row.epics_done == 1
-        assert row.bug_count == 2
 
     def test_list_empty_project_returns_zero_counts(self, db_session):
-        """Versions with no EPIC/BUG rows report zero counts, not ``None``."""
+        """Versions with no EPIC rows report zero counts, not ``None``."""
         user = _make_user(db_session)
         project = _make_project(db_session, user=user)
         service.create(db_session, project.id, _payload("1.0.0"), user.id)
@@ -425,7 +395,6 @@ class TestListVersions:
         row = rows[0]
         assert row.epic_count == 0
         assert row.epics_done == 0
-        assert row.bug_count == 0
 
     def test_list_empty_when_no_versions(self, db_session):
         """A project with no versions returns an empty list."""

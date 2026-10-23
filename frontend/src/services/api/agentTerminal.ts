@@ -37,7 +37,6 @@ export interface AgentTerminalSession {
   ended_at: string | null;
   exit_code: number | null;
   terminated_by: TerminatedBy | null;
-  last_activity_at: string;
 }
 
 export interface SpawnRequest {

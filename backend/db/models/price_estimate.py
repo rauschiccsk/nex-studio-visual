@@ -29,7 +29,6 @@ class PriceSample(Base):
     tasks = Column(Integer, nullable=False)
     code_tokens = Column(Integer, nullable=False)
     docs_tokens = Column(Integer, nullable=False)
-    measured_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.clock_timestamp())
 
 
 class PriceEstimate(Base, UUIDMixin):

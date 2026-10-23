@@ -26,12 +26,3 @@ from backend.services.project import (  # noqa: F401
     list_projects,
     update,
 )
-
-__all__ = [
-    "count_projects",
-    "create",
-    "delete",
-    "get_by_id",
-    "list_projects",
-    "update",
-]

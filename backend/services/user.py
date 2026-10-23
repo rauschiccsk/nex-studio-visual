@@ -39,7 +39,6 @@ import bcrypt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.poradca import PoradcaConversation
 from backend.db.models.projects import Project
@@ -291,7 +290,6 @@ def _has_restrict_dependencies(db: Session, user_id: UUID) -> Optional[str]:
     """
     checks: list[tuple[type, object, str]] = [
         (Project, Project.created_by, "používateľ založil projekty"),
-        (Bug, Bug.created_by, "používateľ nahlásil chyby"),
         (
             PoradcaConversation,
             PoradcaConversation.author_id,

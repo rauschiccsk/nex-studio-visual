@@ -1655,7 +1655,7 @@ export interface paths {
          *
          *     Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``, so
          *     dependent rows (modules, specifications, design documents,
-         *     KB docs, architect sessions, epics, bugs, delegations, migration
+         *     KB docs, architect sessions, epics, delegations, migration
          *     tables, report configs — and the project's **customers** with their whole
          *     **deploy/acceptance history**) are removed automatically.
          *
@@ -1937,8 +1937,8 @@ export interface paths {
          * @description Return every version belonging to ``project_id``.
          *
          *     Results put the newest version number first, compared as numbers
-         *     (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done`` /
-         *     ``bug_count`` aggregates the ``VersionsPage`` UI cards consume —
+         *     (DEV-169: 1.10.0 above 1.9.0, v1.0.0 below 1.1.0) and each row carries the ``epic_count`` / ``epics_done``
+         *     aggregates the ``VersionsPage`` UI cards consume —
          *     see DESIGN.md §2.6 ``GET /projects/{id}/versions``.
          *
          *     No pagination envelope: the version list per project is bounded by
@@ -2778,7 +2778,7 @@ export interface paths {
          * @description Hard-delete a user (ri only).
          *
          *     The ``user_service.delete`` helper proactively checks every inbound
-         *     ``ondelete='RESTRICT'`` foreign key (projects, bugs, architect_sessions,
+         *     ``ondelete='RESTRICT'`` foreign key (projects, architect_sessions,
          *     raw_specifications, professional_specifications, design_documents)
          *     before issuing the DELETE — if any row still references the user,
          *     a clean :class:`ValueError` propagates up to a 409 Conflict here
@@ -2876,8 +2876,8 @@ export interface paths {
          * Get Version
          * @description Return a single version by primary key.
          *
-         *     The service eagerly loads ``epics`` and ``bugs`` via ``selectinload``
-         *     so the ``VersionDetailPage`` UI can render the EPIC / BUG groups
+         *     The service eagerly loads ``epics`` via ``selectinload``
+         *     so the ``VersionDetailPage`` UI can render the EPIC groups
          *     without an N+1 round-trip — see DESIGN.md §2.6 ``GET /versions/{id}``.
          *
          *     v4.0.35: owner-or-admin — a Junior may read only their OWN
@@ -3245,11 +3245,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Last Activity At
-             * Format: date-time
-             */
-            last_activity_at: string;
             /** Pid */
             pid: number;
             /** Project Slug */
@@ -7802,20 +7797,14 @@ export interface components {
          * @description Serialised representation of a version row.
          *
          *     Mirrors every column on :class:`backend.db.models.versions.Version`
-         *     and adds three service-populated aggregate counts
-         *     (``epic_count``, ``epics_done``, ``bug_count``) used by DESIGN.md
+         *     and adds two service-populated aggregate counts
+         *     (``epic_count``, ``epics_done``) used by DESIGN.md
          *     §2.6 ``GET /projects/{id}/versions``.  ``from_attributes=True``
          *     enables construction directly from an ORM instance via
          *     ``VersionRead.model_validate(obj)``; the aggregate counts must be
          *     supplied explicitly by the service layer.
          */
         VersionRead: {
-            /**
-             * Bug Count
-             * @description Number of Bugs assigned to this version.
-             * @default 0
-             */
-            bug_count: number;
             /**
              * Created At
              * Format: date-time

@@ -1,64 +1,9 @@
-"""Service layer for :class:`~backend.db.models.tasks.Feat`.
+"""Service layer for :class:`~backend.db.models.tasks.Feat` — read one and create.
 
-Provides the synchronous CRUD surface used by API routers. All methods
-accept ``db: Session`` as the first argument and only ever call
-``session.flush()`` — transaction commit is the router's responsibility.
-Errors are signalled via :class:`ValueError` so the router can translate
-them to the appropriate HTTP status code.
-
-Design notes (per DESIGN.md §1.9 Tasks (Epic/Feat/Task hierarchy), §2
-``feats`` table, §2.6 ``POST /epics/{id}/feats`` / ``GET /epics/{id}/feats``,
-and :mod:`backend.db.models.tasks.Feat`):
-
-    * ``id``, ``number``, ``created_at`` and ``updated_at`` are
-      server-managed and therefore immutable from the service layer
-      (``updated_at`` is auto-stamped by the ORM via
-      ``onupdate=func.now()`` on flush).
-    * ``epic_id`` is an immutable foreign key — a feat belongs to
-      exactly one epic for its lifetime. :class:`FeatUpdate`
-      deliberately omits it and the service's ``allowed_fields``
-      allow-list enforces that contract defensively.
-    * ``number`` is auto-assigned by :func:`create` as
-      ``MAX(number) + 1`` for the supplied ``epic_id`` (starts at
-      ``1`` for the first feat in an epic). The DB-level
-      ``UNIQUE(epic_id, number)`` constraint
-      (``uq_feats_epic_id_number``) is re-validated defensively before
-      flush so concurrent creates on the same epic — which are rare but
-      possible — still surface as :class:`ValueError` instead of raw
-      :class:`~sqlalchemy.exc.IntegrityError`.
-    * ``status`` is constrained by the ``ck_feats_status`` DB CHECK
-      (``todo | in_progress | done | failed``). The Pydantic
-      :data:`~backend.schemas.feat.FeatStatus` literal mirrors the DB
-      constraint, so the service does not revalidate — if an invalid
-      value ever reaches the service (e.g. a bypassed schema) the DB
-      CHECK rejects it on flush.
-    * ``task_count`` and ``auto_fix_count`` are server-managed counters
-      maintained elsewhere (task-creation hook / auto-fix loop). They
-      are not accepted on :class:`FeatCreate` and not in the update
-      allow-list — the DB ``server_default='0'`` seeds them on insert.
-    * ``actual_minutes`` is normally measured from delegation duration
-      but is exposed in :class:`FeatUpdate` for backfill / correction
-      flows (consistent with ``resolved_at`` in
-      :mod:`backend.schemas.bug`).
-    * Inbound FKs on ``feats`` — ``tasks.feat_id``
-      (``ON DELETE CASCADE``), ``delegations.feat_id``
-      (``ON DELETE SET NULL``) and ``auto_fix_attempts.feat_id``
-      (``ON DELETE CASCADE``) — are all handled at the DB level, so
-      :func:`delete` needs no RESTRICT dependency check; dependent rows
-      are either removed or NULL-ed automatically on flush.
-    * List filters (``epic_id``, ``status``) match the indexed columns
-      (``ix_feats_epic_id``, ``ix_feats_status``) and support the Tasks
-      UI (DESIGN.md §3.1 ``TasksPage`` / ``EpicList`` with per-epic feat
-      display and status filtering via ``FeatCard``). ``GET
-      /epics/{id}/feats`` (DESIGN.md §2.6) maps directly onto
-      ``list_feats(epic_id=...)``.
-    * List ordering is ``number ASC`` — feats display in creation order
-      (feat 1, feat 2, …) to match the hierarchical-numbering
-      convention described in DESIGN.md §1.9 and the ``EpicList``
-      collapsible UI. Within an epic the ``number`` column is
-      monotonically increasing, so ordering by ``number`` gives a
-      stable, human-readable sequence that aligns with the user-facing
-      ``{epic.number}.{feat.number}`` identifiers.
+The build writes a version's plan through :func:`create`; every function takes ``db: Session`` first and only
+flushes — the caller commits. ``number`` is ``MAX(number) + 1`` per epic, re-validated against
+``uq_feats_epic_id_number`` so a concurrent create surfaces as :class:`ValueError`. DEV-155 (23.10.2026) removed
+update, delete and the listings, which only the first version's API called.
 """
 
 from __future__ import annotations

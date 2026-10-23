@@ -7,11 +7,6 @@ session provided by ``tests/conftest.py``. Verifies:
 * ``ValueError`` on missing ``id`` for get / update / delete.
 * ``create`` auto-assigns ``number`` as ``MAX(number) + 1`` per feat,
   starts at ``1`` for the first task, independent per feat.
-* Update allow-list — only ``title``, ``description``, ``task_type``,
-  ``status``, ``estimated_minutes``, ``actual_minutes`` and
-  ``checklist_type`` are applied; ``id``, ``feat_id``, ``number`` and
-  ``created_at`` are preserved.
-* PATCH semantics — omitted fields stay untouched.
 * List filters (``feat_id``, ``status``, ``task_type``) and pagination.
 * List ordering is ``number ASC``.
 * ``delete`` removes the row; inbound FKs — ``delegations.task_id``
@@ -150,7 +145,6 @@ class TestTaskService:
         assert created.description == ""
         assert created.status == "todo"
         assert created.estimated_minutes is None
-        assert created.actual_minutes is None
         assert created.checklist_type is None
         # Auto-assigned number.
         assert created.number == 1
@@ -192,17 +186,6 @@ class TestTaskService:
         )
 
         assert created.checklist_type == "service"
-
-    def test_create_with_actual_minutes(self, db_session):
-        """``create`` accepts ``actual_minutes`` for backfill flows."""
-        feat = _make_feat(db_session)
-
-        created = service.create(
-            db_session,
-            _payload(feat.id, actual_minutes=33),
-        )
-
-        assert created.actual_minutes == 33
 
     def test_create_with_all_task_types(self, db_session):
         """``create`` accepts every value permitted by the CHECK constraint."""

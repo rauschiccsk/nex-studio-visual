@@ -26,7 +26,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -50,11 +49,6 @@ class AgentTerminalSession(Base, UUIDMixin, TimestampMixin):
     ended_at = Column(TIMESTAMP(timezone=True), nullable=True)
     exit_code = Column(Integer, nullable=True)
     terminated_by = Column(String(20), nullable=True)
-    last_activity_at = Column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
     #: claude CLI session UUID — disk-persisted by claude itself.
     #: Used for ``claude --resume <uuid>`` after BE restart so AI memory
     #: continues. Nullable for legacy rows from before migration 046.

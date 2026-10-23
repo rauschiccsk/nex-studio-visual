@@ -80,7 +80,6 @@ export const VERSION: S["VersionRead"] = {
   status: "active",
   epic_count: 6,
   epics_done: 4,
-  bug_count: 1,
   target_date: "2026-10-20",
   release_date: null,
   created_at: T0,
@@ -94,7 +93,6 @@ const RELEASED: S["VersionRead"] = {
   name: "Rýchla oprava brány vydania",
   status: "released",
   epics_done: 6,
-  bug_count: 0,
   release_date: "2026-10-11",
 };
 

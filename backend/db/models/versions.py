@@ -91,18 +91,12 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # is defined on the Project model.
     project = relationship("Project", back_populates="versions")
 
-    # Inverse sides of Epic.version and Bug.version. The FK columns
-    # (Epic.version_id, Bug.version_id) are nullable with ondelete='RESTRICT' —
-    # a Version cannot be deleted while Epics or Bugs still reference it.
+    # Inverse side of Epic.version. The FK column (Epic.version_id) is nullable
+    # with ondelete='RESTRICT' — a Version cannot be deleted while Epics still reference it.
     # ``passive_deletes=True`` prevents SQLAlchemy from auto-nulling the FK
     # before the DELETE, letting the DB enforce the RESTRICT constraint.
     epics = relationship(
         "Epic",
-        back_populates="version",
-        passive_deletes=True,
-    )
-    bugs = relationship(
-        "Bug",
         back_populates="version",
         passive_deletes=True,
     )

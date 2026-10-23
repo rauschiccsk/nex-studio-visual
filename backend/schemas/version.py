@@ -12,8 +12,8 @@ Python Enum, so ``Literal`` is the narrowest faithful representation —
 consistent with the approach used in :mod:`backend.schemas.bug`,
 :mod:`backend.schemas.epic` and :mod:`backend.schemas.project`.
 
-In addition to mirrored columns, :class:`VersionRead` exposes three
-aggregate counts — ``epic_count``, ``epics_done`` and ``bug_count`` —
+In addition to mirrored columns, :class:`VersionRead` exposes two
+aggregate counts — ``epic_count`` and ``epics_done`` —
 that the service layer populates per DESIGN.md §2.6
 ``GET /projects/{id}/versions``.  They are plain integer fields with a
 default of ``0`` rather than Pydantic ``computed_field`` properties
@@ -148,8 +148,8 @@ class VersionRead(BaseModel):
     """Serialised representation of a version row.
 
     Mirrors every column on :class:`backend.db.models.versions.Version`
-    and adds three service-populated aggregate counts
-    (``epic_count``, ``epics_done``, ``bug_count``) used by DESIGN.md
+    and adds two service-populated aggregate counts
+    (``epic_count``, ``epics_done``) used by DESIGN.md
     §2.6 ``GET /projects/{id}/versions``.  ``from_attributes=True``
     enables construction directly from an ORM instance via
     ``VersionRead.model_validate(obj)``; the aggregate counts must be
@@ -179,9 +179,4 @@ class VersionRead(BaseModel):
         default=0,
         ge=0,
         description="Number of Epics in this version with status='done'.",
-    )
-    bug_count: int = Field(
-        default=0,
-        ge=0,
-        description="Number of Bugs assigned to this version.",
     )

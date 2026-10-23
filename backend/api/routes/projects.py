@@ -1280,7 +1280,7 @@ def delete_project(
 
     Every inbound FK to ``projects.id`` uses ``ON DELETE CASCADE``, so
     dependent rows (modules, specifications, design documents,
-    KB docs, architect sessions, epics, bugs, delegations, migration
+    KB docs, architect sessions, epics, delegations, migration
     tables, report configs — and the project's **customers** with their whole
     **deploy/acceptance history**) are removed automatically.
 

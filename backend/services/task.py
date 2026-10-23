@@ -1,64 +1,10 @@
-"""Service layer for :class:`~backend.db.models.tasks.Task`.
+"""Service layer for :class:`~backend.db.models.tasks.Task` — the next task to build, read one, create, and the
+feat / epic status that follows from the tasks.
 
-Provides the synchronous CRUD surface used by API routers. All methods
-accept ``db: Session`` as the first argument and only ever call
-``session.flush()`` — transaction commit is the router's responsibility.
-Errors are signalled via :class:`ValueError` so the router can translate
-them to the appropriate HTTP status code.
-
-Design notes (per DESIGN.md §1.9 Tasks (Epic/Feat/Task hierarchy), §2
-``tasks`` table, §2.6 ``POST /feats/{id}/tasks`` / ``GET /feats/{id}/tasks``,
-§6.6 list filters, §6.8 Service Layer Extension and
-:mod:`backend.db.models.tasks.Task`):
-
-    * ``id``, ``number``, ``created_at`` and ``updated_at`` are
-      server-managed and therefore immutable from the service layer
-      (``updated_at`` is auto-stamped by the ORM via
-      ``onupdate=func.now()`` on flush).
-    * ``feat_id`` is an immutable foreign key — a task belongs to
-      exactly one feat for its lifetime. :class:`TaskUpdate`
-      deliberately omits it and the service's ``allowed_fields``
-      allow-list enforces that contract defensively.
-    * ``number`` is auto-assigned by :func:`create` as
-      ``MAX(number) + 1`` for the supplied ``feat_id`` (starts at
-      ``1`` for the first task in a feat). The DB-level
-      ``UNIQUE(feat_id, number)`` constraint
-      (``uq_tasks_feat_id_number``) is re-validated defensively before
-      flush so concurrent creates on the same feat — which are rare but
-      possible — still surface as :class:`ValueError` instead of raw
-      :class:`~sqlalchemy.exc.IntegrityError`.
-    * ``task_type`` is constrained by the ``ck_tasks_task_type`` DB
-      CHECK (``backend | frontend | migration | test | docs``). The
-      Pydantic :data:`~backend.schemas.task.TaskType` literal mirrors
-      the DB constraint, so the service does not revalidate — if an
-      invalid value ever reaches the service (e.g. a bypassed schema)
-      the DB CHECK rejects it on flush.
-    * ``status`` is constrained by the ``ck_tasks_status`` DB CHECK
-      (``todo | in_progress | done | failed``). The Pydantic
-      :data:`~backend.schemas.task.TaskStatus` literal mirrors the DB
-      constraint.
-    * ``actual_minutes`` is normally measured from delegation duration
-      but is exposed in :class:`TaskUpdate` for backfill / correction
-      flows (consistent with :mod:`backend.services.feat` and
-      :mod:`backend.services.bug_fix_task`).
-    * Inbound FKs on ``tasks`` — ``delegations.task_id`` and
-      ``execution_logs.task_id``, both with ``ON DELETE SET NULL`` —
-      are handled at the DB level, so :func:`delete` needs no RESTRICT
-      dependency check; dependent rows are NULL-ed automatically on
-      flush.
-    * List filters (``feat_id``, ``status``, ``task_type``) match the
-      indexed columns (``ix_tasks_feat_id``, ``ix_tasks_status``) and
-      support the Tasks UI (DESIGN.md §3.1 ``TasksPage`` / ``FeatCard``
-      / ``TaskItem`` with task-type badge and status display).
-      ``GET /feats/{id}/tasks`` (DESIGN.md §2.6) maps directly onto
-      ``list_tasks(feat_id=...)``.
-    * List ordering is ``number ASC`` — tasks display in creation order
-      (task 1, task 2, …) to match the hierarchical-numbering
-      convention described in DESIGN.md §1.9 and the ``TaskItem`` UI.
-      Within a feat the ``number`` column is monotonically increasing,
-      so ordering by ``number`` gives a stable, human-readable sequence
-      that aligns with the user-facing
-      ``{epic.number}.{feat.number}.{task.number}`` identifiers.
+The build writes a version's plan through :func:`create`; every function takes ``db: Session`` first and only
+flushes — the caller commits. ``number`` is ``MAX(number) + 1`` per feat, re-validated against
+``uq_tasks_feat_id_number`` so a concurrent create surfaces as :class:`ValueError`. DEV-155 (23.10.2026) removed
+update, delete and the listings, which only the first version's API called.
 """
 
 from __future__ import annotations
@@ -182,7 +128,6 @@ def create(db: Session, data: TaskCreate) -> Task:
         status=data.status,
         priority=data.priority,
         estimated_minutes=data.estimated_minutes,
-        actual_minutes=data.actual_minutes,
         checklist_type=data.checklist_type,
         billing_category=data.billing_category,
     )

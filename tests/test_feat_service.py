@@ -7,11 +7,6 @@ session provided by ``tests/conftest.py``. Verifies:
 * ``ValueError`` on missing ``id`` for get / update / delete.
 * ``create`` auto-assigns ``number`` as ``MAX(number) + 1`` per epic,
   starts at ``1`` for the first feat, independent per epic.
-* Update allow-list — only ``title``, ``description``, ``status``,
-  ``estimated_minutes`` and ``actual_minutes`` are applied; ``id``,
-  ``epic_id``, ``number``, ``task_count``, ``auto_fix_count`` and
-  ``created_at`` are preserved.
-* PATCH semantics — omitted fields stay untouched.
 * List filters (``epic_id``, ``status``) and pagination.
 * List ordering is ``number ASC``.
 * ``delete`` removes the row; inbound FKs — ``tasks.feat_id``
@@ -124,9 +119,7 @@ class TestFeatService:
         assert created.description == ""
         assert created.status == "todo"
         assert created.estimated_minutes is None
-        assert created.actual_minutes is None
         # Server-managed counters seeded by DB server_default.
-        assert created.task_count == 0
         assert created.auto_fix_count == 0
         # Auto-assigned number.
         assert created.number == 1

@@ -1,71 +1,10 @@
-"""Service layer for :class:`~backend.db.models.tasks.Epic`.
+"""Service layer for :class:`~backend.db.models.tasks.Epic` — read one and create.
 
-Provides the synchronous CRUD surface used by API routers. All methods
-accept ``db: Session`` as the first argument and only ever call
-``session.flush()`` — transaction commit is the router's responsibility.
-Errors are signalled via :class:`ValueError` so the router can translate
-them to the appropriate HTTP status code.
-
-Design notes (per DESIGN.md §1.9 Tasks (Epic/Feat/Task hierarchy), §2
-``epics`` table, §2.6 ``POST /projects/{id}/epics``, §4.0 Version
-Lifecycle Rules, §6.6 list filters, §6.8 Service Layer Extension and
-:mod:`backend.db.models.tasks.Epic`):
-
-    * ``id``, ``number``, ``created_at`` and ``updated_at`` are
-      server-managed and therefore immutable from the service layer
-      (``updated_at`` is auto-stamped by the ORM via
-      ``onupdate=func.now()`` on flush).
-    * ``project_id`` is an immutable foreign key — an epic belongs to
-      exactly one project for its lifetime. :class:`EpicUpdate`
-      deliberately omits it and the service's ``allowed_fields``
-      allow-list enforces that contract defensively.
-    * ``number`` is auto-assigned by :func:`create` as
-      ``MAX(number) + 1`` for the supplied ``project_id`` (starts at
-      ``1`` for the first epic in a project). The DB-level
-      ``UNIQUE(project_id, number)`` constraint
-      (``uq_epics_project_id_number``) is re-validated defensively
-      before flush so concurrent creates on the same project — which
-      are rare but possible — still surface as :class:`ValueError`
-      instead of raw :class:`~sqlalchemy.exc.IntegrityError`.
-    * ``version_id`` is **required** at creation time (DESIGN.md §4.0
-      Rule 2 — every new EPIC must be assigned to a release version
-      before it can be scheduled). The underlying column is nullable at
-      the DB level only so that the FK ``ON DELETE RESTRICT`` remains
-      expressible for legacy rows; the service enforces the stronger
-      application-level contract and rejects ``version_id is None``
-      with :class:`ValueError` (HTTP 422 at the router layer).
-    * ``status`` is constrained by the ``ck_epics_status`` DB CHECK
-      (``planned | in_progress | done``). The Pydantic
-      :data:`~backend.schemas.epic.EpicStatus` literal mirrors the DB
-      constraint, so the service does not revalidate — if an invalid
-      value ever reaches the service (e.g. a bypassed schema) the DB
-      CHECK rejects it on flush.
-    * :func:`update` wires in the DESIGN.md §4.0 Rule 4 auto-activate
-      trigger: whenever an epic transitions **into** ``in_progress``
-      and carries a ``version_id``, the linked version is promoted from
-      ``planned`` → ``active`` via
-      :func:`backend.services.version.auto_activate`. The helper is
-      idempotent — already-``active`` / ``released`` versions are a
-      no-op — so double-firing the trigger on repeated patches does
-      nothing unsafe.
-    * ``epics`` has a single inbound FK (``feats.epic_id``) with
-      ``ON DELETE CASCADE`` — :func:`delete` therefore needs no
-      RESTRICT dependency check; dependent feats (and the tasks under
-      them, via ``tasks.feat_id ON DELETE CASCADE``) are removed
-      automatically at the DB level.
-    * List filters (``project_id``, ``status``) match
-      the indexed columns (``ix_epics_project_id``)
-      and support the Tasks UI (DESIGN.md §3.1
-      ``TasksPage`` / ``EpicList``) and
-      reporting (DESIGN.md §3.1 ``ReportsPage``) — "show every epic in
-      this project", "show every in-progress epic".
-    * List ordering is ``number ASC`` — epics display in creation
-      order (epic 1, epic 2, …) to match the hierarchical-numbering
-      convention described in DESIGN.md §1.9 and the ``EpicList``
-      collapsible UI. Within a project the ``number`` column is
-      monotonically increasing, so ordering by ``number`` gives a
-      stable, human-readable sequence that aligns with the user-facing
-      identifiers.
+The build writes a version's plan through :func:`create` (the plan, a fast fix); every function takes ``db: Session``
+first and only flushes — the caller commits. ``number`` is ``MAX(number) + 1`` per project, re-validated against
+``uq_epics_project_id_number`` so a concurrent create surfaces as :class:`ValueError`, not a raw
+:class:`~sqlalchemy.exc.IntegrityError`. ``version_id`` is required (DESIGN.md §4.0 Rule 2). DEV-155 (23.10.2026)
+removed update, delete and the listings, which only the first version's API called.
 """
 
 from __future__ import annotations

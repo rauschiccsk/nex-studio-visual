@@ -40,14 +40,13 @@ U_MEMBER = uuid.UUID("00000000-0000-0000-0000-0000000000c5")
 ALL_USER_IDS: dict[str, uuid.UUID] = {
     "created_by": U_CREATOR,
     "owner_id": U_OWNER,
-    "bugs.created_by": U_BUG,
     "deploy_events.actor_id": U_ACTOR,
 }
 
 # Source project slugs.
 ALPHA = "alpha"  # multimodule, full valid tree, credential file PRESENT
 BETA = "beta"  # singlemodule, owner_id NULL (fallback), credential file MISSING → WARN
-GAMMA = "gamma"  # web, crafted to FAIL per-project (invalid bug.severity)
+GAMMA = "gamma"  # singlemodule, crafted to FAIL per-project on ONE thing: an invalid epic status
 
 _BASE_TS = datetime(2026, 1, 15, 9, 30, 0, tzinfo=timezone.utc)
 
@@ -616,7 +615,7 @@ def _seed_gamma(ins) -> None:
         id=pid,
         name="Gamma",
         slug=GAMMA,
-        category="web",
+        category="singlemodule",
         description="gamma",
         status="active",
         backend_port=None,
@@ -642,24 +641,18 @@ def _seed_gamma(ins) -> None:
         created_at=_ts(72),
         updated_at=_ts(73),
     )
-    # Invalid severity — the v2 ck_bugs_severity CHECK rejects this at INSERT, so gamma's
-    # transaction rolls back while alpha/beta commit (per-project isolation, M4).
+    # Invalid epic status — the v2 ck_epics_status CHECK rejects this at INSERT, so gamma's
+    # transaction rolls back while alpha/beta commit (per-project isolation, M4). (A bug with an invalid
+    # severity did this until DEV-155: the v2 cockpit no longer carries bugs.)
     ins(
-        "bugs",
+        "epics",
         id=uuid.uuid4(),
         project_id=pid,
         version_id=v,
-        bug_number=1,
-        title="G Bug",
-        description="bad",
-        severity="blocker",
-        status="new",
-        source="internal",
-        reported_by=None,
-        environment=None,
-        resolved_at=None,
-        commit_hash=None,
-        created_by=U_BUG,
+        module_id=uuid.uuid4(),
+        number=1,
+        title="G Epic",
+        status="blocked",
         created_at=_ts(74),
         updated_at=_ts(75),
     )
@@ -737,7 +730,6 @@ _TARGET_TRUNCATE_TABLES = (
     "epics",
     "feats",
     "tasks",
-    "bugs",
     "backlog_items",
     "deploy_events",
     "pipeline_state",

@@ -34,6 +34,7 @@ import sys
 import uuid
 
 from backend.db.session import SessionLocal
+from backend.services import dedo_message
 from backend.services import dedo_unblock as dedo_unblock_service
 
 
@@ -74,11 +75,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"--version-id nie je platné UUID: {args.version_id}", file=sys.stderr)
                 return 2
         else:
-            version_id = dedo_unblock_service.version_awaiting_dedo(db, args.project).id
+            version_id = dedo_message.version_awaiting_dedo(db, args.project).id
 
         dedo_unblock_service.unblock_framework_issue(db, version_id=version_id, reason=reason)
         db.commit()
-    except dedo_unblock_service.DedoMessageError as exc:
+    except dedo_message.DedoMessageError as exc:
         db.rollback()
         print(str(exc), file=sys.stderr)
         return 2

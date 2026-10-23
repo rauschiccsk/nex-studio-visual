@@ -183,7 +183,7 @@ def test_apply_parity_and_no_data_loss(source_url, target):
 
         # per-table count parity. project_members is absent by design — membership is not a concept in
         # V2, so the copy no longer carries the table and there is nothing to compare.
-        for tbl in ("versions", "epics", "bugs", "backlog_items", "deploy_events", "customers"):
+        for tbl in ("versions", "epics", "backlog_items", "deploy_events", "customers"):
             s = _scalar(src, f"SELECT COUNT(*) FROM {tbl} WHERE project_id=:p", p=pid)  # noqa: S608 fixed names
             t = _scalar(tgt, f"SELECT COUNT(*) FROM {tbl} WHERE project_id=:p", p=pid)  # noqa: S608
             assert s == t, f"{tbl} parity"
@@ -391,7 +391,8 @@ def test_per_project_isolation_on_failure(source_url, target):
     by_slug = {p.slug: p for p in report.projects}
 
     assert by_slug[BETA].status == "migrated"  # commits despite a WARN (dangling cred)
-    assert by_slug[GAMMA].status == "failed"  # invalid bug.severity → its tree rolls back
+    assert by_slug[GAMMA].status == "failed"  # invalid epic status → its tree rolls back
+    assert "ck_epics_status" in (by_slug[GAMMA].reason or ""), by_slug[GAMMA].reason  # failed for THAT reason
     assert report.overall == "partial"
     assert report.exit_code == 1
 

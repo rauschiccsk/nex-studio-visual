@@ -3,10 +3,9 @@
 Covers, per the STEP 8 design:
   (a) source==target refusal (guard 1)          — pure URL check
   (b) prod-target refusal unless override (g. 2) — pure URL check, SEPARATE from (a)
-  (c) FULL referenced-user existence (guard 3)   — collection over all five
+  (c) FULL referenced-user existence (guard 3)   — collection over all the
       referencing columns + fail-closed abort, one case each for
-      projects.created_by / projects.owner_id / bugs.created_by /
-      deploy_events.actor_id
+      projects.created_by / projects.owner_id / deploy_events.actor_id
   (d) report serialization carries NO secret material.
 
 The genuine two-DB "target untouched" fail-closed is additionally proven end to
@@ -79,7 +78,7 @@ def test_assert_target_not_prod_passes_for_test_db(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _seed_tree_with_four_roles(db_session):
+def _seed_tree_with_three_roles(db_session):
     """Seed a valid v2 tree whose referenced users cover all five columns.
 
     Returns (project_id, role_ids) where role_ids maps a label to the seeded
@@ -99,7 +98,6 @@ def _seed_tree_with_four_roles(db_session):
 
     creator = _user("creator")
     owner = _user("owner")
-    bug_creator = _user("bug")
     actor = _user("actor")
     _member = _user("member")
 
@@ -115,23 +113,11 @@ def _seed_tree_with_four_roles(db_session):
     db_session.add(project)
     db_session.flush()
 
-    from backend.db.models.bugs import Bug
     from backend.db.models.versions import Version
 
     version = Version(project_id=project.id, version_number="1.0.0", status="active")
     db_session.add(version)
     db_session.flush()
-
-    bug = Bug(
-        project_id=project.id,
-        version_id=version.id,
-        bug_number=1,
-        title="b",
-        description="d",
-        severity="major",
-        created_by=bug_creator.id,
-    )
-    db_session.add(bug)
 
     customer = Customer(project_id=project.id, name="Cust", slug="cust")
     db_session.add(customer)
@@ -151,17 +137,17 @@ def _seed_tree_with_four_roles(db_session):
     db_session.flush()
 
     # project_members is gone with the ownership model — a project belongs to its creator, membership is
-    # not a concept, and the V1→V2 copy no longer carries the table. Four referencing columns remain.
+    # not a concept, and the V1→V2 copy no longer carries the table; nor bugs (DEV-155).
+    # Three referencing columns remain.
     return project.id, {
         "created_by": creator.id,
         "owner_id": owner.id,
-        "bugs.created_by": bug_creator.id,
         "deploy_events.actor_id": actor.id,
     }
 
 
-def test_collect_referenced_user_ids_gathers_all_four_columns(db_session):
-    project_id, role_ids = _seed_tree_with_four_roles(db_session)
+def test_collect_referenced_user_ids_gathers_all_three_columns(db_session):
+    project_id, role_ids = _seed_tree_with_three_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
     refs = runner.collect_referenced_user_ids(conn, tables, [project_id])
@@ -170,10 +156,10 @@ def test_collect_referenced_user_ids_gathers_all_four_columns(db_session):
 
 @pytest.mark.parametrize(
     "column",
-    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id"],
+    ["created_by", "owner_id", "deploy_events.actor_id"],
 )
 def test_find_missing_users_flags_each_referencing_column(db_session, column):
-    _project_id, role_ids = _seed_tree_with_four_roles(db_session)
+    _project_id, role_ids = _seed_tree_with_three_roles(db_session)
     referenced = set(role_ids.values())
     missing_uid = role_ids[column]
     existing = referenced - {missing_uid}
@@ -181,19 +167,19 @@ def test_find_missing_users_flags_each_referencing_column(db_session, column):
 
 
 def test_assert_referenced_users_exist_passes_when_all_present(db_session):
-    project_id, _ = _seed_tree_with_four_roles(db_session)
+    project_id, _ = _seed_tree_with_three_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
-    # No raise — all five users exist in the (same) target.
+    # No raise — all the referenced users exist in the (same) target.
     runner.assert_referenced_users_exist(conn, tables, conn, [project_id])
 
 
 @pytest.mark.parametrize(
     "column",
-    ["created_by", "owner_id", "bugs.created_by", "deploy_events.actor_id"],
+    ["created_by", "owner_id", "deploy_events.actor_id"],
 )
 def test_assert_referenced_users_exist_fails_closed_per_column(db_session, monkeypatch, column):
-    project_id, role_ids = _seed_tree_with_four_roles(db_session)
+    project_id, role_ids = _seed_tree_with_three_roles(db_session)
     conn = db_session.connection()
     tables = runner.reflect_source_tables(conn)
     missing_uid = role_ids[column]

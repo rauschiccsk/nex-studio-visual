@@ -61,7 +61,6 @@ def test_expected_domain_tables_present() -> None:
     ``pipeline_message`` (migration 051).
     """
     expected_tables = {
-        "bugs",
         "epics",
         "feats",
         "projects",

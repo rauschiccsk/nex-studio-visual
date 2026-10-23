@@ -58,7 +58,6 @@ const version = {
   updated_at: "2026-10-09T10:00:00Z",
   epic_count: 0,
   epics_done: 0,
-  bug_count: 0,
 } as Version;
 
 const ON_DISK = "Zadanie v1";

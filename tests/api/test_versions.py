@@ -2,8 +2,7 @@
 
 Covers the DESIGN.md §2.6 *Version Management* contract end-to-end via a
 ``TestClient`` mounted on a private FastAPI app — the same isolation
-pattern used by :mod:`tests.test_epic_router` and
-:mod:`tests.test_bug_router`. Mounting on a private app keeps this file
+pattern the cockpit's router tests use. Mounting on a private app keeps this file
 independent of ``backend.main.app``'s router registration order and lets
 us swap the auth dependency in / out per test.
 
@@ -11,8 +10,8 @@ Coverage:
 
 * ``GET /api/v1/projects/{project_id}/versions`` — list ordered by
   ``version_number DESC`` with aggregate counts attached.
-* ``GET /api/v1/versions/{version_id}`` — detail with ``epics`` and
-  ``bugs`` eagerly loaded (verified via the aggregate counts; the schema
+* ``GET /api/v1/versions/{version_id}`` — detail with ``epics``
+  eagerly loaded (verified via the aggregate counts; the schema
   itself does not embed the relationships, but the service preloads them
   so the same trip can power downstream UI calls).
 * ``POST /api/v1/projects/{project_id}/versions`` — happy path + 403
@@ -37,7 +36,6 @@ from fastapi.testclient import TestClient
 
 from backend.api.routes.versions import router as versions_router
 from backend.core.security import get_current_user, require_ri_role
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -98,21 +96,6 @@ def _make_epic(db_session, *, project: Project, version: Version, number: int, s
     db_session.add(epic)
     db_session.flush()
     return epic
-
-
-def _make_bug(db_session, *, project: Project, version: Version, owner: User, bug_number: int) -> Bug:
-    bug = Bug(
-        project_id=project.id,
-        version_id=version.id,
-        bug_number=bug_number,
-        title=f"Bug {bug_number}",
-        description="Steps to reproduce.",
-        severity="minor",
-        created_by=owner.id,
-    )
-    db_session.add(bug)
-    db_session.flush()
-    return bug
 
 
 @pytest.fixture()
@@ -217,16 +200,14 @@ class TestListVersions:
         assert isinstance(body, list)
         numbers = [row["version_number"] for row in body]
         assert numbers == ["2.0.0", "1.1.0", "1.0.0"]
-        # Aggregate counts default to 0 with no EPICs / BUGs.
+        # Aggregate counts default to 0 with no EPICs.
         assert all(row["epic_count"] == 0 for row in body)
         assert all(row["epics_done"] == 0 for row in body)
-        assert all(row["bug_count"] == 0 for row in body)
 
     def test_list_attaches_aggregate_counts(self, ri_client, db_session, project, ri_user):
         version = _make_version(db_session, project=project, version_number="1.0.0")
         _make_epic(db_session, project=project, version=version, number=1, status_="done")
         _make_epic(db_session, project=project, version=version, number=2, status_="in_progress")
-        _make_bug(db_session, project=project, version=version, owner=ri_user, bug_number=1)
 
         resp = ri_client.get(f"/api/v1/projects/{project.id}/versions")
         assert resp.status_code == 200, resp.text
@@ -235,7 +216,6 @@ class TestListVersions:
         row = rows[0]
         assert row["epic_count"] == 2
         assert row["epics_done"] == 1
-        assert row["bug_count"] == 1
 
     def test_list_empty_returns_empty_list(self, ri_client, project):
         resp = ri_client.get(f"/api/v1/projects/{project.id}/versions")

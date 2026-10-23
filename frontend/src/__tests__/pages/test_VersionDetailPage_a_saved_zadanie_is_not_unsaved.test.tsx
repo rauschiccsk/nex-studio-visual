@@ -82,7 +82,6 @@ const version = {
   updated_at: "2026-09-26T10:00:00Z",
   epic_count: 0,
   epics_done: 0,
-  bug_count: 0,
 } as Version;
 
 /** Presne to znenie, ktoré Dedo položil a cesta zapísala na disk. */

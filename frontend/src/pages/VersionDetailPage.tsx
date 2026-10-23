@@ -233,12 +233,6 @@ export default function VersionDetailPage() {
               <div className="text-sm font-bold text-[var(--color-text-primary)]">{version.epic_count}</div>
               <div className="text-[10px] text-[var(--color-text-secondary)]">celky</div>
             </div>
-            <div>
-              <div className={`text-sm font-bold ${version.bug_count > 0 ? "text-[var(--color-status-error)]" : "text-[var(--color-text-primary)]"}`}>
-                {version.bug_count}
-              </div>
-              <div className="text-[10px] text-[var(--color-text-secondary)]">chyby</div>
-            </div>
           </div>
         </div>
       </div>
@@ -353,7 +347,7 @@ export default function VersionDetailPage() {
                 {version.version_number}{version.name ? ` — ${version.name}` : ""}
               </div>
               <div className="text-xs text-[var(--color-text-muted)]">
-                {epicCount} celkov · {epicsDone} hotových · {version.bug_count} chýb.
+                {epicCount} celkov · {epicsDone} hotových.
                 Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Audítor.
                 Fázy (Príprava → Návrh → Vizuál → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
               </div>

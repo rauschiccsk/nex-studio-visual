@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -308,63 +307,6 @@ class TestVersionRelationships:
         assert epic.version is not None
         assert epic.version.id == version.id
 
-    def test_version_bugs_relationship(self, db_session):
-        """version.bugs returns the collection of Bugs targeting the version."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = _make_version(db_session, project=project)
-        db_session.add(version)
-        db_session.flush()
-
-        bug1 = Bug(
-            project_id=project.id,
-            version_id=version.id,
-            bug_number=1,
-            title="Bug One",
-            description="desc",
-            severity="minor",
-            created_by=user.id,
-        )
-        bug2 = Bug(
-            project_id=project.id,
-            version_id=version.id,
-            bug_number=2,
-            title="Bug Two",
-            description="desc",
-            severity="major",
-            created_by=user.id,
-        )
-        db_session.add_all([bug1, bug2])
-        db_session.flush()
-        db_session.refresh(version)
-
-        bug_ids = {b.id for b in version.bugs}
-        assert bug1.id in bug_ids
-        assert bug2.id in bug_ids
-
-    def test_bug_version_back_populates(self, db_session):
-        """bug.version returns the owning Version (inverse of Version.bugs)."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = _make_version(db_session, project=project)
-        db_session.add(version)
-        db_session.flush()
-
-        bug = Bug(
-            project_id=project.id,
-            version_id=version.id,
-            bug_number=99,
-            title="Linked Bug",
-            description="desc",
-            severity="minor",
-            created_by=user.id,
-        )
-        db_session.add(bug)
-        db_session.flush()
-
-        assert bug.version is not None
-        assert bug.version.id == version.id
-
     def test_version_delete_restricted_by_epic(self, db_session):
         """Deleting a Version referenced by an Epic raises a FK violation (RESTRICT)."""
         project = _make_project(db_session)
@@ -391,38 +333,8 @@ class TestVersionRelationships:
             db_session.flush()
         db_session.rollback()
 
-    def test_version_delete_restricted_by_bug(self, db_session):
-        """Deleting a Version referenced by a Bug raises a FK violation (RESTRICT)."""
-        user = _make_user(db_session)
-        project = _make_project(db_session, user=user)
-        version = _make_version(db_session, project=project)
-        db_session.add(version)
-        db_session.flush()
-
-        bug = Bug(
-            project_id=project.id,
-            version_id=version.id,
-            bug_number=7,
-            title="Blocking Bug",
-            description="desc",
-            severity="minor",
-            created_by=user.id,
-        )
-        db_session.add(bug)
-        db_session.flush()
-
-        # Raw SQL DELETE — ORM session.delete() would first UPDATE the child
-        # FK to NULL, masking the RESTRICT enforcement.
-        with pytest.raises((IntegrityError, ProgrammingError)):
-            db_session.execute(
-                text("DELETE FROM versions WHERE id = :id"),
-                {"id": str(version.id)},
-            )
-            db_session.flush()
-        db_session.rollback()
-
-    def test_version_delete_allowed_without_epics_or_bugs(self, db_session):
-        """A Version with no referencing Epics/Bugs can be deleted."""
+    def test_version_delete_allowed_without_epics(self, db_session):
+        """A Version with no referencing Epics can be deleted."""
         project = _make_project(db_session)
         version = _make_version(db_session, project=project)
         db_session.add(version)

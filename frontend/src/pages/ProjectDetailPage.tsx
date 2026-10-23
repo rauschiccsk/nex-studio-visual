@@ -106,7 +106,7 @@ function VersionCard({ version, onOpen }: { version: Version; onOpen: () => void
       <div className="px-5 py-4">
         <PipelineBar version={version} />
         <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-          <span>{version.bug_count} chýb · {version.epics_done}/{version.epic_count} celkov hotových</span>
+          <span>{version.epics_done}/{version.epic_count} celkov hotových</span>
           {/* Audit Theme 5: a never-started (planned) version says "Začať", not "Pokračovať" (nothing to continue).
               ICCINT-50: a finished one says neither — there is nothing to start and nothing to continue. */}
           <span className="text-primary-400 font-medium">

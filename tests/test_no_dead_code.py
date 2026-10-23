@@ -11,6 +11,7 @@ method names. Variables and attributes are not judged: pydantic fields and model
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 
@@ -62,6 +63,35 @@ PRODUCTION = ["backend", "migrations", "scripts"]
 NOT_PRODUCTION = ["*/backend/tests/*", "*/backend/testing.py"]
 #: Code that exists for the tests says so at its definition (``backend/core/test_seam.py``), not on a list here.
 FOR_TESTS = "@for_tests"
+
+
+def _defines_code(tree: ast.Module) -> bool:
+    return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for n in tree.body)
+
+
+def _declares_all(tree: ast.Module) -> bool:
+    return any(
+        isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "__all__" for t in n.targets) for n in tree.body
+    )
+
+
+def production_modules() -> list[Path]:
+    return [
+        f
+        for p in PRODUCTION
+        for f in sorted((ROOT / p).rglob("*.py"))
+        if "tests" not in f.relative_to(ROOT).parts and f.name != "testing.py"
+    ]
+
+
+def re_export_modules(files: list[Path] | None = None) -> list[str]:
+    """Modules that only re-export — imports and ``__all__``, no definition of their own. A re-export is not a use:
+    vulture counts every name in ``__all__`` as used, so scanning them would keep anything they list alive."""
+    return [
+        str(f)
+        for f in (production_modules() if files is None else files)
+        if not _defines_code(t := ast.parse(f.read_text(encoding="utf-8"))) and _declares_all(t)
+    ]
 
 
 def dead_code(paths: list[Path], *, exclude: list[str] = [], decorators: list[str] = []) -> list[str]:  # noqa: B006
@@ -119,7 +149,9 @@ def test_no_backend_code_lives_only_for_its_tests():
     """DEV-155 (22.10.2026): 30 functions of the backend were called by their tests and nothing else — some tested a
     twin production had replaced, so the guard guarded nothing. vulture judges by name: a function whose name production
     calls elsewhere (``create``, ``update``) escapes it — what it does find is certain."""
-    found = dead_code([ROOT / p for p in PRODUCTION], exclude=NOT_PRODUCTION, decorators=[FOR_TESTS])
+    found = dead_code(
+        [ROOT / p for p in PRODUCTION], exclude=NOT_PRODUCTION + re_export_modules(), decorators=[FOR_TESTS]
+    )
 
     assert found == [], "only the tests call these — remove them, or mark a seam for the tests @for_tests:\n  " + (
         "\n  ".join(found)
@@ -151,11 +183,29 @@ def test_the_check_finds_code_only_the_tests_call(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "app" / "caller.py").write_text("from module import used\n\nused()\n", encoding="utf-8")
+    # a package that only re-exports keeps nothing alive
+    (tmp_path / "app" / "__init__.py").write_text(
+        'from module import only_tested\n\n__all__ = ["only_tested"]\n', encoding="utf-8"
+    )
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_module.py").write_text(
         "from module import only_tested, forget_everything\n\nonly_tested()\nforget_everything()\n", encoding="utf-8"
     )
 
-    found = dead_code([tmp_path / "app"], exclude=["*/tests/*"], decorators=[FOR_TESTS])
+    app = sorted((tmp_path / "app").glob("*.py"))
+    found = dead_code([tmp_path / "app"], exclude=["*/tests/*"] + re_export_modules(app), decorators=[FOR_TESTS])
 
     assert [line.split(" ", 1)[1] for line in found] == ["function only_tested"]
+
+
+def test_a_module_with_code_of_its_own_declares_no___all__():
+    """DEV-155: vulture counts every name in ``__all__`` as used, so a module listing its own functions there hid them
+    from the guard (``schemas/task.py`` kept two dead schemas alive). Nothing imports with ``*``; only re-export
+    modules may list names."""
+    offenders = [
+        str(f.relative_to(ROOT))
+        for f in production_modules()
+        if _defines_code(t := ast.parse(f.read_text())) and _declares_all(t)
+    ]
+
+    assert offenders == [], "these list their own names in __all__ — remove it:\n  " + "\n  ".join(offenders)

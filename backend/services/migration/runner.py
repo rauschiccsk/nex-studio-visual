@@ -42,7 +42,6 @@ SOURCE_TABLE_NAMES: tuple[str, ...] = (
     "epics",
     "feats",
     "tasks",
-    "bugs",
     "backlog_items",
     "deploy_events",
 )
@@ -203,9 +202,8 @@ def collect_referenced_user_ids(
 ) -> set[UUID]:
     """Collect every ``users.id`` referenced by the to-be-copied rows (B2).
 
-    The FULL set across all five referencing columns on copied tables:
-    projects.created_by, projects.owner_id, bugs.created_by,
-    deploy_events.actor_id. ``owner_id`` is read only if
+    The FULL set across the referencing columns on copied tables:
+    projects.created_by, projects.owner_id, deploy_events.actor_id. ``owner_id`` is read only if
     the v1 source actually has that column (it is a v2-added column that some v1
     snapshots carry via CR-NS-012). NULLs are ignored (SET NULL columns).
     """
@@ -222,11 +220,6 @@ def collect_referenced_user_ids(
         for value in row:
             if value is not None:
                 referenced.add(value)
-
-    bugs = source_tables["bugs"]
-    for (created_by,) in source_conn.execute(select(bugs.c.created_by).where(bugs.c.project_id.in_(project_ids))):
-        if created_by is not None:
-            referenced.add(created_by)
 
     deploy_events = source_tables["deploy_events"]
     for (actor_id,) in source_conn.execute(

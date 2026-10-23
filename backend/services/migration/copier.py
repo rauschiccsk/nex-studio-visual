@@ -6,7 +6,8 @@ into the TARGET preserving PK UUIDs + created_at/updated_at, in the CORRECTED FK
 order:
 
     projects → credentials(subset via customers.credential_id)
-    → customers → versions → epics → feats → tasks → bugs → backlog_items → deploy_events
+    → customers → versions → epics → feats → tasks → backlog_items → deploy_events
+    (v1 bugs are not carried: the v2 cockpit has no bug register — DEV-155)
 
 Invariants:
 * NEVER reads/writes ``epics.module_id`` (dropped in v2, migration 070).
@@ -158,8 +159,6 @@ def _feat_dict(row: Mapping) -> dict:
         "plain_description": row.get("plain_description"),
         "status": row.get("status") or "todo",
         "estimated_minutes": row.get("estimated_minutes"),
-        "actual_minutes": row.get("actual_minutes"),
-        "task_count": row.get("task_count") or 0,
         "auto_fix_count": row.get("auto_fix_count") or 0,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -179,30 +178,8 @@ def _task_dict(row: Mapping) -> dict:
         "status": row.get("status") or "todo",
         "priority": row.get("priority") or "normal",
         "estimated_minutes": row.get("estimated_minutes"),
-        "actual_minutes": row.get("actual_minutes"),
         "checklist_type": row.get("checklist_type"),
         "baseline_sha": row.get("baseline_sha"),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
-
-
-def _bug_dict(row: Mapping) -> dict:
-    return {
-        "id": row["id"],
-        "project_id": row["project_id"],
-        "version_id": row.get("version_id"),
-        "bug_number": row["bug_number"],
-        "title": row["title"],
-        "description": row["description"],
-        "severity": row["severity"],
-        "status": row.get("status") or "new",
-        "source": row.get("source") or "internal",
-        "reported_by": row.get("reported_by"),
-        "environment": row.get("environment"),
-        "resolved_at": row.get("resolved_at"),
-        "commit_hash": row.get("commit_hash"),
-        "created_by": row["created_by"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -335,17 +312,12 @@ def copy_project(
     _insert_many(target_conn, "tasks", [_task_dict(r) for r in tasks])
     counts["tasks"] = len(tasks)
 
-    # 9. bugs (created_by NOT NULL — pre-flight already asserted the user exists)
-    bugs = _select_by(source_conn, source_tables["bugs"], project_id=pid)
-    _insert_many(target_conn, "bugs", [_bug_dict(r) for r in bugs])
-    counts["bugs"] = len(bugs)
-
-    # 10. backlog_items
+    # 9. backlog_items
     backlog = _select_by(source_conn, source_tables["backlog_items"], project_id=pid)
     _insert_many(target_conn, "backlog_items", [_backlog_dict(r) for r in backlog])
     counts["backlog_items"] = len(backlog)
 
-    # 11. deploy_events (seq preserved; IDENTITY advanced after the apply loop)
+    # 10. deploy_events (seq preserved; IDENTITY advanced after the apply loop)
     deploys = _select_by(source_conn, source_tables["deploy_events"], project_id=pid)
     _insert_many(target_conn, "deploy_events", [_deploy_dict(r) for r in deploys])
     counts["deploy_events"] = len(deploys)

@@ -75,8 +75,6 @@ class Feat(Base, UUIDMixin, TimestampMixin):
     plain_description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, server_default="todo")
     estimated_minutes = Column(Integer, nullable=True)
-    actual_minutes = Column(Integer, nullable=True)
-    task_count = Column(Integer, nullable=False, server_default="0")
     auto_fix_count = Column(Integer, nullable=False, server_default="0")
 
     __table_args__ = (
@@ -111,7 +109,6 @@ class Task(Base, UUIDMixin, TimestampMixin):
     status = Column(String(20), nullable=False, server_default="todo", index=True)
     priority = Column(String(10), nullable=False, server_default="normal")
     estimated_minutes = Column(Integer, nullable=True)
-    actual_minutes = Column(Integer, nullable=True)
     checklist_type = Column(String(30), nullable=True)
     # F-007 §4: per-task diff anchor — repo HEAD captured when the task is
     # dispatched, so a retry still diffs against the original baseline. Written

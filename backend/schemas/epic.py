@@ -2,24 +2,21 @@
 
 Mirrors :mod:`backend.db.models.tasks.Epic`.  Field names, max lengths
 and default values match the SQLAlchemy model exactly so that
-``EpicRead.model_validate(epic_orm_instance)`` round-trips cleanly.
+a payload maps onto the model one to one.
 
 Status values correspond to the ``ck_epics_status`` CHECK constraint on
 the ``epics`` table (``planned | in_progress | done``).  The ORM column
 is a ``String`` type guarded by a DB-level CHECK rather than a Python
 Enum, so ``Literal`` is the narrowest faithful representation —
-consistent with the approach used in :mod:`backend.schemas.bug`,
-:mod:`backend.schemas.bug_fix_task`,
-:mod:`backend.schemas.project` and :mod:`backend.schemas.user`.
+consistent with :mod:`backend.schemas.project` and :mod:`backend.schemas.user`.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 # Mirrors the CHECK constraint
 # ``status IN ('planned', 'in_progress', 'done')``
@@ -76,46 +73,3 @@ class EpicCreate(BaseModel):
         default="planned",
         description="Lifecycle status: planned | in_progress | done.",
     )
-
-
-class EpicUpdate(BaseModel):
-    """Partial update for an existing epic.
-
-    ``id``, ``project_id``, ``number`` and ``created_at`` are immutable:
-    the epic identity and its position within the project must not be
-    rewritten after the fact.  ``updated_at`` is managed by the ORM via
-    ``onupdate=func.now()`` and must not be set by clients.
-    All remaining fields are optional to support PATCH-style semantics.
-    """
-
-    title: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=500,
-        description="Updated epic title.",
-    )
-    status: Optional[EpicStatus] = Field(
-        default=None,
-        description="Updated lifecycle status: planned | in_progress | done.",
-    )
-
-
-class EpicRead(BaseModel):
-    """Serialised representation of an epic row.
-
-    Mirrors every column on :class:`backend.db.models.tasks.Epic`.
-    ``from_attributes=True`` enables construction directly from an ORM
-    instance via ``EpicRead.model_validate(obj)``.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    project_id: UUID
-    version_id: Optional[UUID] = None
-    number: int
-    title: str = Field(..., min_length=1, max_length=500)
-    plain_description: Optional[str] = None
-    status: EpicStatus
-    created_at: datetime
-    updated_at: datetime

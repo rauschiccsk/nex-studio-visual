@@ -31,7 +31,7 @@ Management and §4.0 Version Lifecycle Rules, and
       before flush in :func:`create` so concurrent creates surface as a
       clean :class:`ValueError` instead of a raw
       :class:`~sqlalchemy.exc.IntegrityError`.
-    * Inbound FKs from ``epics.version_id`` and ``bugs.version_id`` use
+    * The inbound FK from ``epics.version_id`` uses
       ``ON DELETE RESTRICT`` — deletion is not exposed here because
       DESIGN.md §4.0 Rule 6 states a version may not be deleted while
       any EPIC or BUG still references it. This task does not ship a
@@ -39,11 +39,11 @@ Management and §4.0 Version Lifecycle Rules, and
       path in a follow-up task.
     * :func:`list_versions` puts the newest version number first (by number, :func:`number_order_key` —
       DEV-169) per DESIGN.md §2.6 ``GET /projects/{id}/versions`` and attaches three
-      aggregate counts (``epic_count``, ``epics_done``, ``bug_count``)
+      aggregate counts (``epic_count``, ``epics_done``)
       to each returned ORM instance so
       :class:`~backend.schemas.version.VersionRead` can serialise them
       via ``from_attributes=True``.
-    * :func:`get_by_id` eager-loads ``epics`` and ``bugs`` with
+    * :func:`get_by_id` eager-loads ``epics`` with
       ``selectinload`` — DESIGN.md §2.6 ``GET /versions/{id}`` returns
       the version detail "with all EPICs and BUGs grouped", so the
       router needs both collections populated in one trip.
@@ -71,7 +71,6 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.db.models.bugs import Bug
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
@@ -96,7 +95,6 @@ def list_versions(db: Session, project_id: UUID) -> list[Version]:
 
         * ``epic_count`` — total number of EPICs assigned to the version.
         * ``epics_done`` — number of those EPICs with ``status = 'done'``.
-        * ``bug_count`` — total number of BUGs assigned to the version.
 
     These match the ``VersionRead`` schema fields
     (``from_attributes=True``), so the router can serialise the result
@@ -120,15 +118,12 @@ def list_versions(db: Session, project_id: UUID) -> list[Version]:
         .correlate(Version)
         .scalar_subquery()
     )
-    bug_count_col = select(func.count(Bug.id)).where(Bug.version_id == Version.id).correlate(Version).scalar_subquery()
-
-    stmt = select(Version, epic_count_col, epics_done_col, bug_count_col).where(Version.project_id == project_id)
+    stmt = select(Version, epic_count_col, epics_done_col).where(Version.project_id == project_id)
 
     result: list[Version] = []
-    for version, epic_count, epics_done, bug_count in db.execute(stmt).all():
+    for version, epic_count, epics_done in db.execute(stmt).all():
         version.epic_count = int(epic_count or 0)
         version.epics_done = int(epics_done or 0)
-        version.bug_count = int(bug_count or 0)
         result.append(version)
     return sorted(result, key=lambda version: number_order_key(version.version_number), reverse=True)
 
@@ -145,7 +140,7 @@ def number_order_key(version_number: str) -> tuple[int, ...]:
 
 
 def get_by_id(db: Session, version_id: UUID) -> Version:
-    """Return a single version by primary key with ``epics`` and ``bugs`` eager-loaded.
+    """Return a single version by primary key with ``epics`` eager-loaded.
 
     DESIGN.md §2.6 ``GET /versions/{id}`` specifies "Version detail with
     all EPICs and BUGs grouped", so the service eagerly loads both
@@ -156,14 +151,7 @@ def get_by_id(db: Session, version_id: UUID) -> Version:
         ValueError: If no version with the supplied ``version_id``
             exists. The router converts this to an HTTP 404 response.
     """
-    stmt = (
-        select(Version)
-        .where(Version.id == version_id)
-        .options(
-            selectinload(Version.epics),
-            selectinload(Version.bugs),
-        )
-    )
+    stmt = select(Version).where(Version.id == version_id).options(selectinload(Version.epics))
     version = db.execute(stmt).scalar_one_or_none()
     if version is None:
         raise ValueError(f"Version {version_id} not found")

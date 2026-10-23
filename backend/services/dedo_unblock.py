@@ -48,11 +48,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models.pipeline import PipelineState
-from backend.services.dedo_message import DedoMessageError, record_dedo_message, version_awaiting_dedo
+from backend.services.dedo_message import DedoMessageError, record_dedo_message
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DedoMessageError", "unblock_framework_issue", "version_awaiting_dedo"]
 
 #: What the board tells the Manažér once the build is released. Plain Slovak, no "framework"/"Dedo" jargon
 #: (the cockpit's reader is a non-expert): what happened, and the one thing to do about it.

@@ -83,8 +83,6 @@ COMPARE_COLUMNS: dict[str, tuple[str, ...]] = {
         "description",
         "status",
         "estimated_minutes",
-        "actual_minutes",
-        "task_count",
         "auto_fix_count",
         "created_at",
         "updated_at",
@@ -99,26 +97,7 @@ COMPARE_COLUMNS: dict[str, tuple[str, ...]] = {
         "status",
         "priority",
         "estimated_minutes",
-        "actual_minutes",
         "checklist_type",
-        "created_at",
-        "updated_at",
-    ),
-    "bugs": (
-        "id",
-        "project_id",
-        "version_id",
-        "bug_number",
-        "title",
-        "description",
-        "severity",
-        "status",
-        "source",
-        "reported_by",
-        "environment",
-        "resolved_at",
-        "commit_hash",
-        "created_by",
         "created_at",
         "updated_at",
     ),
@@ -258,7 +237,7 @@ def verify_project(
     _compare_rows("projects", [project_row], t_project, src_cols("projects"), findings)
 
     # --- direct project-scoped tables ---
-    for name in ("customers", "versions", "epics", "bugs", "backlog_items", "deploy_events"):
+    for name in ("customers", "versions", "epics", "backlog_items", "deploy_events"):
         s_rows = _src_by(source_conn, st[name], project_id=pid)
         t_rows = _tgt_by(target_conn, name, project_id=pid)
         _compare_rows(name, s_rows, t_rows, src_cols(name), findings)

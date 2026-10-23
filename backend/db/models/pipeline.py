@@ -163,11 +163,6 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     next_action = Column(Text, nullable=False, server_default="")
     is_regate = Column(Boolean, nullable=False, server_default="false")
     iteration = Column(Integer, nullable=False, server_default="0")
-    #: Transient return marker. v1-ORPHANED COLUMN (CR-V2-017 FLAG): its only writer was the retired
-    #: Coordinator ``route_to_designer`` executor, excised with the v1 5-role engine. No v2 code reads or
-    #: writes it; kept as a nullable column (dropping it needs a migration, deferred — Milestone E ships no
-    #: migration). A later cleanup CR drops the column.
-    returns_to = Column(String(20), nullable=True)
     #: WS-D (CR-NS-036): when the pipeline ENTERED its current Manažér-wait status
     #: (``awaiting_manazer`` / ``blocked``). Maintained by the ``status`` ``set`` event listener
     #: below — set on entry, preserved across wait→wait, cleared on leaving. Powers the future

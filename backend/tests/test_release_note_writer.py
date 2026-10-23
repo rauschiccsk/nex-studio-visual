@@ -3,7 +3,7 @@
 Part 1 of ``docs/specs/per-app-changelog-standard.md``: NEX Studio (NOT the AI
 agent) generates the plain-language Slovak release note for the completing
 version from its **Epics** (the user-facing feature altitude — never a Task
-dump), optionally appends a short *Opravené* line from resolved Bugs, and commits
+dump) and commits
 it into the generated app's repo so the app's own ``/api/v1/release-notes``
 endpoint serves it.
 
@@ -11,7 +11,6 @@ Covered contracts:
   * generation from Epic ``plain_description`` (fallback to Epic ``title``);
   * correct on-disk path ``docs/specs/versions/v<N>/RELEASE_NOTES.md``, mkdir -p;
   * H2 version heading, plain bullets, NO internal codes (CR-/EPIC-/BUG-/files);
-  * a resolved-Bug *Opravené* line (title only — no severity/codes);
   * a ``released`` version's note is IMMUTABLE (never regenerated);
   * ``version_notes_dir`` normalises the ``v`` prefix (no ``vv1.0.0`` footgun);
   * ``orchestrator._commit_release_note`` commits the note into the app repo;
@@ -25,7 +24,6 @@ import uuid
 
 from sqlalchemy import select
 
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -78,22 +76,6 @@ def _add_epic(db, project, version, number, title, plain_description):
     db.add(epic)
     db.flush()
     return epic
-
-
-def _add_bug(db, project, version, creator, bug_number, title, *, status="resolved", severity="minor"):
-    bug = Bug(
-        project_id=project.id,
-        version_id=version.id,
-        bug_number=bug_number,
-        title=title,
-        description="detail",
-        severity=severity,
-        status=status,
-        created_by=creator.id,
-    )
-    db.add(bug)
-    db.flush()
-    return bug
 
 
 def _git_init(root):
@@ -201,31 +183,6 @@ def test_internal_codes_stripped_from_bullets(db_session, tmp_path):
 
     assert "EPIC-3" not in body
     assert "Reporting modul" in body
-
-
-def test_resolved_bugs_appended_as_opravene(db_session, tmp_path):
-    creator, project, version = _seed(db_session, version_number="0.3.0")
-    _add_epic(db_session, project, version, 1, "Nová funkcia", "Pridali sme prehľad objednávok.")
-    _add_bug(db_session, project, version, creator, 1, "Chybný súčet DPH", status="resolved")
-    # A non-resolved bug must NOT appear.
-    _add_bug(db_session, project, version, creator, 2, "Nezobrazený dátum", status="new")
-
-    body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
-
-    assert "### Opravené" in body
-    assert "- Chybný súčet DPH" in body
-    assert "Nezobrazený dátum" not in body
-    # Severity jargon never leaks.
-    assert "minor" not in body
-
-
-def test_no_opravene_section_when_no_resolved_bugs(db_session, tmp_path):
-    _creator, project, version = _seed(db_session, version_number="0.1.0")
-    _add_epic(db_session, project, version, 1, "Základ", "Prvá verzia.")
-
-    body = release_note_writer.write_release_note(db_session, version.id, tmp_path).read_text(encoding="utf-8")
-
-    assert "Opravené" not in body
 
 
 # ---------------------------------------------------------------------------

@@ -5,25 +5,13 @@ sibling modules (e.g. ``project.py``) and are re-exported from here for
 convenient consumption by API routers.
 """
 
-from backend.schemas.bug import (
-    BugCreate,
-    BugRead,
-    BugSeverity,
-    BugSource,
-    BugStatus,
-    BugUpdate,
-)
 from backend.schemas.epic import (
     EpicCreate,
-    EpicRead,
     EpicStatus,
-    EpicUpdate,
 )
 from backend.schemas.feat import (
     FeatCreate,
-    FeatRead,
     FeatStatus,
-    FeatUpdate,
 )
 from backend.schemas.project import (
     ProjectAuthMode,
@@ -35,10 +23,8 @@ from backend.schemas.project import (
 )
 from backend.schemas.task import (
     TaskCreate,
-    TaskRead,
     TaskStatus,
     TaskType,
-    TaskUpdate,
 )
 from backend.schemas.user import (
     ChangePasswordRequest,
@@ -58,20 +44,10 @@ from backend.schemas.version import (
 )
 
 __all__ = [
-    "BugCreate",
-    "BugRead",
-    "BugSeverity",
-    "BugSource",
-    "BugStatus",
-    "BugUpdate",
     "EpicCreate",
-    "EpicRead",
     "EpicStatus",
-    "EpicUpdate",
     "FeatCreate",
-    "FeatRead",
     "FeatStatus",
-    "FeatUpdate",
     "ProjectAuthMode",
     "ProjectCreate",
     "ProjectRead",
@@ -79,10 +55,8 @@ __all__ = [
     "ProjectType",
     "ProjectUpdate",
     "TaskCreate",
-    "TaskRead",
     "TaskStatus",
     "TaskType",
-    "TaskUpdate",
     "ChangePasswordRequest",
     "UserCreate",
     "UserRead",

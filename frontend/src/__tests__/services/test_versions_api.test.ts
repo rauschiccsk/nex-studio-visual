@@ -39,7 +39,6 @@ function makeVersion(overrides: Partial<Version> = {}): Version {
     updated_at: "2026-01-01T00:00:00Z",
     epic_count: 0,
     epics_done: 0,
-    bug_count: 0,
     ...overrides,
   };
 }

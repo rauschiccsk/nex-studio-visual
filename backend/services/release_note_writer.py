@@ -17,8 +17,6 @@ Altitude + honesty (design §1):
 * **No internal codes.** ``CR-…``/``EPIC-…``/``BUG-…``/``FEAT-…``/``TASK-…`` and
   file names never surface — :func:`_strip_codes` defensively scrubs them from
   the (rare) title-fallback path; ``plain_description`` is clean by construction.
-* **Resolved bugs** may append a short *Opravené* line — titles only, never the
-  severity/status jargon.
 
 Immutability (design §3): a version already ``released`` is a historical record —
 :func:`write_release_note` refuses to regenerate it. NEX Studio is the source of
@@ -35,7 +33,6 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.db.models.bugs import Bug
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 
@@ -112,27 +109,11 @@ def _epic_bullets(db: Session, version: Version) -> list[str]:
     return bullets
 
 
-def _fixed_bullets(db: Session, version: Version) -> list[str]:
-    """Plain-language *Opravené* bullets — titles of RESOLVED bugs (no codes/severity)."""
-    bugs = (
-        db.execute(select(Bug).where(Bug.version_id == version.id, Bug.status == "resolved").order_by(Bug.bug_number))
-        .scalars()
-        .all()
-    )
-    out: list[str] = []
-    for bug in bugs:
-        title = _strip_codes((bug.title or "").strip())
-        if title:
-            out.append(title)
-    return out
-
-
 def render_release_note(db: Session, version: Version) -> str:
     """Render the plain-language Slovak note markdown for *version*.
 
-    Mirrors the scaffold template: an ``## v<N> — <name>`` H2 heading, plain
-    bullets from the Epics, and an optional ``### Opravené`` block from resolved
-    bugs. No internal codes, no Task dump, no date in the heading (the endpoint
+    Mirrors the scaffold template: an ``## v<N> — <name>`` H2 heading and plain
+    bullets from the Epics. No internal codes, no Task dump, no date in the heading (the endpoint
     sources the date from the DB).
     """
     heading = f"## v{_bare(version.version_number)}"
@@ -148,12 +129,6 @@ def render_release_note(db: Session, version: Version) -> str:
     else:
         # Never emit an empty note — a version with no Epics still ships one honest line.
         lines.append("- Nová verzia.")
-
-    fixed = _fixed_bullets(db, version)
-    if fixed:
-        lines.append("")
-        lines.append("### Opravené")
-        lines.extend(f"- {b}" for b in fixed)
 
     # Podpis na konci nesie ODTLAČOK tela (ICCINT-116): pri ďalšom behu sa podľa neho pozná nielen to,
     # že text je náš, ale aj to, že sa ho odvtedy nikto nedotkol. Holá značka to rozlíšiť nevedela.

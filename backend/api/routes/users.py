@@ -161,7 +161,7 @@ def delete_user(
     """Hard-delete a user (ri only).
 
     The ``user_service.delete`` helper proactively checks every inbound
-    ``ondelete='RESTRICT'`` foreign key (projects, bugs, architect_sessions,
+    ``ondelete='RESTRICT'`` foreign key (projects, architect_sessions,
     raw_specifications, professional_specifications, design_documents)
     before issuing the DELETE — if any row still references the user,
     a clean :class:`ValueError` propagates up to a 409 Conflict here

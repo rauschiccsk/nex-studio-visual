@@ -24,7 +24,6 @@ import uuid
 import bcrypt
 import pytest
 
-from backend.db.models.bugs import Bug
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
 from backend.schemas.user import SelfProfileUpdate, UserCreate, UserUpdate
@@ -252,35 +251,6 @@ class TestUserService:
 
         with pytest.raises(ValueError, match="založil projekty"):
             service.delete(db_session, owner.id)
-
-    def test_delete_blocked_by_bug(self, db_session):
-        """``delete`` refuses when a ``bugs.created_by`` references the user."""
-        owner = service.create(db_session, _payload())
-        project = Project(
-            name=f"P-{uuid.uuid4().hex[:6]}",
-            slug=f"p-{uuid.uuid4().hex[:6]}",
-            type="standard",
-            auth_mode="password",
-            description="",
-            created_by=owner.id,
-        )
-        db_session.add(project)
-        db_session.flush()
-
-        reporter = service.create(db_session, _payload())
-        bug = Bug(
-            project_id=project.id,
-            bug_number=1,
-            title="Broken thing",
-            description="desc",
-            severity="minor",
-            created_by=reporter.id,
-        )
-        db_session.add(bug)
-        db_session.flush()
-
-        with pytest.raises(ValueError, match="nahlásil chyby"):
-            service.delete(db_session, reporter.id)
 
     # ------------------------------------------------------------------ list
     def test_list_all(self, db_session):

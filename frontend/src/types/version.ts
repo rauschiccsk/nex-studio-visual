@@ -37,8 +37,6 @@ export interface Version {
   epic_count: number;
   /** Number of Epics with status 'done'. */
   epics_done: number;
-  /** Number of Bugs assigned to this version. */
-  bug_count: number;
 }
 
 /** Payload for creating a new version (``POST /projects/{id}/versions``). */

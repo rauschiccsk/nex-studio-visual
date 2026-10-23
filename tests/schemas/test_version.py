@@ -15,8 +15,7 @@ from typing import get_args
 import pytest
 from pydantic import ValidationError
 
-from backend.schemas.bug import BugCreate, BugRead
-from backend.schemas.epic import EpicCreate, EpicRead
+from backend.schemas.epic import EpicCreate
 from backend.schemas.version import (
     VersionCreate,
     VersionRead,
@@ -211,7 +210,6 @@ class TestVersionRead:
         read = VersionRead.model_validate(_make_version_namespace())
         assert read.epic_count == 0
         assert read.epics_done == 0
-        assert read.bug_count == 0
 
     def test_computed_counts_accept_positive_integers(self) -> None:
         """Service layer supplies aggregate counts via dict merge."""
@@ -220,18 +218,16 @@ class TestVersionRead:
             **{f: getattr(orm, f) for f in VersionRead.model_fields if hasattr(orm, f)},
             "epic_count": 7,
             "epics_done": 3,
-            "bug_count": 12,
         }
         read = VersionRead.model_validate(data)
         assert read.epic_count == 7
         assert read.epics_done == 3
-        assert read.bug_count == 12
 
     def test_computed_counts_reject_negative(self) -> None:
         """Aggregate counts are non-negative (``ge=0``)."""
         orm = _make_version_namespace()
         base = {f: getattr(orm, f) for f in VersionRead.model_fields if hasattr(orm, f)}
-        for field in ("epic_count", "epics_done", "bug_count"):
+        for field in ("epic_count", "epics_done"):
             with pytest.raises(ValidationError):
                 VersionRead.model_validate({**base, field: -1})
 
@@ -250,7 +246,7 @@ class TestVersionRead:
 
 
 # ---------------------------------------------------------------------------
-# Epic / Bug schemas — version_id propagation
+# Epic schemas — version_id propagation
 # ---------------------------------------------------------------------------
 
 
@@ -271,73 +267,3 @@ class TestEpicVersionId:
         """``version_id`` is optional; service layer auto-assigns if omitted."""
         payload = EpicCreate(project_id=uuid.uuid4(), title="Epic title")
         assert payload.version_id is None
-
-    def test_read_exposes_version_id(self) -> None:
-        """EpicRead round-trips ``version_id`` from the ORM instance."""
-        version_id = uuid.uuid4()
-        now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
-        orm = SimpleNamespace(
-            id=uuid.uuid4(),
-            project_id=uuid.uuid4(),
-            version_id=version_id,
-            number=1,
-            title="Epic title",
-            status="planned",
-            created_at=now,
-            updated_at=now,
-        )
-        read = EpicRead.model_validate(orm)
-        assert read.version_id == version_id
-
-
-class TestBugVersionId:
-    """Bug schemas must expose ``version_id`` after Feat 9."""
-
-    def test_create_accepts_version_id(self) -> None:
-        """BugCreate carries the optional ``version_id`` FK."""
-        version_id = uuid.uuid4()
-        payload = BugCreate(
-            project_id=uuid.uuid4(),
-            title="Bug title",
-            description="Something broke.",
-            severity="major",
-            created_by=uuid.uuid4(),
-            version_id=version_id,
-        )
-        assert payload.version_id == version_id
-
-    def test_create_version_id_defaults_none(self) -> None:
-        """``version_id`` is optional; service layer auto-assigns if omitted."""
-        payload = BugCreate(
-            project_id=uuid.uuid4(),
-            title="Bug title",
-            description="Something broke.",
-            severity="major",
-            created_by=uuid.uuid4(),
-        )
-        assert payload.version_id is None
-
-    def test_read_exposes_version_id(self) -> None:
-        """BugRead round-trips ``version_id`` from the ORM instance."""
-        version_id = uuid.uuid4()
-        now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
-        orm = SimpleNamespace(
-            id=uuid.uuid4(),
-            project_id=uuid.uuid4(),
-            version_id=version_id,
-            bug_number=1,
-            title="Bug title",
-            description="Something broke.",
-            severity="major",
-            status="new",
-            source="internal",
-            reported_by=None,
-            environment=None,
-            resolved_at=None,
-            commit_hash=None,
-            created_by=uuid.uuid4(),
-            created_at=now,
-            updated_at=now,
-        )
-        read = BugRead.model_validate(orm)
-        assert read.version_id == version_id
