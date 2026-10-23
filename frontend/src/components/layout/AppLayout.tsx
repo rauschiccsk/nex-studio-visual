@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { AppShell } from "nex-shared";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import PageErrorBoundary from "@/components/layout/PageErrorBoundary";
 import { PersistentTerminalsLayer } from "@/components/PersistentTerminalsLayer";
 import { useAuthStore } from "@/store/authStore";
 import { useUserLayoutStore } from "@/store/userLayoutStore";
@@ -17,7 +18,10 @@ export default function AppLayout() {
 
   return (
     <AppShell sidebar={<Sidebar />} header={<Topbar />}>
-      <Outlet />
+      {/* DEV-192: a page that crashes says so here — the menu and the top bar stay. */}
+      <PageErrorBoundary>
+        <Outlet />
+      </PageErrorBoundary>
       {/* Overlay anchored in AppShell's relative <main> region. */}
       <PersistentTerminalsLayer />
     </AppShell>

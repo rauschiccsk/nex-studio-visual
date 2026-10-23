@@ -15,6 +15,7 @@ from backend.api.routes.auth import router as auth_router
 from backend.api.routes.backlog import router as backlog_router
 from backend.api.routes.ci_runner import router as ci_runner_router
 from backend.api.routes.ci_runs import router as ci_runs_router
+from backend.api.routes.client_errors import router as client_errors_router
 from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.customers import router as customers_router
 from backend.api.routes.dead_code import router as dead_code_router
@@ -435,6 +436,7 @@ app.include_router(standing_router, prefix="/api/v1")  # DEV-150 „Kde stojíme
 app.include_router(version_notes_router, prefix="/api/v1")  # DEV-151 „Kde sme skončili“
 app.include_router(price_estimate_router, prefix="/api/v1")  # DEV-154 orientačná cena verzie
 app.include_router(dead_code_router, prefix="/api/v1")  # DEV-156 nepoužívaný kód z minulých verzií
+app.include_router(client_errors_router, prefix="/api/v1")  # DEV-192 chyby stránok kokpitu do záznamu
 # The deploy router (CR-V2-026) also mounts under the bare ``/api/v1`` prefix
 # because its routes sit under ``/customers/{id}/deploy`` | ``/accept`` — see design §3 Deploy & Customers.
 app.include_router(deploy_router, prefix="/api/v1")
