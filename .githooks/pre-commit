@@ -33,12 +33,20 @@ fi
 
 NEEDS_BACKEND=0
 NEEDS_FRONTEND=0
+NEEDS_CONTRACT=0
 while IFS= read -r path; do
     case "${path}" in
         backend/*|tests/*|pyproject.toml|poetry.lock)
             NEEDS_BACKEND=1 ;;
         frontend/*)
             NEEDS_FRONTEND=1 ;;
+    esac
+    # DEV-207: the backend's code (routes, schemas, their docstrings) is the OpenAPI schema the frontend's contract
+    # types are generated from; the generated file itself may also have been edited by hand.
+    case "${path}" in
+        backend/tests/*) ;;
+        backend/*|frontend/src/services/api/pipeline.generated.ts)
+            NEEDS_CONTRACT=1 ;;
     esac
 done <<< "${STAGED}"
 
@@ -82,6 +90,19 @@ if [[ "${NEEDS_FRONTEND}" == "1" ]]; then
     if ! (cd frontend && npm run lint > /tmp/pre-commit-eslint.log 2>&1); then
         echo "❌ ESLint FAILED:"
         cat /tmp/pre-commit-eslint.log
+        exit 1
+    fi
+fi
+
+# ─── contract check ────────────────────────────────────────────────────
+# DEV-207: the CI job „Contract Drift-Gate“ — the same script, so a commit that passes here passes there.
+if [[ "${NEEDS_CONTRACT}" == "1" ]]; then
+    echo "pre-commit: contract — frontend types regenerated from the backend"
+    if ! scripts/contract_drift_check.sh > /tmp/pre-commit-contract.log 2>&1; then
+        echo "❌ Contract check FAILED — the frontend's contract types do not match the backend:"
+        tail -40 /tmp/pre-commit-contract.log
+        echo ""
+        echo "The regenerated file is in the working tree:  git add frontend/src/services/api/pipeline.generated.ts"
         exit 1
     fi
 fi

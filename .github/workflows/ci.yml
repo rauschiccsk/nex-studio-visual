@@ -207,16 +207,9 @@ jobs:
         working-directory: frontend
         run: npm install
 
-      - name: Regenerate FE contract types
-        working-directory: frontend
-        # `npm run codegen` dumps the OpenAPI schema (poetry → backend.scripts.dump_openapi) and
-        # runs openapi-typescript → src/services/api/pipeline.generated.ts.
-        run: npm run codegen
-
-      - name: Fail on contract drift
-        run: |
-          git diff --exit-code frontend/src/services/api/pipeline.generated.ts \
-            || { echo "::error::pipeline.generated.ts is stale — run 'npm run codegen' in frontend/ and commit the result."; exit 1; }
+      - name: Regenerate FE contract types and fail on drift
+        # DEV-207: the same script the pre-commit hook runs, so a commit that passes there passes here.
+        run: scripts/contract_drift_check.sh
 
   build:
     name: Build Docker Images
