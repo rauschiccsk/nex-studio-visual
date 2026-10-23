@@ -160,3 +160,36 @@ def test_the_note_written_before_a_release_smoke_brings_its_derivative_too(
 
     assert ran == [project / "frontend"]
     assert "Kinekus" in (project / DERIVED).read_text(encoding="utf-8")
+
+
+async def test_a_derivative_already_changed_before_the_note_goes_in_once_the_generator_rewrote_it(
+    db_session, project, writes_the_note, monkeypatch
+):
+    """23.10.2026 NEX Inbox 1.10.1: something rebuilt ``release-notes.ts`` before the cockpit wrote the note (a build of
+    the frontend runs the generator first), so the file was already changed — and the cockpit took it for the agent's
+    unfinished work. The generator rewrote it with the new version and the commit carried the note alone, which the
+    project's generated-file check refuses. What the generator rewrote is the note's derivative, whatever it was
+    before."""
+    (project / DERIVED).write_text("export const NOTES = []; // rebuilt by a frontend build\n", encoding="utf-8")
+    version, _ = _make_version(db_session)
+    _generator(monkeypatch)
+
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+
+    assert _committed(project) == ["docs/specs/versions/v1.5.2/RELEASE_NOTES.md", DERIVED]
+    assert _git(project, "status", "--porcelain") == ""
+
+
+async def test_a_changed_file_the_generator_did_not_touch_stays_out_of_the_commit(
+    db_session, project, writes_the_note, monkeypatch
+):
+    (project / "frontend" / "package.json").write_text(
+        json.dumps({"scripts": {"generate-release-notes": "tsx g.ts", "build": "vite build"}}), encoding="utf-8"
+    )
+    version, _ = _make_version(db_session)
+    _generator(monkeypatch)
+
+    await orchestrator._commit_release_note(db_session, version.id, project, "1.5.2")
+
+    assert "frontend/package.json" not in _committed(project)
+    assert " M frontend/package.json" in _git(project, "status", "--porcelain")

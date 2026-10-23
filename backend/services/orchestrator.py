@@ -5496,6 +5496,17 @@ def _changed_paths(project_root: Path) -> set[str]:
     return {line[3:] for line in done.stdout.splitlines() if len(line) > 3} if done.returncode == 0 else set()
 
 
+def _written_at(project_root: Path, paths: set[str]) -> dict[str, int]:
+    """When each of the paths was last written (nanoseconds) — a path that is gone has no entry."""
+    stamps: dict[str, int] = {}
+    for path in paths:
+        try:
+            stamps[path] = (Path(project_root) / path).stat().st_mtime_ns
+        except OSError:
+            continue
+    return stamps
+
+
 def _run_release_notes_generator(frontend: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["npm", "run", "--silent", RELEASE_NOTES_GENERATOR],
@@ -5514,7 +5525,12 @@ def _regenerate_release_note_derivatives(project_root: Path) -> tuple[list[str],
     app's ``frontend/src/lib/release-notes.ts`` stayed stale, its CI failed on the generated-file check and the 1.8.0
     build got a verification round for it. The project says what it derives — the ``generate-release-notes`` script in
     its ``frontend/package.json``; without it nothing is derived and nothing runs. Returns the files the generator
-    changed (to be committed with the note) and, when it failed, why."""
+    changed (to be committed with the note) and, when it failed, why.
+
+    What the generator changed is what it WROTE — a file changed only after it ran, or one already changed before that
+    it wrote again (23.10.2026 NEX Inbox 1.10.1: a frontend build had rebuilt ``release-notes.ts`` before the note, the
+    cockpit took it for the agent's unfinished work and the commit carried the note alone). A changed file the generator
+    did not write stays out of the commit."""
     frontend = Path(project_root) / "frontend"
     try:
         scripts = json.loads((frontend / "package.json").read_text(encoding="utf-8")).get("scripts") or {}
@@ -5523,6 +5539,7 @@ def _regenerate_release_note_derivatives(project_root: Path) -> tuple[list[str],
     if RELEASE_NOTES_GENERATOR not in scripts:
         return [], None
     before = _changed_paths(project_root)
+    stamps = _written_at(project_root, before)
     try:
         done = _run_release_notes_generator(frontend)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -5530,7 +5547,9 @@ def _regenerate_release_note_derivatives(project_root: Path) -> tuple[list[str],
     if done.returncode != 0:
         lines = (done.stderr or done.stdout or "").strip().splitlines()
         return [], f"generátor skončil chybou: {lines[-1][:200] if lines else f'kód {done.returncode}'}"
-    return sorted(_changed_paths(project_root) - before), None
+    after = _changed_paths(project_root)
+    rewritten = {path for path, at in _written_at(project_root, after & before).items() if at != stamps.get(path)}
+    return sorted((after - before) | rewritten), None
 
 
 async def _commit_release_note(
