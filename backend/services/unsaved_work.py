@@ -49,6 +49,18 @@ def status(source_path: Optional[str]) -> dict:
     return git_state.working_tree_status(source_path, exclude=workspace_owner.COCKPIT_WRITES)
 
 
+def save(source_path: str, message: str) -> dict:
+    """„Uložiť ich“ — commits exactly what :func:`status` shows (DEV-203): the cockpit's own files stay out of the
+    project's git, as they stay off the card. ``git_state.commit_all``'s answer."""
+    return git_state.commit_all(source_path, message, exclude=workspace_owner.COCKPIT_WRITES)
+
+
+def discard(source_path: str) -> dict:
+    """„Zahodiť“ — throws away exactly what :func:`status` shows (DEV-203) and leaves the cockpit's own files as the
+    cockpit wrote them. ``git_state.discard_all``'s answer."""
+    return git_state.discard_all(source_path, exclude=workspace_owner.COCKPIT_WRITES)
+
+
 def refusal(project_id: UUID, source_path: Optional[str]) -> Optional[dict]:
     """``None`` when a version may be founded; otherwise the body of the 409 — the sentence for the Manažér, the project
     whose work it is and what is unsaved (the shape of :func:`status`), so a screen that knows only a version can still

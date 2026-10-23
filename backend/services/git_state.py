@@ -74,6 +74,16 @@ def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -
     )
 
 
+def _excluded(exclude: Sequence[str]) -> list[str]:
+    """*exclude* (git pathspec globs) as pathspec entries that leave those paths out."""
+    return [f":(glob,exclude){pattern}" for pattern in exclude]
+
+
+def _outside(exclude: Sequence[str]) -> list[str]:
+    """The pathspec for the whole workspace except *exclude*; empty when nothing is excluded."""
+    return ["--", ".", *_excluded(exclude)] if exclude else []
+
+
 def working_tree_status(
     source_path: str, *, paths: Sequence[str] = (), exclude: Sequence[str] = (), timeout: int = 30
 ) -> dict:
@@ -91,11 +101,7 @@ def working_tree_status(
     root = _project_root(source_path)
     args = ["status", "--porcelain"]
     if exclude:
-        args += [
-            "--",
-            *(paths or ["."]),
-            *(f":(glob,exclude){pattern}" for pattern in exclude),
-        ]
+        args += ["--", *(paths or ["."]), *_excluded(exclude)]
     elif paths:
         args += ["--", *paths]
     proc = _run(root, args, timeout=timeout)
@@ -111,45 +117,48 @@ def working_tree_status(
     }
 
 
-def commit_all(source_path: str, message: str, *, timeout: int = 60) -> dict:
+def commit_all(source_path: str, message: str, *, exclude: Sequence[str] = (), timeout: int = 60) -> dict:
     """Stage + commit ALL pending changes so the tree is clean before founding.
 
     ``git add -A`` (respects ``.gitignore`` — see module note) then ``git commit``.
     A "nothing to commit" result is a benign no-op (returns ``ok`` when the tree ends
-    up clean), not an error.
+    up clean), not an error. *exclude* (git pathspec globs) stays out of both — DEV-203: the
+    files the cockpit writes itself; the commit names its paths, so an entry of them staged
+    earlier does not ride along either.
 
     Returns ``{ok: bool, error?: str, note?: str}``.
     """
     root = _project_root(source_path)
     msg = (message or "").strip() or "chore: uloženie rozrobených zmien pred založením novej verzie"
-    add = _run(root, ["add", "-A"], timeout=timeout)
+    add = _run(root, ["add", "-A", *_outside(exclude)], timeout=timeout)
     if add.returncode != 0:
         return {"ok": False, "error": "git add zlyhal"}
-    commit = _run(root, ["commit", "-m", msg], timeout=timeout)
+    commit = _run(root, ["commit", "-m", msg, *_outside(exclude)], timeout=timeout)
     if commit.returncode != 0:
         # "nothing to commit" (already clean) is benign — verify by re-checking the tree.
-        if working_tree_status(source_path, timeout=timeout)["clean"]:
+        if working_tree_status(source_path, exclude=exclude, timeout=timeout)["clean"]:
             return {"ok": True, "note": "nothing-to-commit"}
         return {"ok": False, "error": "git commit zlyhal"}
     return {"ok": True}
 
 
-def _untracked_paths(root: Path, *, timeout: int) -> list[str]:
+def _untracked_paths(root: Path, *, exclude: Sequence[str], timeout: int) -> list[str]:
     """Untracked entries from ``git status --porcelain -z`` (``-z`` emits paths RAW, never quoted)."""
-    proc = _run(root, ["status", "--porcelain", "-z"], timeout=timeout)
+    proc = _run(root, ["status", "--porcelain", "-z", *_outside(exclude)], timeout=timeout)
     if proc.returncode != 0:
         raise ValueError("git status zlyhal")
     return [entry[3:] for entry in proc.stdout.split("\0") if entry[:2] == "??"]
 
 
-def _cleanable_paths(root: Path, *, timeout: int) -> Optional[set[str]]:
+def _cleanable_paths(root: Path, *, exclude: Sequence[str], timeout: int) -> Optional[set[str]]:
     """What ``git clean -fd`` WOULD remove, asked via its own dry run. None when git failed.
 
     ``core.quotepath=false`` + the C locale keep the output raw + English so the
     ``Would remove `` prefix parses deterministically; anything that fails to parse simply
     stays out of the set, which makes the caller refuse rather than destroy.
     """
-    proc = _run(root, ["-c", "core.quotepath=false", "clean", "-nd"], timeout=timeout, c_locale=True)
+    args = ["-c", "core.quotepath=false", "clean", "-nd", *_outside(exclude)]
+    proc = _run(root, args, timeout=timeout, c_locale=True)
     if proc.returncode != 0:
         return None
     prefix = "Would remove "
@@ -169,12 +178,13 @@ def _cleanable_paths(root: Path, *, timeout: int) -> Optional[set[str]]:
     return cleanable
 
 
-def discard_all(source_path: str, *, timeout: int = 60) -> dict:
+def discard_all(source_path: str, *, exclude: Sequence[str] = (), timeout: int = 60) -> dict:
     """Discard ALL pending changes (index + tracked + untracked) → clean tree.
 
-    ``git reset --hard HEAD`` (index AND working tree — plain ``git checkout -- .`` leaves
-    STAGED changes behind, so the tree stayed dirty) + ``git clean -fd`` (untracked
-    files/dirs).
+    ``git restore --source=HEAD --staged --worktree`` (index AND working tree — plain
+    ``git checkout -- .`` leaves STAGED changes behind, so the tree stayed dirty) + ``git clean
+    -fd`` (untracked files/dirs). *exclude* (git pathspec globs) is left as it is by both —
+    DEV-203: the files the cockpit writes itself, which ``git reset --hard`` used to take too.
 
     Fail-fast by construction: everything that could make the discard incomplete is checked
     BEFORE anything is destroyed, because the destruction is irreversible and "your work is
@@ -190,19 +200,20 @@ def discard_all(source_path: str, *, timeout: int = 60) -> dict:
     root = _project_root(source_path)
     if _run(root, ["rev-parse", "--verify", "HEAD"], timeout=timeout).returncode != 0:
         return {"ok": False, "error": "Projekt nemá žiadny commit, ku ktorému by sa dalo vrátiť."}
-    cleanable = _cleanable_paths(root, timeout=timeout)
+    cleanable = _cleanable_paths(root, exclude=exclude, timeout=timeout)
     if cleanable is None:
         return {"ok": False, "error": "git clean zlyhal"}
-    surviving = [p for p in _untracked_paths(root, timeout=timeout) if p not in cleanable]
+    surviving = [p for p in _untracked_paths(root, exclude=exclude, timeout=timeout) if p not in cleanable]
     if surviving:
         shown = ", ".join(surviving[:5]) + (" …" if len(surviving) > 5 else "")
         return {"ok": False, "error": f"Tieto položky sa nedajú zahodiť, nič sa nezmazalo: {shown}"}
 
     # Preflight passed — only now destroy.
-    if _run(root, ["reset", "--hard", "HEAD"], timeout=timeout).returncode != 0:
-        return {"ok": False, "error": "git reset zlyhal"}
-    if _run(root, ["clean", "-fd"], timeout=timeout).returncode != 0:
+    scope = _outside(exclude) or ["--", "."]
+    if _run(root, ["restore", "--source=HEAD", "--staged", "--worktree", *scope], timeout=timeout).returncode != 0:
+        return {"ok": False, "error": "git restore zlyhal"}
+    if _run(root, ["clean", "-fd", *scope], timeout=timeout).returncode != 0:
         return {"ok": False, "error": "git clean zlyhal"}
-    if not working_tree_status(source_path, timeout=timeout)["clean"]:
+    if not working_tree_status(source_path, exclude=exclude, timeout=timeout)["clean"]:
         return {"ok": False, "error": "Pracovný strom je aj po zahodení zmenený."}
     return {"ok": True}

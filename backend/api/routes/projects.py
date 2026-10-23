@@ -67,7 +67,6 @@ from backend.schemas.version import VersionCreate
 from backend.services import dedo_project_proposal as dedo_proposal_service
 from backend.services import deploy as deploy_service
 from backend.services import fast_fix as fast_fix_service
-from backend.services import git_state as git_state_service
 from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
 from backend.services import (
@@ -775,8 +774,9 @@ def commit_git(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Commit ALL pending changes so the tree is clean before founding (the guard's
-    "Uložiť ich" action). Preserves work — the safe, default resolution."""
+    """Commit the pending changes the guard shows so the tree is clean before founding (the guard's
+    "Uložiť ich" action). Preserves work — the safe, default resolution. DEV-203: the cockpit's own
+    files stay out, as they stay off the guard."""
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
@@ -785,7 +785,7 @@ def commit_git(
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     try:
-        result = git_state_service.commit_all(project.source_path, payload.message or "")
+        result = unsaved_work.save(project.source_path, payload.message or "")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not result.get("ok"):
@@ -799,8 +799,9 @@ def discard_git(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Discard ALL pending changes → clean tree (the guard's "Zahodiť" action).
-    Destructive; the FE gates it behind an explicit operator confirmation."""
+    """Discard the pending changes the guard shows → clean tree (the guard's "Zahodiť" action).
+    Destructive; the FE gates it behind an explicit operator confirmation. DEV-203: the cockpit's
+    own files are left as they are."""
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
@@ -809,7 +810,7 @@ def discard_git(
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
     try:
-        result = git_state_service.discard_all(project.source_path)
+        result = unsaved_work.discard(project.source_path)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not result.get("ok"):

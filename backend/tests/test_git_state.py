@@ -74,7 +74,8 @@ def test_discard_all_reverts_tracked_and_removes_untracked(tmp_path: Path) -> No
 
 def test_discard_all_clears_staged_changes(tmp_path: Path) -> None:
     # `git checkout -- .` left the INDEX untouched, so staged work survived the discard and
-    # the tree stayed dirty. `git reset --hard` is what actually clears it.
+    # the tree stayed dirty. Restoring the index together with the worktree (`git restore --staged --worktree`,
+    # DEV-203; before it `git reset --hard`) is what actually clears it.
     repo = tmp_path / "proj"
     _init_repo(repo)
     (repo / "README.md").write_text("staged change\n", encoding="utf-8")
