@@ -498,24 +498,6 @@ def get_float(db: Session, key: str) -> float:
     return float(value)
 
 
-def get_float_or_none(db: Session, key: str) -> Optional[float]:
-    """Return the float value of *key* ONLY when a ``system_settings`` row exists for it, else ``None``.
-
-    Unlike :func:`get_float` (which falls back to the registered default → 0.0 when no row exists),
-    this distinguishes an explicitly-stored ``0.0`` from "never configured": a row → its value
-    (including 0.0) is honored; no row → ``None``. Lets a caller honor an explicit 0 while still
-    treating "no row at all" as unset (e.g. a wage the Manažér deliberately zeroed vs never touched).
-    Not cached — it is read once on the read-time metrics path, not a hot request loop, and must see
-    row presence directly (the typed cache stores only value+type, not whether a row backs it)."""
-    row = db.execute(select(SystemSetting).where(SystemSetting.key == key)).scalar_one_or_none()
-    if row is None:
-        return None
-    try:
-        return float(row.value)
-    except (TypeError, ValueError):
-        return None
-
-
 def get_bool(db: Session, key: str) -> bool:
     """Return the effective bool value of *key* (cached).
 

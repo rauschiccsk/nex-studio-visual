@@ -346,4 +346,3 @@ def test_a_legacy_string_finding_still_loads_and_reads_its_own_marker():
     assert [f.text for f in v.findings] == ["Export nevracia DIČ", "Preklep v hlavičke (neblokujúce)"]
     assert v.findings[0].blocking is True
     assert v.findings[1].blocking is False, "starý marker v texte je jediné, čo o starom náleze vieme"
-    assert v.blocking_count == 1

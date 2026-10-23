@@ -136,7 +136,7 @@ def test_another_project_cannot_take_a_web_port(db_session):
     verdict = port_registry.describe_port_availability(db_session, BASE + 5)
 
     assert (verdict.state, verdict.holder) == (port_registry.TAKEN, holder.name)
-    assert BASE + 5 in port_registry.get_all_allocated_ports(db_session)["web"]
+    assert BASE + 5 in port_registry._get_all_used_ports(db_session)
 
 
 @pytest.mark.parametrize(

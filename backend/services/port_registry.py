@@ -1,8 +1,7 @@
 """Port Registry Management Service.
 
-Provides port availability checking, next-port suggestion, block-based
-port suggestion and allocated-port querying for projects managed in
-NEX Studio.
+Provides port availability checking and block-based port suggestion for
+projects managed in NEX Studio.
 
 Range follows ICC DECISIONS.md D-020 (Port Registry v2): new projects
 land in the **commercial projects** band ``10100–14999``, ten ports
@@ -60,6 +59,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.core.test_seam import for_tests
 from backend.db.models.projects import Project
 from backend.services import kb_git, kb_owner
 from backend.services import system_setting as system_setting_service
@@ -148,6 +148,7 @@ _host_cache_lock = threading.Lock()
 _host_cache: tuple[dict[int, str] | None, HostProbeError | None, float] | None = None
 
 
+@for_tests
 def invalidate_host_port_cache() -> None:
     """Drop the cached host published-port snapshot.
 
@@ -523,28 +524,6 @@ def describe_port_availability(
     return PortAvailability(port=port, state=FREE, warnings=warnings)
 
 
-def check_port_available(
-    db: Session,
-    port: int,
-    project_id: str | None = None,
-) -> bool:
-    """Return ``True`` only when *port* is provably free on every source.
-
-    Backwards-compatible boolean face of :func:`describe_port_availability`.
-    An ``unknown`` verdict returns ``False``: refusing a port we cannot vouch
-    for is recoverable, handing out a port a neighbour is serving on is not.
-    Callers that need to tell "taken" from "could not check" — and every
-    caller that reports to a human should — must use
-    :func:`describe_port_availability`.
-
-    Raises
-    ------
-    ValueError
-        If *port* is outside the configured registry range.
-    """
-    return describe_port_availability(db, port, project_id).available
-
-
 def _blocked_ports(db: Session) -> tuple[set[int], ReservedRangesStatus]:
     """Union of every port an allocator must avoid: table + reservations + host.
 
@@ -558,22 +537,6 @@ def _blocked_ports(db: Session) -> tuple[set[int], ReservedRangesStatus]:
     reserved = reserved_ranges_status(db)
     blocked = _get_all_used_ports(db) | reserved.ports | set(get_host_taken_ports())
     return blocked, reserved
-
-
-def get_all_allocated_ports(db: Session) -> dict[str, list[int]]:
-    """Return all allocated ports grouped by type.
-
-    Returns
-    -------
-    dict
-        Keys: every port type of :data:`PROJECT_PORT_COLUMNS`.
-        Values: sorted list of ports currently in use for that type.
-    """
-    rows = db.execute(select(*PROJECT_PORT_COLUMNS.values())).all()
-    return {
-        port_type: sorted(row[i] for row in rows if row[i] is not None)
-        for i, port_type in enumerate(PROJECT_PORT_COLUMNS)
-    }
 
 
 def _get_all_used_ports(db: Session) -> set[int]:

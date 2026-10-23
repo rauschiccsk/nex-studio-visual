@@ -601,19 +601,6 @@ async def remove_network(name: str) -> None:
     )
 
 
-def network_create_argv(plan: BuildDatabase) -> list[str]:
-    """``docker network create`` for the per-build network — no options that widen it.
-
-    A plain user-defined bridge, on purpose: it gives docker's embedded DNS (so ``alias`` resolves without
-    anybody having to look up an IP) and it keeps outbound internet, which the turn needs for the Claude MAX
-    endpoint, for ``npm``/``pip`` and for ``gh``. Both were measured on this host from a container attached
-    to exactly such a network: the Qdrant/Ollama gateway answered ``200`` and ``api.anthropic.com`` answered.
-    ``--internal`` would cut all of that and is therefore not an option; the honest statement of what a
-    build turn can still reach on the network stays :data:`build_sandbox.NETWORK_RESIDUAL`.
-    """
-    return ["docker", "network", "create", "--label", f"{OWNER_LABEL}={plan.slug}", plan.network]
-
-
 def container_run_argv(plan: BuildDatabase) -> list[str]:
     """``docker run`` for the throwaway PostgreSQL.
 

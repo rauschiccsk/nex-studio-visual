@@ -347,7 +347,9 @@ def test_the_facts_only_the_live_instance_knows_are_read_off_it(tmp_path):
     nevyžaduje, aby ich niekto opisoval do formulára. Laik pripojenie priečinka neodpíše."""
     from backend.services import uat_provisioner
 
-    fakty = uat_provisioner.read_instance_facts(_magerstav_instalacia(tmp_path))
+    fakty = uat_provisioner.facts_from_compose_text(
+        (_magerstav_instalacia(tmp_path) / "docker-compose.yml").read_text(encoding="utf-8")
+    )
 
     assert "/mnt/mager-edocs-inbox-uat:/var/lib/inbox/genesis-out" in fakty.host_mounts.get("backend", []), (
         "pripojenie hostiteľského priečinka sa nenašlo — presne to by sa pri prevzatí stratilo"
@@ -423,7 +425,9 @@ def test_the_render_actually_carries_the_facts_the_preview_promised(tmp_path):
     """
     from backend.services import uat_provisioner
 
-    fakty = uat_provisioner.read_instance_facts(_magerstav_instalacia(tmp_path))
+    fakty = uat_provisioner.facts_from_compose_text(
+        (_magerstav_instalacia(tmp_path) / "docker-compose.yml").read_text(encoding="utf-8")
+    )
     # Sieť sa v zdroji volá INAK než v ručnej inštalácii — presne ako v skutočnosti: nex-inbox
     # deklaruje `inbox-dev-net`, MÁGERSTAV má `inbox-net`. Párovanie podľa mena by tu podsieť
     # stratilo, a strata podsiete na ANDROSe znamená, že sa sieť vôbec nepridelí.
@@ -555,7 +559,7 @@ def test_the_instances_own_data_directories_are_carried_too(tmp_path):
         encoding="utf-8",
     )
 
-    fakty = uat_provisioner.read_instance_facts(d)
+    fakty = uat_provisioner.facts_from_compose_text((d / "docker-compose.yml").read_text(encoding="utf-8"))
     be = fakty.host_mounts.get("backend", [])
 
     assert "./originals:/var/lib/inbox/originals" in be, f"priecinok s originalmi by sa stratil — {be}"
@@ -594,7 +598,7 @@ def test_the_live_network_name_is_kept_so_the_subnet_does_not_collide(tmp_path):
         "    networks: [inbox-net]\n",
         encoding="utf-8",
     )
-    fakty = P.read_instance_facts(d)
+    fakty = P.facts_from_compose_text((d / "docker-compose.yml").read_text(encoding="utf-8"))
 
     novy = P.build_uat_compose(
         slug="mager",
@@ -646,6 +650,6 @@ def test_a_matching_network_name_is_left_alone(tmp_path):
         environment="uat",
         customer_slug="icc",
         app="demo",
-        preserved_facts=P.read_instance_facts(d),
+        preserved_facts=P.facts_from_compose_text((d / "docker-compose.yml").read_text(encoding="utf-8")),
     )
     assert [n for n in novy["networks"] if n != P.PROXY_NETWORK] == ["demo-net"]

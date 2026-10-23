@@ -1,9 +1,7 @@
 """GitHub repository service — validate existence and create new repos.
 
-The new-project flow uses both surfaces:
+The new-project flow uses:
 
-* :func:`validate_github_repo` — HEAD-style existence check for the
-  legacy path where the user types a pre-existing repo URL.
 * :func:`create_github_repo` — provision a new repository under the
   configured organisation when ``POST /api/v1/projects`` ships a
   ``repo_url`` that does not exist yet. The ``projects`` router calls
@@ -28,55 +26,6 @@ GITHUB_API_BASE = "https://api.github.com"
 # ``github_api_timeout_seconds``). All routes that invoke these
 # functions pass an explicit ``timeout`` sourced from the DB.
 _DEFAULT_GITHUB_API_TIMEOUT = 10.0
-
-
-def validate_github_repo(repo: str, *, timeout: float = _DEFAULT_GITHUB_API_TIMEOUT) -> bool:
-    """Check whether a GitHub repository exists and is accessible.
-
-    Parameters
-    ----------
-    repo:
-        Repository in ``owner/repo`` format (e.g. ``"icc-dev/nex-studio"``).
-
-    Returns
-    -------
-    bool
-        ``True`` if the repository exists (HTTP 200),
-        ``False`` if not found (HTTP 404).
-
-    Raises
-    ------
-    ValueError
-        If *repo* format is invalid (must contain exactly one ``/``).
-    RuntimeError
-        If the GitHub API returns an unexpected status code.
-    """
-    if not repo or repo.count("/") != 1:
-        raise ValueError(f"Invalid repository format '{repo}'. Expected 'owner/repo'.")
-
-    owner, name = repo.split("/")
-    if not owner or not name:
-        raise ValueError(f"Invalid repository format '{repo}'. Owner and repo name must not be empty.")
-
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{name}"
-    headers: dict[str, str] = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
-
-    response = httpx.get(url, headers=headers, timeout=timeout)
-
-    if response.status_code == 200:
-        return True
-    if response.status_code == 404:
-        return False
-
-    raise RuntimeError(
-        f"GitHub API returned unexpected status {response.status_code} for repository '{repo}': {response.text}"
-    )
 
 
 def runner_status(repo_full: str, label: str, *, timeout: float) -> str | None:

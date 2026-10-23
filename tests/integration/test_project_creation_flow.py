@@ -50,10 +50,6 @@ class TestProjectCreationFlow:
         # ------------------------------------------------------------------
         with (
             patch(
-                "backend.services.github_validation.validate_github_repo",
-                return_value=True,
-            ),
-            patch(
                 "backend.services.github_validation.create_github_repo",
                 return_value=None,
             ),
@@ -127,10 +123,6 @@ class TestProjectCreationFlow:
         # ------------------------------------------------------------------
         with (
             patch(
-                "backend.services.github_validation.validate_github_repo",
-                return_value=True,
-            ),
-            patch(
                 "backend.services.github_validation.create_github_repo",
                 return_value=None,
             ),
@@ -164,10 +156,6 @@ class TestProjectCreationFlow:
 
         # Create project with specific ports
         with (
-            patch(
-                "backend.services.github_validation.validate_github_repo",
-                return_value=True,
-            ),
             patch(
                 "backend.services.github_validation.create_github_repo",
                 return_value=None,

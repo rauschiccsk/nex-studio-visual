@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 import yaml
 
+from backend.core.test_seam import for_tests
 from backend.services import ci_runner, ci_runs, create_project_postscaffold, github_validation
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ def run_start(slug: str, repo_url: Optional[str], github_org: Optional[str]) -> 
     logger.info("CI runner of %s started by the Manažér: %s", slug, note or "online")
 
 
+@for_tests
 def forget_all() -> None:
     """Tests only: no project is starting and no start left a note."""
     with _lock:

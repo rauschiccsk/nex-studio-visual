@@ -79,9 +79,7 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Epic
 from backend.schemas.epic import (
     EpicCreate,
-    EpicUpdate,
 )
-from backend.services import version as version_service
 
 
 def get_by_id(db: Session, epic_id: UUID) -> Epic:
@@ -182,73 +180,3 @@ def create(db: Session, data: EpicCreate) -> Epic:
     db.add(epic)
     db.flush()
     return epic
-
-
-def update(db: Session, epic_id: UUID, data: EpicUpdate) -> Epic:
-    """Partially update an epic.
-
-    Only ``title`` and ``status`` may be changed. ``id``,
-    ``project_id``, ``number`` and ``created_at`` are immutable — an
-    epic belongs to exactly one project for its lifetime, its position
-    within the project (``number``) must not be rewritten after the
-    fact, and ``updated_at`` is auto-stamped by the ORM on flush via
-    ``onupdate=func.now()``.
-
-    Fields that are ``None`` in the payload are treated as "leave
-    unchanged" to support PATCH semantics.
-
-    Version lifecycle trigger (DESIGN.md §4.0 Rule 4): when ``status``
-    transitions **into** ``in_progress`` and the epic carries a
-    ``version_id``, the linked version is promoted from ``planned`` →
-    ``active`` via
-    :func:`backend.services.version.auto_activate`. The helper is a
-    no-op for versions already in ``active`` / ``released`` (Rule 3 —
-    status only flows forward), so firing it on every transition into
-    ``in_progress`` is safe even for repeated PATCHes.
-
-    Raises:
-        ValueError: If the epic does not exist.
-    """
-    epic = get_by_id(db, epic_id)
-
-    update_data = data.model_dump(exclude_unset=True)
-    # Defensive guard — the schema already excludes immutable fields,
-    # but silently dropping any that slip through keeps the service
-    # honest.
-    allowed_fields = {
-        "title",
-        "status",
-    }
-
-    # Capture the pre-update status so we can detect the exact
-    # ``-> in_progress`` transition and avoid firing ``auto_activate``
-    # on idempotent re-patches that keep ``status = 'in_progress'``.
-    previous_status = epic.status
-
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(epic, field, value)
-
-    db.flush()
-
-    new_status = update_data.get("status")
-    if new_status == "in_progress" and previous_status != "in_progress" and epic.version_id is not None:
-        version_service.auto_activate(db, epic.version_id)
-
-    return epic
-
-
-def delete(db: Session, epic_id: UUID) -> None:
-    """Hard-delete an epic.
-
-    The single inbound FK (``feats.epic_id``) uses ``ON DELETE
-    CASCADE`` — dependent feats (and the tasks under them, via
-    ``tasks.feat_id ON DELETE CASCADE``) are removed automatically at
-    the DB level. No RESTRICT dependency check is required.
-
-    Raises:
-        ValueError: If the epic does not exist.
-    """
-    epic = get_by_id(db, epic_id)
-    db.delete(epic)
-    db.flush()

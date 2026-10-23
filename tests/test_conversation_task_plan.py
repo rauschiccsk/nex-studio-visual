@@ -102,22 +102,6 @@ def _seed_conversation(db_session, version_id, *, status="awaiting_manazer", mod
     return state
 
 
-def _seed_navrh_phase(db_session, version_id):
-    """A legacy phase build parked at Návrh (mode NULL) — for the byte-identity control."""
-    state = PipelineState(
-        version_id=version_id,
-        flow_type="new_version",
-        current_stage="navrh",
-        current_actor="ai_agent",
-        status="agent_working",
-        next_action="working",
-        mode=None,
-    )
-    db_session.add(state)
-    db_session.flush()
-    return state
-
-
 def _approve_spec(db_session, version_id):
     """Record the durable kind='approval' Špecifikácia freeze signal (what orchestrator.spec_approved reads)."""
     db_session.add(
@@ -493,34 +477,6 @@ class TestInPlaceReplace:
 
         epics = _epics(db_session, version.id)
         assert [e.title for e in epics] == ["Alpha", "Beta"]  # replaced in place — the old "Foundation" is gone
-
-
-# ── Návrh path stays byte-identical (stage=navrh) ─────────────────────────────
-
-
-class TestNavrhUnchanged:
-    async def test_navrh_fold_still_records_navrh_stage(self, db_session, monkeypatch):
-        version, _ = _make_version(db_session)
-        state = _seed_navrh_phase(db_session, version.id)
-        _stub_plan_passes(monkeypatch, _plan())
-
-        settled = await orchestrator._fold_task_plan_into_navrh(
-            db_session, state, on_event=None, directive=None, on_message=None
-        )
-        assert settled is None  # success — the caller runs the shared dial-settle
-
-        plan_records = [
-            m
-            for m in _msgs(db_session, version.id)
-            if m.kind in ("gate_report", "notification") and m.author in ("ai_agent", "system")
-        ]
-        assert plan_records
-        for m in plan_records:
-            assert m.stage == "navrh", f"navrh path recorded stage {m.stage!r} — must stay navrh"
-            if isinstance(m.payload, dict) and "phase" in m.payload:
-                assert m.payload["phase"] == "navrh"
-        gate = [m for m in plan_records if m.kind == "gate_report"][-1]
-        assert gate.content.startswith("Návrh hotový")  # navrh register summary (message content) unchanged
 
 
 # ── task-plan doc register (Auditor clause dropped for the conversation register) ──

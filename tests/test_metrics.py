@@ -231,12 +231,6 @@ def test_v1_per_role_keys_retired(db_session):
         assert key not in system_setting.DEFAULT_SETTINGS, key
 
 
-def test_get_float_or_none_distinguishes_unset_from_explicit_zero(db_session):
-    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_programovanie") is None  # no row
-    _set(db_session, "metrics_hourly_wage_programovanie", "0.0")  # explicit 0
-    assert system_setting.get_float_or_none(db_session, "metrics_hourly_wage_programovanie") == 0.0
-
-
 # ── Manažér-wait accumulation listener ───────────────────────────────────────
 
 

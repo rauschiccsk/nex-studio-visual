@@ -733,3 +733,18 @@ def test_http_deploy_response_never_echoes_secret(client, db_session, _fake_defa
     )
     assert resp.status_code == 200
     assert secret not in resp.text
+
+
+async def test_a_project_lists_its_deploy_and_accept_events(db_session):
+    """DEV-155: ``list_project_events`` feeds the project's route; its test went with the customer listing removed
+    beside it, so it stands on its own again."""
+    user = _make_user(db_session)
+    project = _make_project(db_session, user=user)
+    _make_version(db_session, project, "0.1.0")
+    customer = _make_customer(db_session, project)
+
+    await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=_FakeRunner())
+    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
+
+    events = deploy_service.list_project_events(db_session, project.id)
+    assert sorted(e.event_type for e in events) == ["accept", "deploy"]

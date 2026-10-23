@@ -23,20 +23,13 @@ DB-driven generator.
 This module is therefore intentionally **write-free for ``MEMORY.md``**. It
 provides only:
 
-* :data:`MEMORY_FILENAME` / :data:`MEMORY_TOPIC_DIR` — the path convention.
-* :func:`memory_path` / :func:`memory_topic_dir` — resolve those paths for a
-  given project workspace (used by the seed + recall helpers and by tests).
+* :data:`MEMORY_FILENAME` — the path convention; :func:`memory_path` resolves it for a project workspace.
 * :func:`seed_memory` — write the *initial* ``MEMORY.md`` skeleton **once** at
   project creation (a one-shot scaffold, not an ongoing writer — it no-ops if a
   memory already exists, so it never overwrites the agent's free writes).
-* :func:`read_memory` — read the current memory back (recall / serving / the
-  "second build recalls it" gate), returning ``None`` when absent.
-* :func:`reindex_shared_kb_write` — the **shared-KB** reindex hook the charter
-  rules invoke after a *deliberate* contribution to the shared ICC KB, so the
-  RAG vector store never drifts from the filesystem (design §5.2 (3);
-  CLAUDE.md §13 — "žiadna KB zmena bez následného reindexu"). Per-project
-  ``MEMORY.md`` is **local file context**, not shared KB — it is not reindexed
-  here; only deliberate shared-KB writes are.
+
+The agent reads its memory itself (the file is in its ``cwd``). DEV-155 removed a backend read, a topic-dir resolver
+and a shared-KB reindex hook that nothing called.
 
 The retired live-document writers (``STATUS.md`` / ``HISTORY.md`` DB-driven
 persistence) are gone, along with the live-document generators that read them. The status /
@@ -53,17 +46,13 @@ from typing import TYPE_CHECKING
 from backend.services.claude_agent import PROJECTS_ROOT
 
 if TYPE_CHECKING:
-    from backend.rag.indexer import RAGIndexer
+    pass
 
 logger = logging.getLogger(__name__)
 
 #: The AI Agent's primary per-project memory file, at the workspace root so it is
 #: the agent's ``cwd``-relative ``MEMORY.md`` (mirrors the Dedo ``MEMORY.md``).
 MEMORY_FILENAME = "MEMORY.md"
-
-#: Optional per-project topic-file directory (the Dedo "topic files" pattern):
-#: detailed notes the agent splits out of ``MEMORY.md`` to keep the index short.
-MEMORY_TOPIC_DIR = ".memory"
 
 
 def workspace_root(project_slug: str) -> Path:
@@ -78,11 +67,6 @@ def workspace_root(project_slug: str) -> Path:
 def memory_path(project_slug: str) -> Path:
     """Return the absolute path to the project's ``MEMORY.md``."""
     return workspace_root(project_slug) / MEMORY_FILENAME
-
-
-def memory_topic_dir(project_slug: str) -> Path:
-    """Return the absolute path to the project's memory topic-file directory."""
-    return workspace_root(project_slug) / MEMORY_TOPIC_DIR
 
 
 def _seed_skeleton(project_name: str) -> str:
@@ -134,53 +118,3 @@ def seed_memory(project_slug: str, project_name: str) -> Path | None:
     target.write_text(_seed_skeleton(project_name), encoding="utf-8")
     logger.info("Seeded AI-Agent memory for project=%s at %s", project_slug, target)
     return target
-
-
-def read_memory(project_slug: str) -> str | None:
-    """Return the current ``MEMORY.md`` content, or ``None`` if absent.
-
-    The recall path — "a second build of the same project recalls it" — and the
-    serving path. Read-only; never writes.
-    """
-    target = memory_path(project_slug)
-    try:
-        return target.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-
-
-async def reindex_shared_kb_write(
-    indexer: "RAGIndexer",
-    *,
-    kb_relative_path: str,
-    tenant: str = "icc",
-    content: str | None = None,
-) -> None:
-    """Reindex a **deliberate shared-ICC-KB** write into the RAG vector store.
-
-    Invoked by the charter rules after the agent contributes a broadly-valuable
-    lesson / pattern to the shared KB (design §5.2 (3); CLAUDE.md §13) so the
-    Qdrant store never drifts from the filesystem. Addresses the document by its
-    KB-relative path under the ``icc`` tenant — identical addressing to a
-    ``/knowledge`` write of the same file.
-
-    **Graceful on failure**: any error (re-read or Qdrant/Ollama) is logged and
-    swallowed so the reindex never fails the originating write (mirrors
-    ``knowledge.py`` and the retired live-document ``_reindex``). Per-project
-    ``MEMORY.md`` is **not** routed here — it is local file context, not shared
-    KB; only deliberate shared-KB writes trigger a reindex.
-    """
-    try:
-        await indexer.index_document(
-            file_path=kb_relative_path,
-            tenant=tenant,
-            content=content,
-        )
-        logger.info("RAG reindex of shared-KB write %s (tenant=%s) complete", kb_relative_path, tenant)
-    except Exception as exc:  # noqa: BLE001 — reindex must never fail the write path
-        logger.warning(
-            "RAG reindex failed for shared-KB write %s (tenant=%s): %s — write saved, index may be stale",
-            kb_relative_path,
-            tenant,
-            exc,
-        )

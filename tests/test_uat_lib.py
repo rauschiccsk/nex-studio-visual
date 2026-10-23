@@ -82,14 +82,6 @@ def test_project_dir_returns_expected_path():
     assert _uat_lib.project_dir("nex-inbox") == Path("/opt/projects/nex-inbox")
 
 
-def test_uat_compose_path_returns_expected():
-    assert _uat_lib.uat_compose_path("mager") == Path("/opt/uat/mager/docker-compose.yml")
-
-
-def test_nginx_config_path_returns_expected():
-    assert _uat_lib.nginx_config_path("mager") == Path("/etc/nginx/sites-available/uat-mager.conf")
-
-
 def test_path_helpers_validate_slug():
     """All path helpers must reject invalid slugs (defence in depth)."""
     with pytest.raises(ValueError):
@@ -296,23 +288,6 @@ def test_wait_healthy_returns_false_on_timeout():
 # ---------- Template rendering (generic helper) ----------
 
 
-def test_render_template_substitutes_jinja(tmp_path, monkeypatch):
-    template_dir = tmp_path / "templates" / "uat"
-    template_dir.mkdir(parents=True)
-    (template_dir / "test.conf").write_text("port = {{ UAT_PORT }};\nslug = {{ SLUG }};")
-    monkeypatch.setattr(_uat_lib, "TEMPLATES_DIR", tmp_path / "templates")
-
-    rendered = _uat_lib.render_template("uat/test.conf", {"UAT_PORT": "19500", "SLUG": "mager"})
-    assert "port = 19500;" in rendered
-    assert "slug = mager;" in rendered
-
-
-def test_render_template_missing_raises(tmp_path, monkeypatch):
-    monkeypatch.setattr(_uat_lib, "TEMPLATES_DIR", tmp_path / "templates")
-    with pytest.raises(Exception):  # jinja2.TemplateNotFound or similar
-        _uat_lib.render_template("uat/nonexistent.conf", {})
-
-
 # ---------- Rich UI helpers ----------
 
 
@@ -334,9 +309,3 @@ def test_confirm_returns_default_when_non_interactive(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert _uat_lib.confirm("Continue?", default=False) is False
     assert _uat_lib.confirm("Continue?", default=True) is True
-
-
-def test_print_url_outputs_url(capsys):
-    _uat_lib.print_url("https://uat-mager.isnex.eu")
-    captured = capsys.readouterr()
-    assert "uat-mager.isnex.eu" in captured.out

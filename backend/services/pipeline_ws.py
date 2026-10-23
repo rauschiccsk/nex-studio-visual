@@ -23,6 +23,8 @@ from uuid import UUID
 
 from fastapi import WebSocket
 
+from backend.core.test_seam import for_tests
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +90,7 @@ class PipelineWsRegistry:
     # snapshot of `_conns` and each `_Conn.away`. INVARIANT: if either is ever made async (e.g. to add
     # `await self._lock`), it MUST then hold the lock — an async read could otherwise interleave a
     # `_conns` structural mutation and hit "dict changed size during iteration".
+    @for_tests
     def present_director_ids(self, version_id: UUID) -> set[UUID]:
         """User ids with a live board socket for ``version_id`` (§9 raw presence read)."""
         return {c.user_id for c in self._conns.get(version_id, {}).values()}

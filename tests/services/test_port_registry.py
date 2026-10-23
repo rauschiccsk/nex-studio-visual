@@ -18,12 +18,9 @@ from backend.services import port_registry
 from backend.services import system_setting as system_setting_service
 from backend.services.port_registry import (
     PORT_BLOCK_SIZE,
-    PORT_RANGE_MAX,
     PORT_RANGE_MIN,
     HostProbeError,
-    check_port_available,
     describe_port_availability,
-    get_all_allocated_ports,
     reserved_ranges_status,
     suggest_next_port_block,
 )
@@ -71,112 +68,6 @@ def _make_project(db_session, *, user=None, **overrides) -> Project:
     db_session.add(project)
     db_session.flush()
     return project
-
-
-# ==================================================================
-# check_port_available
-# ==================================================================
-
-
-class TestCheckPortAvailable:
-    """Tests for check_port_available()."""
-
-    def test_port_available_when_no_projects(self, db_session):
-        """Port in valid range is available when no projects exist."""
-        assert check_port_available(db_session, 10100) is True
-
-    def test_port_unavailable_when_used_as_backend(self, db_session):
-        _make_project(db_session, backend_port=10150)
-        assert check_port_available(db_session, 10150) is False
-
-    def test_port_unavailable_when_used_as_frontend(self, db_session):
-        _make_project(db_session, frontend_port=10151)
-        assert check_port_available(db_session, 10151) is False
-
-    def test_port_unavailable_when_used_as_db(self, db_session):
-        _make_project(db_session, db_port=10152)
-        assert check_port_available(db_session, 10152) is False
-
-    def test_port_available_for_same_project(self, db_session):
-        """Port used by a project is available when checking for that project (edit mode)."""
-        project = _make_project(db_session, backend_port=10160)
-        assert check_port_available(db_session, 10160, project_id=str(project.id)) is True
-
-    def test_port_unavailable_for_different_project(self, db_session):
-        """Port used by project A is not available for project B."""
-        _make_project(db_session, backend_port=10161)
-        other = _make_project(db_session)
-        assert check_port_available(db_session, 10161, project_id=str(other.id)) is False
-
-    def test_cross_type_conflict(self, db_session):
-        """A port used as frontend_port blocks its use as backend_port."""
-        _make_project(db_session, frontend_port=10170)
-        assert check_port_available(db_session, 10170) is False
-
-    def test_port_below_range_raises(self, db_session):
-        with pytest.raises(ValueError, match="outside the allowed range"):
-            check_port_available(db_session, 10099)
-
-    def test_port_above_range_raises(self, db_session):
-        with pytest.raises(ValueError, match="outside the allowed range"):
-            check_port_available(db_session, 15000)
-
-    def test_boundary_min_valid(self, db_session):
-        assert check_port_available(db_session, PORT_RANGE_MIN) is True
-
-    def test_boundary_max_valid(self, db_session):
-        assert check_port_available(db_session, PORT_RANGE_MAX) is True
-
-
-# ==================================================================
-# suggest_next_port
-# ==================================================================
-
-
-class TestSuggestNextPort:
-    """Tests for suggest_next_port()."""
-
-
-# ==================================================================
-# get_all_allocated_ports
-# ==================================================================
-
-
-class TestGetAllAllocatedPorts:
-    """Tests for get_all_allocated_ports()."""
-
-    def test_empty_when_no_projects(self, db_session):
-        result = get_all_allocated_ports(db_session)
-        assert result == {"backend": [], "frontend": [], "db": [], "web": []}
-
-    def test_returns_allocated_ports(self, db_session):
-        _make_project(db_session, backend_port=10100, frontend_port=10101, db_port=10102)
-        result = get_all_allocated_ports(db_session)
-        assert 10100 in result["backend"]
-        assert 10101 in result["frontend"]
-        assert 10102 in result["db"]
-
-    def test_ignores_null_ports(self, db_session):
-        _make_project(db_session, backend_port=10100)
-        result = get_all_allocated_ports(db_session)
-        assert result["backend"] == [10100]
-        assert result["frontend"] == []
-        assert result["db"] == []
-
-    def test_multiple_projects(self, db_session):
-        user = _make_user(db_session)
-        _make_project(db_session, user=user, backend_port=10100)
-        _make_project(db_session, user=user, backend_port=10110)
-        result = get_all_allocated_ports(db_session)
-        assert result["backend"] == [10100, 10110]
-
-    def test_ports_sorted(self, db_session):
-        user = _make_user(db_session)
-        _make_project(db_session, user=user, backend_port=10200)
-        _make_project(db_session, user=user, backend_port=10100)
-        _make_project(db_session, user=user, backend_port=10150)
-        result = get_all_allocated_ports(db_session)
-        assert result["backend"] == [10100, 10150, 10200]
 
 
 # ==================================================================
@@ -322,10 +213,6 @@ class TestHostAwareAvailability:
         assert verdict.holder == "nex-manager-frontend"
         assert verdict.available is False
 
-    def test_check_port_available_false_for_host_held_port(self, db_session, host_ports):
-        host_ports[10111] = "nex-manager-frontend"
-        assert check_port_available(db_session, 10111) is False
-
     def test_reason_names_the_container(self, db_session, host_ports):
         """The operator must be told WHO holds it, not merely that it is taken."""
         host_ports[10111] = "nex-manager-frontend"
@@ -409,11 +296,6 @@ class TestHostProbeFailureIsNotFree:
         assert verdict.state == "unknown"
         assert verdict.source == "host"
 
-    def test_unknown_does_not_read_as_available(self, db_session, monkeypatch):
-        _break_host_probe(monkeypatch)
-        assert describe_port_availability(db_session, 10123).available is False
-        assert check_port_available(db_session, 10123) is False
-
     def test_unknown_reason_is_explained(self, db_session, monkeypatch):
         _break_host_probe(monkeypatch, "daemon unreachable")
         verdict = describe_port_availability(db_session, 10123)
@@ -468,6 +350,10 @@ class TestHostProbeFailureIsNotFree:
         monkeypatch.setattr(port_registry.shutil, "which", lambda name: "/usr/bin/docker")
         monkeypatch.setattr(port_registry.subprocess, "run", lambda *a, **kw: _Proc())
         assert _REAL_DOCKER_PUBLISHED_PORTS() == {}
+
+    def test_unknown_does_not_read_as_available(self, db_session, monkeypatch):
+        _break_host_probe(monkeypatch)
+        assert describe_port_availability(db_session, 10123).available is False
 
 
 # ==================================================================

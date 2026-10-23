@@ -566,11 +566,6 @@ class PipelineStatusBlock(BaseModel):
         """
         return [f.model_dump() for f in self.findings]
 
-    @property
-    def blocking_count(self) -> int:
-        """Koľko nálezov blokuje. Toto je to jediné číslo, z ktorého sa dá poskladať smer 5 → 1 → 0."""
-        return sum(1 for f in self.findings if f.blocking)
-
     #: The Auditor's proposed fix scope TEXT when the verdict is FAIL — the targeted scope the AI Agent
     #: re-runs in the bounded fix↔re-verify loop (CR-V2-014). Never an edit by the Auditor itself
     #: (independence); ``None`` on a PASS verdict.

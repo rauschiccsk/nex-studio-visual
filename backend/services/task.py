@@ -72,7 +72,6 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.schemas.task import (
     TaskCreate,
-    TaskUpdate,
 )
 
 
@@ -192,57 +191,6 @@ def create(db: Session, data: TaskCreate) -> Task:
     return task
 
 
-def update(db: Session, task_id: UUID, data: TaskUpdate) -> Task:
-    """Partially update a task.
-
-    Only ``title``, ``description``, ``task_type``, ``status``,
-    ``estimated_minutes``, ``actual_minutes`` and ``checklist_type`` may
-    be changed. ``id``, ``feat_id``, ``number`` and ``created_at`` are
-    immutable — a task belongs to exactly one feat for its lifetime, its
-    position within the feat (``number``) must not be rewritten after
-    the fact, and ``updated_at`` is auto-stamped by the ORM on flush via
-    ``onupdate=func.now()``.
-
-    Fields that are ``None`` in the payload are treated as "leave
-    unchanged" to support PATCH semantics. Consequently, the
-    explicit-null transitions ``estimated_minutes -> NULL``,
-    ``actual_minutes -> NULL`` and ``checklist_type -> NULL`` are not
-    expressible through this service; they are rare corrections that
-    belong to admin tooling rather than the UI.
-
-    Raises:
-        ValueError: If the task does not exist.
-    """
-    task = get_by_id(db, task_id)
-
-    update_data = data.model_dump(exclude_unset=True)
-    # Defensive guard — the schema already excludes immutable and
-    # server-managed fields, but silently dropping any that slip
-    # through keeps the service honest.
-    allowed_fields = {
-        "title",
-        "description",
-        "task_type",
-        "status",
-        "priority",
-        "estimated_minutes",
-        "actual_minutes",
-        "checklist_type",
-    }
-
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(task, field, value)
-
-    db.flush()
-
-    # Propagate status change upward through the hierarchy.
-    if "status" in update_data:
-        recompute_feat_status(db, task.feat_id)
-
-    return task
-
-
 def recompute_feat_status(db: Session, feat_id: UUID) -> None:
     """Recompute and persist ``Feat.status`` from its tasks.
 
@@ -308,19 +256,3 @@ def recompute_epic_status(db: Session, epic_id: UUID) -> None:
     if epic.status != new_status:
         epic.status = new_status
         db.flush()
-
-
-def delete(db: Session, task_id: UUID) -> None:
-    """Hard-delete a task.
-
-    Inbound FKs — ``delegations.task_id`` (``ON DELETE SET NULL``) and
-    ``execution_logs.task_id`` (``ON DELETE SET NULL``) — are handled at
-    the DB level, so dependent rows are NULL-ed automatically on flush.
-    No RESTRICT dependency check is required.
-
-    Raises:
-        ValueError: If the task does not exist.
-    """
-    task = get_by_id(db, task_id)
-    db.delete(task)
-    db.flush()

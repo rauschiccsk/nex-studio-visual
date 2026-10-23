@@ -12,13 +12,11 @@ uat-snapshot / uat-status).
 
 Public API:
 - Slug validation: validate_slug()
-- Path utilities: uat_dir, snapshots_dir, project_dir, uat_compose_path,
-  uat_env_path, read_uat_env, nginx_config_path
+- Path utilities: uat_dir, snapshots_dir, project_dir, uat_env_path, read_uat_env
 - Port allocation: allocate_port, release_port, get_allocated_port
 - Snapshot filenames: snapshot_filename
 - Subprocess wrappers: docker_compose, docker_exec, wait_healthy, git_describe
-- Template rendering: render_template
-- Rich UI: console, confirm, status_table, print_url
+- Rich UI: console, confirm, status_table
 
 State files:
 - PORT_STATE_FILE: /opt/projects/nex-studio/.uat-ports.json (gitignored)
@@ -39,7 +37,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import jinja2
 from rich.console import Console
 from rich.table import Table
 
@@ -94,10 +91,6 @@ def project_dir(project: str) -> Path:
     return Path("/opt/projects") / project
 
 
-def uat_compose_path(slug: str) -> Path:
-    return uat_dir(slug) / "docker-compose.yml"
-
-
 def uat_env_path(slug: str) -> Path:
     """UAT .env file path: /opt/uat/<slug>/.env."""
     return uat_dir(slug) / ".env"
@@ -130,16 +123,6 @@ def read_uat_env(slug: str) -> dict[str, str]:
         key, _, value = line.partition("=")
         out[key.strip()] = value
     return out
-
-
-def nginx_config_path(slug: str) -> Path:
-    """Final NGINX sites-available path (root-owned — sudo required to write).
-
-    Legacy (pre-Traefik) UATs: used by ``uat-teardown.py`` to clean up an old
-    vhost. The provisioner no longer renders nginx (Traefik replaces it).
-    """
-    validate_slug(slug)
-    return Path("/etc/nginx/sites-available") / f"uat-{slug}.conf"
 
 
 # ---------- Port allocation ----------
@@ -299,21 +282,6 @@ def wait_healthy(
 # ---------- Template rendering ----------
 
 
-def render_template(template_name: str, context: dict[str, str]) -> str:
-    """Render Jinja2 template from TEMPLATES_DIR with given context.
-
-    template_name is relative to TEMPLATES_DIR (e.g. "uat/test.conf"). Generic helper used by the
-    UAT CLIs; the compose template is rendered by :mod:`backend.services.uat_provisioner`.
-    """
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
-        keep_trailing_newline=True,
-        undefined=jinja2.StrictUndefined,
-    )
-    template = env.get_template(template_name)
-    return template.render(**context)
-
-
 # ---------- Rich UI ----------
 
 
@@ -336,8 +304,3 @@ def status_table(data: dict[str, Any]) -> Table:
     for key, value in data.items():
         table.add_row(str(key), str(value))
     return table
-
-
-def print_url(url: str) -> None:
-    """Print URL in a highlighted block."""
-    console.print(f"[bold green]URL:[/bold green] [link={url}]{url}[/link]")

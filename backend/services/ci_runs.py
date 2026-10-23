@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.core.test_seam import for_tests
 from backend.db.models.customers import Customer
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
@@ -224,6 +225,7 @@ def _clock() -> float:
     return time.monotonic()
 
 
+@for_tests
 def forget_all() -> None:
     """Drop what was remembered — for tests."""
     _listings.clear()

@@ -19,7 +19,6 @@ def test_known_value_is_replaced_wherever_it_appears():
 def test_short_known_values_are_not_hunted_they_would_blank_ordinary_words():
     f = SecretFilter(["abc", "admin"])
     assert f("admin opened abc") == "admin opened abc"
-    assert f.known_count == 0
 
 
 def test_longer_known_value_wins_over_its_prefix():

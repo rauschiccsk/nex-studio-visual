@@ -60,10 +60,6 @@ class SecretFilter:
         # Longer first: if one value were the beginning of another, the shorter would leave a tail of the longer.
         self._known = sorted((v for v in values if len(v) >= MIN_KNOWN_LENGTH), key=len, reverse=True)
 
-    @property
-    def known_count(self) -> int:
-        return len(self._known)
-
     def __call__(self, text: str) -> str:
         if not text:
             return text

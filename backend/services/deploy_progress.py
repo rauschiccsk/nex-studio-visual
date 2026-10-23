@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from backend.core.test_seam import for_tests
+
 #: Kroky, ktoré nasadenie naozaj robí — v poradí, v akom prebiehajú. Text je pre človeka na obrazovke.
 KROK_PRIPRAVA = "pripravujem predpis a nastavenia"
 #: DEV-68: the build runs while the installation is untouched; the outage starts only with the next step.
@@ -102,6 +104,7 @@ def bezi(instance_dir: Path) -> bool:
     return stav(instance_dir) is not None
 
 
+@for_tests
 def _vycisti_vsetko() -> None:
     """Len pre skúšky — pamäť je procesová a medzi skúškami by sa prenášala."""
     with _zamok:

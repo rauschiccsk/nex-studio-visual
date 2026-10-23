@@ -41,21 +41,6 @@ _TAG_RE = re.compile(r"refs/tags/v(\d+\.\d+\.\d+)$")
 _SECTION_RE = re.compile(r"^## v(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
 
 
-def parse_pin(package_json_text: str) -> Optional[str]:
-    """Extract the pinned nex-shared version (``'0.11.0'``) from a package.json, or None."""
-    try:
-        data = json.loads(package_json_text)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    dep = (data.get("dependencies") or {}).get("nex-shared") or (data.get("devDependencies") or {}).get("nex-shared")
-    if not isinstance(dep, str):
-        return None
-    m = _PIN_RE.search(dep)
-    return m.group(1) if m else None
-
-
 def parse_lock_version(package_lock_text: str) -> Optional[str]:
     """Extract the RESOLVED nex-shared version (``'0.11.0'``) from a package-lock.json, or None.
 

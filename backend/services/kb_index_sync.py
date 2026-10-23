@@ -78,10 +78,6 @@ class KbIndexComparison:
     def out_of_sync(self) -> int:
         return len(self.missing) + len(self.stale) + len(self.orphaned)
 
-    @property
-    def in_sync(self) -> bool:
-        return self.out_of_sync == 0
-
 
 def compare(disk: Mapping[str, float], indexed: Mapping[str, datetime]) -> KbIndexComparison:
     """ČISTÉ rozhodovanie — bez disku a bez Qdrantu, aby sa dalo prejsť tabuľkou.

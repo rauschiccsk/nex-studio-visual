@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from backend.services import nexshared
+from backend.testing import parse_pin
 
 _PKG = {
     "name": "demo-frontend",
@@ -49,12 +50,12 @@ def _seed(root: Path, *, pin: str = "0.11.0", locked: str | None = "0.11.0") -> 
 
 
 def test_parse_pin_reads_the_version() -> None:
-    assert nexshared.parse_pin(json.dumps(_PKG)) == "0.11.0"
+    assert parse_pin(json.dumps(_PKG)) == "0.11.0"
 
 
 def test_parse_pin_none_when_absent_or_bad() -> None:
-    assert nexshared.parse_pin(json.dumps({"dependencies": {"react": "^19"}})) is None
-    assert nexshared.parse_pin("not json at all") is None
+    assert parse_pin(json.dumps({"dependencies": {"react": "^19"}})) is None
+    assert parse_pin("not json at all") is None
 
 
 def test_pick_latest_and_count_behind() -> None:
@@ -163,7 +164,7 @@ def test_upgrade_source_pin_moves_manifest_and_lockfile(tmp_path: Path, monkeypa
     fe = _seed(tmp_path)
     monkeypatch.setattr(nexshared, "resolve_lockfile", _resolver("0.15.0"))
     assert nexshared.upgrade_source_pin(str(tmp_path), "0.15.0") is True
-    assert nexshared.parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.15.0"
+    assert parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.15.0"
     # The one that decides what gets built.
     assert nexshared.effective_version(str(tmp_path)) == "0.15.0"
     # No file → False (nothing to do), never a crash.
@@ -175,7 +176,7 @@ def test_upgrade_fails_and_rolls_back_when_lockfile_cannot_be_resolved(tmp_path:
     monkeypatch.setattr(nexshared, "resolve_lockfile", _resolver(None))
     assert nexshared.upgrade_source_pin(str(tmp_path), "0.15.0") is False
     # Manifest restored — a failed upgrade leaves no half-applied state to be committed later.
-    assert nexshared.parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.11.0"
+    assert parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.11.0"
     assert nexshared.effective_version(str(tmp_path)) == "0.11.0"
 
 
@@ -185,7 +186,7 @@ def test_upgrade_fails_when_lockfile_did_not_reach_the_target(tmp_path: Path, mo
     fe = _seed(tmp_path)
     monkeypatch.setattr(nexshared, "resolve_lockfile", _resolver("0.14.0"))
     assert nexshared.upgrade_source_pin(str(tmp_path), "0.15.0") is False
-    assert nexshared.parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.11.0"
+    assert parse_pin((fe / "package.json").read_text(encoding="utf-8")) == "0.11.0"
     assert nexshared.effective_version(str(tmp_path)) == "0.11.0"
 
 

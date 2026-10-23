@@ -5,12 +5,10 @@ single source of truth for project status / history / decisions (OQ-4
 RESOLVED = file-based; R-DOUBLEWRITE). These tests cover the
 backend-owned seam:
 
-* the path convention (workspace-root ``MEMORY.md`` + ``.memory`` topic dir),
+* the path convention (workspace-root ``MEMORY.md``),
 * the one-shot ``seed_memory`` scaffold (never clobbers the agent's writes),
-* the recall path (``read_memory``) — including the build-plan gate
-  "the AI Agent writes a decision; a second build recalls it",
-* the **shared-KB** reindex hook (deliberate shared-KB write triggers a RAG
-  reindex; failure is graceful), and
+* the build-plan gate "the AI Agent writes a decision; a second build recalls it"
+  (the agent reads the file itself — DEV-155 removed the backend recall nothing called), and
 * the **single-writer invariant** — there is no backend auto-writer of
   ``MEMORY.md``; only the seed (one-shot) and the agent (its own tools) write it.
 
@@ -43,14 +41,6 @@ def workspace(tmp_path: Path, monkeypatch: Any) -> Path:
 
 
 # ── path convention ───────────────────────────────────────────────────
-
-
-def test_path_convention(workspace: Path) -> None:
-    assert project_memory.memory_path("demo") == workspace / "MEMORY.md"
-    assert project_memory.memory_topic_dir("demo") == workspace / ".memory"
-    assert project_memory.workspace_root("demo") == workspace
-    assert project_memory.MEMORY_FILENAME == "MEMORY.md"
-    assert project_memory.MEMORY_TOPIC_DIR == ".memory"
 
 
 # ── seed_memory ───────────────────────────────────────────────────────
@@ -86,11 +76,13 @@ def test_seed_noops_without_checkout(tmp_path: Path, monkeypatch: Any) -> None:
     assert project_memory.seed_memory("ghost", "Ghost") is None
 
 
-# ── read_memory / recall ──────────────────────────────────────────────
+def test_path_convention(workspace: Path) -> None:
+    assert project_memory.memory_path("demo") == workspace / "MEMORY.md"
+    assert project_memory.workspace_root("demo") == workspace
+    assert project_memory.MEMORY_FILENAME == "MEMORY.md"
 
 
-def test_read_missing_returns_none(workspace: Path) -> None:
-    assert project_memory.read_memory("demo") is None
+# ── recall ────────────────────────────────────────────────────────────
 
 
 def test_decision_written_is_recalled_on_second_build(workspace: Path) -> None:
@@ -98,7 +90,7 @@ def test_decision_written_is_recalled_on_second_build(workspace: Path) -> None:
     second build of the same project recalls it.
 
     Build 1: seed + the agent records a decision via its own Write (the file in
-    its ``cwd``). Build 2: a fresh recall (``read_memory``) returns it.
+    its ``cwd``). Build 2: the agent reads that same file — nothing carried in process.
     """
     # --- Build 1 ---
     project_memory.seed_memory("demo", "Demo Project")
@@ -107,21 +99,11 @@ def test_decision_written_is_recalled_on_second_build(workspace: Path) -> None:
     mem.write_text(mem.read_text(encoding="utf-8") + "\n" + decision + "\n", encoding="utf-8")
 
     # --- Build 2 (a separate recall, nothing carried in process) ---
-    recalled = project_memory.read_memory("demo")
-    assert recalled is not None
+    recalled = project_memory.memory_path("demo").read_text(encoding="utf-8")
     assert decision in recalled
 
 
 # ── shared-KB reindex hook ────────────────────────────────────────────
-
-
-class _RecordingIndexer:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    async def index_document(self, *, file_path: str, tenant: str, content: str | None = None) -> dict:
-        self.calls.append({"file_path": file_path, "tenant": tenant, "content": content})
-        return {"source_file": file_path, "chunks": 1, "tenant": tenant}
 
 
 class _FailingIndexer:
@@ -133,42 +115,6 @@ class _FailingIndexer:
         raise RuntimeError("qdrant unreachable")
 
 
-@pytest.mark.asyncio
-async def test_shared_kb_write_triggers_reindex() -> None:
-    indexer = _RecordingIndexer()
-    await project_memory.reindex_shared_kb_write(
-        indexer,
-        kb_relative_path="icc/LESSONS_LEARNED.md",
-        content="# Lessons\n\n- Nový broadly-valuable lesson.\n",
-    )
-    assert len(indexer.calls) == 1
-    call = indexer.calls[0]
-    assert call["file_path"] == "icc/LESSONS_LEARNED.md"
-    assert call["tenant"] == "icc"  # shared ICC KB tenant
-    assert "broadly-valuable lesson" in call["content"]
-
-
-@pytest.mark.asyncio
-async def test_shared_kb_reindex_failure_is_graceful(caplog: Any) -> None:
-    """A RAG outage must NOT propagate out of the reindex hook (mirrors
-    /knowledge): the originating shared-KB write already landed."""
-    import logging
-
-    indexer = _FailingIndexer()
-    backend_logger = logging.getLogger("backend")
-    prev = backend_logger.propagate
-    backend_logger.propagate = True
-    try:
-        with caplog.at_level(logging.WARNING, logger="backend.services.project_memory"):
-            # Must NOT raise.
-            await project_memory.reindex_shared_kb_write(indexer, kb_relative_path="icc/PATTERNS.md")
-    finally:
-        backend_logger.propagate = prev
-
-    assert indexer.called is True
-    assert any("RAG reindex failed" in r.getMessage() for r in caplog.records)
-
-
 # ── single-writer invariant (R-DOUBLEWRITE) ──────────────────────────
 
 
@@ -178,15 +124,11 @@ def test_no_backend_auto_writer_of_memory(workspace: Path) -> None:
     own tools), which is what keeps the file the single source of truth (no
     DB-driven second writer can drift it).
 
-    The only public functions that touch the filesystem / index are:
-      * ``seed_memory`` — one-shot scaffold of ``MEMORY.md`` (no-ops if it
-        already exists, so it never overwrites the agent's writes), and
-      * ``reindex_shared_kb_write`` — reindexes a *shared-ICC-KB* write into RAG;
-        it does NOT write ``MEMORY.md`` (per-project memory is local file
-        context, never auto-reindexed).
-    The rest are pure path resolvers / a read.
+    The only public function that touches the filesystem is ``seed_memory`` — a one-shot scaffold of
+    ``MEMORY.md`` (no-ops if it already exists, so it never overwrites the agent's writes). The rest are pure
+    path resolvers.
     """
-    allowed = {"seed_memory", "reindex_shared_kb_write"}
+    allowed = {"seed_memory"}
     memory_write_verbs = ("append", "save", "regenerate", "persist", "update")
     offenders = [
         name

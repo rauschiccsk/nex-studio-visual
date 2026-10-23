@@ -556,11 +556,14 @@ async def test_a_wedged_daemon_cannot_hang_a_dispatch(monkeypatch) -> None:
     assert code == 1 and "failed" in detail
 
 
-def test_both_objects_are_labelled_so_a_hard_kill_is_sweepable(tmp_path) -> None:
+async def test_both_objects_are_labelled_so_a_hard_kill_is_sweepable(tmp_path, docker_calls) -> None:
     """A SIGKILL of the backend mid-turn survives no ``finally``. What it leaves behind has to be findable
-    by something other than memory."""
+    by something other than memory. DEV-155: the network is checked on the command production runs
+    (:func:`build_db.create_fenced_network`) — the label used to be asserted on a twin nothing called."""
     plan = _plan(tmp_path, None)
-    assert f"{build_db.OWNER_LABEL}=acme" in build_db.network_create_argv(plan)
+    await build_db.create_fenced_network(plan.network, plan.slug, "token")
+
+    assert f"{build_db.OWNER_LABEL}=acme" in docker_calls[0]
     assert f"{build_db.OWNER_LABEL}=acme" in build_db.container_run_argv(plan)
 
 

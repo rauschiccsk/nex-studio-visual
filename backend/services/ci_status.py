@@ -35,6 +35,8 @@ from typing import Any, Optional
 
 import yaml
 
+from backend.core.test_seam import for_tests
+
 logger = logging.getLogger(__name__)
 
 #: Závery, ktoré znamenajú, že beh o kóde povedal „v poriadku".
@@ -299,6 +301,7 @@ class StavZostavenia:
 _pamat: dict[str, tuple[float, StavZostavenia]] = {}
 
 
+@for_tests
 def _zabudni_vsetko() -> None:
     """Len pre skúšky — pamäť je procesová a medzi skúškami by sa prenášala."""
     _pamat.clear()

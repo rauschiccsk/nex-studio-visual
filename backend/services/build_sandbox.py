@@ -313,7 +313,7 @@ _DEFAULT_IMAGE_REPO = "nex-studio-visual-backend"
 #:
 #: An earlier version named "the Studio API (9217), the v3 API (9207) and Traefik (80/443)" and added that
 #: "Postgres, Ollama and Qdrant were NOT reachable". Audit re-measured from a container on a freshly created
-#: user-defined network — the exact shape :func:`build_db.network_create_argv` makes — and the truth is
+#: user-defined network — the exact shape :func:`build_db.create_fenced_network` makes — and the truth is
 #: categorical rather than enumerable: the bridge gateway answers on EVERY port published to ``0.0.0.0`` on
 #: this host. On this machine that included SIX PostgreSQL instances (this Studio's own production database,
 #: the v3 production one, UAT, two development ones and the shared platform ``nex-postgres``), Vaultwarden,

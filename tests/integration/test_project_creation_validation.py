@@ -35,10 +35,6 @@ def _mock_github_for_validation_tests():
     """
     with (
         patch(
-            "backend.services.github_validation.validate_github_repo",
-            return_value=True,
-        ),
-        patch(
             "backend.services.github_validation.create_github_repo",
             return_value=None,
         ),

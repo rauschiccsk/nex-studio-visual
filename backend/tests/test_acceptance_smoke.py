@@ -894,7 +894,6 @@ def test_a_later_report_cannot_quietly_shorten_the_list(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
     # K2 was dropped by the later report — it must NOT disappear; it simply has no binding.
     assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
-    assert orchestrator._unbound_safety_keys(None, None) == {"K2"}
 
 
 # ─── ICCINT-135: a binding that matches NOTHING must say so — the loop that cannot break ─────────────
@@ -941,7 +940,6 @@ def test_a_keyless_declaration_still_gets_a_stable_handle(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [novy, plan])
 
     assert orchestrator._declared_safety_assertions(None, None) == {"test_a"}
-    assert orchestrator._unbound_safety_keys(None, None) == set()
 
 
 def test_the_minted_handle_is_stable_and_distinguishes() -> None:
@@ -1024,7 +1022,6 @@ def test_binding_with_a_new_key_reaches_a_keyless_declaration(monkeypatch) -> No
     monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
     monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
     assert orchestrator._declared_safety_assertions(None, None) == {"a-neprejde"}
-    assert orchestrator._unbound_safety_keys(None, None) == set()
 
 
 def test_a_binding_for_an_undeclared_invariant_is_still_refused(monkeypatch) -> None:
@@ -1034,4 +1031,3 @@ def test_a_binding_for_an_undeclared_invariant_is_still_refused(monkeypatch) -> 
     monkeypatch.setattr(orchestrator, "_release_declaration_payload", lambda db, vid: plan)
     monkeypatch.setattr(orchestrator, "_gate_report_payloads_newest_first", lambda db, vid: [later, plan])
     assert orchestrator._declared_safety_assertions(None, None) == set()
-    assert orchestrator._unbound_safety_keys(None, None) == {"A"}

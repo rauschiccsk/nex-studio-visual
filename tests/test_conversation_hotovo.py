@@ -18,11 +18,11 @@ verification plan:
 * **(d) deploy-eligibility** — ``hotovo_sha == HEAD`` → ``version_verified`` True ``hotovo_match`` AND
   ``deploy.list_verified_versions`` INCLUDES it; HEAD moved past the signed commit → ``hotovo_drift`` → excluded;
   repo unreadable at sign → ``hotovo_unbound`` (still verified, never anchored).
-* **(e) re-open + MD-2 terminal** — a fresh Programovanie-complete outranks the old signature → ``hotovo_done`` /
-  ``kontrola_done`` / ``_manazer_signoff`` re-open (honest, stale-aware); a terminal ``done`` board offers
+* **(e) re-open + MD-2 terminal** — a fresh Programovanie-complete outranks the old signature → ``kontrola_done`` /
+  ``_manazer_signoff`` re-open (honest, stale-aware); a terminal ``done`` board offers
   NOTHING (no UI re-sign — MD-2).
 * **(f) legacy + probes** — a legacy (mode NULL) verdict-PASS build has NO signature → ``version_verified`` keys
-  off the UNCHANGED verdict path byte-identically; ``hotovo_done`` seq-semantics; the STEP-6
+  off the UNCHANGED verdict path byte-identically; the signature's seq-semantics; the STEP-6
   ``custom_development_enabled`` flag defaults False on an existing project.
 
 No agent turns are involved (``hotovo`` is a pure terminal signature), so no CLI/agent stub is needed; the git
@@ -152,7 +152,7 @@ def _seed_kontrola_report(db_session, version_id):
 
 
 def _seed_hotovo_marker(db_session, version_id):
-    """Record a raw Hotovo signature marker (what ``hotovo_done`` / ``_manazer_signoff`` read) — for probe tests."""
+    """Record a raw Hotovo signature marker (what ``_manazer_signoff`` reads) — for probe tests."""
     return orchestrator._record_message(
         db_session,
         version_id=version_id,
@@ -360,13 +360,12 @@ class TestHotovoReopenAndTerminal:
         _seed_ready_for_hotovo(db_session, version.id)
         _stub_repo_head(monkeypatch, "abc123")
         await _sign_hotovo(db_session, version.id)
-        assert orchestrator.hotovo_done(db_session, version.id) is True
+        assert orchestrator._manazer_signoff(db_session, version.id) is not None
         assert version.version_number in deploy.list_verified_versions(db_session, project.id)
 
         # a NEW build completes (fresher seq) → the old signature + kontrola go STALE (honest re-open).
         _seed_programming_complete(db_session, version.id)
         assert orchestrator.kontrola_done(db_session, version.id) is False
-        assert orchestrator.hotovo_done(db_session, version.id) is False
         assert orchestrator._manazer_signoff(db_session, version.id) is None
         # stale signature → version_verified falls through to the verdict path (no verdict) → not verified → dropped.
         assert orchestrator.version_verified(db_session, version.id)[0] is False
@@ -410,19 +409,19 @@ class TestLegacyAndProbes:
         monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: "zzz999")
         assert orchestrator.version_verified(db_session, version.id) == (False, "sha_drift")
 
-    def test_hotovo_done_seq_semantics(self, db_session):
+    def test_the_signature_seq_semantics(self, db_session):
         version, _ = _make_version(db_session)
         # no build → not done.
-        assert orchestrator.hotovo_done(db_session, version.id) is False
+        assert orchestrator._manazer_signoff(db_session, version.id) is None
         _seed_programming_complete(db_session, version.id)
         # build complete but no signature yet → not done.
-        assert orchestrator.hotovo_done(db_session, version.id) is False
+        assert orchestrator._manazer_signoff(db_session, version.id) is None
         _seed_hotovo_marker(db_session, version.id)
         # signature AFTER the build → done.
-        assert orchestrator.hotovo_done(db_session, version.id) is True
+        assert orchestrator._manazer_signoff(db_session, version.id) is not None
         # a fresher build completion outranks the old signature → re-opened.
         _seed_programming_complete(db_session, version.id)
-        assert orchestrator.hotovo_done(db_session, version.id) is False
+        assert orchestrator._manazer_signoff(db_session, version.id) is None
 
     def test_custom_development_enabled_defaults_false(self, db_session):
         # STEP-6 flag: the server_default backfills existing / newly-created projects to False (no custom-dev

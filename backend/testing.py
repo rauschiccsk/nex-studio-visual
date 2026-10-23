@@ -42,3 +42,28 @@ def preview_accepted_values(text: str, *, src_dir=None):
                     if zoznam:
                         return tuple(re.findall(r'"([^"]*)"', zoznam.group(1)))
     return None
+
+
+# ---------------------------------------------------------------------------
+# Pin nex-shared — prečítanie späť toho, čo zapísal rewrite_pin (DEV-155: ostrý kód ho nečíta)
+# ---------------------------------------------------------------------------
+
+
+def parse_pin(package_json_text: str):
+    """The nex-shared version a package.json pins (``'0.11.0'``), or ``None`` — the tests read back what
+    :func:`backend.services.nexshared.rewrite_pin` wrote, with the same pattern it writes by."""
+    import json
+
+    from backend.services.nexshared import _PIN_RE
+
+    try:
+        data = json.loads(package_json_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    dep = (data.get("dependencies") or {}).get("nex-shared") or (data.get("devDependencies") or {}).get("nex-shared")
+    if not isinstance(dep, str):
+        return None
+    m = _PIN_RE.search(dep)
+    return m.group(1) if m else None

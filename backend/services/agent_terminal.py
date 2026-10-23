@@ -61,6 +61,7 @@ from sqlalchemy.orm import Session
 
 from backend.constants.paths import TERMINAL_LOG_DIR as DURABLE_TERMINAL_LOG_DIR
 from backend.core.agent_env import agent_env
+from backend.core.test_seam import for_tests
 from backend.db.models.agent_terminal import AgentTerminalSession
 
 logger = logging.getLogger(__name__)
@@ -862,5 +863,6 @@ def _finalize_db_row(
 
 
 # Exposed for tests — direct access to the registry for assertion.
+@for_tests
 def _get_runtime_for_test(session_id: uuid.UUID) -> Optional[_RuntimeSession]:
     return _sessions.get(session_id)

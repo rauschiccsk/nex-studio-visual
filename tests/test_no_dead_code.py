@@ -56,10 +56,18 @@ JUDGED = {"function", "class", "method", "property", "import", "unreachable_code
 MIN_CONFIDENCE = 60
 
 
-def dead_code(paths: list[Path]) -> list[str]:
+#: DEV-155 — where production code lives. What only the tests call is not used: it is code to keep for nothing.
+PRODUCTION = ["backend", "migrations", "scripts"]
+#: Not production: the backend's own tests and its test-support module (``backend/testing.py``).
+NOT_PRODUCTION = ["*/backend/tests/*", "*/backend/testing.py"]
+#: Code that exists for the tests says so at its definition (``backend/core/test_seam.py``), not on a list here.
+FOR_TESTS = "@for_tests"
+
+
+def dead_code(paths: list[Path], *, exclude: list[str] = [], decorators: list[str] = []) -> list[str]:  # noqa: B006
     """``file:line kind name`` of every judged piece of code nobody calls."""
-    scan = vulture.Vulture(ignore_names=CALLED_BY_NAME, ignore_decorators=CALLED_BY_DECORATOR)
-    scan.scavenge([str(p) for p in paths])
+    scan = vulture.Vulture(ignore_names=CALLED_BY_NAME, ignore_decorators=CALLED_BY_DECORATOR + decorators)
+    scan.scavenge([str(p) for p in paths], exclude=exclude)
     found = []
     for item in scan.get_unused_code(min_confidence=MIN_CONFIDENCE):
         if item.typ not in JUDGED:
@@ -105,3 +113,49 @@ def test_the_check_finds_dead_code_and_leaves_called_code(tmp_path):
     found = dead_code([tmp_path])
 
     assert [line.split(" ", 1)[1] for line in found] == ["function forgotten"]
+
+
+def test_no_backend_code_lives_only_for_its_tests():
+    """DEV-155 (22.10.2026): 30 functions of the backend were called by their tests and nothing else — some tested a
+    twin production had replaced, so the guard guarded nothing. vulture judges by name: a function whose name production
+    calls elsewhere (``create``, ``update``) escapes it — what it does find is certain."""
+    found = dead_code([ROOT / p for p in PRODUCTION], exclude=NOT_PRODUCTION, decorators=[FOR_TESTS])
+
+    assert found == [], "only the tests call these — remove them, or mark a seam for the tests @for_tests:\n  " + (
+        "\n  ".join(found)
+    )
+
+
+def test_the_check_finds_code_only_the_tests_call(tmp_path):
+    """⚠️ The guard over the guard: production code that only a test calls is found; a marked seam is not."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "module.py").write_text(
+        textwrap.dedent(
+            """
+            from backend.core.test_seam import for_tests
+
+
+            def used():
+                return 1
+
+
+            def only_tested():
+                return 2
+
+
+            @for_tests
+            def forget_everything():
+                return 3
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "app" / "caller.py").write_text("from module import used\n\nused()\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_module.py").write_text(
+        "from module import only_tested, forget_everything\n\nonly_tested()\nforget_everything()\n", encoding="utf-8"
+    )
+
+    found = dead_code([tmp_path / "app"], exclude=["*/tests/*"], decorators=[FOR_TESTS])
+
+    assert [line.split(" ", 1)[1] for line in found] == ["function only_tested"]

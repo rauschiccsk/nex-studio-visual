@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
 
+from backend.core.test_seam import for_tests
 from backend.services import delivered_tokens
 
 #: Letters only Slovak (of the languages we meet in code) writes — the mechanical sign of a Slovak sentence.
@@ -269,6 +270,7 @@ def _parts_of(path: str, source: str, is_test: bool) -> Optional[Iterator[tuple[
     return None
 
 
+@for_tests
 def slovak_in(path: str, source: str, *, is_test: bool = False, own: frozenset[str] = frozenset()) -> list[SlovakText]:
     """Slovak text in every line of one file — what :func:`scan` reports for the lines a version added. DEV-182: the
     cockpit's templates that become a project's code are held to it before any project gets them. ``own`` is the

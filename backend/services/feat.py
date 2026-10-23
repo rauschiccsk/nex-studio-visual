@@ -72,7 +72,6 @@ from sqlalchemy.orm import Session
 from backend.db.models.tasks import Feat
 from backend.schemas.feat import (
     FeatCreate,
-    FeatUpdate,
 )
 
 
@@ -165,66 +164,3 @@ def create(db: Session, data: FeatCreate) -> Feat:
     db.add(feat)
     db.flush()
     return feat
-
-
-def update(db: Session, feat_id: UUID, data: FeatUpdate) -> Feat:
-    """Partially update a feat.
-
-    Only ``title``, ``description``, ``status``, ``estimated_minutes``
-    and ``actual_minutes`` may be changed. ``id``, ``epic_id``,
-    ``number`` and ``created_at`` are immutable — a feat belongs to
-    exactly one epic for its lifetime, its position within the epic
-    (``number``) must not be rewritten after the fact, and
-    ``updated_at`` is auto-stamped by the ORM on flush via
-    ``onupdate=func.now()``. ``task_count`` and ``auto_fix_count`` are
-    server-managed counters maintained elsewhere and are therefore not
-    exposed for direct edits.
-
-    Fields that are ``None`` in the payload are treated as "leave
-    unchanged" to support PATCH semantics. Consequently, the
-    explicit-null transitions ``estimated_minutes -> NULL`` and
-    ``actual_minutes -> NULL`` are not expressible through this
-    service; they are rare corrections that belong to admin tooling
-    rather than the UI.
-
-    Raises:
-        ValueError: If the feat does not exist.
-    """
-    feat = get_by_id(db, feat_id)
-
-    update_data = data.model_dump(exclude_unset=True)
-    # Defensive guard — the schema already excludes immutable and
-    # server-managed fields, but silently dropping any that slip
-    # through keeps the service honest.
-    allowed_fields = {
-        "title",
-        "description",
-        "status",
-        "estimated_minutes",
-        "actual_minutes",
-    }
-
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(feat, field, value)
-
-    db.flush()
-    return feat
-
-
-def delete(db: Session, feat_id: UUID) -> None:
-    """Hard-delete a feat.
-
-    Inbound FKs — ``tasks.feat_id`` (``ON DELETE CASCADE``),
-    ``delegations.feat_id`` (``ON DELETE SET NULL``) and
-    ``auto_fix_attempts.feat_id`` (``ON DELETE CASCADE``) — are all
-    handled at the DB level, so dependent rows are either removed or
-    NULL-ed automatically on flush. No RESTRICT dependency check is
-    required.
-
-    Raises:
-        ValueError: If the feat does not exist.
-    """
-    feat = get_by_id(db, feat_id)
-    db.delete(feat)
-    db.flush()

@@ -27,14 +27,14 @@ def _cas(**kw) -> datetime:
 
 def test_everything_matching_reads_as_in_sync():
     porovnanie = kb.compare({"icc/A.md": _cas().timestamp()}, {"icc/A.md": _cas(minutes=1)})
-    assert porovnanie.in_sync
+    assert porovnanie.out_of_sync == 0
     assert porovnanie.out_of_sync == 0
 
 
 def test_a_file_never_indexed_is_missing():
     porovnanie = kb.compare({"icc/STRUCTURE.md": _cas().timestamp()}, {})
     assert porovnanie.missing == ("icc/STRUCTURE.md",)
-    assert not porovnanie.in_sync
+    assert porovnanie.out_of_sync > 0
 
 
 def test_a_file_changed_after_indexing_is_stale():
@@ -44,21 +44,21 @@ def test_a_file_changed_after_indexing_is_stale():
         {"projects/nex-inbox/STATUS.md": _cas()},
     )
     assert porovnanie.stale == ("projects/nex-inbox/STATUS.md",)
-    assert not porovnanie.in_sync
+    assert porovnanie.out_of_sync > 0
 
 
 def test_a_file_deleted_from_disk_is_orphaned():
     """Odpoveď z dokumentu, ktorý už neexistuje, je najzavádzajúcejšia zo všetkých."""
     porovnanie = kb.compare({}, {"projects/zrusene/X.md": _cas()})
     assert porovnanie.orphaned == ("projects/zrusene/X.md",)
-    assert not porovnanie.in_sync
+    assert porovnanie.out_of_sync > 0
 
 
 def test_a_file_indexed_seconds_after_it_was_written_is_not_stale():
     """Bez tolerancie by KAŽDÝ súbor vyzeral zastaraný hneď po zápise — index vzniká o chvíľu neskôr,
     takže by údaj „nesedí N" nikdy nespadol na nulu a prestal by niečo znamenať."""
     porovnanie = kb.compare({"icc/A.md": _cas(seconds=5).timestamp()}, {"icc/A.md": _cas()})
-    assert porovnanie.in_sync, "pár sekúnd rozdielu sa vydáva za zastaranie"
+    assert porovnanie.out_of_sync == 0, "pár sekúnd rozdielu sa vydáva za zastaranie"
 
 
 def test_the_newest_write_across_the_corpus_is_reported():

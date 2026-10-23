@@ -9,6 +9,7 @@ from pathlib import Path
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.services import nexshared
+from backend.testing import parse_pin
 
 
 def _make_project(db, source_path) -> Project:
@@ -79,7 +80,7 @@ def test_upgrade_nexshared_rewrites_the_pin(client, db_session, tmp_path, monkey
     assert resp.json()["upgraded"] is True
     # Both files moved (no git repo → committed False, but the writes happened).
     pkg = (tmp_path / "frontend" / "package.json").read_text(encoding="utf-8")
-    assert nexshared.parse_pin(pkg) == "0.15.0"
+    assert parse_pin(pkg) == "0.15.0"
     assert nexshared.effective_version(str(tmp_path)) == "0.15.0"
 
 

@@ -1379,19 +1379,6 @@ def _volume_text(volume: Any) -> str:
     return str(volume)
 
 
-def read_instance_facts(instance_dir: Path) -> InstanceFacts:
-    """Read :class:`InstanceFacts` off whatever compose is at ``instance_dir``.
-
-    Tolerant by design: an unreadable or absent file yields empty facts rather than raising. The
-    caller (preview / adoption) decides what emptiness means — here it only means "nothing to carry".
-    """
-    compose_path = instance_dir / "docker-compose.yml"
-    try:
-        return facts_from_compose_text(compose_path.read_text(encoding="utf-8"))
-    except OSError:
-        return InstanceFacts({}, [], {}, {})
-
-
 def facts_from_compose_text(text: Optional[str]) -> InstanceFacts:
     """To isté, ale z TEXTU predpisu — lebo inštalácia nemusí bývať na tomto stroji (ICCINT-151).
 

@@ -998,35 +998,12 @@ def kontrola_passed(db: Session, version_id: uuid.UUID) -> bool:
     return kontrola_done(db, version_id) and not kontrola_floor_red(db, version_id)
 
 
-def hotovo_done(db: Session, version_id: uuid.UUID) -> bool:
-    """True iff the Manažér has already signed the LATEST completed build as Hotovo (STEP 6, mirror of
-    :func:`kontrola_done`).
-
-    The signature is the latest ``stage='priprava'`` ∧ ``kind='notification'`` ∧ ``payload.hotovo`` message; it
-    counts as "done" only if its ``seq`` is HIGHER than the latest Programovanie-complete notification — a fresh
-    build/fix records a NEWER ``programming_complete`` (higher seq than the old signature) → ``hotovo_done`` flips
-    back to ``False``, honestly re-opening the Hotovo sign-off (kept consistent with :func:`_manazer_signoff`'s
-    stale-awareness). Returns ``False`` when the build never completed (nothing to have signed yet)."""
-    prog_seq = _latest_programming_complete_seq(db, version_id)
-    if prog_seq is None:
-        return False
-    hotovo_seq = db.execute(
-        select(func.max(PipelineMessage.seq)).where(
-            PipelineMessage.version_id == version_id,
-            PipelineMessage.stage == "priprava",
-            PipelineMessage.kind == "notification",
-            PipelineMessage.payload["hotovo"].astext == "true",
-        )
-    ).scalar()
-    return hotovo_seq is not None and hotovo_seq > prog_seq
-
-
 def ever_signed_off(db: Session, version_id: uuid.UUID) -> bool:
     """True iff this version was EVER declared finished — a Hotovo signature or an Auditor PASS is on record,
     STALENESS IGNORED (v4.0.54).
 
-    The deliberate complement of :func:`hotovo_done` / :func:`_manazer_signoff`, which both go False once a
-    fresher build outranks the signature. Those answer "is it finished NOW"; this answers "was it finished at
+    The deliberate complement of :func:`_manazer_signoff`, which goes ``None`` once a
+    fresher build outranks the signature. It answers "is it finished NOW"; this answers "was it finished at
     some point" — the difference between a version that never got anywhere (nothing to explain) and one whose
     sign-off went stale (explainable, with a real next step). :func:`deploy.deployability` needs exactly that
     split to tell the manager WHY Nasadiť is closed instead of showing an unexplained grey button."""
@@ -6080,36 +6057,6 @@ def _compose_drift(local_text: str, remote_text: Optional[str]) -> Optional[str]
 _MKDIR_IMAGE = "alpine:3.20"
 
 
-def _remote_mkdir_cmd(instance_dir: "Path", subdirs: "Sequence[str]", *, uid: int = 1000, gid: int = 1000) -> list[str]:
-    """Príkaz, ktorým na CIELI vzniknú priečinky pre dáta zákazníka (ICCINT-151).
-
-    Prečo cez Docker a nie ``ssh mkdir``: kľúč kokpitu je na cieli obmedzený na
-    ``command="docker system dial-stdio"`` — shell ním získať nejde, a to je zámer, lebo v tom istom
-    kontajneri bežia stavby projektov. Docker je teda jediné, s čím ten kľúč vie hovoriť; priečinky
-    preto vyrobí kontajner, ktorý má pripojený priečinok inštalácie.
-
-    Pripája sa VÝHRADNE priečinok tejto inštalácie — nie ``/opt/customers`` a nie koreň. Na tom
-    stroji sú dáta iných zákazníkov a nasadenie jedného sa ich nemá ako dotknúť.
-
-    Vlastník sa nastavuje hneď: priečinok vyrobený Dockerom patrí správcovi systému a aplikácia by
-    doň nezapísala — chyba by sa prejavila až pri prvej faktúre. Oba naše stroje majú používateľa
-    pod číslom 1000 (overené 24.09.2026).
-    """
-    ciele = " ".join(f"/target/{d}" for d in subdirs)
-    skript = f"mkdir -p {ciele} && chown {uid}:{gid} {ciele}"
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{instance_dir}:/target",
-        _MKDIR_IMAGE,
-        "sh",
-        "-c",
-        skript,
-    ]
-
-
 def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str]]:
     """Prostredie pre OVERENIE po nasadení — ``None``, keď sa nasadzuje sem (ICCINT-151).
 
@@ -8602,15 +8549,6 @@ def _safety_identity(sp: dict[str, Any]) -> str:
     return str(sp.get("key") or sp.get("name") or "").strip()
 
 
-def _declared_safety_identities(db: Session, version_id: uuid.UUID) -> set[str]:
-    """The identities the PLAN gate_report fixed. A later report may ATTACH an assertion to one of these; it
-    may never add or drop one, or a build could shrink its own declaration to escape promised coverage."""
-    declared = _release_declaration_payload(db, version_id).get("safety_properties")
-    if not isinstance(declared, list):
-        return set()
-    return {i for sp in declared if isinstance(sp, dict) and (i := _safety_identity(sp))}
-
-
 def _declared_safety_aliases(db: Session, version_id: uuid.UUID) -> dict[str, str]:
     """``{alias: identity}`` — every way a binding may name a DECLARED safety property.
 
@@ -8699,11 +8637,6 @@ def _unmatched_binding_note(db: Session, version_id: uuid.UUID) -> str:
         + ".\n   Naviazanie musí v poli `key` alebo `name` niesť DOSLOVA jeden z týchto identifikátorov:\n"
         + ocakavane
     )
-
-
-def _unbound_safety_keys(db: Session, version_id: uuid.UUID) -> set[str]:
-    """Declared safety properties with NO assertion bound — named, so the gate can say WHICH is unguarded."""
-    return _declared_safety_identities(db, version_id) - set(_safety_bindings(db, version_id))
 
 
 def _declared_safety_assertions(db: Session, version_id: uuid.UUID) -> set[str]:
@@ -9657,10 +9590,10 @@ async def _generate_incremental_plan(
     the Manažér every note and where it went.
 
     The PROVEN incremental machinery, extracted so BOTH registers reuse it byte-for-byte (step3-plan-design.md
-    — do NOT parse a whole plan tree off one turn): the Návrh phase (``stage='navrh'`` —
-    :func:`_fold_task_plan_into_navrh`) and the STEP-3 conversation plan round (``stage='priprava'`` —
-    :func:`_run_conversation_plan_round`). Runs on the SAME warm AI-Agent session (so the design doc /
-    Špecifikácia + the just-emitted skeleton stay in context), then materializes via :func:`_write_task_plan`:
+    — do NOT parse a whole plan tree off one turn): the STEP-3 conversation plan round (``stage='priprava'`` —
+    :func:`_run_conversation_plan_round`) and Programovanie when no plan was materialized
+    (``stage='programovanie'``). Runs on the SAME warm AI-Agent session (so the design doc / Špecifikácia + the
+    just-emitted skeleton stay in context), then materializes via :func:`_write_task_plan`:
 
     * **Pass 1 — skeleton:** EPIC + FEAT (no tasks) + ``cross_cutting_rules`` (+ the release-coverage
       declaration). ``directive`` prepends the register's framed brief (MD-2: re-read the current spec).
@@ -9916,27 +9849,6 @@ async def _generate_incremental_plan(
         db.flush()
         return state
     return None  # success — the caller settles for its register
-
-
-async def _fold_task_plan_into_navrh(
-    db: Session,
-    state: PipelineState,
-    *,
-    on_event: Optional[claude_agent.EventCallback],
-    directive: Optional[str],
-    on_message: Optional[MessageCallback],
-) -> Optional[PipelineState]:
-    """Fold the incremental task plan into the Návrh phase (CR-V2-011) — the ``stage='navrh'`` wrapper over
-    the shared :func:`_generate_incremental_plan`.
-
-    The standalone ``task_plan`` stage/round is removed; the plan is the LAST part of the Návrh design doc
-    (design §2.1(2)), generated pass-by-pass so a large plan never overflows one turn. Byte-identical to the
-    pre-STEP-3 behaviour (every record stays on the ``navrh`` stage). Returns the SETTLED state on any
-    failure (the caller returns it directly), or ``None`` on success (the caller then runs the SHARED
-    dial-settle)."""
-    return await _generate_incremental_plan(
-        db, state, stage="navrh", on_event=on_event, directive=directive, on_message=on_message
-    )
 
 
 def _docs_changed_in_head(project_root: Path) -> str:

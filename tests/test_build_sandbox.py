@@ -1428,7 +1428,7 @@ def test_the_network_residual_is_published_not_implied() -> None:
 
     The published sentence used to name three services (the Studio API, the v3 API, Traefik) and add that
     "Postgres, Ollama and Qdrant were NOT reachable". Audit re-measured from a container on a user-defined
-    network of the exact shape ``build_db.network_create_argv`` makes, and the truth is categorical: the
+    network of the exact shape ``build_db.create_fenced_network`` makes, and the truth is categorical: the
     bridge gateway answers on EVERY port published to 0.0.0.0 on this host — six PostgreSQL instances (this
     Studio's own production database among them), Vaultwarden, the NEX Manager API, Prometheus, Alertmanager
     and Grafana included. A short list where the rule is "everything published" reads as a reassurance, so

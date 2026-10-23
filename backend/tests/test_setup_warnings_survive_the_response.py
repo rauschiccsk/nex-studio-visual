@@ -32,7 +32,6 @@ PREVZATIE = "prevzatý"
 def _bez_githubu():
     """Zakladanie sa nemá pýtať skutočného GitHubu — meriame, čo sa stane s vetou, nie sieť."""
     with (
-        patch("backend.services.github_validation.validate_github_repo", return_value=True),
         patch("backend.services.github_validation.create_github_repo", return_value=None),
     ):
         yield
