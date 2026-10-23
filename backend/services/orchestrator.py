@@ -13075,9 +13075,16 @@ def _vizual_mockup_rel(project_root: Path, version_number: str) -> Optional[str]
 def read_vizual_mockup(db: Session, version_id: uuid.UUID) -> Optional[str]:
     """Return the version's Vizuál mockup HTML text, or ``None`` when there is none (the public
     ``/{version_id}/vizual-mockup`` route serves this into the cockpit iframe). Path-scoped to the version's
-    ``visual/`` dir (defense-in-depth ``relative_to`` check) — never an arbitrary file read."""
-    slug = _project_slug_for_version(db, version_id)
-    version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
+    ``visual/`` dir (defense-in-depth ``relative_to`` check) — never an arbitrary file read. A version that does not
+    exist has none either (DEV-198: the public route answered 500 to a stale address)."""
+    found = db.execute(
+        select(Project.slug, Version.version_number)
+        .join(Version, Version.project_id == Project.id)
+        .where(Version.id == version_id)
+    ).one_or_none()
+    if found is None:
+        return None
+    slug, version_number = found
     project_root = claude_agent.PROJECTS_ROOT / slug
     rel = _vizual_mockup_rel(project_root, version_number)
     if rel is None:
