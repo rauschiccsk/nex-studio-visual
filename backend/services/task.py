@@ -127,7 +127,6 @@ def create(db: Session, data: TaskCreate) -> Task:
         task_type=data.task_type,
         status=data.status,
         priority=data.priority,
-        estimated_minutes=data.estimated_minutes,
         checklist_type=data.checklist_type,
         billing_category=data.billing_category,
     )

@@ -80,4 +80,12 @@ export interface TaskPlanResponse {
   task_count: number;
   /** DEV-75 — the category of a task without its own; null while the version's work kind is undecided. */
   billing_default?: BillingCategory | null;
+  /** DEV-210 — how long the agent will work on the tasks, forecast from measured builds; null = nothing to go by yet. */
+  forecast?: TaskPlanForecast | null;
+}
+
+/** DEV-210 — the backend's sentences (``build_forecast``): „asi 1 h 10 min ± 30 %“, „zostáva asi 40 min“. */
+interface TaskPlanForecast {
+  text: string;
+  remaining_text: string | null;
 }

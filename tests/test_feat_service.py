@@ -118,14 +118,13 @@ class TestFeatService:
         # Schema / DB defaults.
         assert created.description == ""
         assert created.status == "todo"
-        assert created.estimated_minutes is None
         # Server-managed counters seeded by DB server_default.
         assert created.auto_fix_count == 0
         # Auto-assigned number.
         assert created.number == 1
 
-    def test_create_with_description_and_estimate(self, db_session):
-        """``create`` applies explicit ``description`` and ``estimated_minutes``."""
+    def test_create_with_description(self, db_session):
+        """``create`` applies an explicit ``description``."""
         epic = _make_epic(db_session)
 
         created = service.create(
@@ -133,12 +132,10 @@ class TestFeatService:
             _payload(
                 epic.id,
                 description="Detailed feat body.",
-                estimated_minutes=120,
             ),
         )
 
         assert created.description == "Detailed feat body."
-        assert created.estimated_minutes == 120
 
     def test_create_with_custom_status(self, db_session):
         """``create`` applies a non-default ``status`` when supplied."""

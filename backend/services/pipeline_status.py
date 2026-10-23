@@ -103,7 +103,6 @@ class TaskPlanTask(BaseModel):
     plain_description: str = ""
     checklist_type: Optional[str] = Field(default=None, max_length=30)
     priority: TaskPriority = "normal"
-    estimated_minutes: Optional[int] = None
     #: DEV-75: the AI Agent's proposal of what the task is billed as; the manager confirms or changes it in the
     #: task plan.
     billing_category: Optional[BillingCategory] = None
@@ -125,7 +124,6 @@ class TaskPlanFeat(BaseModel):
     description: str = ""
     #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner for the Plán úloh rail. Default empty.
     plain_description: str = ""
-    estimated_minutes: Optional[int] = None
     tasks: list[TaskPlanTask] = Field(min_length=1)
 
 
@@ -182,14 +180,13 @@ class SafetyProperty(BaseModel):
 
 
 class TaskPlanSkeletonFeat(BaseModel):
-    """A feat in the skeleton pass — title/description/plain_description/estimated_minutes, **NO** tasks
+    """A feat in the skeleton pass — title/description/plain_description, **NO** tasks
     (tasks arrive in the per-feat passes)."""
 
     title: str = Field(min_length=1, max_length=500)
     description: str = ""
     #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner for the Plán úloh rail. Default empty.
     plain_description: str = ""
-    estimated_minutes: Optional[int] = None
 
 
 class TaskPlanSkeletonEpic(BaseModel):

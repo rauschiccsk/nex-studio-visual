@@ -104,7 +104,6 @@ def create(db: Session, data: FeatCreate) -> Feat:
         description=data.description,
         plain_description=data.plain_description,
         status=data.status,
-        estimated_minutes=data.estimated_minutes,
     )
     db.add(feat)
     db.flush()

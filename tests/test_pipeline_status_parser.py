@@ -315,7 +315,7 @@ def test_parse_task_plan_skeleton_accepts_feats_without_tasks():
         "epics": [
             {
                 "title": "Foundation",
-                "feats": [{"title": "Schema", "description": "tables", "estimated_minutes": 120}],
+                "feats": [{"title": "Schema", "description": "tables"}],
             }
         ],
         "cross_cutting_rules": "## Invarianty\n- audit",
@@ -335,7 +335,7 @@ def test_parse_task_plan_skeleton_rejects_a_missing_release_declaration():
         "epics": [
             {
                 "title": "Foundation",
-                "feats": [{"title": "Schema", "description": "tables", "estimated_minutes": 120}],
+                "feats": [{"title": "Schema", "description": "tables"}],
             }
         ],
     }
@@ -377,7 +377,7 @@ def test_parse_task_plan_skeleton_carries_release_coverage_declaration():
 
 
 def test_parse_task_plan_feat_tasks_accepts_tasks_only():
-    obj = {"tasks": [{"title": "GL výpočet", "task_type": "backend", "estimated_minutes": 90}]}
+    obj = {"tasks": [{"title": "GL výpočet", "task_type": "backend"}]}
     res = parse_task_plan_feat_tasks(obj)
     assert isinstance(res, TaskPlanFeatTasks)
     assert res.tasks[0].title == "GL výpočet" and res.tasks[0].task_type == "backend"

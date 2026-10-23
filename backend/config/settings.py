@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     # DEV-201: how long a version passed by the Auditor waits for the CI of its last commit before the wait is given up
     # (said out loud). Measured 23.10.2026: NEX Inbox's CI took up to 100 minutes, its jobs waiting for the only runner.
     ci_pending_cap_hours: int = 6
+    # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
+    # asks for it at every new message of a build, and the history moves only when a build does.
+    build_forecast_history_ttl_seconds: int = 600
     # DEV-94: what the cockpit writes into the Knowledge Base goes to GitHub — how long one exchange with GitHub may
     # take, and how often commits that did not get there are sent again (off in tests: it would reach for GitHub).
     kb_publish_timeout_seconds: int = 30

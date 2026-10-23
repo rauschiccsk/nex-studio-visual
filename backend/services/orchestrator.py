@@ -61,6 +61,7 @@ from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
     build_db,
+    build_forecast,
     build_leftovers,
     build_provenance,
     ci_runs,
@@ -2777,12 +2778,6 @@ def _fix_critique_directive(db: Session, version_id: uuid.UUID, *, verdict_msg: 
     )
 
 
-# E5 (CR-NS-045): the per-task human-effort estimate is the metrics page's human-baseline source — kept
-# in BOTH task_plan prompts below (skeleton → feat-level Σ; per-feat → per-task), advisory, never blocking.
-_TASK_PLAN_ESTIMATE_NOTE = (
-    "`estimated_minutes` = realistický odhad práce pre schopného ĽUDSKÉHO vývojára v minútach "
-    "(NIE čas AI výpočtu); ADVISORY pole — chýbajúci odhad je povolený a NIKDY neblokuje build."
-)
 # D1 (release-smoke-boot-and-batch-fixes.md): the AI drifted to writing per-version "EPIC 1 — …" / "EPIC 2 — …"
 # prefixes INTO epic/feat titles, so the cockpit showed a confusing double number ("8. EPIC 1 — …") on top of
 # the DB's own continuous numbering. FORBID it: the title is the NAME only — the system numbers epics/feats.
@@ -2805,7 +2800,7 @@ _SKELETON_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
     '{"epics":[{"title":"Foundation","plain_description":"Základ aplikácie — databáza a spoločné pravidlá.",'
     '"feats":[{"title":"Schéma a migrácie","description":"DB schéma + audit log",'
-    '"plain_description":"Založíme databázu a záznam o zmenách.","estimated_minutes":120}]}],'
+    '"plain_description":"Založíme databázu a záznam o zmenách."}]}],'
     '"cross_cutting_rules":"Spoločná transakčná hranica; immutable audit; scoping na firmu.",'
     '"flagship_features":["Export faktúry do Peppol XML","Automatické párovanie dodávateľa"],'
     '"safety_properties":[{"name":"Scoping na firmu (žiadny cross-tenant read)",'
@@ -2817,7 +2812,7 @@ _FEAT_TASKS_EXAMPLE = (
     "Príklad tvaru:\n<<<TASK_PLAN_JSON>>>\n"
     '{"tasks":[{"title":"GL tabuľky","task_type":"migration","description":"hlavná kniha + saldokonto",'
     '"plain_description":"Pripravíme tabuľky hlavnej knihy.",'
-    '"checklist_type":null,"priority":"normal","estimated_minutes":90,"billing_category":"request"}]}\n'
+    '"checklist_type":null,"priority":"normal","billing_category":"request"}]}\n'
     "<<<END_TASK_PLAN_JSON>>>"
 )
 
@@ -2845,8 +2840,8 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "Doplň POSLEDNÚ časť návrhu — plán úloh. Najprv vytvor jeho KOSTRU: emituj IBA epiky a funkcie "
         "(EPIC + FEAT), BEZ úloh. "
         "Objekt má pole `epics` (zoznam): KAŽDÝ epik má `title`, `plain_description` a pole "
-        "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description`, `plain_description` a "
-        "`estimated_minutes` (Σ odhadov jej úloh). `plain_description` je JEDNORIADKOVÉ ľudské vysvetlenie "
+        "`feats` (zoznam, ≥1) — KAŽDÁ funkcia má `title`, `description` a `plain_description`. "
+        "`plain_description` je JEDNORIADKOVÉ ľudské vysvetlenie "
         "BEZ žargónu (čo daný epik/funkcia znamená pre Manažéra — nie technický popis); epik `description` "
         "NEMÁ, takže `plain_description` je jeho jediný ľudský text. "
         + _TASK_PLAN_TITLE_RULE
@@ -2880,8 +2875,7 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         # the hard cap) and the engine rejected the plan.
         "GRANULARITA KOSTRY JE HRUBOZRNNÁ — modul ≈ úloha (F-007 §4): zlučuj súvisiace veci do JEDNEJ "
         f"funkcie, nedeľ koherentný modul na drobné, a drž CELKOVÝ počet funkcií VÝRAZNE POD {MAX_PLAN_FEATS} "
-        "(tvrdý strop — jemnejší rozklad engine ODMIETNE a budeš musieť kostru prerobiť). "
-        + _TASK_PLAN_ESTIMATE_NOTE
+        "(tvrdý strop — jemnejší rozklad engine ODMIETNE a budeš musieť kostru prerobiť)."
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
         + "\n\n"
@@ -2913,11 +2907,10 @@ def _task_plan_feat_directive(feat_title: str, review_notes: Sequence[tuple[int,
         f"Pre funkciu „{feat_title}“ z kostry plánu emituj IBA jej úlohy. Objekt má jedno pole `tasks` "
         "(zoznam, ≥1): KAŽDÁ úloha má `title`, `task_type` (jedno z: backend, frontend, migration, test, "
         "docs), `description`, `plain_description`, `checklist_type` (text alebo null), `priority` "
-        "(normal | high | urgent), `estimated_minutes` a `billing_category`. `plain_description` je JEDNORIADKOVÉ "
+        "(normal | high | urgent) a `billing_category`. `plain_description` je JEDNORIADKOVÉ "
         "ľudské vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
         "HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
         + _BILLING_CATEGORY_RULE
-        + _TASK_PLAN_ESTIMATE_NOTE
         + notes_block
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
@@ -3333,7 +3326,6 @@ def _render_task_plan_md(db: Session, version: Version, project: Project, stage:
     hierarchical numbers match the cockpit."""
     epics = db.execute(select(Epic).where(Epic.version_id == version.id).order_by(Epic.number)).scalars().all()
     n_epics = n_feats = n_tasks = 0
-    total_min = 0
     body: list[str] = []
     for epic in epics:
         n_epics += 1
@@ -3342,18 +3334,22 @@ def _render_task_plan_md(db: Session, version: Version, project: Project, stage:
         feats = db.execute(select(Feat).where(Feat.epic_id == epic.id).order_by(Feat.number)).scalars().all()
         for feat in feats:
             n_feats += 1
-            fest = f" — ~{feat.estimated_minutes} min" if feat.estimated_minutes else ""
-            body.append(f"### Feat {epic.number}.{feat.number}: {feat.title}{fest}")
+            body.append(f"### Feat {epic.number}.{feat.number}: {feat.title}")
             if feat.description:
                 body.append(feat.description)
             tasks = db.execute(select(Task).where(Task.feat_id == feat.id).order_by(Task.number)).scalars().all()
             for task in tasks:
                 n_tasks += 1
-                total_min += task.estimated_minutes or 0
-                test = f" — ~{task.estimated_minutes} min" if task.estimated_minutes else ""
-                body.append(f"- **{epic.number}.{feat.number}.{task.number}** `[{task.task_type}]` {task.title}{test}")
+                body.append(f"- **{epic.number}.{feat.number}.{task.number}** `[{task.task_type}]` {task.title}")
             body.append("")
-    hours = round(total_min / 60, 1)
+    # DEV-210: the cockpit's forecast from what it measured — the human-developer minutes the agent used to guess here
+    # read „~54 h“ for an hour of the agent's work.
+    forecast = build_forecast.forecast(db, version.id)
+    work = (
+        f"práca agenta na úlohách {forecast.text}"
+        if forecast is not None
+        else "odhad práce agenta zatiaľ nie je (kokpit ešte nemá namerané stavby)"
+    )
     if stage == "navrh":
         provenance = (
             "> Generované automaticky z plánu úloh fázy Návrh (zdroj pravdy = cockpit DB rows). Slúži Manažérovi "
@@ -3372,7 +3368,7 @@ def _render_task_plan_md(db: Session, version: Version, project: Project, stage:
         "",
         provenance,
         "",
-        f"**Súhrn:** {n_epics} epicov · {n_feats} featov · {n_tasks} úloh · odhad ~{total_min} min (~{hours} h).",
+        f"**Súhrn:** {n_epics} epicov · {n_feats} featov · {n_tasks} úloh · {work}.",
         "",
     ]
     return "\n".join(header + body).rstrip() + "\n"
@@ -3810,7 +3806,6 @@ def _write_task_plan(
                             title=feat_in.title,
                             description=feat_in.description,
                             plain_description=feat_in.plain_description,
-                            estimated_minutes=feat_in.estimated_minutes,
                         ),
                     )
                     n_feats += 1
@@ -3825,7 +3820,6 @@ def _write_task_plan(
                                 plain_description=task_in.plain_description,
                                 checklist_type=task_in.checklist_type,
                                 priority=task_in.priority,
-                                estimated_minutes=task_in.estimated_minutes,
                                 billing_category=task_in.billing_category,
                             ),
                         )
@@ -9979,7 +9973,6 @@ async def _generate_incremental_plan(
                             title=feat.title,
                             description=feat.description,
                             plain_description=feat.plain_description,
-                            estimated_minutes=feat.estimated_minutes,
                             tasks=feat_tasks[(ei, fi)],
                         )
                         for fi, feat in enumerate(epic.feats)

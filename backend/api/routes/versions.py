@@ -60,8 +60,8 @@ from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import VERSION_NUMBER_PATTERN, VERSION_NUMBER_RULE, Version
 from backend.db.session import get_db
 from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
+from backend.services import build_forecast, metrics, pipeline_metrics, unsaved_work
 from backend.services import delivery_statement as statements
-from backend.services import metrics, pipeline_metrics, unsaved_work
 from backend.services import version as version_service
 
 router = APIRouter(tags=["Versions"])
@@ -234,6 +234,15 @@ def update_version(
     return VersionRead.model_validate(version)
 
 
+class _TaskPlanForecast(BaseModel):
+    """DEV-210 — how long the agent will work on the plan's tasks, as the screen says it (``build_forecast``)."""
+
+    #: „asi 1 h 10 min ± 30 %“ — or, once every task is done, „1 h 5 min (namerané)“
+    text: str
+    #: „zostáva asi 40 min“ while the build is under way; ``None`` before its first task and after its last
+    remaining_text: Optional[str] = None
+
+
 class _TaskPlanResponse(BaseModel):
     """Response for GET /versions/{version_id}/task-plan."""
 
@@ -244,6 +253,8 @@ class _TaskPlanResponse(BaseModel):
     #: DEV-75 — the billing category of a task without its own (``bug`` / ``request``); ``None`` while the version's
     #: work kind is undecided.
     billing_default: Optional[str] = None
+    #: DEV-210 — ``None`` when there is nothing measured to go by yet.
+    forecast: Optional[_TaskPlanForecast] = None
 
 
 @router.get(
@@ -347,7 +358,15 @@ def get_task_plan(
         feat_count=len(feats),
         task_count=len(tasks_all),
         billing_default=billing_default,
+        forecast=_forecast(db, version_id, by_task),
     )
+
+
+def _forecast(db: Session, version_id: UUID, by_task: dict) -> Optional[_TaskPlanForecast]:
+    forecast = build_forecast.forecast(db, version_id, by_task=by_task)
+    if forecast is None:
+        return None
+    return _TaskPlanForecast(text=forecast.text, remaining_text=forecast.remaining_text)
 
 
 class _ZadanieWrite(BaseModel):

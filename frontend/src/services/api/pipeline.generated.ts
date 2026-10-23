@@ -8312,6 +8312,16 @@ export interface components {
             to_user_id: string;
         };
         /**
+         * _TaskPlanForecast
+         * @description DEV-210 — how long the agent will work on the plan's tasks, as the screen says it (``build_forecast``).
+         */
+        _TaskPlanForecast: {
+            /** Remaining Text */
+            remaining_text?: string | null;
+            /** Text */
+            text: string;
+        };
+        /**
          * _TaskPlanResponse
          * @description Response for GET /versions/{version_id}/task-plan.
          */
@@ -8322,6 +8332,7 @@ export interface components {
             epic_count: number;
             /** Feat Count */
             feat_count: number;
+            forecast?: components["schemas"]["_TaskPlanForecast"] | null;
             /** Plan */
             plan: {
                 [key: string]: unknown;

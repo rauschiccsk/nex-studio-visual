@@ -82,10 +82,6 @@ class TaskCreate(BaseModel):
         default="todo",
         description="Lifecycle status: todo | in_progress | done | failed.",
     )
-    estimated_minutes: Optional[int] = Field(
-        default=None,
-        description="Architect's estimated duration in minutes.",
-    )
     checklist_type: Optional[str] = Field(
         default=None,
         max_length=30,

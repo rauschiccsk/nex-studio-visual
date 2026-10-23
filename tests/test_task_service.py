@@ -144,13 +144,12 @@ class TestTaskService:
         # Schema / DB defaults.
         assert created.description == ""
         assert created.status == "todo"
-        assert created.estimated_minutes is None
         assert created.checklist_type is None
         # Auto-assigned number.
         assert created.number == 1
 
-    def test_create_with_description_and_estimate(self, db_session):
-        """``create`` applies explicit ``description`` and ``estimated_minutes``."""
+    def test_create_with_description(self, db_session):
+        """``create`` applies an explicit ``description``."""
         feat = _make_feat(db_session)
 
         created = service.create(
@@ -158,12 +157,10 @@ class TestTaskService:
             _payload(
                 feat.id,
                 description="Detailed task body.",
-                estimated_minutes=45,
             ),
         )
 
         assert created.description == "Detailed task body."
-        assert created.estimated_minutes == 45
 
     def test_create_with_custom_status(self, db_session):
         """``create`` applies a non-default ``status`` when supplied."""

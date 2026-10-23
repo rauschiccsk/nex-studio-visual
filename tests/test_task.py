@@ -183,13 +183,11 @@ class TestTaskModel:
         """Optional fields can be NULL."""
         task = _make_task(
             db_session,
-            estimated_minutes=None,
             checklist_type=None,
         )
         db_session.add(task)
         db_session.flush()
 
-        assert task.estimated_minutes is None
         assert task.checklist_type is None
 
     def test_checklist_type_with_value(self, db_session):

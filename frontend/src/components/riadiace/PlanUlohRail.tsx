@@ -898,6 +898,16 @@ function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
               style={{ width: `${donePct}%` }}
             />
           </div>
+          {plan?.forecast && (
+            // DEV-210: the cockpit's forecast from the agent's measured work — never a human-developer estimate.
+            <p
+              className="mt-1.5 text-[11px] text-[var(--color-text-secondary)]"
+              title="Odhad kokpitu z času, ktorý agent naozaj pracoval na úlohách predošlých stavieb; s každou hotovou úlohou sa spresňuje."
+            >
+              Práca agenta: {plan.forecast.text}
+              {plan.forecast.remaining_text && ` · ${plan.forecast.remaining_text}`}
+            </p>
+          )}
         </div>
       )}
 

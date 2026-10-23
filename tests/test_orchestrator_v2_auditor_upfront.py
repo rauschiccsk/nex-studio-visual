@@ -202,10 +202,10 @@ def _stub_turns(monkeypatch, *, design_block, audit_block, consult_block=None):
 def _stub_plan_passes(monkeypatch):
     """Fold the task plan in via a fake invoke_claude: one EPIC/one FEAT/one TASK."""
     skeleton = {
-        "epics": [{"title": "Foundation", "feats": [{"title": "Schema", "estimated_minutes": 60}]}],
+        "epics": [{"title": "Foundation", "feats": [{"title": "Schema"}]}],
         "cross_cutting_rules": "## Invarianty\n- spoločná transakčná hranica",
     }
-    feat_tasks = {"tasks": [{"title": "users table", "task_type": "migration", "estimated_minutes": 60}]}
+    feat_tasks = {"tasks": [{"title": "users table", "task_type": "migration"}]}
 
     async def _fake_invoke_claude(*, prompt, **_kw):
         if "KOSTRU" in prompt:

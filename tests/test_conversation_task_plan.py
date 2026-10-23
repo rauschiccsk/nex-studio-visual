@@ -155,7 +155,6 @@ def _skeleton_dict(plan_spec, cross="## Invarianty\n- x", *, flagship=None, safe
                 "title": f["title"],
                 "description": f.get("description", ""),
                 "plain_description": f.get("plain_description", ""),
-                **({"estimated_minutes": f["estimated_minutes"]} if f.get("estimated_minutes") else {}),
             }
             for f in e["feats"]
         ]
@@ -210,7 +209,6 @@ def _plan(*, epic_plain="Základ aplikácie.", feat_plain="Založíme databázu.
                     "title": "Schema",
                     "description": "DB schema",
                     "plain_description": feat_plain,
-                    "estimated_minutes": 60,
                     "tasks": [
                         {"title": "users table", "task_type": "migration", "plain_description": task_plain},
                     ],

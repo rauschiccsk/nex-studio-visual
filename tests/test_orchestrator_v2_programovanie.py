@@ -435,11 +435,7 @@ def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=Non
     for e_title, feats in plan_spec:
         fs = []
         for f_title, tasks in feats:
-            f = {"title": f_title}
-            ests = [t[2] for t in tasks if len(t) > 2 and t[2] is not None]
-            if ests:
-                f["estimated_minutes"] = sum(ests)
-            fs.append(f)
+            fs.append({"title": f_title})
         epics.append({"title": e_title, "feats": fs})
     # flagship_features is REQUIRED (the release risk floor is derived from it and an optional floor is
     # no floor), so the default is a real declaration rather than an omission.
@@ -454,10 +450,7 @@ def _skeleton_dict(plan_spec, cross=_DEFAULT_CROSS, *, flagship=None, safety=Non
 def _feat_tasks_dict(tasks):
     out = []
     for t in tasks:
-        d = {"title": t[0], "task_type": t[1]}
-        if len(t) > 2 and t[2] is not None:
-            d["estimated_minutes"] = t[2]
-        out.append(d)
+        out.append({"title": t[0], "task_type": t[1]})
     return {"tasks": out}
 
 
@@ -552,8 +545,7 @@ async def test_build_entry_generates_task_plan_via_incremental_passes(db_session
     feats = db_session.execute(select(Feat)).scalars().all()
     tasks = db_session.execute(select(Task)).scalars().all()
     assert len(feats) == 2 and len(tasks) == 3
-    est = {t.title: t.estimated_minutes for t in tasks}
-    assert est["GL tables"] == 90 and est["GL výpočet"] == 120
+    assert {"GL tables", "GL výpočet"} <= {t.title for t in tasks}
     # the plan-gen gate_report carries the plan + cross_cutting_rules the build loop re-reads (_fetch_cross...)
     gr = _plan_gate_reports(db_session, version.id)
     assert gr and "transakčná" in gr[-1].payload["cross_cutting_rules"]
