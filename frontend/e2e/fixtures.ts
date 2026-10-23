@@ -204,6 +204,7 @@ const PIPELINE: S["PipelineBoardRead"] = {
     next_action: "Rozhodni o dvoch otázkach k doručovaniu do NEX Genesis",
     pause_reason: null,
     resume_after_framework_fix: false,
+    resume_after_restart: false,
     working_since: null,
     created_at: T1,
     updated_at: T2,

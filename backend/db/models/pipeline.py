@@ -248,6 +248,13 @@ class PipelineState(Base, UUIDMixin, TimestampMixin):
     #: starts.
     ci_pending_since = Column(TIMESTAMP(timezone=True), nullable=True)
 
+    #: DEV-204 — a restart of the cockpit cut this build off
+    #: (:func:`~backend.services.orchestrator.recover_orphaned_builds_on_startup`) and it waits for the Manažér to run
+    #: the interrupted phase again. A COLUMN for the same reason as
+    #: ``resume_after_framework_fix``: the offered actions are state-only. Set by the recovery, cleared when a turn
+    #: starts. 23.10.2026 NEX Inbox 1.10.2, cut off in Verifikácia, was told „Pokračuj“ with no way to.
+    resume_after_restart = Column(Boolean, nullable=False, server_default="false")
+
     #: ICCINT-25 — "build the Decision Cards again", after the ONE turn that was meant to build them did not
     #: come back (the model briefly unreachable, an unparseable answer). The engine's fail-open is right, but
     #: it used to be a ONE-WAY door: a transient failure permanently downgraded the Manažér from deciding one
@@ -473,3 +480,5 @@ def _clear_framework_resume_on_work(target, value, oldvalue, initiator):
     target.resume_after_framework_fix = False
     # DEV-201: a turn that starts (a fix, a re-run of Verifikácia) makes the wait for the old commit's CI moot.
     target.ci_pending_since = None
+    # DEV-204: the interrupted phase is running again.
+    target.resume_after_restart = False

@@ -66,6 +66,8 @@ export interface PipelineState {
   // PokracovatPoOpraveBar owns it — the words matter (a build released after a repair is not a build the
   // manager paused, and the PlanUlohRail resume rung would say the wrong thing). Absent on an older board.
   resume_after_framework_fix?: boolean;
+  /** DEV-204 — a restart of the cockpit cut the build off; „Pokračovať“ runs the interrupted phase again. */
+  resume_after_restart?: boolean;
   /**
    * ICCINT-75: odkedy sa na tomto ťahu pracuje (`null`, keď sa nepracuje).
    *

@@ -57,8 +57,12 @@ export default function PokracovatPoOpraveBar({ board, versionId, onBoard }: Pro
   // Raz sme už usúdili, že tlačidlo v bočnej lište na oznámenie „čakám na teba“ nestačí, a postavili
   // naň tento pruh (ICCINT-13). Tu je ten istý záver, len pre druhú cestu k tomu istému stavu.
   const poOprave = !!board?.state?.resume_after_framework_fix;
+  // DEV-204 — tretí dôvod: kokpit sa reštartoval počas práce a fázu prerušil. Záchrana po reštarte napísala
+  // „Pokračuj“, no tlačidlo bolo len v pozastavenom Programovaní — NEX Inbox 1.10.2 vo Verifikácii nemal ako
+  // pokračovať (23.10.2026, Director: „Nemám tam možnosť Pokračovať“).
+  const poRestarte = !!board?.state?.resume_after_restart;
   const poPokyne = board?.state?.status === "paused" && board?.state?.pause_reason === "fix_ready";
-  if (!offered || (!poOprave && !poPokyne)) return null;
+  if (!offered || (!poOprave && !poRestarte && !poPokyne)) return null;
 
   async function submit() {
     setError(null);
@@ -81,7 +85,9 @@ export default function PokracovatPoOpraveBar({ board, versionId, onBoard }: Pro
         <span>
           {poOprave
             ? "Chybu v NEX Studiu sme opravili — stavba môže pokračovať"
-            : "Stavba čaká na teba — oprava podľa tvojho pokynu je pripravená"}
+            : poRestarte
+              ? "Kokpit sa počas práce reštartoval — stavba môže pokračovať"
+              : "Stavba čaká na teba — oprava podľa tvojho pokynu je pripravená"}
         </span>
       </div>
 
@@ -89,9 +95,11 @@ export default function PokracovatPoOpraveBar({ board, versionId, onBoard }: Pro
         <p className="text-xs text-[var(--color-text-muted)]">
           {poOprave
             ? "Náš technický tím opravil chybu, na ktorej sa stavba zastavila. Keď stlačíš „Pokračovať“, AI Agent nadviaže tam, kde prestal — nič sa nezačína odznova."
-            : "Tvoj pokyn je zapísaný a oprava pripravená. Zámerne sa nespustila sama — máš možnosť si pokyn ešte pozrieť. Kým nestlačíš „Pokračovať“, stavba stojí."}
+            : poRestarte
+              ? "Reštart kokpitu prerušil prácu na tejto verzii. Keď stlačíš „Pokračovať“, prerušená fáza sa spustí znova; čo už je v kóde zapísané, ostáva."
+              : "Tvoj pokyn je zapísaný a oprava pripravená. Zámerne sa nespustila sama — máš možnosť si pokyn ešte pozrieť. Kým nestlačíš „Pokračovať“, stavba stojí."}
         </p>
-        {note && (
+        {poOprave && note && (
           <p className="rounded border border-[var(--color-border-default)] bg-[var(--color-surface-hover)] px-2 py-1 text-xs text-[var(--color-text-secondary)]">
             Čo sa opravilo: {note}
           </p>

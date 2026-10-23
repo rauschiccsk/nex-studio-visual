@@ -732,6 +732,12 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     if status == "awaiting_manazer" and state.resume_after_framework_fix:
         return {"pokracovat"} | prenos
 
+    # DEV-204: a restart cut the build off — the phase did not finish, so nothing of it is approved or ratified;
+    # „Pokračovať“ runs it again (Verifikácia with the Auditor, from the start), „Upraviť“ steers it instead.
+    # 23.10.2026 NEX Inbox 1.10.2 cut off in Verifikácia offered „Schváliť na Hotovo — Auditor ju overil“, untrue.
+    if status == "awaiting_manazer" and state.resume_after_restart:
+        return {"pokracovat", "uprav"} | prenos
+
     # Director observation #6: a ``framework_issue`` block is an escalation to our technical team — the fix
     # needs a change to NEX Studio ITSELF, which the Manažér objectively CANNOT do (no Uprav / answer / decide
     # — nothing the Manažér can act on). But a pure empty set is a jargon-free dead-end for a non-expert (audit
@@ -12659,6 +12665,8 @@ def recover_orphaned_builds_on_startup(db: Session) -> int:
         state.status = "awaiting_manazer"  # the set listener also clears the flag + baseline …
         state.dispatch_in_flight = False  # … cleared explicitly too for robustness (Seam #2).
         state.dispatch_baseline_sha = None
+        # DEV-204: „Pokračuj“ must be a button in every phase, not only in a paused Programovanie.
+        state.resume_after_restart = True
     db.commit()
     return len(rows)
 
@@ -15262,7 +15270,9 @@ async def apply_action(
         # the Programovanie-only restriction, and only for that one settled window. Same verb rather than a
         # new one: two buttons that both mean "run the next turn" is the confusion this avoids.
         framework_resume = bool(state.resume_after_framework_fix)
-        if not framework_resume and state.current_stage != "programovanie":
+        # DEV-204: a build a restart cut off goes on in whichever phase it was cut off.
+        restart_resume = bool(state.resume_after_restart)
+        if not framework_resume and not restart_resume and state.current_stage != "programovanie":
             raise OrchestratorError("Pokračovať je platné len vo fáze Programovanie")
         # P0 (audit 2026-07-12): resuming the build also re-runs any ``failed`` tasks (else they stay skipped
         # and the build silently completes over dropped work — mirrors the ``uprav`` reset). Kept scoped to
@@ -15281,6 +15291,7 @@ async def apply_action(
             payload={
                 "phase": state.current_stage,
                 **({"framework_fix_resume": True} if framework_resume else {}),
+                **({"restart_resume": True} if restart_resume else {}),
             },
         )
         # Arms the next turn (status → agent_working), which is also what CONSUMES any pending Dedo message:

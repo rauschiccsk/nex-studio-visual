@@ -211,3 +211,36 @@ describe("PokracovatPoOpraveBar — čakanie po usmernenej oprave (ICCINT-126)",
     expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD);
   });
 });
+
+// DEV-204 — a restart of the cockpit cut the build off; „Pokračovať“ must be a button in whichever phase it was.
+describe("PokracovatPoOpraveBar — one button after a restart cut the build off", () => {
+  const restarted = (messages: PipelineMessage[] = []) =>
+    ({
+      state: { current_stage: "verifikacia", status: "awaiting_manazer", resume_after_restart: true },
+      recent_messages: messages,
+      available_actions: ["pokracovat", "uprav"],
+    }) as unknown as PipelineBoard;
+
+  beforeEach(() => {
+    vi.mocked(postPipelineActionApi).mockReset();
+    vi.mocked(postPipelineActionApi).mockResolvedValue(NEXT_BOARD);
+  });
+
+  it("says the restart cut the work off — and no old fix note", () => {
+    render(<PokracovatPoOpraveBar board={restarted([unblockMsg(FIX_NOTE, 4)])} versionId="v-1" onBoard={vi.fn()} />);
+
+    expect(screen.getByText(/Kokpit sa počas práce reštartoval/)).toBeInTheDocument();
+    expect(screen.queryByText(/sme opravili/)).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(FIX_NOTE.slice(0, 30)))).not.toBeInTheDocument();
+  });
+
+  it("its button runs the interrupted phase again", async () => {
+    const onBoard = vi.fn();
+    render(<PokracovatPoOpraveBar board={restarted()} versionId="v-1" onBoard={onBoard} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pokračovať" }));
+
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
+    expect(postPipelineActionApi).toHaveBeenCalledWith("v-1", { action: "pokracovat" });
+  });
+});

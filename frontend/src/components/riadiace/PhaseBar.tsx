@@ -68,7 +68,8 @@ function conversationPhase(board: PipelineBoard | null): ConvPhase {
   // Špecifikácia was not even approved (audit finding, 2026-08-22). The unblock window changes nothing
   // about WHERE the build is, so it must contribute nothing to that derivation. (Same exception
   // `PlanUlohRail` makes for the same reason: the button belongs to `PokracovatPoOpraveBar`.)
-  const releasedAfterFix = !!board?.state?.resume_after_framework_fix;
+  // DEV-204: the resume after a restart belongs to the same bar and says as little about the phase.
+  const releasedAfterFix = !!(board?.state?.resume_after_framework_fix || board?.state?.resume_after_restart);
 
   // Hotovo (STEP 6) — the Manažér's terminal sign-off has settled the version to 'done'. Furthest-right
   // terminal phase, evaluated FIRST so it wins over every earlier signal and back-marks Kontrola ✓.

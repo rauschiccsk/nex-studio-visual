@@ -5788,6 +5788,11 @@ export interface components {
              */
             resume_after_framework_fix: boolean;
             /**
+             * Resume After Restart
+             * @default false
+             */
+            resume_after_restart: boolean;
+            /**
              * Status
              * @enum {string}
              */

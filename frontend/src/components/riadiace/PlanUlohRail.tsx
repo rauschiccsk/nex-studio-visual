@@ -563,7 +563,8 @@ function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
   // bug — and that one belongs to PokracovatPoOpraveBar in the main column, which explains what was repaired.
   // Yield the rung to it: two buttons firing the same verb, one of them labelled "Pokračovať v stavbe" for a
   // build that may never have reached the build phase, is exactly the near-duplicate this avoids.
-  const releasedAfterFix = !!board?.state?.resume_after_framework_fix;
+  // DEV-204: the resume after a restart belongs to the same bar and says as little about the phase.
+  const releasedAfterFix = !!(board?.state?.resume_after_framework_fix || board?.state?.resume_after_restart);
   // ICCINT-126: to isté platí pre druhú cestu k tomu istému pruhu — opravu pripravenú podľa pokynu
   // Manažéra. Dovtedy bola jediným viditeľným signálom práve táto priečka so zmeneným textom, a
   // Director ju 14.09.2026 prehliadol. Pruh v hlavnom stĺpci ju odteraz nahrádza a povie aj prečo;
