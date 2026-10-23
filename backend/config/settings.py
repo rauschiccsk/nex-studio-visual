@@ -109,6 +109,11 @@ class Settings(BaseSettings):
     # it has taken more than the budget since it began, or when the server has less than the floor left
     # (04.10.2026 a project's tests filled ANDROS's root disk).
     release_smoke_tmp_root: str = "/opt/data/nex-studio-visual/smoke"
+
+    # DEV-166: how much build cache a deploy target keeps after a deploy (GB) — the cleanup removes only what is above
+    # it, least recently used first, so the next build of an unchanged project does not start from nothing. Sized for
+    # MAGER (97,9 GB disk, alarm at 15 % free): the last builds of NEX Inbox (~2,8 GB) and NEX Manager, with room.
+    deploy_build_cache_max_gb: int = 8
     release_smoke_disk_budget_bytes: int = 30 * 1024**3
     release_smoke_min_free_bytes: int = 20 * 1024**3
     # DEV-70 — what a verification turn needs from this server's Docker is prepared by the cockpit, not fetched by the

@@ -6090,6 +6090,10 @@ async def _uprac_na_cieli(
     ⚠️ **Pripnuté obrazy zostávajú.** Maže sa vyrovnávacia pamäť a vrstvy, ktoré už nikto nedrží
     (``image prune`` bez ``-a``). Obraz predchádzajúcej verzie je návrat a ten sa nezahadzuje.
 
+    ⚠️ **Vyrovnávacia pamäť stavby zostáva do stropu (DEV-166).** Celá (``builder prune -af``) mazala aj to, z čoho
+    by ďalšia stavba vychádzala — NEX Inbox sa na MAGERi staval zakaždým od nuly 12–27 minút. Maže sa len to, čo
+    presahuje :attr:`settings.deploy_build_cache_max_gb`, najdlhšie nepoužité prvé.
+
     ⚠️ **Zlyhanie upratovania nezhodí nasadenie.** Je to údržba: aplikácia beží, len disku sa neuľavilo.
     Povie sa to v hlásení, aby to nezostalo tajomstvom.
     """
@@ -6104,7 +6108,10 @@ async def _uprac_na_cieli(
     env = remote_instance.docker_env(ciel)
     uvolnene: list[str] = []
     for popis, cmd in (
-        ("vyrovnávacia pamäť stavby", ["docker", "builder", "prune", "-af"]),
+        (
+            f"vyrovnávacia pamäť stavby nad {settings.deploy_build_cache_max_gb} GB",
+            ["docker", "builder", "prune", "-af", "--max-used-space", f"{settings.deploy_build_cache_max_gb}gb"],
+        ),
         ("nepoužívané vrstvy obrazov", ["docker", "image", "prune", "-f"]),
     ):
         try:
@@ -6115,7 +6122,8 @@ async def _uprac_na_cieli(
         except (OSError, asyncio.TimeoutError) as exc:
             return f"{detail} ⚠️ Upratanie na cieli sa nepodarilo ({popis}: {exc.__class__.__name__})."
         text = (vystup or b"").decode("utf-8", "replace")
-        koniec = next((r for r in reversed(text.splitlines()) if "reclaimed" in r.lower()), "")
+        # BuildKit says ``Total:``, the image prune ``Total reclaimed space:`` — both end with what was freed.
+        koniec = next((r for r in reversed(text.splitlines()) if r.lower().startswith("total")), "")
         if proc.returncode != 0:
             return f"{detail} ⚠️ Upratanie na cieli sa nepodarilo ({popis})."
         if koniec:

@@ -95,14 +95,17 @@ RUN git config --global user.email "studio@isnex.eu" \
 # for the pipeline build + Verifikácia smoke, UAT/PROD deploy (uat_provisioner/orchestrator), and
 # `docker run` for per-project CI-runner provisioning. python:3.12-slim has no docker CLI, so those
 # shell-outs raised FileNotFoundError — which aborted even Create Project at the CI-runner step (v4.0.40).
-# Install the docker CLI + compose plugin (client only; the daemon is the host's, via the socket).
+# Install the docker CLI + compose and buildx plugins (client only; the daemon is the host's, via the socket).
+# DEV-166: without buildx Compose falls back to the classic builder — a multi-stage build's dependency stage is then
+# an unused image the post-deploy cleanup removes, and every build on a target started from nothing.
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin openssh-client \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
+        openssh-client \
     && rm -rf /var/lib/apt/lists/*
 # ICCINT-151 — `openssh-client` nie je pre prihlasovanie, ale pre Docker: nasadenie na druhý
 # stroj beží cez `DOCKER_HOST=ssh://…`, kde si Docker otvára spojenie sám. Kľúč, ktorý na to
@@ -118,7 +121,8 @@ RUN docker_bin="$(command -v docker)" && test -x "$docker_bin" \
     && git_bin="$(command -v git)" && test -x "$git_bin" \
     && ssh_bin="$(command -v ssh)" && test -x "$ssh_bin" \
     && docker compose version \
-    && echo "Docker CLI at $docker_bin (+ compose plugin), GitHub CLI at $gh_bin, git at $git_bin, ssh at $ssh_bin"
+    && docker buildx version \
+    && echo "Docker CLI at $docker_bin (+ compose and buildx plugins), GitHub CLI at $gh_bin, git at $git_bin, ssh at $ssh_bin"
 
 # Node.js — the AI Agent (claude) shells out to node/npm when it builds a generated app's frontend
 # (npm install / build), so the backend that hosts the agent needs a node runtime. The `claude` binary

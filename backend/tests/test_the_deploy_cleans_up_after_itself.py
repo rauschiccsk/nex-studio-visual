@@ -154,3 +154,47 @@ def test_a_blank_target_means_this_machine(monkeypatch, ciel) -> None:
     asyncio.run(O._uprac_na_cieli(True, "OK", ciel))
 
     assert videne == []
+
+
+# ── 5. DEV-166: pamäť stavby zostáva do stropu, aby ďalšia stavba nezačínala od nuly ──────────────────────────────
+
+
+def test_the_build_cache_is_kept_up_to_its_ceiling(monkeypatch) -> None:
+    """DEV-166 (21.10.2026): ``builder prune -af`` zmazal po každom nasadení celú pamäť stavby a NEX Inbox sa na MAGERi
+    staval zakaždým od nuly 12–27 minút. Upratanie maže len to, čo presahuje strop z nastavení kokpitu."""
+    videne = _zachyt(monkeypatch, vystup=b"Total:\t1.2GB\n")
+    monkeypatch.setattr(O.settings, "deploy_build_cache_max_gb", 3)  # the ceiling is the setting, not a number here
+
+    detail = asyncio.run(O._uprac_na_cieli(True, "OK", "mager"))
+
+    builder = [v["cmd"] for v in videne if v["cmd"][:3] == ["docker", "builder", "prune"]]
+    assert builder == [["docker", "builder", "prune", "-af", "--max-used-space", "3gb"]]
+    assert "vyrovnávacia pamäť stavby nad 3 GB: 1.2GB" in detail
+
+
+def test_what_the_build_cache_cleanup_freed_is_reported_from_buildkit(monkeypatch) -> None:
+    """BuildKit hlási uvoľnené miesto riadkom ``Total:`` — nie ``Total reclaimed space`` starého spôsobu stavby."""
+    outputs = iter([b"ID\tRECLAIMABLE\tSIZE\nabc\ttrue\t1.2GB\nTotal:\t1.2GB\n", b"Total reclaimed space: 0B\n"])
+
+    async def _fake(*cmd, **kw):
+        return _FalosnyProces(next(outputs), 0)
+
+    monkeypatch.setattr(O.asyncio, "create_subprocess_exec", _fake)
+
+    detail = asyncio.run(O._uprac_na_cieli(True, "OK", "mager"))
+
+    ceiling = O.settings.deploy_build_cache_max_gb
+    assert detail == (
+        f"OK Upratané na cieli — vyrovnávacia pamäť stavby nad {ceiling} GB: 1.2GB; nepoužívané vrstvy obrazov: 0B."
+    )
+
+
+def test_the_cockpit_image_builds_with_buildkit():
+    """Bez doplnku buildx Compose stavia starým spôsobom stavby: medzistupne (knižnice) sú preň nepoužívané obrazy a
+    upratanie ich zmaže (DEV-166, zmerané pokusom 23.10.2026)."""
+    from pathlib import Path
+
+    recipe = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "docker-buildx-plugin" in recipe
+    assert "docker buildx version" in recipe
