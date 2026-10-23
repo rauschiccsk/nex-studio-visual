@@ -184,6 +184,22 @@ def _sync_skills(claude_dir: Path) -> int:
     return changed
 
 
+def role_settings_text(settings_tpl: Path, project_root: Path) -> str:
+    """A role's ``settings.json`` (its deny profile) for the project at *project_root*.
+
+    ``<PROJECT_ROOT>`` = the project root = the agent's cwd at dispatch (claude_agent runs with
+    cwd=PROJECTS_ROOT/slug), so the absolute deny/allow globs match the files the agent touches.
+
+    The LEADING EXTRA SLASH is not a typo and is load-bearing. Claude Code's path rules spell an ABSOLUTE path with
+    a double slash — ``Edit(//opt/projects/demo/CLAUDE.md)``; a single slash is read as relative to the settings
+    file's own directory, so it silently matches nothing. Verified against the real CLI: a deny on
+    ``Read(/tmp/x/target.txt)`` let the read through, the same rule written ``Read(//tmp/x/target.txt)`` blocked it.
+    Every path deny in these profiles was written the single-slash way, so even once the profile is actually loaded
+    (it now is — see ``build_claude_argv``), the file rules would have gone on matching nothing while the
+    ``Bash(...)`` rules beside them worked. Two bugs, one appearance."""
+    return settings_tpl.read_text(encoding="utf-8").replace("<PROJECT_ROOT>", "//" + str(project_root).lstrip("/"))
+
+
 def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: str = project_surfaces.STANDARD) -> int:
     """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
 
@@ -206,6 +222,9 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
     v najhoršom prípade bežal podľa starších pravidiel, čo je presne dnešný stav — nie zhoršenie.
 
     DEV-165: ``project_type`` rozhoduje o dodatku Web projektu — volajúci ho berie z kokpitu (``Project.type``).
+
+    DEV-196: pravidlá agenta nie sú v gite projektu, takže projekt znovu naklonovaný z GitHubu ich nemá — obnova
+    preto založí aj chýbajúci priečinok roly a zapíše aj nastavenia roly (``settings.json``), ako pri založení.
     """
     claude_dir = project_root / ".claude"
     if not project_root.is_dir() or not claude_dir.is_dir():
@@ -217,17 +236,25 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
     base_text = base_tpl.read_text(encoding="utf-8").rstrip()
 
     refreshed = 0
-    for role_slug, (charter_tpl_name, _settings_tpl_name) in _V2_AGENTS.items():
+    for role_slug, (charter_tpl_name, settings_tpl_name) in _V2_AGENTS.items():
         charter_tpl = NEX_STUDIO_TEMPLATES / charter_tpl_name
-        role_charter = claude_dir / "agents" / role_slug / "CLAUDE.md"
-        if not charter_tpl.is_file() or not role_charter.parent.is_dir():
+        settings_tpl = NEX_STUDIO_TEMPLATES / settings_tpl_name
+        role_dir = claude_dir / "agents" / role_slug
+        if not charter_tpl.is_file() or not settings_tpl.is_file():
             continue
-        wanted = role_charter_text(base_text, charter_tpl, project_type)
+        wanted = {
+            role_dir / "CLAUDE.md": role_charter_text(base_text, charter_tpl, project_type),
+            role_dir / "settings.json": role_settings_text(settings_tpl, project_root),
+        }
         try:
-            if role_charter.is_file() and role_charter.read_text(encoding="utf-8") == wanted:
-                continue  # už sedí — nezapisujeme, nech sa nemení čas úpravy zbytočne
-            role_charter.write_text(wanted, encoding="utf-8")
-            refreshed += 1
+            role_dir.mkdir(parents=True, exist_ok=True)
+            written = 0
+            for path, text in wanted.items():
+                if path.is_file() and path.read_text(encoding="utf-8") == text:
+                    continue  # už sedí — nezapisujeme, nech sa nemení čas úpravy zbytočne
+                path.write_text(text, encoding="utf-8")
+                written += 1
+            refreshed += 1 if written else 0
         except OSError as exc:
             logger.warning("charter refresh failed for slug=%s role=%s: %s", slug, role_slug, exc)
     # DEV-46: the skills travel with the charters — the same template owner, the same moment, the same leniency.
@@ -281,18 +308,6 @@ def provision_v2_agent_charters(
             f"v2 charter provisioning failed (slug={slug}): shared base template missing at {base_tpl}"
         )
     base_text = base_tpl.read_text(encoding="utf-8").rstrip()
-    # <PROJECT_ROOT> = the project root = the agent's cwd at dispatch (claude_agent runs with
-    # cwd=PROJECTS_ROOT/slug), so the absolute deny/allow globs match the files the agent touches.
-    #
-    # The LEADING EXTRA SLASH is not a typo and is load-bearing. Claude Code's path rules spell an
-    # ABSOLUTE path with a double slash — ``Edit(//opt/projects/demo/CLAUDE.md)``; a single slash is
-    # read as relative to the settings file's own directory, so it silently matches nothing. Verified
-    # against the real CLI: a deny on ``Read(/tmp/x/target.txt)`` let the read through, the same rule
-    # written ``Read(//tmp/x/target.txt)`` blocked it. Every path deny in these profiles was written
-    # the single-slash way, so even once the profile is actually loaded (it now is — see
-    # ``build_claude_argv``), the file rules would have gone on matching nothing while the ``Bash(...)``
-    # rules beside them worked. Two bugs, one appearance.
-    project_root_str = "//" + str(project_root).lstrip("/")
 
     for role_slug, (charter_tpl_name, settings_tpl_name) in _V2_AGENTS.items():
         charter_tpl = NEX_STUDIO_TEMPLATES / charter_tpl_name
@@ -318,10 +333,7 @@ def provision_v2_agent_charters(
                 role_charter_text(base_text, charter_tpl, project_type),
                 encoding="utf-8",
             )
-            (role_dir / "settings.json").write_text(
-                settings_tpl.read_text(encoding="utf-8").replace("<PROJECT_ROOT>", project_root_str),
-                encoding="utf-8",
-            )
+            (role_dir / "settings.json").write_text(role_settings_text(settings_tpl, project_root), encoding="utf-8")
         except OSError as exc:
             raise ProvisioningError(
                 f"v2 charter provisioning failed (slug={slug}): writing {role_slug} charter: {exc}"

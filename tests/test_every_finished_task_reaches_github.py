@@ -43,12 +43,13 @@ def _commit(work: Path, name: str, subject: str) -> str:
 
 def _repo(work: Path, origin: Path | None) -> None:
     """A checkout on ``main`` with one commit; with ``origin``, that commit is already on it — as after the
-    project's creation, whose ``.gitignore`` names the build's leftovers (DEV-176), so the cockpit adds no commit."""
+    project's creation, whose ``.gitignore`` names the build's leftovers (DEV-176) and the agent's rules (DEV-196), so
+    the cockpit adds no commit."""
     work.mkdir(parents=True)
     _git(work, "init", "-q", "-b", "main")
     _git(work, "config", "user.email", "studio@isnex.eu")
     _git(work, "config", "user.name", "NEX Studio")
-    (work / ".gitignore").write_text(f"{build_leftovers.PATTERN}\n", encoding="utf-8")
+    (work / ".gitignore").write_text("".join(f"{line}\n" for line in build_leftovers.IGNORED), encoding="utf-8")
     _commit(work, "README.md", "chore: start")
     if origin is not None:
         subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)

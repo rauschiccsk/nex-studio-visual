@@ -91,7 +91,7 @@ def _repo(work: Path) -> str:
     _git(work, "init", "-q", "-b", "main")
     _git(work, "config", "user.email", "studio@isnex.eu")
     _git(work, "config", "user.name", "NEX Studio")
-    (work / ".gitignore").write_text(f"{build_leftovers.PATTERN}\n", encoding="utf-8")
+    (work / ".gitignore").write_text("".join(f"{line}\n" for line in build_leftovers.IGNORED), encoding="utf-8")
     _git(work, "add", "-A")
     _git(work, "commit", "-q", "-m", "chore: start")
     return _git(work, "rev-parse", "HEAD")

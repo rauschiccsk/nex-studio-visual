@@ -33,7 +33,10 @@ def project(tmp_path, monkeypatch) -> tuple[Path, Path]:
     _git(ws, "init", "-q", "-b", "main")
     _git(ws, "config", "user.email", "t@example.com")
     _git(ws, "config", "user.name", "t")
-    (ws / ".gitignore").write_text("node_modules\n")
+    # A project founded today ignores the agent's rules already (DEV-196) — these tests are about the build's cache.
+    (ws / ".gitignore").write_text(
+        "node_modules\n" + "".join(f"{line}\n" for line in build_leftovers.AGENT_RULES.ignore)
+    )
     for rel in ("frontend/tsconfig.app.tsbuildinfo", "web/tsconfig.node.tsbuildinfo", "frontend/src/a.ts"):
         (ws / rel).parent.mkdir(parents=True, exist_ok=True)
         (ws / rel).write_text("{}\n")
@@ -68,13 +71,14 @@ def test_a_project_that_tracks_leftovers_stops_tracking_them_in_one_commit(proje
 
 def test_an_ignore_file_without_a_final_newline_keeps_its_last_line(project):
     ws, _origin = project
-    (ws / ".gitignore").write_text("node_modules")
+    (ws / ".gitignore").write_text("\n".join(["node_modules", *build_leftovers.AGENT_RULES.ignore]))
     _git(ws, "commit", "-q", "-am", "an ignore file without a final newline")
 
     assert build_leftovers.keep_out_of_git(ws) is None
 
     lines = (ws / ".gitignore").read_text().splitlines()
     assert (lines[0], lines[-1]) == ("node_modules", build_leftovers.PATTERN)
+    assert build_leftovers.AGENT_RULES.ignore[-1] in lines, "the last line before the addition stays a line of its own"
 
 
 def test_a_clean_project_gets_no_commit(project):
