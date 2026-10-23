@@ -149,6 +149,7 @@ nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 čísla karty — kokpit ju ukáže zelenou a zhrnie nad odpoveďou: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
 Pri nej ponúkne „Vložiť do odpovede“: text medzi značkami sa vloží do poľa odpovede agentovi a Manažér ho odošle
 sám. Medzi značky preto daj **celú odpoveď tak, ako ju má agent dostať** — jednu, krátku a presnú, nie jej nadpis.
+Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra — povedz mu, nech pri nej klikne „Vložiť do odpovede“.
 
 ## 5. Ako odpovedáš
 

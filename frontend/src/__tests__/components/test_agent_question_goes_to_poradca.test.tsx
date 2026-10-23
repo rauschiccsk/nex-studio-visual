@@ -7,7 +7,7 @@
  * agentovi …“) had no way back into the box — only an instruction for the agent had one.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
@@ -249,7 +249,24 @@ describe("Poradca's recommended answer comes back into the answer box", () => {
   it("one click puts the answer into the box of Riadiace centrum — nothing is sent", () => {
     renderAnswer([ANSWER]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Vložiť do odpovede" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Čo vybrať" })).getByRole("button", { name: "Vložiť do odpovede" }),
+    );
+
+    expect(screen.getByText("na adrese /riadiace-centrum")).toBeInTheDocument();
+    expect(takeHandoff("v1")).toBe("Platný je zoznam v prílohe.");
+  });
+
+  // DEV-205 — where Poradca names the answer in its text, the same button stands beside it.
+  it("the answer inside the text carries the same button", () => {
+    renderAnswer([ANSWER]);
+
+    const summary = screen.getByRole("group", { name: "Čo vybrať" });
+    const buttons = screen.getAllByRole("button", { name: "Vložiť do odpovede" });
+    expect(buttons).toHaveLength(2);
+    const inText = buttons.find((b) => !summary.contains(b));
+    expect(inText).toBeDefined();
+    fireEvent.click(inText as HTMLElement);
 
     expect(screen.getByText("na adrese /riadiace-centrum")).toBeInTheDocument();
     expect(takeHandoff("v1")).toBe("Platný je zoznam v prílohe.");
@@ -257,19 +274,17 @@ describe("Poradca's recommended answer comes back into the answer box", () => {
 
   it("a choice on a decision card is picked on the card, not inserted", () => {
     renderAnswer([ON_CARD]);
-    expect(
-      screen.queryByRole("button", { name: "Vložiť do odpovede" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: "Vložiť do odpovede" })).toHaveLength(0);
   });
 
-  it("when the box would not take it, the button says why instead of sending him to an empty box", () => {
+  it("when the box would not take it, the buttons say why instead of sending him to an empty box", () => {
     renderAnswer([ANSWER], null);
 
-    const button = screen.getByRole("button", { name: "Vložiť do odpovede" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute(
-      "title",
-      expect.stringMatching(/hore vyber verziu/),
-    );
+    const buttons = screen.getAllByRole("button", { name: "Vložiť do odpovede" });
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", expect.stringMatching(/hore vyber verziu/));
+    }
   });
 });

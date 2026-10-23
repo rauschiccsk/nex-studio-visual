@@ -99,6 +99,9 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       ? null
       : (scopeVersion.instruction_closed_reason ?? "Pole Riadiaceho centra teraz pokyn neprijme.");
 
+  // DEV-135 / DEV-205 — the same „Vložiť do odpovede“ above the answer and where the answer names it.
+  const answerInsert = { insert: handOff, blocked: instructionBlocked };
+
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
       <div className="mb-1 text-[11px] font-semibold text-[var(--color-text-secondary)]">Poradca</div>
@@ -127,7 +130,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
         </div>
       )}
 
-      {!running && <ChoiceSummary choices={choices} answer={{ insert: handOff, blocked: instructionBlocked }} />}
+      {!running && <ChoiceSummary choices={choices} answer={answerInsert} />}
       {!running && message.content && (
         <SpecMarkdown
           codePaths={codePaths}
@@ -137,7 +140,11 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
           components={{
             a({ href, children, ...props }) {
               if (href?.startsWith(CHOICE_HREF)) {
-                return <InlineChoice href={href} choices={choices}>{children}</InlineChoice>;
+                return (
+                  <InlineChoice href={href} choices={choices} answer={answerInsert}>
+                    {children}
+                  </InlineChoice>
+                );
               }
               return (
                 <a href={href} {...props}>

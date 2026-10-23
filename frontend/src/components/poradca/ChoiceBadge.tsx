@@ -43,6 +43,21 @@ export interface AnswerInsert {
   blocked: string | null;
 }
 
+/** „Vložiť do odpovede“ — the answer for the agent's question into the answer box of Riadiace centrum (DEV-135). */
+function InsertAnswerButton({ label, answer }: { label: string; answer: AnswerInsert }) {
+  return (
+    <button
+      type="button"
+      onClick={() => answer.insert(label)}
+      disabled={!!answer.blocked}
+      title={answer.blocked ?? "Vloží odpoveď do poľa odpovede v Riadiacom centre — odošleš ju sám."}
+      className="ml-1 inline-flex items-center gap-1 rounded border border-[var(--color-border-default)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:border-primary-500 hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Send className="h-3 w-3" aria-hidden /> Vložiť do odpovede
+    </button>
+  );
+}
+
 /** Above the answer: what to pick, at one glance. */
 export function ChoiceSummary({ choices, answer }: { choices: PoradcaChoice[]; answer?: AnswerInsert }) {
   if (!choices.length) return null;
@@ -60,15 +75,7 @@ export function ChoiceSummary({ choices, answer }: { choices: PoradcaChoice[]; a
             <span className="text-xs text-[var(--color-state-warning-fg)]">{NOT_ON_CARD_NOTE}</span>
           )}
           {answer && !choice.card && choice.status === "answer" && (
-            <button
-              type="button"
-              onClick={() => answer.insert(choice.label)}
-              disabled={!!answer.blocked}
-              title={answer.blocked ?? "Vloží odpoveď do poľa odpovede v Riadiacom centre — odošleš ju sám."}
-              className="ml-1 inline-flex items-center gap-1 rounded border border-[var(--color-border-default)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:border-primary-500 hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Send className="h-3 w-3" aria-hidden /> Vložiť do odpovede
-            </button>
+            <InsertAnswerButton label={choice.label} answer={answer} />
           )}
         </div>
       ))}
@@ -76,10 +83,29 @@ export function ChoiceSummary({ choices, answer }: { choices: PoradcaChoice[]; a
   );
 }
 
-/** The badge for a choice link inside the answer — the server's verdict found by card and text. */
-export function InlineChoice({ href, children, choices }: { href: string; children: ReactNode; choices: PoradcaChoice[] }) {
+/** The badge for a choice link inside the answer — the server's verdict found by card and text. DEV-205: the answer for
+ * the agent's question carries „Vložiť do odpovede“ here too — where Poradca says to send it, not only above. */
+export function InlineChoice({
+  href,
+  children,
+  choices,
+  answer,
+}: {
+  href: string;
+  children: ReactNode;
+  choices: PoradcaChoice[];
+  answer?: AnswerInsert;
+}) {
   const card = choiceCard(href);
   const label = Children.toArray(children).join("");
   const found = choices.find((c) => (c.card ?? null) === card && c.label === label);
-  return <ChoiceBadge choice={found ?? { card, label, status: card ? "not_on_card" : "answer" }} />;
+  const choice = found ?? { card, label, status: card ? "not_on_card" : "answer" };
+  // Only an answer the server recognised among the answer's choices — the same one the summary above offers.
+  if (!answer || !found || found.card || found.status !== "answer") return <ChoiceBadge choice={choice} />;
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-1">
+      <ChoiceBadge choice={found} />
+      <InsertAnswerButton label={found.label} answer={answer} />
+    </span>
+  );
 }
