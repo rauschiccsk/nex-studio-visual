@@ -1814,8 +1814,9 @@ export interface paths {
         put?: never;
         /**
          * Commit Git
-         * @description Commit ALL pending changes so the tree is clean before founding (the guard's
-         *     "Uložiť ich" action). Preserves work — the safe, default resolution.
+         * @description Commit the pending changes the guard shows so the tree is clean before founding (the guard's
+         *     "Uložiť ich" action). Preserves work — the safe, default resolution. DEV-203: the cockpit's own
+         *     files stay out, as they stay off the guard.
          */
         post: operations["commit_git_api_v1_projects__project_id__git_commit_post"];
         delete?: never;
@@ -1835,8 +1836,9 @@ export interface paths {
         put?: never;
         /**
          * Discard Git
-         * @description Discard ALL pending changes → clean tree (the guard's "Zahodiť" action).
-         *     Destructive; the FE gates it behind an explicit operator confirmation.
+         * @description Discard the pending changes the guard shows → clean tree (the guard's "Zahodiť" action).
+         *     Destructive; the FE gates it behind an explicit operator confirmation. DEV-203: the cockpit's
+         *     own files are left as they are.
          */
         post: operations["discard_git_api_v1_projects__project_id__git_discard_post"];
         delete?: never;
