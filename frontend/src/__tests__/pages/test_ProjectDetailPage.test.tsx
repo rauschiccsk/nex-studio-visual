@@ -210,6 +210,9 @@ describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
       proposed_action: "new_version",
       status: "proposed",
       created_at: "2026-09-26T08:02:49Z",
+      proposed_version_number: null,
+      version_number: "0.20.0",
+      unstarted_version_numbers: [],
     });
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
@@ -692,6 +695,7 @@ describe("ProjectDetailPage — the next version's number comes from the cockpit
       created_at: "2026-10-21T15:06:34Z",
       proposed_version_number: "1.1.0",
       version_number: "1.1.0",
+      unstarted_version_numbers: [],
     });
     getNextVersionNumberApiMock
       .mockResolvedValueOnce({ version_number: "1.1.0" })

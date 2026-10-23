@@ -171,6 +171,29 @@ def _get_by_project_and_version_number(
     return db.execute(stmt).scalar_one_or_none()
 
 
+def unstarted_versions(db: Session, project_id: UUID) -> list[Version]:
+    """The project's versions nothing has happened in yet, in number order — DEV-206.
+
+    Unstarted = still ``planned``, no build record and no Zadanie on disk: a new project's 0.1.0 as the cockpit founds
+    it, or an empty draft. Dedo's brief fills such a version instead of founding another one next to it (until
+    23.10.2026 it founded 0.2.0 and the empty 0.1.0 of NEX Knowledge would have stayed behind). A version that has
+    begun in any of the three ways is never filled — its Zadanie or its build is work (ICCINT-71)."""
+    from backend.db.models.pipeline import PipelineState
+
+    planned = db.execute(
+        select(Version)
+        .where(Version.project_id == project_id, Version.status == "planned")
+        .where(~select(PipelineState.id).where(PipelineState.version_id == Version.id).exists())
+    ).scalars()
+    unstarted = [version for version in planned if not read_zadanie(db, version.id).strip()]
+    return sorted(unstarted, key=lambda version: number_order_key(version.version_number))
+
+
+def unstarted_version(db: Session, project_id: UUID, version_number: str) -> Optional[Version]:
+    """The unstarted version (:func:`unstarted_versions`) with this number, or ``None``."""
+    return next((v for v in unstarted_versions(db, project_id) if v.version_number == version_number), None)
+
+
 #: Bare-semver (optional leading ``v`` + optional patch) — the same shape the FE ``nextVersionNumber``
 #: helper accepts (NewVersionPage.tsx). Versions are stored WITHOUT the leading ``v``.
 _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?$")

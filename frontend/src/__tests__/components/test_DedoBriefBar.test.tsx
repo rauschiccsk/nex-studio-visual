@@ -55,6 +55,7 @@ function navrh(over: Partial<DedoProjectProposal> = {}): DedoProjectProposal {
     created_at: "2026-09-25T10:00:00Z",
     proposed_version_number: null,
     version_number: null,
+    unstarted_version_numbers: [],
     ...over,
   };
 }
@@ -241,6 +242,35 @@ describe("Číslo novej verzie Manažér vidí pred založením (DEV-149)", () =
     vykresli(navrh());
 
     expect(screen.queryByLabelText("Číslo verzie")).not.toBeInTheDocument();
+  });
+});
+
+describe("Zadanie doplní verziu, ktorá sa ešte nezačala (DEV-206)", () => {
+  // 23.10.2026: NEX Knowledge mal len prázdnu plánovanú 0.1.0 — zadanie by založilo 0.2.0 vedľa nej.
+  const prvaVerzia = () =>
+    navrh({ proposed_action: "new_version", version_number: "0.1.0", unstarted_version_numbers: ["0.1.0"] });
+
+  it("povie, že doplní pripravenú verziu, a pošle ju s jej číslom", async () => {
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-1", started: false });
+    vykresli(prvaVerzia());
+
+    expect(screen.getByText(/Zadanie sa zapíše do pripravenej verzie 0\.1\.0, ktorá sa ešte nezačala/)).toBeInTheDocument();
+    expect(screen.queryByText(/Verzia vznikne ako koncept/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Doplniť verziu 0.1.0" }));
+
+    await waitFor(() =>
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "0.1.0"),
+    );
+  });
+
+  it("s iným číslom znova zakladá novú verziu", () => {
+    vykresli(prvaVerzia());
+
+    fireEvent.change(screen.getByLabelText("Číslo verzie"), { target: { value: "0.2.0" } });
+
+    expect(screen.getByRole("button", { name: /Založiť novú verziu/i })).toBeEnabled();
+    expect(screen.getByText(/Verzia vznikne ako koncept/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Doplniť verziu/ })).not.toBeInTheDocument();
   });
 });
 

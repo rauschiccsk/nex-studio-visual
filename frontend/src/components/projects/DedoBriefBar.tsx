@@ -50,6 +50,16 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
   },
 };
 
+/** DEV-206 — sent with the number of a version that has not started yet (a new project's 0.1.0), the brief fills it. */
+function fillCopy(versionNumber: string): { button: string; effect: string } {
+  return {
+    button: `Doplniť verziu ${versionNumber}`,
+    effect:
+      `Zadanie sa zapíše do pripravenej verzie ${versionNumber}, ktorá sa ešte nezačala — nová verzia nevznikne. ` +
+      "Nič sa nerozbehne — spustíš ju, keď budeš chcieť.",
+  };
+}
+
 const FALLBACK_COPY = {
   button: "Použiť zadanie",
   effect: "Zo zadania vznikne nová verzia.",
@@ -105,10 +115,11 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   if (!proposal) return null;
 
   const decidingAbout = proposal.id;
-  const copy = ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY;
-  const edited = text.trim() !== proposal.content.trim();
   const needsKind = proposal.proposed_action === "fast_fix";
   const needsNumber = proposal.proposed_action === "new_version";
+  const fills = needsNumber && proposal.unstarted_version_numbers.includes(versionNumber.trim());
+  const copy = fills ? fillCopy(versionNumber.trim()) : (ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY);
+  const edited = text.trim() !== proposal.content.trim();
   const numberOk = !needsNumber || VERSION_NUMBER_RE.test(versionNumber.trim());
   const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null) && numberOk;
 

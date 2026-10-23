@@ -1593,7 +1593,10 @@ def get_dedo_proposal(
     if proposal is None:
         return None
     return DedoProjectProposalRead.model_validate(proposal).model_copy(
-        update={"version_number": dedo_proposal_service.founding_number(db, proposal)}
+        update={
+            "version_number": dedo_proposal_service.founding_number(db, proposal),
+            "unstarted_version_numbers": dedo_proposal_service.unstarted_numbers(db, proposal),
+        }
     )
 
 
@@ -1638,17 +1641,20 @@ async def send_dedo_proposal(
                 payload={"flow_type": "fast_fix", "directive": payload.text},
             )
         else:
-            version = version_service.create(
-                db,
-                project_id,
-                VersionCreate(
-                    # DEV-149: the number the Manažér had on screen — Dedo's proposed one or the suggestion.
-                    version_number=payload.version_number or dedo_proposal_service.founding_number(db, proposal),
-                    name="Nová verzia",
-                    description=payload.text,
-                ),
-                current_user.id,
-            )
+            # DEV-149: the number the Manažér had on screen — Dedo's proposed one or the suggestion.
+            number = payload.version_number or dedo_proposal_service.founding_number(db, proposal)
+            # DEV-206: a version that has not started yet (a new project's 0.1.0) is filled, not founded next to.
+            version = version_service.unstarted_version(db, project_id, number)
+            if version is not None:
+                version.description = payload.text
+                db.flush()
+            else:
+                version = version_service.create(
+                    db,
+                    project_id,
+                    VersionCreate(version_number=number, name="Nová verzia", description=payload.text),
+                    current_user.id,
+                )
             # ⚠️ Dva kroky, nie jeden. Popis je nadpisová poznámka; ZADANIE je to, čo číta fáza
             # Príprava (`customer-requirements.md`). 26.09.2026 pri prvom skutočnom použití vyšlo
             # najavo, že sa zapisoval len popis — verzia vznikla, v kokpite vyzerala správne a agent

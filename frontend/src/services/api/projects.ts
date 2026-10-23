@@ -285,6 +285,8 @@ export interface DedoProjectProposal {
   proposed_version_number: string | null;
   /** DEV-149 — the number the new version is founded with unless the Manažér changes it; `null` for a fast fix. */
   version_number: string | null;
+  /** DEV-206 — versions that have not started yet; sent with one of these numbers, the brief fills that version. */
+  unstarted_version_numbers: string[];
 }
 
 export interface DedoProjectProposalSent {

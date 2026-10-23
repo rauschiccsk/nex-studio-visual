@@ -4593,6 +4593,11 @@ export interface components {
             proposed_version_number?: string | null;
             /** Status */
             status: string;
+            /**
+             * Unstarted Version Numbers
+             * @default []
+             */
+            unstarted_version_numbers: string[];
             /** Version Number */
             version_number?: string | null;
         };

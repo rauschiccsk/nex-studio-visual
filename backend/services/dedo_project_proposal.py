@@ -116,12 +116,27 @@ def record(
 
 def founding_number(db: Session, proposal: DedoProjectProposal) -> Optional[str]:
     """The number a ``new_version`` brief founds its version with unless the Manažér changes it (DEV-149) — Dedo's
-    proposed number, else the cockpit's suggestion. ``None`` for a fast fix: its number follows the fix rule."""
+    proposed number, else the first version that has not started yet (DEV-206: the brief fills it), else the cockpit's
+    suggestion. ``None`` for a fast fix: its number follows the fix rule."""
     if proposal.proposed_action != "new_version":
         return None
     from backend.services import version as version_service
 
-    return proposal.proposed_version_number or version_service.suggest_next_version_number(db, proposal.project_id)
+    if proposal.proposed_version_number:
+        return proposal.proposed_version_number
+    unstarted = version_service.unstarted_versions(db, proposal.project_id)
+    if unstarted:
+        return unstarted[0].version_number
+    return version_service.suggest_next_version_number(db, proposal.project_id)
+
+
+def unstarted_numbers(db: Session, proposal: DedoProjectProposal) -> list[str]:
+    """DEV-206 — the numbers a ``new_version`` brief fills rather than founds, so the screen says which it does."""
+    if proposal.proposed_action != "new_version":
+        return []
+    from backend.services import version as version_service
+
+    return [v.version_number for v in version_service.unstarted_versions(db, proposal.project_id)]
 
 
 def mark_sent(

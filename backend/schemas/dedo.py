@@ -105,6 +105,9 @@ class DedoProjectProposalRead(BaseModel):
     #: DEV-149 — the number ``new_version`` will found the version with unless the Manažér changes it: Dedo's
     #: proposed number, else the cockpit's suggestion. ``None`` for a fast fix (its number follows the fix rule).
     version_number: Optional[str] = None
+    #: DEV-206 — the project's versions that have not started yet (planned, no build, no Zadanie): sent with one of
+    #: these numbers, the brief fills that version instead of founding a new one.
+    unstarted_version_numbers: list[str] = []
 
 
 class DedoProjectProposalSendRequest(BaseModel):
