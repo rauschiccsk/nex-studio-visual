@@ -14,6 +14,10 @@
 // way — Director 16.10.2026: „Chýba mi tu tlačidlo ktorým odošleme pre Poradcu.“ It is a card of its own kind: the
 // question, where the build stands, what the agent found, and the request; Poradca's recommended answer comes back
 // into the answer box through „Vložiť do odpovede“.
+//
+// DEV-191: „Opýtaj sa Poradcu“ at a finished version goes the same way too — Director 23.10.2026: „Ak kliknem na Opýtať
+// poradcu, malo by sa skutočne opýtať ako to robíme na kartách“. It asks what the version brought, what to try in UAT
+// and what to watch before PROD; the version's conversation after the build (phase „done“) takes every such question.
 
 import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { PipelineBoard, PipelineMessage } from "@/services/api/pipeline";
@@ -73,7 +77,28 @@ export interface AgentQuestionReview {
   request: string;
 }
 
-export type ReviewCard = DecisionReview | AgentQuestionReview;
+/** DEV-191 — a finished version in Riadiace centrum: what its „Opýtaj sa Poradcu“ asks. */
+interface FinishedVersionReview {
+  kind: "version_done";
+  /** „Verzia 1.10.1 projektu NEX Inbox je hotová.“ */
+  question: string;
+  request: string;
+}
+
+/** DEV-191 — what „Opýtaj sa Poradcu“ asks about a finished version (Director 23.10.2026). */
+const FINISHED_VERSION_REQUEST =
+  "Zhrň mi, čo priniesla, čo mám vyskúšať v UAT a na čo si dať pozor pred nasadením na PROD.";
+
+export type ReviewCard = DecisionReview | AgentQuestionReview | FinishedVersionReview;
+
+/** DEV-191 — the question about a finished version, as a card for Poradca. */
+export function finishedVersionCard(projectName: string, versionNumber: string): FinishedVersionReview {
+  return {
+    kind: "version_done",
+    question: `Verzia ${versionNumber} projektu ${projectName} je hotová.`,
+    request: FINISHED_VERSION_REQUEST,
+  };
+}
 
 /** The request a card's question ends with: check the Auditor's finding, or advise which option to choose. */
 export function reviewRequestFor(source: string | undefined): string {
@@ -81,6 +106,7 @@ export function reviewRequestFor(source: string | undefined): string {
 }
 
 function compose(card: ReviewCard, explanation: string, detail: string): string {
+  if (card.kind === "version_done") return `${card.question} ${card.request}`;
   if (card.kind === "agent_question") {
     // The agent writes its question as paragraphs with headings — it stands whole, under one line saying whose it is.
     const found = explanation ? `${card.explanationTitle ?? AGENT_WROTE}\n${explanation}` : "";
@@ -122,6 +148,7 @@ function shorten(text: string, room: number): string {
  * whole.
  */
 export function reviewQuestion(card: ReviewCard, maxChars: number): string {
+  if (card.kind === "version_done") return compose(card, "", "");
   let explanation = card.explanation?.trim() ?? "";
   let detail = card.kind === "agent_question" ? "" : (card.technicalDetail?.trim() ?? "");
   const over = () => compose(card, explanation, detail).length - maxChars;
@@ -156,6 +183,7 @@ function isCard(value: unknown): value is ReviewCard {
     return false;
   }
   if (c.kind === "agent_question") return typeof c.origin === "string";
+  if ((c as { kind?: string }).kind === "version_done") return true;
   return (
     typeof c.position === "number" &&
     typeof c.total === "number" &&

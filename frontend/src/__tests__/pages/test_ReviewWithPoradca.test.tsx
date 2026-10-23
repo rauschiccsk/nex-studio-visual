@@ -227,7 +227,7 @@ describe("DEV-103 — the review-with-Poradca button on the verification card", 
     await waitFor(() => expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1));
     unmount();
 
-    tree(card("verifikacia_fix"), `/poradca?verzia=${VERSION}`); // „Opýtaj sa Poradcu" leads here the same way
+    tree(card("verifikacia_fix"), `/poradca?verzia=${VERSION}`); // a visit that did not come from a button
     expect(await composer()).toHaveValue("");
     await new Promise((r) => setTimeout(r, 50));
     expect(api.createPoradcaConversationApi).toHaveBeenCalledTimes(1);

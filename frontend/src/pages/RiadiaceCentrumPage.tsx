@@ -381,7 +381,11 @@ export default function RiadiaceCentrumPage() {
           works on a done version, so a message there would go unanswered (the engine refuses it). */}
       <div className={`col-start-1 row-start-5 min-w-0 md:row-start-4 ${conversationOnPhone}`}>
         {board?.state?.current_stage === "done" ? (
-          <OpytajSaPoradcuBar versionId={versionId} />
+          <OpytajSaPoradcuBar
+            versionId={versionId}
+            projectName={selectedProject.name}
+            versionNumber={selectedVersion?.versionNumber ?? ""}
+          />
         ) : (
           <ConversationComposer
             versionId={versionId}

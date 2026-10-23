@@ -169,3 +169,17 @@ def test_a_version_of_another_project_is_refused(db_session):
 
 def test_every_phase_has_its_place_in_the_title():
     assert set(review.STAGE_PLACES) == set(STAGE_VALUES)
+
+
+def test_the_questions_about_a_finished_version_share_its_conversation_after_the_build(db_session):
+    """DEV-191 — „Opýtaj sa Poradcu“ at a finished version asks like a card: the first question founds the version's
+    conversation after the build, the next goes on in it. It holds questions, not decisions — its title says so."""
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    version = _version(db_session, project, number="1.10.1", stage="done")
+    c = _client(db_session, owner)
+
+    first = _found(c, project, version, question="Verzia 1.10.1 projektu NEX Inbox je hotová. Zhrň mi, čo priniesla.")
+
+    assert first["title"] == "1.10.1 — po dokončení"
+    assert _found_by_button(c, project, version) == first["id"]

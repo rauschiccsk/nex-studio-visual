@@ -41,6 +41,10 @@ def stage_of(db: Session, version_id: UUID) -> Optional[str]:
 
 
 def title(version_number: str, stage: str) -> str:
+    """A phase's conversation holds the decisions of its cards; after the build it holds the questions „Opýtaj sa
+    Poradcu“ asks about the finished version (DEV-191) — no decisions, so the title does not promise them."""
+    if stage == "done":
+        return f"{version_number} — {STAGE_PLACES[stage]}"
     return f"{version_number} — rozhodnutia {STAGE_PLACES[stage]}"
 
 
