@@ -23,7 +23,8 @@ projektu (`backend/services/create_project_postscaffold.py`). Tento súbor je le
   novým sedením agenta, aj v prevzatých projektoch (`claude_agent._refresh_rules`, DEV-47). Zmena teda platí od
   najbližšieho nového sedenia po nasadení kokpitu; pokračujúce sedenie si drží chartu, s ktorou začalo.
 - `docs/specs/versions/vX.Y.Z/RELEASE_NOTES.md` — poznámka k vydaniu po slovensky pre toho, kto kokpit používa.
-- `scripts/deploy-prod.sh` — nasadenie na PROD.
+- `scripts/deploy-prod.sh` — nasadenie na PROD. Backend nereštartuje, kým v kokpite pracuje agent, Poradca alebo
+  nasadenie (pýta sa `/health/busy`); nútene len s `--aj-ked-bezi "dôvod"`.
 
 ## Skúšky a brány — tak, ako ich púšťa CI (`.github/workflows/ci.yml`)
 

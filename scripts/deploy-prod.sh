@@ -36,11 +36,16 @@ FRONTEND_IMAGE="nex-studio-visual-frontend"
 DRY_RUN=0
 VERSION=""
 TARGET="all"
+#: DEV-193 — why the backend may be restarted although work is in flight (``--aj-ked-bezi "<dôvod>"``).
+FORCE_REASON=""
+#: Where the cockpit says how much work is in flight — counts only (DEV-193).
+BUSY_URL="${NSV_BUSY_URL:-http://127.0.0.1:9216/health/busy}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --version) VERSION="${2:-}"; shift 2 ;;
+    --aj-ked-bezi) FORCE_REASON="${2:-}"; shift 2 ;;
     backend|frontend|all) TARGET="$1"; shift ;;
     *) echo "neznámy argument: $1" >&2; exit 2 ;;
   esac
@@ -65,6 +70,49 @@ CI_STATE="$(gh run list -R "$CI_REPO" --workflow ci.yml --commit "$HEAD_SHA" --l
   || die "stav CI pre ${HEAD_SHA:0:7} sa nedal zistiť (gh) — bez zeleného CI nenasadzujem."
 [[ "$CI_STATE" == "completed success" ]] \
   || die "CI pre ${HEAD_SHA:0:7} nie je zelené (${CI_STATE:-žiadny beh}) — nasadzujem až po zelenom CI na GitHube."
+
+# ── Nothing in flight (DEV-193) ─────────────────────────────────────────────────────────────────────
+# Restarting the backend cuts off whatever it is doing: an agent's turn (Verifikácia runs inside the backend's own
+# process, with no nex-build- container — 23.10.2026 a watcher that looked at containers took that for idle), Poradca
+# answering, a deploy to a customer. The cockpit says how much is in flight; the screens alone do not restart it.
+busy_check() {
+  [[ "$TARGET" == "frontend" ]] && return 0
+  local body code said
+  body="$(mktemp)"
+  code="$(curl -s --max-time 10 -o "$body" -w '%{http_code}' "$BUSY_URL" 2>/dev/null || true)"
+  case "$code" in
+    200) ;;
+    000) rm -f "$body"; echo "⚠️  kokpit neodpovedá (${BUSY_URL}) — nebeží, takže v ňom nič nebeží." >&2; return 0 ;;
+    404) rm -f "$body"; echo "⚠️  kokpit ešte nevie povedať, či niečo beží (stará verzia) — over ručne." >&2; return 0 ;;
+    *) rm -f "$body"; [[ -n "$FORCE_REASON" ]] && return 0
+       die "kokpit nevie povedať, či niečo beží (HTTP ${code:-?}) — bez toho backend nereštartujem. Ak to musí byť teraz: --aj-ked-bezi \"dôvod\"." ;;
+  esac
+  said="$(python3 - "$body" <<'PY'
+import json, sys
+n = json.load(open(sys.argv[1], encoding="utf-8"))
+def count(k):
+    return int(n.get(k) or 0)
+parts = []
+if count("agents_working"):
+    parts.append(f"agent pracuje na {count('agents_working')} {'stavbe' if count('agents_working') == 1 else 'stavbách'}")
+if count("poradca_answering"):
+    q = count("poradca_answering")
+    parts.append(f"Poradca odpovedá na {q} {'otázku' if q == 1 else 'otázky' if q < 5 else 'otázok'}")
+if count("deploys_running"):
+    d = count("deploys_running")
+    parts.append(f"{d} {'nasadenie' if d == 1 else 'nasadenia' if d < 5 else 'nasadení'}")
+print(", ".join(parts))
+PY
+)" || { rm -f "$body"; die "kokpit odpovedal na otázku, či niečo beží, nečitateľne."; }
+  rm -f "$body"
+  [[ -z "$said" ]] && return 0
+  if [[ -n "$FORCE_REASON" ]]; then
+    echo "⚠️  nasadzujem napriek tomu, že beží: ${said} — dôvod: ${FORCE_REASON}" >&2
+    return 0
+  fi
+  die "v kokpite práve beží: ${said}. Reštart backendu by to prerušil — počkaj, kým dobehne, alebo nasaď len frontend. Ak to musí byť teraz: --aj-ked-bezi \"dôvod\"."
+}
+busy_check
 
 # ── Refusals ────────────────────────────────────────────────────────────────────────────────────────
 # Each of these is a way the old script could have deployed somewhere other than the live stack. A
@@ -123,6 +171,10 @@ if [[ "$TARGET" == "all" || "$TARGET" == "frontend" ]]; then
   docker build -f frontend/Dockerfile -t "${FRONTEND_IMAGE}:v${VERSION}" \
     --build-arg VITE_API_BASE_URL="" --build-arg VITE_APP_VERSION="${VERSION}" ./frontend
 fi
+
+# Asked again: the build took minutes and work may have started meanwhile (DEV-193). Before the compose is rewritten,
+# so a refusal leaves it naming the images that really run.
+busy_check
 
 # ── Rewrite the live compose ────────────────────────────────────────────────────────────────────────
 # ONLY the image tags. Routing, ports, volumes and env are hand-maintained on this file and nothing here

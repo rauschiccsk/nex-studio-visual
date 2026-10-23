@@ -7,9 +7,11 @@ from typing import Optional
 
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
+from backend.api.routes import health as _health
 from backend.api.routes.agent_terminal import router as agent_terminal_router
 from backend.api.routes.auth import router as auth_router
 from backend.api.routes.backlog import router as backlog_router
@@ -47,7 +49,7 @@ from backend.api.routes.users import router as users_router
 from backend.api.routes.version_notes import router as version_notes_router
 from backend.api.routes.versions import router as versions_router
 from backend.config.settings import settings
-from backend.db.session import SessionLocal
+from backend.db.session import SessionLocal, get_db
 from backend.services import agent_terminal as agent_terminal_service
 from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
@@ -474,6 +476,16 @@ def health_check() -> dict:
     Called by: the container's HEALTHCHECK (``backend.scripts.healthcheck``) and Dedo's check after a deploy.
     """
     return _health_check_handler()
+
+
+@app.get("/health/busy")
+def health_busy(db: Session = Depends(get_db)) -> dict:
+    """How much work is in flight — agents, Poradca, deploys; counts only, so no login (DEV-193).
+
+    Called by: ``scripts/deploy-prod.sh`` before it restarts the backend (only from the host: the screens' nginx
+    answers ``/health`` itself).
+    """
+    return _health.busy(db)
 
 
 @app.get("/api/v1/version")

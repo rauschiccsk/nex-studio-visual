@@ -4,12 +4,15 @@ import logging
 import shutil
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.db.models.pipeline import PipelineState
 from backend.db.session import engine
-from backend.services import notify
+from backend.services import deploy_progress, notify
 from backend.services.poradca import readiness as poradca_readiness
+from backend.services.poradca import runner as poradca_runner
 
 logger = logging.getLogger(__name__)
 
@@ -53,4 +56,20 @@ def health_check() -> dict:
         # deployment whose notifications have never once worked — previously unknowable, because the notify
         # script exited 0 on every path and nothing inspected it.
         "telegram": notify.ledger.as_dict(),
+    }
+
+
+def busy(db: Session) -> dict:
+    """How much work a restart of the backend would cut off (DEV-193) — counts only.
+
+    An agent's turn runs as the backend's child — Verifikácia even inside its own process, with no ``nex-build-``
+    container to see from outside; Poradca's answers and the deploys to customers are tracked in its memory only.
+    """
+    return {
+        "agents_working": db.scalar(
+            select(func.count()).select_from(PipelineState).where(PipelineState.status == "agent_working")
+        )
+        or 0,
+        "poradca_answering": poradca_runner._slots.active,
+        "deploys_running": deploy_progress.kolko_bezi(),
     }

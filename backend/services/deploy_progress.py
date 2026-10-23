@@ -104,6 +104,12 @@ def bezi(instance_dir: Path) -> bool:
     return stav(instance_dir) is not None
 
 
+def kolko_bezi() -> int:
+    """Koľko nasadení práve beží — reštart kokpitu by ich prerušil (DEV-193, ``/health/busy``)."""
+    with _zamok:
+        return len(_bezi)
+
+
 @for_tests
 def _vycisti_vsetko() -> None:
     """Len pre skúšky — pamäť je procesová a medzi skúškami by sa prenášala."""
