@@ -17,7 +17,7 @@ import { saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca"
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
 import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
-import { ChoiceSummary, InlineChoice } from "@/components/poradca/ChoiceBadge";
+import { InlineChoice } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
@@ -99,7 +99,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       ? null
       : (scopeVersion.instruction_closed_reason ?? "Pole Riadiaceho centra teraz pokyn neprijme.");
 
-  // DEV-135 / DEV-205 — the same „Vložiť do odpovede“ above the answer and where the answer names it.
+  // DEV-135 / DEV-205 — „Vložiť do odpovede“ where the answer names the answer for the agent (DEV-208: only there).
   const answerInsert = { insert: handOff, blocked: instructionBlocked };
 
   return (
@@ -130,7 +130,6 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
         </div>
       )}
 
-      {!running && <ChoiceSummary choices={choices} answer={answerInsert} />}
       {!running && message.content && (
         <SpecMarkdown
           codePaths={codePaths}

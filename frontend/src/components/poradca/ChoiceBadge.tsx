@@ -58,33 +58,10 @@ function InsertAnswerButton({ label, answer }: { label: string; answer: AnswerIn
   );
 }
 
-/** Above the answer: what to pick, at one glance. */
-export function ChoiceSummary({ choices, answer }: { choices: PoradcaChoice[]; answer?: AnswerInsert }) {
-  if (!choices.length) return null;
-  return (
-    <div
-      role="group"
-      aria-label="Čo vybrať"
-      className="mb-2 space-y-1 rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm"
-    >
-      {choices.map((choice, i) => (
-        <div key={i} className="flex flex-wrap items-baseline gap-1.5">
-          <span className="text-[var(--color-text-secondary)]">{choice.card ? "Vyber" : "Odpovedz agentovi"}</span>
-          <ChoiceBadge choice={choice} />
-          {choice.status === "not_on_card" && (
-            <span className="text-xs text-[var(--color-state-warning-fg)]">{NOT_ON_CARD_NOTE}</span>
-          )}
-          {answer && !choice.card && choice.status === "answer" && (
-            <InsertAnswerButton label={choice.label} answer={answer} />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** The badge for a choice link inside the answer — the server's verdict found by card and text. DEV-205: the answer for
- * the agent's question carries „Vložiť do odpovede“ here too — where Poradca says to send it, not only above. */
+/** The badge for a choice link inside the answer — the server's verdict found by card and text. It is the one place the
+ * choice is drawn (DEV-208: a summary above the answer showed it a second time — Director 23.10.2026: „stačí len
+ * raz“), so it carries what goes with it: the answer for the agent's question „Vložiť do odpovede“ (DEV-205), an option
+ * the card does not offer its warning in words. */
 export function InlineChoice({
   href,
   children,
@@ -100,7 +77,15 @@ export function InlineChoice({
   const label = Children.toArray(children).join("");
   const found = choices.find((c) => (c.card ?? null) === card && c.label === label);
   const choice = found ?? { card, label, status: card ? "not_on_card" : "answer" };
-  // Only an answer the server recognised among the answer's choices — the same one the summary above offers.
+  if (choice.status === "not_on_card") {
+    return (
+      <span className="inline-flex flex-wrap items-baseline gap-1">
+        <ChoiceBadge choice={choice} />
+        <span className="text-xs text-[var(--color-state-warning-fg)]">{NOT_ON_CARD_NOTE}</span>
+      </span>
+    );
+  }
+  // Only an answer the server recognised among the answer's choices gets the button — not one it never checked.
   if (!answer || !found || found.card || found.status !== "answer") return <ChoiceBadge choice={choice} />;
   return (
     <span className="inline-flex flex-wrap items-baseline gap-1">
