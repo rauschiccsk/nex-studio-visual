@@ -44,6 +44,7 @@ SHELLING_MODULES = {
     "cockpit_commit",
     "create_project_postscaffold",
     "database_schema",
+    "dead_code",
     "delivered_tokens",
     "delivery_statement",
     "git_push",

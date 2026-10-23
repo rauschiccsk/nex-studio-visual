@@ -1,0 +1,10 @@
+{
+  "name": "nex-studio-dead-code",
+  "private": true,
+  "description": "DEV-156 — the cockpit's own pinned tools for the dead-code check of the projects it builds (knip and the TypeScript parser).",
+  "type": "module",
+  "dependencies": {
+    "knip": "6.41.0",
+    "typescript": "5.9.3"
+  }
+}

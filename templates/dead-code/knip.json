@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "project": ["src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}!"],
+  "ignore": [
+    "src/**/__tests__/**",
+    "src/**/*.{test,spec}.*",
+    "src/**/*.stories.*",
+    "src/test/**",
+    "src/tests/**",
+    "src/mocks/**",
+    "src/**/*.d.ts"
+  ]
+}

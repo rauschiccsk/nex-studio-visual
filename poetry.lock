@@ -2568,7 +2568,7 @@ version = "2.16"
 description = "Find dead code"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["main"]
 files = [
     {file = "vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee"},
     {file = "vulture-2.16.tar.gz", hash = "sha256:f8d9f6e2af03011664a3c6c240c9765b3f392917d3135fddca6d6a68d359f717"},
@@ -2770,4 +2770,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "24a2ba6d2880800fc9f6cd5f266f27c5440090ba4b9e303c3fa776bee33f3137"
+content-hash = "1f824971b035fd0bef0a3c88843beb7c5391c04d1c21765e8f4819efb64d2d71"

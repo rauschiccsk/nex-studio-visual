@@ -149,6 +149,10 @@ COPY migrations/ ./migrations/
 # ai-agent-charter.md, auditor-charter.md, release_smoke_test.sh, github-actions-workflow.yml, uat/, …).
 # Without this, v2 charter provisioning fails "shared base template missing" and create 500s (v4.0.39).
 COPY templates/ ./templates/
+# DEV-156: the TypeScript half of the dead-code check of every version runs from THIS image, in a sealed container
+# (backend/services/dead_code.py). Its tools — knip and the TypeScript parser — are pinned by
+# templates/dead-code/package-lock.json and installed here; node_modules is never copied from the build context.
+RUN cd templates/dead-code && npm ci --ignore-scripts --no-audit --no-fund && npm cache clean --force
 # Bake the notify script so send_telegram works in ANY instance. backend.services.notify prefers this
 # baked copy and otherwise falls back to /opt/projects/nex-studio/scripts/notify_telegram.sh — a path
 # that belongs to a DIFFERENT project's checkout and only resolves while /opt/projects happens to be

@@ -67,6 +67,7 @@ from backend.services import (
     claude_agent,
     cockpit_commit,
     database_schema,
+    dead_code,
     dedo_escalation,
     dedo_message,
     delivery_statement,
@@ -7456,6 +7457,61 @@ async def _source_language_finding(
     }
 
 
+#: DEV-156: how long the dead-code check of a version may take — two trees from git and the TypeScript half's container.
+DEAD_CODE_CAP = dead_code.SCRIPT_CAP + 120
+#: The sentence that starts every note of the dead-code check in the verdict.
+DEAD_CODE_CHECK = "Kontrola nepoužívaného kódu"
+
+
+def _scan_version_dead_code(repo: Path, plan: list[delivery_statement.BaseStep]) -> Optional[dead_code.Report]:
+    """Off the main loop: HEAD, the version's base and the check — git and the check's container, no database."""
+    head = _repo_head(repo)
+    base = delivery_statement.resolve_base(repo, plan, head) if head else None
+    return dead_code.scan(repo, base, head) if head and base else None
+
+
+async def _dead_code_check(db: Session, version_id: uuid.UUID, slug: str) -> tuple[Optional[dict[str, Any]], list[str]]:
+    """DEV-156: the blocking finding for code this version added and nothing uses (or ``None``), and the sentences the
+    Manažér reads with the verdict — the exceptions the version added (the Auditor reviews them), the entries that do
+    not count, and why a part of the check did not run.
+
+    The range is the delivery statement's, as for the source language (DEV-65): the check runs before anything is
+    counted for the customer. A check that cannot run never stops a release — it says so instead."""
+    version = db.get(Version, version_id)
+    if version is None:
+        return None, []
+    plan = delivery_statement.base_plan(db, version)
+    repo = claude_agent.PROJECTS_ROOT / slug
+    try:
+        report = await run_blocking(_scan_version_dead_code, repo, plan, cap=DEAD_CODE_CAP)
+    except dead_code.CheckNotRun as exc:
+        logger.warning("dead code check not run (slug=%s): %s", slug, exc)
+        return None, [f"{DEAD_CODE_CHECK} neprebehla — {str(exc).rstrip('.')}."]
+    except BlockingWorkTimedOut:
+        logger.warning("dead code check timed out (slug=%s)", slug)
+        return None, [f"{DEAD_CODE_CHECK} neprebehla — nedobehla do {DEAD_CODE_CAP} s."]
+    except Exception:  # noqa: BLE001 — the check of a project's code must never take Verifikácia down with it
+        logger.exception("dead code check failed (slug=%s)", slug)
+        return None, [f"{DEAD_CODE_CHECK} neprebehla — v kokpite nastala chyba (je zapísaná v jeho logu)."]
+    if report is None:
+        return None, [f"{DEAD_CODE_CHECK} neprebehla — začiatok verzie sa nedá určiť z gitu."]
+    notes = [f"{DEAD_CODE_CHECK}: {sentence.rstrip('.')}." for sentence in report.not_run + report.invalid_waivers]
+    if report.waivers_added:
+        added = "; ".join(w.sentence() for w in report.waivers_added)
+        notes.append(f"{DEAD_CODE_CHECK} — výnimky pridané v tejto verzii (preverí ich Audítor): {added}.")
+    if not report.new:
+        return None, notes
+    finding = {
+        "text": (
+            f"Verzia pridala kód, ktorý nikto nepoužíva ({len(report.new)}): "
+            f"{'; '.join(dead_code.listing(report.new))}. Odstráň ho. {dead_code.HOW_TO_RESOLVE}"
+        ),
+        "blocking": True,
+        "escapes_tests": False,
+    }
+    return finding, notes
+
+
 def _scan_task_source(repo: Path, baseline: str, version_label: str) -> list:
     """Off the main loop: the Slovak text one task added — its baseline .. HEAD (DEV-183)."""
     head = _repo_head(repo)
@@ -11406,7 +11462,9 @@ async def _run_verifikacia_round(
     language_finding = await _source_language_finding(db, version_id, slug, version_label)
     # DEV-90: so does a missing UAT test guide — the manager tests the version in UAT from it.
     guide_finding = _uat_guide_finding(slug, version_label)
-    floor_findings = [f for f in (language_finding, guide_finding) if f is not None]
+    # DEV-156: and code the version added that nothing uses.
+    dead_code_finding, dead_code_notes = await _dead_code_check(db, version_id, slug)
+    floor_findings = [f for f in (language_finding, guide_finding, dead_code_finding) if f is not None]
     is_pass = llm_pass and not runtime_floor_red and not floor_findings
     verdict_str = "PASS" if is_pass else "FAIL"
     # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
@@ -11430,13 +11488,14 @@ async def _run_verifikacia_round(
         # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
         # sedenie s databázou do cudzieho vlákna nedostane.
         await run_blocking(_push_release_artifacts, claude_agent.PROJECTS_ROOT / slug, version_label, cap=GIT_PUSH_CAP)
-    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90) — the Auditor passed the version.
+    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90, DEV-156) — the Auditor passed the version.
     floor_only = llm_pass and not runtime_floor_red and bool(floor_findings)
     floor_sentences = [
         sentence
         for finding, sentence in (
             (language_finding, "kód, ktorý dostane zákazník, má slovenský text — treba ho preložiť do angličtiny"),
             (guide_finding, "chýba úplný návod na skúšku v UAT — treba ho doplniť"),
+            (dead_code_finding, "pridala kód, ktorý nikto nepoužíva — treba ho odstrániť"),
         )
         if finding is not None
     ]
@@ -11444,7 +11503,8 @@ async def _run_verifikacia_round(
         db,
         version_id=version_id,
         content=(f"Verzia funguje, ale {' a '.join(floor_sentences)}. " if floor_only else "")
-        + (review.summary or f"Verifikácia {verdict_str}."),
+        + (review.summary or f"Verifikácia {verdict_str}.")
+        + "".join(f" {note}" for note in dead_code_notes),
         payload={
             "verdict": verdict_str,
             "findings": (
@@ -11469,7 +11529,17 @@ async def _run_verifikacia_round(
             **({"technical_detail": review.technical_detail} if review.technical_detail else {}),
             **({"engine_override": "runtime_floor_red"} if (llm_pass and runtime_floor_red) else {}),
             **(
-                {"engine_override": "source_language" if language_finding is not None else "uat_guide"}
+                {
+                    "engine_override": next(
+                        name
+                        for finding, name in (
+                            (language_finding, "source_language"),
+                            (guide_finding, "uat_guide"),
+                            (dead_code_finding, "dead_code"),
+                        )
+                        if finding is not None
+                    )
+                }
                 if floor_only
                 else {}
             ),
@@ -11485,8 +11555,8 @@ async def _run_verifikacia_round(
     # a ``runtime_floor_red`` FAIL (the mechanical floor IS the truth — no proposed_fix to vet, D4) and the
     # ``fast_fix`` lane (its focused auto loop is unchanged, §6 D3). Fail-open inside → no record → the card
     # demotes accept_fix (§2). The critic writes an append-only fix_critique note the settle then reads.
-    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90) has no Auditor fix scope to vet — like the
-    # runtime floor.
+    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90, DEV-156) has no Auditor fix scope to vet —
+    # like the runtime floor.
     if verdict_str == "FAIL" and not runtime_floor_red and not floor_only and state.flow_type != "fast_fix":
         await _run_fix_critique(db, state, verdict_msg=verdict_msg, on_event=on_event, on_message=on_message)
 

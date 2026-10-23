@@ -17,6 +17,7 @@ from backend.api.routes.ci_runner import router as ci_runner_router
 from backend.api.routes.ci_runs import router as ci_runs_router
 from backend.api.routes.credentials import router as credentials_router
 from backend.api.routes.customers import router as customers_router
+from backend.api.routes.dead_code import router as dead_code_router
 from backend.api.routes.dedo import router as dedo_router
 from backend.api.routes.delivery_statements import router as delivery_statements_router
 from backend.api.routes.deploy import router as deploy_router
@@ -433,6 +434,7 @@ app.include_router(plane_tickets_router, prefix="/api/v1")  # DEV-120 „Plane t
 app.include_router(standing_router, prefix="/api/v1")  # DEV-150 „Kde stojíme“ na Prehľade
 app.include_router(version_notes_router, prefix="/api/v1")  # DEV-151 „Kde sme skončili“
 app.include_router(price_estimate_router, prefix="/api/v1")  # DEV-154 orientačná cena verzie
+app.include_router(dead_code_router, prefix="/api/v1")  # DEV-156 nepoužívaný kód z minulých verzií
 # The deploy router (CR-V2-026) also mounts under the bare ``/api/v1`` prefix
 # because its routes sit under ``/customers/{id}/deploy`` | ``/accept`` — see design §3 Deploy & Customers.
 app.include_router(deploy_router, prefix="/api/v1")

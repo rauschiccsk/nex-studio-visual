@@ -16,7 +16,9 @@ import {
 import { listUsersApi } from "@/services/api/users";
 import { getNextVersionNumberApi, listVersions } from "@/services/api/versions";
 import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
-import { FROM_UAT_LABEL, fastFixFromUat, forgetFastFixOrigin } from "@/lib/fastFixHandoff";
+import { ORIGIN_DEAD_CODE, fastFixOriginLabel, forgetFastFixOrigin, markFastFixOrigin } from "@/lib/fastFixHandoff";
+import { appendInstruction } from "@/lib/poradcaHandoff";
+import DeadCodeCleanupPanel from "@/components/projects/DeadCodeCleanupPanel";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
@@ -143,7 +145,7 @@ export default function ProjectDetailPage() {
   // dialog again, and is forgotten once the fix has started.
   const fastFixDraft = useDraft(draftKey("rychla-oprava", slug));
   // DEV-91: the text was prepared from a UAT test that failed — the dialog says so until he edits it.
-  const [fastFixFromTest, setFastFixFromTest] = useState(false);
+  const [fastFixOrigin, setFastFixOrigin] = useState<string | null>(null);
   const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
   const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
   // DEV-175: the fix is a new version, founded only over saved work — save or discard it in the dialog, then start again.
@@ -297,10 +299,28 @@ export default function ProjectDetailPage() {
     setFastFixError(null);
     setFastFixUnsaved(null);
     setFastFixDirective(fastFixDraft.text);
-    setFastFixFromTest(fastFixFromUat(slug));
+    setFastFixOrigin(fastFixOriginLabel(slug));
     setFastFixKind(null);
     setFastFixOpen(true);
   }, [fastFixDraft.text, slug]);
+
+  // DEV-156: „Upratať nepoužívaný kód“ — the prepared cleanup goes under his own draft and the dialog opens on it,
+  // labelled as the check's text. The page owns the dialog's text: a hand-off through the storage alone would not
+  // reach it, the page does not mount again for its own address.
+  const cleanUpDeadCode = useCallback(
+    (brief: string) => {
+      const text = appendInstruction(fastFixDraft.text, brief);
+      fastFixDraft.setText(text);
+      markFastFixOrigin(slug, ORIGIN_DEAD_CODE);
+      setFastFixError(null);
+      setFastFixUnsaved(null);
+      setFastFixDirective(text);
+      setFastFixOrigin(fastFixOriginLabel(slug));
+      setFastFixKind(null);
+      setFastFixOpen(true);
+    },
+    [fastFixDraft, slug],
+  );
 
   // DEV-57: a screen that sends the manager here to start a fast fix (the deploy stopped by failed checks) lands
   // on the open dialog — once the versions are loaded (a fast fix patches the newest one), and only once: the
@@ -532,6 +552,12 @@ export default function ProjectDetailPage() {
           onSwitched={() => void getProjectApi(project.id).then(setProject)}
         />
       )}
+
+      {/* DEV-156: code nobody uses that earlier versions left behind — Verifikácia stops the new; the old is offered here. */}
+      <DeadCodeCleanupPanel
+        slug={project.slug}
+        onCleanUp={mayOperateProject(user, project.created_by) ? cleanUpDeadCode : undefined}
+      />
 
       {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
           žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz.
@@ -871,8 +897,8 @@ export default function ProjectDetailPage() {
             <label htmlFor="fastfix-directive" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
               Popis opravy
             </label>
-            {fastFixFromTest && (
-              <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_UAT_LABEL}</p>
+            {fastFixOrigin && (
+              <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{fastFixOrigin}</p>
             )}
             <textarea
               data-draft="rychla-oprava"
@@ -884,8 +910,8 @@ export default function ProjectDetailPage() {
               onChange={(e) => {
                 setFastFixDirective(e.target.value);
                 fastFixDraft.setText(e.target.value);
-                if (fastFixFromTest) {
-                  setFastFixFromTest(false); // he edited it — the text is his now
+                if (fastFixOrigin) {
+                  setFastFixOrigin(null); // he edited it — the text is his now
                   forgetFastFixOrigin(slug);
                 }
               }}

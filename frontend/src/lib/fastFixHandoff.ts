@@ -3,7 +3,8 @@
 // Nothing is started by itself: the text lands in the „Rýchla oprava“ dialog of the project, which opens on arrival
 // (`?rychla-oprava=1`), and the manager reads it, picks the work kind and clicks. Text already in that dialog is never
 // overwritten — the new one goes under it. The dialog says where the text came from: text that appears by itself
-// must not look like the manager's own earlier draft (the same rule as Poradca's handoff).
+// must not look like the manager's own earlier draft (the same rule as Poradca's handoff). DEV-156: the cleanup of the
+// code nobody uses arrives the same way, with its own label.
 import { draftKey } from "@/hooks/useDraft";
 import { appendInstruction } from "@/lib/poradcaHandoff";
 import { FAST_FIX_PARAM } from "@/lib/projectLinks";
@@ -11,9 +12,17 @@ import { FAST_FIX_PARAM } from "@/lib/projectLinks";
 const SURFACE = "rychla-oprava";
 const ORIGIN_SUFFIX = ".origin";
 const ORIGIN_UAT = "uat";
+export const ORIGIN_DEAD_CODE = "dead-code";
+type Origin = typeof ORIGIN_UAT | typeof ORIGIN_DEAD_CODE;
 
-/** How the fast-fix dialog labels a text prepared from a UAT test — one text, shown until he edits it. */
+/** How the fast-fix dialog labels a text prepared from a UAT test — one text, shown until he edits it.
+ * @internal — exported for its test (DEV-155). */
 export const FROM_UAT_LABEL = "Zadanie pripravené zo skúšky v UAT — prečítaj ho, uprav podľa potreby a spusti sám.";
+/** DEV-156: the same for the cleanup the check of the code nobody uses prepared.
+ * @internal — exported for its test (DEV-155). */
+export const FROM_DEAD_CODE_LABEL =
+  "Zadanie pripravené z kontroly nepoužívaného kódu — prečítaj ho, uprav podľa potreby a spusti sám.";
+const LABELS: Record<Origin, string> = { [ORIGIN_UAT]: FROM_UAT_LABEL, [ORIGIN_DEAD_CODE]: FROM_DEAD_CODE_LABEL };
 
 export interface BrokenChange {
   version: string;
@@ -50,13 +59,25 @@ export function handOffFastFix(slug: string, text: string): string {
   return `/projects/${slug}?${FAST_FIX_PARAM}=1`;
 }
 
-/** Whether the dialog's text was prepared from a UAT test and the manager has not touched it yet. */
-export function fastFixFromUat(slug: string | undefined): boolean {
-  if (!slug) return false;
+/** The label of a dialog text prepared elsewhere that the manager has not touched yet — ``null`` for his own text. */
+export function fastFixOriginLabel(slug: string | undefined): string | null {
+  if (!slug) return null;
   try {
-    return window.localStorage.getItem(originKey(slug)) === ORIGIN_UAT;
+    const origin = window.localStorage.getItem(originKey(slug));
+    return origin && origin in LABELS ? LABELS[origin as Origin] : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** DEV-156: the dialog's text was prepared by a check of the cockpit (the page put it there itself) — say so until he
+ * edits it. */
+export function markFastFixOrigin(slug: string | undefined, origin: Origin): void {
+  if (!slug) return;
+  try {
+    window.localStorage.setItem(originKey(slug), origin);
+  } catch {
+    /* a label is a convenience — never a reason to break the screen */
   }
 }
 

@@ -17,44 +17,19 @@ from pathlib import Path
 
 import vulture
 
+from backend.services import dead_code as rules
+
 ROOT = Path(__file__).resolve().parents[1]
 
 #: Where code lives and where it is called from.
 SCANNED = ["backend", "tests", "conftest.py", "migrations", "scripts"]
 
-#: Called through a decorator, never by name.
-CALLED_BY_DECORATOR = [
-    "@router.*",
-    "@app.*",
-    "@*.validator",
-    "@*field_validator",
-    "@*model_validator",
-    "@*field_serializer",
-    "@*model_serializer",
-    "@pytest.fixture",
-    "@event.listens_for",
-    "@*.on_event",
-    "@*.exception_handler",
-    "@*.middleware",
-]
-
-#: Called by name by a library or a framework.
-CALLED_BY_NAME = [
-    "test_*",  # pytest
-    "Test*",  # pytest
-    "upgrade",  # alembic
-    "downgrade",  # alembic
-    "do_GET",  # http.server — the test servers that play GitHub or a deployed app
-    "do_POST",
-    "do_HEAD",
-    "log_message",
-]
-
-#: What is judged. Variables and attributes are left out on purpose (see the module's docstring).
-JUDGED = {"function", "class", "method", "property", "import", "unreachable_code"}
-
-#: vulture's own scale: 60 % is the lowest it gives a function nobody calls.
-MIN_CONFIDENCE = 60
+#: What a framework calls, what is judged and from what confidence — the same rules the cockpit applies to every
+#: project it builds (DEV-156), kept in one place.
+CALLED_BY_DECORATOR = rules.CALLED_BY_DECORATOR
+CALLED_BY_NAME = rules.CALLED_BY_NAME
+JUDGED = rules.JUDGED
+MIN_CONFIDENCE = rules.MIN_CONFIDENCE
 
 
 #: DEV-155 — where production code lives. What only the tests call is not used: it is code to keep for nothing.

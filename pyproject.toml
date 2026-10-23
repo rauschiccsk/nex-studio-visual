@@ -30,13 +30,15 @@ jinja2 = "^3.1.6"
 pyyaml = "^6.0"
 rich = "^15.0.0"
 tiktoken = "0.14.0"
+# DEV-156: the dead-code check of every version of every project runs in the backend — pinned, so the check cannot
+# change under a project between two of its versions.
+vulture = "2.16"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
 pytest-cov = "^6.1"
 pytest-asyncio = "^0.24"
 ruff = "^0.11"
-vulture = "^2.16"
 pytest-xdist = "^3.8"
 pytest-testmon = "^2.2"
 # The screenshot tests draw their images with it (tests/test_poradca_sees_pasted_screenshots.py). It used to come

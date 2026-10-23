@@ -2288,6 +2288,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{slug}/dead-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Dead Code */
+        get: operations["project_dead_code_api_v1_projects__slug__dead_code_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{slug}/deploy-matrix": {
         parameters: {
             query?: never;
@@ -4373,6 +4390,28 @@ export interface components {
             path: string;
             /** Removed Lines */
             removed_lines: number;
+        };
+        /** DeadCodeFindingRead */
+        DeadCodeFindingRead: {
+            /** Kind */
+            kind: string;
+            /** Line */
+            line: number;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Sentence */
+            sentence: string;
+        };
+        /** DeadCodeRead */
+        DeadCodeRead: {
+            /** Brief */
+            brief: string | null;
+            /** Findings */
+            findings: components["schemas"]["DeadCodeFindingRead"][];
+            /** Not Run */
+            not_run: string[];
         };
         /**
          * DecisionCardContextRead
@@ -12002,6 +12041,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustomerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_dead_code_api_v1_projects__slug__dead_code_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadCodeRead"];
                 };
             };
             /** @description Validation Error */

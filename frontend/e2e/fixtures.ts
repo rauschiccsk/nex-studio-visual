@@ -883,6 +883,22 @@ export function registerFixtures(): void {
     changelog: [{ version: "v0.20.0", body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu." }],
     frontends: [{ directory: "frontend", label: "Aplikácia", current: "v0.19.0" }],
   });
+  // DEV-156: the panel „Nepoužívaný kód z minulých verzií“ — one thing the earlier versions left behind.
+  answer("get", "/api/v1/projects/{slug}/dead-code", {
+    findings: [
+      {
+        kind: "function",
+        path: "backend/app/core/security.py",
+        name: "generate_temp_password",
+        line: 45,
+        sentence: "funkciu generate_temp_password (backend/app/core/security.py:45) nikto nevolá",
+      },
+    ],
+    not_run: [],
+    brief:
+      "Uprac kód, ktorý nikto nepoužíva — kontrola kokpitu ho našla v projekte z minulých verzií (1):\n" +
+      "- funkciu generate_temp_password (backend/app/core/security.py:45) nikto nevolá",
+  });
   // DEV-164: the panel „Projekt s webom“ — NEX Inbox signs in by token, so the cockpit names why it cannot switch.
   answer("get", "/api/v1/projects/{project_id}/web-switch", {
     allowed: false,

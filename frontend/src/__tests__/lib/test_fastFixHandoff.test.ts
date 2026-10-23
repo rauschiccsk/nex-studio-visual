@@ -2,7 +2,16 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { fastFixFromUat, fastFixText, forgetFastFixOrigin, handOffFastFix } from "@/lib/fastFixHandoff";
+import {
+  FROM_DEAD_CODE_LABEL,
+  FROM_UAT_LABEL,
+  ORIGIN_DEAD_CODE,
+  fastFixOriginLabel,
+  fastFixText,
+  forgetFastFixOrigin,
+  handOffFastFix,
+  markFastFixOrigin,
+} from "@/lib/fastFixHandoff";
 
 const CHANGE = {
   version: "1.8.0",
@@ -39,8 +48,20 @@ describe("fastFixHandoff", () => {
     expect(window.localStorage.getItem("nex.draft.rychla-oprava.nex-inbox")).toBe(
       "Môj rozpísaný text.\n\nPripravené zadanie.",
     );
-    expect(fastFixFromUat("nex-inbox")).toBe(true);
+    expect(fastFixOriginLabel("nex-inbox")).toBe(FROM_UAT_LABEL);
     forgetFastFixOrigin("nex-inbox");
-    expect(fastFixFromUat("nex-inbox")).toBe(false);
+    expect(fastFixOriginLabel("nex-inbox")).toBeNull();
+  });
+
+  it("DEV-156: the cleanup of the code nobody uses says it came from that check", () => {
+    markFastFixOrigin("nex-inbox", ORIGIN_DEAD_CODE);
+
+    expect(fastFixOriginLabel("nex-inbox")).toBe(FROM_DEAD_CODE_LABEL);
+  });
+
+  it("an origin it does not know is no label — the text is shown as his own", () => {
+    window.localStorage.setItem("nex.draft.rychla-oprava.nex-inbox.origin", "something-else");
+
+    expect(fastFixOriginLabel("nex-inbox")).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ import { ApiError } from "@/services/api";
 
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
-import { FROM_UAT_LABEL } from "@/lib/fastFixHandoff";
+import { FROM_DEAD_CODE_LABEL, FROM_UAT_LABEL } from "@/lib/fastFixHandoff";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ const {
   getVersionMock,
   getNextVersionNumberApiMock,
   startFastFixApiMock,
+  getDeadCodeApiMock,
   getProjectDedoProposalApiMock,
   sendProjectDedoProposalApiMock,
   setSelectedProjectMock,
@@ -49,6 +50,7 @@ const {
   getVersionMock: vi.fn(),
   getNextVersionNumberApiMock: vi.fn(),
   startFastFixApiMock: vi.fn(),
+  getDeadCodeApiMock: vi.fn(),
   getProjectDedoProposalApiMock: vi.fn(),
   sendProjectDedoProposalApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
@@ -98,6 +100,7 @@ vi.mock("@/services/api/versions", () => ({
   getNextVersionNumberApi: getNextVersionNumberApiMock,
 }));
 vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: startFastFixApiMock }));
+vi.mock("@/services/api/deadCode", () => ({ getDeadCodeApi: getDeadCodeApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ setSelectedProject: setSelectedProjectMock, setSelectedVersion: setSelectedVersionMock }),
@@ -156,6 +159,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   listProjectsApiMock.mockResolvedValue({ items: [project], total: 1, skip: 0, limit: 100 });
   getProjectApiMock.mockResolvedValue(project);
+  getDeadCodeApiMock.mockResolvedValue({ findings: [], not_run: [], brief: null });
   deleteProjectApiMock.mockResolvedValue(undefined);
   listVersionsMock.mockResolvedValue([baseVersion]);
   getVersionMock.mockResolvedValue(patchVersion);
@@ -577,6 +581,35 @@ describe("ProjectDetailPage — príchod zo zastaveného nasadenia (DEV-57)", ()
 
       expect(within(dialog).queryByText(FROM_UAT_LABEL)).not.toBeInTheDocument();
       expect(window.localStorage.getItem("nex.draft.rychla-oprava.demo.origin")).toBeNull();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("DEV-156: „Upratať nepoužívaný kód“ opens the dialog on the prepared cleanup under his draft — nothing starts", async () => {
+    window.localStorage.setItem("nex.draft.rychla-oprava.demo", "Môj rozpísaný text.");
+    getDeadCodeApiMock.mockResolvedValue({
+      findings: [
+        { kind: "function", path: "app/x.py", name: "f", line: 3, sentence: "funkciu f (app/x.py:3) nikto nevolá" },
+      ],
+      not_run: [],
+      brief: "Uprac kód, ktorý nikto nepoužíva.",
+    });
+    try {
+      const ProjectDetailPage = await importPage();
+      render(<ProjectDetailPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Upratať nepoužívaný kód" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Rýchla oprava" });
+      expect(within(dialog).getByLabelText("Popis opravy")).toHaveValue(
+        "Môj rozpísaný text.\n\nUprac kód, ktorý nikto nepoužíva.",
+      );
+      expect(within(dialog).getByText(FROM_DEAD_CODE_LABEL)).toBeInTheDocument();
+      expect(window.localStorage.getItem("nex.draft.rychla-oprava.demo")).toBe(
+        "Môj rozpísaný text.\n\nUprac kód, ktorý nikto nepoužíva.",
+      );
+      expect(startFastFixApiMock).not.toHaveBeenCalled();
     } finally {
       window.localStorage.clear();
     }

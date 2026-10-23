@@ -141,6 +141,11 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Zdrojový kód je celý po anglicky (DEV-65).** Mená, komentáre, docstringy, hlášky aj mená skúšok — kód raz
   dostane zákazník. V jazyku zákazníka (po slovensky) je **len text, ktorý aplikácia zobrazí používateľovi**.
   Slovenský komentár v riadku, ktorý meníš, prelož. Kokpit to pri Verifikácii kontroluje sám.
+- **Žiadny kód, ktorý nikto nepoužíva (DEV-156).** Čo pridáš, nech niečo volá — funkcia, trieda, súbor, export,
+  balík aj trasa API (volá ju obrazovka); kód, ktorý volajú len skúšky, sa neráta (export len pre skúšku označ
+  `/** @internal */`). Čo prestane byť potrebné, odstráň. Kokpit to pri Verifikácii kontroluje sám. Čo volá niečo
+  mimo kódu projektu (rámec, plánovač, iný systém), zapíš do `docs/dead-code-exceptions.yml`: `path`, `name` (ako
+  v náleze) a `reason`; bez dôvodu neplatí.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Fáza Programovanie
   (rovnako ako Príprava, Návrh a Vizuál) beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only):
   - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.
