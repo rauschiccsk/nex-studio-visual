@@ -13624,6 +13624,151 @@ async def _run_vizual_round(
     return state
 
 
+# ── DEV-214: the build stops after its task plan ─────────────────────────────────────────────────────────────
+# 23.10.2026 NEX Manager 1.4.0: the build round wrote its task plan at 20:29:31 and started task #21.1.1 in the same
+# second — the Manažér saw how big the plan was, and how long the agent would work on it (DEV-210), only while it was
+# being coded. Director: „Áno, súhlasím, založ všetkých päť tiketov.“, „Áno, súhlasím, začni DEV-214“. Now the round
+# that writes the plan stops; „Spustiť programovanie“ (``pokracovat``) starts the first task, „Uprav“ sends the plan
+# back to the agent, and a question is answered with the build still waiting at the plan.
+
+#: What the Manažér is told to do at the plan stop — the buttons by the names the screen gives them.
+PLAN_STOP_NEXT_ACTION = (
+    "Manažér: pozri plán úloh a spusti programovanie (Spustiť programovanie), alebo plán vráť na úpravu (Uprav)."
+)
+#: The agent's turn when the Manažér asks about the plan before any task started — an answer, never a task.
+PLAN_QUESTION_DIRECTIVE = (
+    "Plán úloh je zostavený a programovanie ešte nezačalo — čaká, kým ho Manažér spustí. Medzitým sa ťa pýta:\n\n"
+    "{text}\n\n"
+    "Odpovedz mu na otázku. Žiadnu úlohu nezačínaj, nič neprogramuj a nič necommituj. Ak je jeho správa pokynom "
+    "na zmenu plánu, povedz mu, nech plán vráti tlačidlom „Uprav“ s touto pripomienkou."
+)
+#: The plan passes' brief when „Uprav“ sends the plan back — the comment is about the PLAN, not about a task.
+PLAN_REWORK_DIRECTIVE = (
+    "Manažér vrátil PLÁN ÚLOH na úpravu — programovanie ešte nezačalo. Prepracuj plán podľa jeho pripomienky:\n\n"
+    "{comment}"
+)
+
+
+def plan_awaits_start(db: Session, version_id: uuid.UUID) -> bool:
+    """The version's task plan is written and none of its tasks has ever started (DEV-214).
+
+    A task that started carries its ``baseline_sha`` even when a cut-off dispatch reclaimed it to ``todo``."""
+    rows = db.execute(
+        select(Task.status, Task.baseline_sha)
+        .join(Feat, Feat.id == Task.feat_id)
+        .join(Epic, Epic.id == Feat.epic_id)
+        .where(Epic.version_id == version_id)
+    ).all()
+    return bool(rows) and all(status == "todo" and baseline is None for status, baseline in rows)
+
+
+def _latest_manazer_message(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    return (
+        db.execute(
+            select(PipelineMessage)
+            .where(PipelineMessage.version_id == version_id, PipelineMessage.author == "manazer")
+            .order_by(PipelineMessage.seq.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _count_words(n: int, one: str, few: str, many: str) -> str:
+    """„1 úloha“, „3 úlohy“, „20 úloh“."""
+    return f"{n} {one if n == 1 else few if 2 <= n <= 4 else many}"
+
+
+async def _settle_at_plan_stop(
+    db: Session, state: PipelineState, *, on_message: Optional[MessageCallback] = None, announce: bool = True
+) -> PipelineState:
+    """Stop the build at its written task plan for the Manažér (DEV-214) — with the plan's size and the forecast
+    of the agent's work, and the two buttons by their names."""
+    from backend.services import build_forecast
+
+    version_id = state.version_id
+    if announce:
+        epics = db.execute(select(func.count()).select_from(Epic).where(Epic.version_id == version_id)).scalar_one()
+        feats = db.execute(
+            select(func.count())
+            .select_from(Feat)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version_id)
+        ).scalar_one()
+        tasks = db.execute(
+            select(func.count())
+            .select_from(Task)
+            .join(Feat, Feat.id == Task.feat_id)
+            .join(Epic, Epic.id == Feat.epic_id)
+            .where(Epic.version_id == version_id)
+        ).scalar_one()
+        forecast = build_forecast.forecast(db, version_id)
+        work = f"; práca agenta {forecast.text}" if forecast is not None else ""
+        msg = _record_message(
+            db,
+            version_id=version_id,
+            stage=state.current_stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                f"Plán úloh je zostavený: {_count_words(epics, 'epic', 'epicy', 'epicov')}, "
+                f"{_count_words(feats, 'feat', 'featy', 'featov')}, {_count_words(tasks, 'úloha', 'úlohy', 'úloh')}"
+                f"{work}. Programovanie sa začne, až keď ho spustíš: pozri si plán v Pláne úloh a klikni "
+                "„Spustiť programovanie“, alebo plán vráť agentovi na úpravu tlačidlom „Uprav“ s pripomienkou."
+            ),
+            payload={"phase": state.current_stage, "plan_stop": True},
+        )
+        if on_message is not None:
+            await on_message(msg)
+    state.status = "awaiting_manazer"
+    state.block_reason = None
+    state.next_action = PLAN_STOP_NEXT_ACTION
+    db.flush()
+    return state
+
+
+async def _answer_at_plan_stop(
+    db: Session,
+    state: PipelineState,
+    question: PipelineMessage,
+    *,
+    on_event: Optional[claude_agent.EventCallback] = None,
+    on_message: Optional[MessageCallback] = None,
+) -> PipelineState:
+    """One answer turn for a question asked at the plan stop, then the same stop again (DEV-214)."""
+    stage = state.current_stage
+    result = await invoke_agent_with_parse_retry(
+        db,
+        version_id=state.version_id,
+        role=state.current_actor,
+        stage=stage,
+        prompt=PLAN_QUESTION_DIRECTIVE.format(text=question.content),
+        on_event=on_event,
+        on_message=on_message,
+    )
+    if isinstance(result, PipelineStatusBlock) and result.kind == "framework_issue":
+        return await _settle_framework_issue(db, state, result, stage=stage, on_message=on_message)
+    if isinstance(result, ParseFailure):
+        msg = _record_message(
+            db,
+            version_id=state.version_id,
+            stage=stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=(
+                "Odpoveď AI partnera na tvoju otázku sa nepodarilo prečítať. Plán úloh čaká ďalej — opýtaj sa "
+                "znova, alebo spusti programovanie."
+            ),
+            payload={"phase": stage, "parse_failure_reason": result.reason},
+        )
+        if on_message is not None:
+            await on_message(msg)
+    return await _settle_at_plan_stop(db, state, on_message=on_message, announce=False)
+
+
 async def _run_build_round(
     db: Session,
     state: PipelineState,
@@ -13706,6 +13851,30 @@ async def _run_build_round(
         )
         if plan_settled is not None:
             return plan_settled  # a plan-generation failure already settled (blocked / awaiting_manazer)
+        # DEV-214: the plan is written — no task starts before the Manažér has seen it and started the coding.
+        return await _settle_at_plan_stop(db, state, on_message=on_message)
+
+    # DEV-214: at the plan stop (no task ever started) the Manažér's word is about the PLAN, never a first task's
+    # brief: „Uprav“ sends the plan back to the agent, a question gets an answer — and the build stops at the plan
+    # again either way. Only „Spustiť programovanie“ (``pokracovat``, no directive) goes on to the task loop.
+    if state.flow_type != "fast_fix" and directive is not None and plan_awaits_start(db, version_id):
+        word = _latest_manazer_message(db, version_id)
+        if word is not None and word.kind == "return":
+            plan_settled = await _generate_incremental_plan(
+                db,
+                state,
+                stage="programovanie",
+                on_event=on_event,
+                directive=PLAN_REWORK_DIRECTIVE.format(comment=word.content),
+                on_message=on_message,
+                metrics_phase="navrh",
+                review_notes=_unhandled_review_notes(db, version_id),
+            )
+            if plan_settled is not None:
+                return plan_settled
+            return await _settle_at_plan_stop(db, state, on_message=on_message)
+        if word is not None and word.kind == "question":
+            return await _answer_at_plan_stop(db, state, word, on_event=on_event, on_message=on_message)
 
     # Cross-cutting invariants the AI Agent codified once in the Návrh gate_report (re-read each round, threaded
     # into every task brief).

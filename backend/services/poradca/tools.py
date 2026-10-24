@@ -290,6 +290,7 @@ class PoradcaTools:
 
     async def stavba(self, args: dict) -> str:
         from backend.api.routes.pipeline import _board
+        from backend.services import orchestrator
 
         with SessionLocal() as db:
             version = self._version(db, args.get("verzia"))
@@ -304,10 +305,14 @@ class PoradcaTools:
                 f"čo ďalej: {state.next_action or '—'}."
             )
             actions = board.available_actions or []
+            labels = dict(ACTION_LABELS)
+            if "pokracovat" in actions and orchestrator.plan_awaits_start(db, version.id):
+                # DEV-214: at the stop after the task plan the same verb STARTS the coding — the screen says so.
+                labels["pokracovat"] = "Spustiť programovanie"
             if actions:
                 lines.append(
                     "Tlačidlá, ktoré Manažér v Riadiacom centre práve vidí: "
-                    + "; ".join(f"„{ACTION_LABELS.get(a, a)}“ ({a})" for a in actions)
+                    + "; ".join(f"„{labels.get(a, a)}“ ({a})" for a in actions)
                     + "."
                 )
             else:

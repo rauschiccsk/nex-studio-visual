@@ -393,6 +393,49 @@ describe("PlanUlohRail — Programovanie build controls (STEP 4)", () => {
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(fresh));
   });
 
+  // DEV-214: the build stops once its task plan is written, before any task — the same `pokracovat` STARTS the
+  // coding there, and the button says so; once anything was built it is the ordinary resume again.
+  it("names the button 'Spustiť programovanie' while no task of the plan has started", async () => {
+    const notStarted: TaskPlanResponse = {
+      ...PROGRESS_PLAN,
+      plan: PROGRESS_PLAN.plan.map((e) => ({
+        ...e,
+        status: "planned",
+        feats: e.feats.map((f) => ({ ...f, status: "todo", tasks: f.tasks.map((t) => ({ ...t, status: "todo" })) })),
+      })),
+    };
+    vi.mocked(getTaskPlan).mockResolvedValue(notStarted);
+    vi.mocked(postPipelineActionApi).mockResolvedValue(mkBoard({ available_actions: [] }));
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "awaiting_manazer" }) })}
+        onBoard={() => {}}
+      />,
+    );
+
+    const btn = await screen.findByRole("button", { name: "Spustiť programovanie" });
+    expect(screen.queryByRole("button", { name: /Pokračovať v stavbe/ })).not.toBeInTheDocument();
+    fireEvent.click(btn);
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v1", { action: "pokracovat" }));
+  });
+
+  it("keeps 'Pokračovať v stavbe' once a task of the plan has been built", async () => {
+    vi.mocked(getTaskPlan).mockResolvedValue(PROGRESS_PLAN);
+    render(
+      <PlanUlohRail
+        versionId="v1"
+        messages={[]}
+        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "awaiting_manazer" }) })}
+        onBoard={() => {}}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Pokračovať v stavbe" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Spustiť programovanie" })).not.toBeInTheDocument();
+  });
+
   it("yields the resume rung to the after-a-fix bar, so the screen never shows two 'continue' buttons", async () => {
     // ICCINT-13: a build our technical team released from a NEX Studio bug offers the SAME `pokracovat` verb,
     // but that one belongs to PokracovatPoOpraveBar in the main column, which explains what was repaired.

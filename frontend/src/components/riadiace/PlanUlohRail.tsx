@@ -630,6 +630,9 @@ function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
   // Show only when the plan HAS tasks (and no fetch error): hides the no-plan / loading / error states AND the
   // degenerate "epics but zero tasks" case — no confusing "0/0 úloh". totalCount>0 ⇒ a populated tree.
   const showProgress = !error && totalCount > 0;
+  // DEV-214: the build stops once its task plan is written — before ANY task. The same `pokracovat` then STARTS
+  // the coding, and the button says so: „Pokračovať v stavbe“ for a build nothing was built in yet would mislead.
+  const startsCoding = totalCount > 0 && allTasks.every((t) => t.status === "todo");
 
   // Auto-expand active during build (req 3): the ancestor EPIC/FEAT ids of any IN-PROGRESS task. The active-task
   // signal is the plan's own per-node status (`in_progress`), not board.current_task — current_task carries only
@@ -746,11 +749,19 @@ function PlanUlohRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
           )}
           <button
             type="button"
-            onClick={() => runTrigger("pokracovat", "Pokračovanie v stavbe zlyhalo")}
+            onClick={() =>
+              runTrigger("pokracovat", startsCoding ? "Spustenie programovania zlyhalo" : "Pokračovanie v stavbe zlyhalo")
+            }
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {triggering ? "Pokračujem…" : "Pokračovať v stavbe"}
+            {triggering
+              ? startsCoding
+                ? "Spúšťam programovanie…"
+                : "Pokračujem…"
+              : startsCoding
+                ? "Spustiť programovanie"
+                : "Pokračovať v stavbe"}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>

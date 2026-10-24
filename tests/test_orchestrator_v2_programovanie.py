@@ -537,7 +537,7 @@ async def test_build_entry_generates_task_plan_via_incremental_passes(db_session
     _stub_turns(monkeypatch, [_done_block()])  # code each generated task
     _stub_mech(monkeypatch, [None])
     settled = await orchestrator._run_build_round(db_session, state)
-    # new_version → the Programovanie schvaľovací bod stops for the Manažér (mandatory gate)
+    # DEV-214: the round that wrote the plan stops for the Manažér before any task (he starts the coding)
     assert settled.current_stage == "programovanie" and settled.status == "awaiting_manazer"
     # EPIC→FEAT→TASK materialized at build entry
     epics = _epics(db_session, version.id)
