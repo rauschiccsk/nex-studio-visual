@@ -83,7 +83,7 @@ def safe_name(filename: str) -> str:
     return name
 
 
-def _git_ignores(project_root: Path, rel: str) -> bool:
+def git_ignores(project_root: Path, rel: str) -> bool:
     try:
         result = subprocess.run(
             ["git", "-C", str(project_root), "check-ignore", "-q", "--", rel],
@@ -105,28 +105,39 @@ def ensure_ignored(project_root: Path, rel: str) -> None:
     git_dir = Path(project_root) / ".git"
     if not git_dir.exists():
         return
-    if git_dir.is_dir():
-        exclude = git_dir / "info" / "exclude"
-        existing = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
-        if EXCLUDE_LINE not in (line.strip() for line in existing):
-            created = not exclude.exists()
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            with exclude.open("a", encoding="utf-8") as fh:
-                if existing and existing[-1].strip():
-                    fh.write("\n")
-                fh.write("# NEX Studio (DEV-44): files the Manažér hands the AI Agent — never committed.\n")
-                fh.write(EXCLUDE_LINE + "\n")
-            if created:
-                _own_like(Path(project_root), exclude.parent)
-                _own_like(Path(project_root), exclude)
-    if not _git_ignores(Path(project_root), rel):
+    exclude_locally(
+        project_root, EXCLUDE_LINE, "NEX Studio (DEV-44): files the Manažér hands the AI Agent — never committed."
+    )
+    if not git_ignores(Path(project_root), rel):
         raise PrivateFileRefused(
             f"Súbor som neuložil: git by ho v projekte videl ({rel}). Pravidlá projektu vracajú priečinok "
             f"{PRIVATE_DIR}/ do gitu — to treba opraviť skôr, než sa doň dá niečo priložiť."
         )
 
 
-def _own_like(project_root: Path, path: Path) -> None:
+def exclude_locally(project_root: Path, line: str, comment: str) -> None:
+    """Add ``line`` to the repository's own untracked ``.git/info/exclude`` once, under ``comment`` — no tracked file
+    of the project changes. Nothing when the project has no repository (or ``.git`` is a worktree's file)."""
+    git_dir = Path(project_root) / ".git"
+    if not git_dir.is_dir():
+        return
+    exclude = git_dir / "info" / "exclude"
+    existing = exclude.read_text(encoding="utf-8").splitlines() if exclude.is_file() else []
+    if line in (entry.strip() for entry in existing):
+        return
+    created = not exclude.exists()
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as fh:
+        if existing and existing[-1].strip():
+            fh.write("\n")
+        fh.write(f"# {comment}\n")
+        fh.write(line + "\n")
+    if created:
+        own_like(Path(project_root), exclude.parent)
+        own_like(Path(project_root), exclude)
+
+
+def own_like(project_root: Path, path: Path) -> None:
     """Give ``path`` the project's owner — the backend writes as root, the agent's sandbox reads as that uid."""
     if os.geteuid() != 0:
         return
@@ -179,13 +190,13 @@ def save(project_root: Path, filename: str, content: bytes, *, max_bytes: int, r
     ensure_ignored(root, dest.relative_to(root).as_posix())
     if not base.exists():
         base.mkdir(mode=0o750)
-        _own_like(root, base)
+        own_like(root, base)
     part = base / f".{dest.name}.{uuid.uuid4().hex}{_PART_SUFFIX}"
     fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(content)
-        _own_like(root, part)
+        own_like(root, part)
         os.replace(part, dest)
     except BaseException:
         part.unlink(missing_ok=True)

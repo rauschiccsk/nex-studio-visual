@@ -15,12 +15,14 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance, ci_runner, git_push, project_surfaces
+from backend.core.local_time import local_time
+from backend.services import build_provenance, ci_runner, git_push, project_files, project_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,19 @@ def web_claude_md_section() -> str:
 #: v1-era charter dirs the v1 ``init.sh`` still emits but the v2 two-agent engine never reads (it reads
 #: ONLY ``.claude/agents/{ai-agent,auditor}/CLAUDE.md``) — removed so a v2 project is clean v2 shape.
 _V1_AGENT_DIRS = ("designer", "implementer", "customer")
+
+#: DEV-217: where the role dirs the cockpit no longer has go — out of ``.claude/agents/``, never deleted. 24.10.2026
+#: NEX Manager and NEX Inbox still carried the first version's designer/implementer/coordinator/customer rules,
+#: 483–712 lines written for each project and kept only on disk; the audit of 28.07.2026 had forbidden deleting them.
+#: Director: „Áno, súhlasím, presuň ich do archívu a implementuj“.
+RETIRED_ROLES_DIR = ".claude/agents-v1-archiv"
+RETIRED_ROLES_NOTE = "README.md"
+_RETIRED_ROLES_HEADER = (
+    "# Pravidlá rolí z prvej verzie kokpitu\n\n"
+    "Kokpit NEX Studio Visual spočiatku pracoval s viacerými agentmi (designer, implementer, coordinator, customer). "
+    "Dnes pracuje len s rolami ai-agent a auditor v `.claude/agents/`. Pravidlá rolí, ktoré kokpit už nemá, sa sem "
+    "presunuli pri obnove pravidiel agenta (DEV-217), aby ich nikto nepovažoval za platné pokyny. Nič sa nezmazalo.\n\n"
+)
 
 #: DEV-46: the skills the cockpit ships to every build agent — ``templates/skills/<name>/SKILL.md``, written into the
 #: project as ``.claude/skills/<name>/SKILL.md`` next to the charters and refreshed with them. A directory with
@@ -257,6 +272,12 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
             refreshed += 1 if written else 0
         except OSError as exc:
             logger.warning("charter refresh failed for slug=%s role=%s: %s", slug, role_slug, exc)
+    # DEV-217: the roles the cockpit no longer has leave .claude/agents/ for the archive — the same moment, the same
+    # leniency: a failure is logged and the agent runs, as it did with them beside it.
+    try:
+        archive_retired_roles(project_root, slug)
+    except (OSError, project_files.PrivateFileRefused) as exc:
+        logger.warning("retired roles not archived for slug=%s: %s", slug, exc)
     # DEV-46: the skills travel with the charters — the same template owner, the same moment, the same leniency.
     try:
         skills_changed = _sync_skills(claude_dir)
@@ -266,6 +287,46 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
     if refreshed or skills_changed:
         logger.info("charter refresh: slug=%s roles=%d skills=%d obnovené zo šablóny", slug, refreshed, skills_changed)
     return refreshed
+
+
+def archive_retired_roles(project_root: Path, slug: str) -> list[str]:
+    """Move every role dir of ``.claude/agents/`` the cockpit no longer has to :data:`RETIRED_ROLES_DIR` — whole, byte
+    for byte, never over an archived one — and say so in its note. Returns the roles moved (DEV-217).
+
+    Git must never see the archive: it is excluded in the repository's own ``.git/info/exclude`` (no tracked file of
+    the project changes) and nothing moves unless ``git check-ignore`` then confirms it — a project whose own rules
+    would put the archive into git keeps its dirs where they are."""
+    agents = project_root / ".claude" / "agents"
+    if not agents.is_dir():
+        return []
+    retired = sorted(d.name for d in agents.iterdir() if d.is_dir() and not d.is_symlink() and d.name not in _V2_AGENTS)
+    if not retired:
+        return []
+    archive = project_root / RETIRED_ROLES_DIR
+    if (project_root / ".git").exists():
+        project_files.exclude_locally(
+            project_root, f"/{RETIRED_ROLES_DIR}/", "NEX Studio (DEV-217): rules of roles the cockpit no longer has."
+        )
+        if not project_files.git_ignores(project_root, f"{RETIRED_ROLES_DIR}/{RETIRED_ROLES_NOTE}"):
+            logger.warning("retired roles of slug=%s left in place — git would see %s", slug, RETIRED_ROLES_DIR)
+            return []
+    if not archive.exists():
+        archive.mkdir(parents=True)
+        project_files.own_like(project_root, archive)
+    moved = []
+    for role in retired:
+        target, n = archive / role, 2
+        while target.exists() or target.is_symlink():
+            target, n = archive / f"{role}-{n}", n + 1
+        shutil.move(str(agents / role), str(target))
+        moved.append(target.name)
+    note = archive / RETIRED_ROLES_NOTE
+    text = note.read_text(encoding="utf-8") if note.is_file() else _RETIRED_ROLES_HEADER
+    when = local_time(datetime.now(timezone.utc)).strftime("%d.%m.%Y")
+    note.write_text(f"{text}- {when} presunuté: {', '.join(moved)}\n", encoding="utf-8")
+    project_files.own_like(project_root, note)
+    logger.info("retired roles of slug=%s moved to %s: %s", slug, RETIRED_ROLES_DIR, ", ".join(moved))
+    return moved
 
 
 def provision_v2_agent_charters(
