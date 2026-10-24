@@ -173,19 +173,17 @@ function ConversationComposer({
           {error ? error.message : hint}
         </div>
       )}
+      {/* DEV-222: the line about where the text came from stands ABOVE the row — beside the field it took the width
+          of its sentence and left the field a third of the panel (Author Asistent, 24.10.2026). */}
+      {restored && !fromPoradca && (
+        // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
+        // something someone else wrote into his box while he was away.
+        <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+      )}
+      {fromPoradca && (
+        <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
+      )}
       <div className="flex items-end gap-2">
-        {restored && !fromPoradca && (
-          // ICCINT-30: text that appears by itself must be recognisable as HIS earlier draft — not as
-          // something someone else wrote into his box while he was away.
-          <p className="text-[11px] text-[var(--color-text-muted)]">
-            {RESTORED_DRAFT_LABEL}
-          </p>
-        )}
-        {fromPoradca && (
-          <p className="text-[11px] font-medium text-[var(--color-accent-primary)]">
-            {FROM_PORADCA_LABEL}
-          </p>
-        )}
         <textarea
           data-draft="rozhovor"
           lang="sk"
