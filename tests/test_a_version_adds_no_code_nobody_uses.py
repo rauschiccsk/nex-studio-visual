@@ -633,7 +633,7 @@ async def test_dead_code_floors_the_auditors_pass_and_reaches_the_fixer(db_sessi
             "Verzia pridala kód, ktorý nikto nepoužíva (1): funkciu vat (backend/app/tax.py:1) nikto nevolá. Odstráň "
             "ho. Export, ktorý potrebuje len skúška, označ komentárom /** @internal */. Čo predsa volá niečo mimo kódu "
             "projektu (rámec, plánovač, iný systém), nechaj a zapíš výnimku s dôvodom do "
-            f"{dead_code.EXCEPTIONS_FILE} (položky path, name, reason)."
+            f"{dead_code.EXCEPTIONS_FILE} (položky path, name, reason; {dead_code.ROUTE_NAMING})."
         ),
         "blocking": True,
         "escapes_tests": False,
@@ -772,7 +772,7 @@ def test_the_project_page_offers_the_cleanup_of_what_earlier_versions_left(clien
             "- funkciu forgotten_before (backend/app/money.py:5) nikto nevolá\n"
             "Každú z týchto vecí odstráň. Export, ktorý potrebuje len skúška, označ komentárom /** @internal */. Čo "
             "predsa volá niečo mimo kódu projektu (rámec, plánovač, iný systém), nechaj a zapíš výnimku s dôvodom do "
-            f"{dead_code.EXCEPTIONS_FILE} (položky path, name, reason)."
+            f"{dead_code.EXCEPTIONS_FILE} (položky path, name, reason; {dead_code.ROUTE_NAMING})."
         ),
     }
     assert again.json() == first.json()

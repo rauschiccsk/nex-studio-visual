@@ -209,6 +209,10 @@ _SENTENCES = {
 }
 
 
+#: DEV-211 — how a route is named in an exception: the agent wrote its function, the check named it by method and path.
+ROUTE_NAMING = "trasu menuje meno jej funkcie alebo metóda s cestou, napr. „GET /items“"
+
+
 @dataclass(frozen=True)
 class Finding:
     """One piece of code nobody uses. ``path`` is relative to the repository; ``name`` is what the exceptions name."""
@@ -217,6 +221,9 @@ class Finding:
     path: str
     name: str
     line: int = 0
+    #: DEV-211 — other names an exception may give it: a route's function (the agent names a route by its function as
+    #: naturally as by its method and path). Not part of :attr:`key`.
+    aliases: tuple[str, ...] = ()
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -239,7 +246,14 @@ class Waiver:
     reason: str
 
     def covers(self, finding: Finding) -> bool:
-        return finding.path == self.path and finding.name == self.name
+        return finding.path == self.path and self.name in (finding.name, *finding.aliases)
+
+    def covers_nothing_sentence(self) -> str:
+        """DEV-211 — what the Manažér and the fixer read about an exception that excepts nothing."""
+        return (
+            f"výnimka {self.name} ({self.path}) v {EXCEPTIONS_FILE} nič nepokrýva — kontrola v tom súbore nenašla "
+            f"nepoužívaný kód s týmto menom ({ROUTE_NAMING}); výnimku oprav, alebo ju zmaž"
+        )
 
     def sentence(self) -> str:
         return f"{self.name} ({self.path}) — {self.reason.rstrip('.')}"
@@ -488,6 +502,8 @@ class Route:
     path: str
     file: str
     line: int
+    #: the function the route runs — an exception may name the route by it (DEV-211)
+    function: str = ""
 
 
 def _router_prefixes(tree: ast.Module) -> dict[str, str]:
@@ -534,7 +550,7 @@ def routes(root: Path, files: list[Path]) -> list[Route]:
                 if not (deco.args and isinstance(deco.args[0], ast.Constant) and isinstance(deco.args[0].value, str)):
                     continue
                 path = prefixes.get(owner.id, "") + deco.args[0].value
-                out.append(Route(deco.func.attr.upper(), path, f.relative_to(root).as_posix(), deco.lineno))
+                out.append(Route(deco.func.attr.upper(), path, f.relative_to(root).as_posix(), deco.lineno, node.name))
     return out
 
 
@@ -576,7 +592,7 @@ def orphan_routes(found: list[Route], calls: list[dict[str, str]]) -> list[Findi
             continue
         if any((c["method"] in (_ANY, r.method)) and reaches(r.path, c["path"]) for c in calls):
             continue
-        out.append(Finding("route", r.file, f"{r.method} {r.path}", r.line))
+        out.append(Finding("route", r.file, f"{r.method} {r.path}", r.line, (r.function,) if r.function else ()))
     return out
 
 
@@ -744,7 +760,14 @@ def _judge(
     report.new.sort(key=_place)
     report.old.sort(key=_place)
     known = {(renames.get(w.path, w.path) if renames else w.path, w.name) for w in base_waivers}
-    report.waivers_added = [w for w in head_waivers if (w.path, w.name) not in known]
+    # DEV-211: an exception that covers nothing is said — and is not listed as added, as if it excepted something. Only
+    # where the whole check ran: with a frontend or the routes unchecked, what it would cover is unknown.
+    if head.routes_judged and not head.failed_packages:
+        empty = [w for w in head_waivers if not any(w.covers(f) for f in head.findings)]
+        report.invalid_waivers = [w.covers_nothing_sentence() for w in empty]
+    else:
+        empty = []
+    report.waivers_added = [w for w in head_waivers if (w.path, w.name) not in known and w not in empty]
     return report
 
 
@@ -779,7 +802,7 @@ def scan(repo: Path, base: Optional[str], head: str) -> Report:
         base_waivers = waivers(trees["base"])[0] if base else []
         renames = _renames(repo, base, head) if base else {}
         report = _judge(read["head"], read.get("base"), head_waivers, base_waivers, renames)
-        report.invalid_waivers = invalid
+        report.invalid_waivers = invalid + report.invalid_waivers
         failed = sorted(read["head"].failed_packages.items())
         report.not_run = not_run + [f"priečinok {pkg} sa neskontroloval — {reason}" for pkg, reason in failed]
         return report
@@ -802,7 +825,7 @@ def listing(findings: list[Finding], limit: int = LISTED) -> Iterator[str]:
 HOW_TO_RESOLVE = (
     "Export, ktorý potrebuje len skúška, označ komentárom /** @internal */. Čo predsa volá niečo mimo kódu projektu "
     "(rámec, plánovač, iný systém), nechaj a zapíš výnimku s dôvodom do "
-    f"{EXCEPTIONS_FILE} (položky path, name, reason)."
+    f"{EXCEPTIONS_FILE} (položky path, name, reason; {ROUTE_NAMING})."
 )
 
 

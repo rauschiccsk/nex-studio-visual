@@ -135,7 +135,8 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   balík aj trasa API (volá ju obrazovka); kód, ktorý volajú len skúšky, sa neráta (export len pre skúšku označ
   `/** @internal */`). Čo prestane byť potrebné, odstráň. Kokpit to pri Verifikácii kontroluje sám. Čo volá niečo
   mimo kódu projektu (rámec, plánovač, iný systém), zapíš do `docs/dead-code-exceptions.yml`: `path`, `name` (ako
-  v náleze) a `reason`; bez dôvodu neplatí.
+  v náleze; trasu API aj menom jej funkcie) a `reason`; bez dôvodu neplatí a výnimku, ktorá nič nepokrýva, kokpit
+  ohlási.
 - **Aplikácia pre viac zákazníkov (DEV-137)** — pri oprave podľa dokladu zákazníka a pri rozdiele medzi zákazníkmi
   použi zručnosť `multi-customer`.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Ako fázy
