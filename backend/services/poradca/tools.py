@@ -765,8 +765,8 @@ class PoradcaTools:
             return "\n".join(lines)
 
     async def plane_tiket(self, args: dict) -> str:
-        """DEV-218 — one ticket of any register the cockpit is a member of, by its number: what the agent's brief
-        names without its content. The same document a click then attaches for the agent."""
+        """DEV-218 — one ticket of DEV by its number: what the agent asks for without its content. The same document a
+        click then attaches for the agent. Development is kept in DEV only (Director 24.10.2026)."""
         from backend.services import plane_tickets
         from backend.services.plane_gateway import PlaneError
 
@@ -1109,9 +1109,9 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
         ),
         Tool(
             "plane_tiket",
-            "Jeden tiket z Plane podľa čísla (napr. MAGER-66, DEV-186) z ktorejkoľvek evidencie, ktorej je kokpit "
-            "členom — názov, stav, celý popis a komentáre. Keď ho kokpit prečítať nemôže, povie prečo.",
-            _schema({"cislo": {"type": "string", "description": "Číslo tiketu, napr. MAGER-66."}}, ["cislo"]),
+            "Jeden tiket evidencie DEV podľa čísla (napr. DEV-186) — názov, stav, celý popis a komentáre. Vývojová "
+            "práca sa vedie len v DEV; tiket inej evidencie kokpit nečíta a povie to.",
+            _schema({"cislo": {"type": "string", "description": "Číslo tiketu, napr. DEV-186."}}, ["cislo"]),
             t.plane_tiket,
             lambda a: str(a.get("cislo") or ""),
         ),

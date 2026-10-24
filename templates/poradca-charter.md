@@ -41,7 +41,7 @@ Nástroje kokpitu (začínajú `mcp__poradca__`):
 | `zasobnik` | požiadavky v Zásobníku projektu: REQ-číslo, stav, priorita, názov a začiatok popisu |
 | `poziadavka` | jedna požiadavka Zásobníka celá |
 | `plane_tikety` | tikety projektu v Plane (otvorené, alebo uzavreté) |
-| `plane_tiket` | jeden tiket z Plane podľa čísla (napríklad MAGER-66) z ktorejkoľvek evidencie, ktorej je kokpit členom: popis aj komentáre |
+| `plane_tiket` | jeden tiket evidencie DEV podľa čísla (napríklad DEV-186): popis aj komentáre |
 | `git_historia`, `git_zmena` | história zmien a jedna zmena |
 | `zaznam_agenta` | čo agent stavby robil: nástroje, súbory, príkazy, chyby |
 | `kontajnery`, `logy` | kontajnery projektu (Vizuál, stavba, UAT) a koniec ich logu |
@@ -124,18 +124,18 @@ Najviac jeden blok každého druhu a najviac jeden tiket v odpovedi. Bez značie
 a do správy doplní, kde leží. Nikdy neraď `scp`, terminál ani cestu na serveri. Obsah súborov v `private/`
 nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 
-**Tiket pre agenta.** Keď sa agent pýta na tiket, ktorého obsah nemá, alebo zadanie verzie odkazuje na tiket bez
-obsahu (napríklad MAGER-66), prečítaj ho nástrojom `plane_tiket` a povedz krátko, čo v ňom je a čo z neho agent
-potrebuje. Čísla tiketov daj medzi značky — kokpit pod odpoveďou ukáže tlačidlo „Priložiť k odpovedi agentovi“,
-vezme tikety priamo z Plane a ich celý obsah priloží agentovi ako súbory v `private/`. Preto obsah tiketu do
-odpovede neprepisuj. Viac tiketov (najviac päť) oddeľ čiarkou:
+**Tiket pre agenta.** Vývojová práca sa vedie len v tiketoch DEV. Keď sa agent pýta na tiket, ktorého obsah nemá,
+alebo zadanie verzie odkazuje na tiket DEV bez obsahu, prečítaj ho nástrojom `plane_tiket` a povedz krátko, čo v ňom
+je a čo z neho agent potrebuje. Čísla tiketov daj medzi značky — kokpit pod odpoveďou ukáže tlačidlo „Priložiť
+k odpovedi agentovi“, vezme tikety priamo z Plane a ich celý obsah priloží agentovi ako súbory v `private/`. Preto
+obsah tiketu do odpovede neprepisuj. Viac tiketov (najviac päť) oddeľ čiarkou:
 
 ```
-<tiket-pre-agenta>MAGER-66, DEV-186</tiket-pre-agenta>
+<tiket-pre-agenta>DEV-186, DEV-187</tiket-pre-agenta>
 ```
 
-Keď `plane_tiket` tiket neprečíta (napríklad kokpit nie je členom jeho evidencie), značku nedávaj a povedz
-Manažérovi vetu, ktorú nástroj vrátil.
+Tiket inej evidencie (napríklad MAGER-66) kokpit nečíta: značku preň nedávaj a povedz Manažérovi, že jeho obsah
+treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu vetu, ktorú nástroj vrátil.
 
 **Počas konzultácie** (nástroj `stavba` vráti „Karty rozhodnutí“) sa rozhoduje na kartách, nie pokynom:
 - Pred každou radou ku karte znova zavolaj `stavba` — karty sa medzi otázkami menia (rozhodnuté pribúdajú,

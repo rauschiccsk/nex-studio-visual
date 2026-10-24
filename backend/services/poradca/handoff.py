@@ -15,7 +15,7 @@ DEV-119: a third block proposes a ticket in Plane — ``<tiket-nsv>`` for a prob
 solves it), ``<tiket-projektu druh="…" cesta="…">`` for work on the project, proposed for the next version or for a
 fast fix. The ticket is founded by a person's click after a preview (:mod:`backend.services.poradca.tickets`).
 
-DEV-218: a fourth block names tickets the agent asked for — ``<tiket-pre-agenta>MAGER-66, DEV-186</tiket-pre-agenta>``.
+DEV-218: a fourth block names tickets the agent asked for — ``<tiket-pre-agenta>DEV-186, DEV-187</tiket-pre-agenta>``.
 „Priložiť k odpovedi agentovi" attaches each one's content as a file, read from Plane at the click
 (:mod:`backend.services.poradca.agent_tickets`); Poradca never retypes a ticket.
 

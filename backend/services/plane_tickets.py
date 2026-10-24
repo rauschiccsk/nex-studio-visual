@@ -373,7 +373,7 @@ def fix_failed(ticket: LinkedTicket, event: str, why: str) -> str:
     return f"{FIX_MOVES[event][2].format(ticket=ticket.identifier)}: {why}"
 
 
-# --- a ticket of any register, by its number, for the agent (DEV-218) ------------------------------------------------
+# --- a ticket of DEV, by its number, for the agent (DEV-218) ---------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -426,21 +426,20 @@ def _moment(at: datetime) -> str:
     return local_time(at).strftime("%d.%m.%Y %H:%M")
 
 
-def read_ticket(gateway: PlaneGateway, identifier: str) -> RegisterTicket:
-    """The ticket ``identifier`` (``MAGER-66``) in any register the cockpit's account is a member of.
+def read_ticket(gateway: PlaneGateway, number: str) -> RegisterTicket:
+    """The ticket ``number`` (``DEV-186``) of the gateway's register — development is kept in DEV only.
 
-    Raises :class:`PlaneError` with the sentence for a person when the cockpit cannot read it."""
-    register, issue, comments = gateway.ticket_by_identifier(identifier)
+    Raises :class:`PlaneError` with the sentence for a person when the cockpit does not read it."""
+    issue, comments = gateway.ticket_by_identifier(number)
     names = gateway.member_names() if comments else {}
-    prefix = register.get("identifier", "")
     return RegisterTicket(
-        identifier=f"{prefix}-{issue.get('sequence_id')}",
-        register=prefix,
+        identifier=identifier(gateway, issue),
+        register=gateway.project()["identifier"],
         title=issue.get("name", ""),
-        state=gateway.register_states(register["id"]).get(issue.get("state"), ""),
+        state=gateway.state_names().get(issue.get("state"), ("", ""))[0],
         archived=bool(issue.get("archived_at")),
         updated_at=_when(issue.get("updated_at")),
-        url=gateway.issue_url(register["id"], issue["id"]),
+        url=gateway.ticket_url(issue),
         text=ticket_text(issue),
         comments=tuple(
             TicketComment(

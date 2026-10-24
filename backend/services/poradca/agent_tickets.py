@@ -6,7 +6,9 @@ Director sent them in an answer. Director: „ak Agent sa narazí na tiket (napr
 požiadá (tlačítko ako to už máme v iných mistach) Poradcu aby doplnil chýbajúce informácie.“
 
 So the agent names the ticket in its question, the Manažér asks Poradca („Overiť s Poradcom“), Poradca reads it
-(tool ``plane_tiket``) and puts its number into ``<tiket-pre-agenta>``. „Priložiť k odpovedi agentovi“ under the answer
+(tool ``plane_tiket``) and puts its number into ``<tiket-pre-agenta>``. Only tickets of DEV — Director 24.10.2026:
+„Úplne všetko čo sa týka vývojových prác majú by zachytené v tiketoch DEV. Preto v zadaní nikde nemá byť iný tiket
+uvedený ako DEV.“ (MAGER-66 was then taken over into DEV-186.) „Priložiť k odpovedi agentovi“ under the answer
 lands here: the tickets the STORED answer names — never what the browser sends — are read from Plane at that moment,
 not retyped by Poradca, each into ``private/<identifier>.md`` (git never sees it, :mod:`backend.services.project_files`)
 through the same secret filter as Poradca's tools. Every ticket is read before any file is written: half of them is not
@@ -20,11 +22,12 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.db.models.poradca import AUTHOR_PORADCA, DONE, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import plane_tickets, project_files
-from backend.services.plane_gateway import PlaneGateway
+from backend.services.plane_gateway import PlaneError, PlaneGateway, ticket_identifier
 from backend.services.poradca.handoff import HandoffRefused, agent_tickets
 from backend.services.poradca.secrets_filter import SecretFilter
 
@@ -56,6 +59,10 @@ def target(db: Session, message: PoradcaMessage) -> Target:
     identifiers = agent_tickets(message.content)
     if not identifiers:
         raise HandoffRefused("V tejto odpovedi nie je tiket pre agenta.")
+    try:
+        identifiers = [ticket_identifier(i, settings.plane_dev_project) for i in identifiers]
+    except PlaneError as exc:
+        raise HandoffRefused(str(exc)) from exc
     conversation = db.get(PoradcaConversation, message.conversation_id)
     version = db.get(Version, conversation.version_id) if conversation and conversation.version_id else None
     if version is None:

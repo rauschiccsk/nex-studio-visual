@@ -1,8 +1,8 @@
 """Plane's API as far as the cockpit uses it, in memory.
 
-Shared by the tests of every door to Plane (DEV-117, DEV-121). DEV-218: other registers than DEV, each with whether
-the cockpit's account is its member, and a ticket read by its identifier — as Plane answers (measured 24.10.2026: a
-register the account is not a member of is 403, an identifier in small letters too, a missing ticket 404).
+Shared by the tests of every door to Plane (DEV-117, DEV-121). DEV-218: a ticket read by its identifier, as Plane
+answers (measured 24.10.2026: a register the account is not a member of is 403, an identifier in small letters too, a
+missing ticket 404), and the workspace's members.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class FakePlane:
         self.module_issues: dict[str, list[str]] = {}
         self.comments: dict[str, list[dict]] = {}
         self._seq = itertools.count(1)
-        #: Every register the account sees — ``is_member`` decides whether it may read its tickets.
+        #: Every register the account sees — only of a member may it read the tickets.
         self.registers: list[dict] = [{"id": "p1", "identifier": "DEV", "is_member": True}]
         self.members: list[dict] = []
 
@@ -64,12 +64,6 @@ class FakePlane:
             return httpx.Response(200, json=self.members)
         if path.startswith("/api/v1/workspaces/icc/issues/"):
             return self._by_identifier(path.removeprefix("/api/v1/workspaces/icc/issues/").strip("/"))
-        for register in self.registers:
-            other = f"/api/v1/workspaces/icc/projects/{register['id']}"
-            if register["id"] != "p1" and path.startswith(other + "/"):
-                if not register.get("is_member"):
-                    return httpx.Response(403, json={"detail": "not a member"})
-                path = P + path.removeprefix(other)
         if path == f"{P}/states/":
             return httpx.Response(
                 200,

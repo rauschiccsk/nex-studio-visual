@@ -11,9 +11,9 @@ write back and says whether it holds. The cockpit writes the same way, through t
 * **a project's tickets live in the DEV register under the module named after the application** (rule
   „Vývoj patrí do DEV, s modulom aplikácie"); a missing module is created.
 
-DEV-218: a ticket is also read by its identifier („MAGER-66“) in any register the cockpit's account is a member of —
-the agent's brief names tickets of other registers. Plane decides what the account may read: which registers it is
-a member of is asked of Plane, never kept in the cockpit.
+DEV-218: a ticket is also read by its identifier („DEV-186“) — the one the agent asks for. Only a ticket of the DEV
+register: Director 24.10.2026 „Úplne všetko čo sa týka vývojových prác majú by zachytené v tiketoch DEV. Preto v zadaní
+nikde nemá byť iný tiket uvedený ako DEV.“ A ticket of another register is said to need taking over into DEV.
 
 Synchronous (``httpx.Client``); callers in async code run it through ``run_blocking``.
 """
@@ -45,8 +45,25 @@ class PlaneNotFound(PlaneError):
     """Plane answered 404 — what was asked for is not there."""
 
 
-#: A ticket's identifier as the registers write it: the register's identifier, a dash, the number („MAGER-66“).
+#: A ticket's identifier as the registers write it: the register's identifier, a dash, the number („DEV-186“).
 TICKET_IDENTIFIER = re.compile(r"([A-Za-z][A-Za-z0-9]{0,11})-(\d{1,7})")
+
+
+def ticket_identifier(identifier: str, register: str) -> str:
+    """``identifier`` as ``register`` writes it („dev-186“ → „DEV-186“) — else :class:`PlaneError` with the sentence:
+    not a ticket's number, or a ticket of another register, whose content belongs taken over into ``register``."""
+    wanted = identifier.strip()
+    match = TICKET_IDENTIFIER.fullmatch(wanted)
+    own = register.upper()
+    if not match:
+        raise PlaneError(f"„{wanted}“ nie je číslo tiketu — napíš ho tak, ako ho píše Plane, napríklad {own}-186.")
+    prefix, number = match.group(1).upper(), int(match.group(2))
+    if prefix != own:
+        raise PlaneError(
+            f"Vývojová práca sa vedie v tiketoch {own} — tiket {prefix}-{number} kokpit nečíta, jeho obsah treba "
+            f"prevziať do tiketu {own}."
+        )
+    return f"{own}-{number}"
 
 
 @dataclass(frozen=True)
@@ -230,10 +247,7 @@ class PlaneGateway:
     # --- tickets -----------------------------------------------------------------------------------------------
 
     def ticket_url(self, issue: dict) -> str:
-        return self.issue_url(self.project()["id"], issue["id"])
-
-    def issue_url(self, project_id: str, issue_id: str) -> str:
-        return f"{self.base_url}/{self.workspace}/projects/{project_id}/issues/{issue_id}"
+        return f"{self.base_url}/{self.workspace}/projects/{self.project()['id']}/issues/{issue['id']}"
 
     def _ref(self, issue: dict) -> TicketRef:
         return TicketRef(
@@ -333,19 +347,7 @@ class PlaneGateway:
         if self.get_ticket(issue_id).get("state") != wanted:
             raise PlaneMismatch(f"Tiket sa do stĺpca „{state}“ neposunul.")
 
-    # --- any register, a ticket by its identifier (DEV-218) ---------------------------------------------------------
-
-    def registers(self) -> list[dict]:
-        """Every register the account sees, each with ``is_member`` — only a member reads its tickets."""
-        if "registers" not in self._cache.extra:
-            self._cache.extra["registers"] = self._results(self._request("GET", "projects/"))
-        return self._cache.extra["registers"]
-
-    def register_states(self, project_id: str) -> dict[str, str]:
-        """The columns of a register by their id → their name."""
-        return {
-            s["id"]: s.get("name", "") for s in self._results(self._request("GET", f"projects/{project_id}/states/"))
-        }
+    # --- a ticket of this register by its identifier (DEV-218) ------------------------------------------------------
 
     def member_names(self) -> dict[str, str]:
         """The people of the workspace by their id → the name they go by (first and last name, else the display one)."""
@@ -355,27 +357,13 @@ class PlaneGateway:
             names[m.get("id", "")] = full or m.get("display_name") or ""
         return names
 
-    def ticket_by_identifier(self, identifier: str) -> tuple[dict, dict, list[dict]]:
-        """``(register, ticket, live comments oldest first)`` of the ticket ``identifier`` (``MAGER-66``).
+    def ticket_by_identifier(self, identifier: str) -> tuple[dict, list[dict]]:
+        """``(ticket, its live comments oldest first)`` of the ticket ``identifier`` of this register (``DEV-186``).
 
-        Raises :class:`PlaneError` with the sentence for a person: a register the account does not see or is not a
-        member of, a ticket that is not there or was deleted. The identifier is written as Plane writes it — in
-        small letters Plane refuses it (measured 24.10.2026)."""
-        wanted = identifier.strip()
-        match = TICKET_IDENTIFIER.fullmatch(wanted)
-        if not match:
-            raise PlaneError(f"„{wanted}“ nie je číslo tiketu — napíš ho tak, ako ho píše Plane, napríklad MAGER-66.")
-        prefix, number = match.group(1).upper(), int(match.group(2))
-        ident = f"{prefix}-{number}"
-        found = [r for r in self.registers() if (r.get("identifier") or "").upper() == prefix]
-        if not found:
-            raise PlaneError(f"Evidenciu {prefix} účet kokpitu v Plane nevidí — tiket {ident} neprečíta.")
-        register = found[0]
-        if not register.get("is_member"):
-            raise PlaneError(
-                f"Účet kokpitu nie je členom evidencie {prefix} v Plane, preto tiket {ident} neprečíta. O členstve "
-                "kokpitu v evidencii rozhoduje Director."
-            )
+        Raises :class:`PlaneError` with the sentence for a person: not this register's ticket
+        (:func:`ticket_identifier`), not there, or deleted. Plane refuses an identifier in small letters (measured
+        24.10.2026) — it is sent in capitals."""
+        ident = ticket_identifier(identifier, self.project_identifier)
         try:
             issue = self._request("GET", f"issues/{ident}/")
         except PlaneNotFound as exc:
@@ -384,10 +372,10 @@ class PlaneGateway:
             raise PlaneError(f"Tiket {ident} je v Plane zmazaný.")
         comments = [
             c
-            for c in self._results(self._request("GET", f"projects/{register['id']}/issues/{issue['id']}/comments/"))
+            for c in self._results(self._request("GET", self._project_path(f"issues/{issue['id']}/comments/")))
             if not c.get("deleted_at")
         ]
-        return register, issue, sorted(comments, key=lambda c: c.get("created_at") or "")
+        return issue, sorted(comments, key=lambda c: c.get("created_at") or "")
 
     def who_am_i(self) -> str:
         """The e-mail of the account the key belongs to — proves which identity the cockpit writes under."""
