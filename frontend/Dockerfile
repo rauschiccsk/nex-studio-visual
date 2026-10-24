@@ -17,14 +17,15 @@ RUN npm run build
 
 FROM nginx:1.27-alpine AS production
 
+# curl is used by the container healthcheck. Installed before the site is copied (DEV-219) — after it, every commit
+# downloaded it again.
+RUN apk add --no-cache curl
+
 # Drop the default config shipped with the image — we ship our own.
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# curl is used by the container healthcheck.
-RUN apk add --no-cache curl
 
 EXPOSE 9177
 

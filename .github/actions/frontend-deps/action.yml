@@ -1,0 +1,25 @@
+name: Frontend dependencies
+description: >-
+  Node.js 20 and frontend/node_modules, restored from a cache keyed by the exact Node version and package-lock.json;
+  installed only when the cache missed (DEV-216, DEV-219).
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      id: node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "20"
+
+    - name: Restore frontend dependencies
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: frontend/node_modules
+        key: frontend-${{ runner.os }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('frontend/package-lock.json') }}
+
+    - name: Install frontend dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: frontend
+      run: npm install
