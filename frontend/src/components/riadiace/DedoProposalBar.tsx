@@ -90,6 +90,12 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
   },
 };
 
+// DEV-221: sent while the Decision Cards wait, „Uprav“ cancels them — and the engine takes the decided ones along
+// (24.10.2026 Author Asistent: 12 decided cards never reached the agent, the next round asked them again).
+const UPRAV_AT_THE_CARDS =
+  "Otvorené karty rozhodnutia sa tým zrušia. Karty, ktoré si už rozhodol, dostane AI Agent spolu s týmto textom " +
+  "a znovu sa na ne nepýta; na ostatné sa ďalšie kolo spýta, len ak ešte platia.";
+
 const FALLBACK_COPY = {
   button: "Odoslať agentovi",
   effect: "Text sa odošle AI Agentovi.",
@@ -146,6 +152,8 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   // actually on screen at the moment of the click — that binding IS the guarantee (see the header note).
   const decidingAbout = proposal.message_id;
   const copy = ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY;
+  const atTheCards = board?.state?.block_reason === "decision_needed";
+  const effect = proposal.proposed_action === "uprav" && atTheCards ? UPRAV_AT_THE_CARDS : copy.effect;
   const edited = text.trim() !== proposal.content.trim();
   const needsKind = proposal.proposed_action === "fast_fix";
   const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null);
@@ -242,7 +250,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
 
         <p className="text-xs text-[var(--color-text-muted)]">
           Text napísal Dedo — agentovi zatiaľ NEODIŠIEL a agent o ňom nevie. Môžeš ho upraviť alebo doplniť;
-          odoslať ho môžeš len ty. {copy.effect}
+          odoslať ho môžeš len ty. {effect}
         </p>
 
         <textarea

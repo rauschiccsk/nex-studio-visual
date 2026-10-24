@@ -3894,6 +3894,21 @@ CONSULTATION_APPLY_CHECK = (
     "vyžadovalo nové rozhodnutie Manažéra, nerozhoduj sám — vráť `kind=question` s jednou otázkou."
 )
 
+#: DEV-221: an „Uprav“ that interrupts the Decision Cards. The decisions reach the agent with the LAST decide of a
+#: round; an Uprav before it sent the agent the Uprav text alone, and the next review asked the decided cards again
+#: (Author Asistent 0.1.0, 24.10.2026: 12 of 20 decided, then 21 cards). The decided cards go with the Uprav.
+UPRAV_KEEPS_DECISIONS = (
+    "Manažér ťa vrátil uprostred konzultácie. Karty, ktoré už rozhodol, platia — zapracuj ich spolu s úpravou "
+    "a znovu sa na ne nepýtaj:"
+)
+UPRAV_CANCELS_THE_REST = (
+    "Ostatné karty tejto konzultácie úprava ruší; ak po nej ešte platia, ďalšie kolo sa na ne spýta."
+)
+UPRAV_BEFORE_ANY_DECISION = (
+    "Manažér ťa vrátil uprostred konzultácie, skôr než rozhodol niektorú kartu. Karty tejto konzultácie úprava "
+    "ruší; ak po nej ešte platia, ďalšie kolo sa na ne spýta."
+)
+
 #: DEV-27: what the agent is told when the Manažér asks in the chat while the Decision Cards wait.
 CONSULTATION_QUESTION_DIRECTIVE = (
     "Prebieha konzultácia — Manažér rozhoduje body previerky na kartách a ešte neskončil. Medzitým sa ťa pýta "
@@ -4193,6 +4208,40 @@ def consultation_direction(db: Session, version_id: uuid.UUID) -> Optional[dict[
     }
 
 
+def _decided_on_open_cards(db: Session, state: PipelineState) -> Optional[list[dict[str, str]]]:
+    """DEV-221: the cards of the open consultation the Manažér has decided — in card order, each with its question
+    and what he chose — or ``None`` when the build does not stand at the cards. A held card is not a decision."""
+    if not (state.status == "blocked" and state.block_reason == "decision_needed"):
+        return None
+    lc = _latest_consultation(db, state.version_id)
+    if lc is None:
+        return None
+    c, c_seq = lc
+    answers = _consultation_answers(db, state.version_id, c_seq)
+    return [
+        {"key": str(d["key"]), "question": str(d.get("question", "")), "chosen": _chosen_on_card(a)}
+        for d in c.get("decisions", [])
+        if (a := answers.get(d.get("key"))) is not None and not a.get("held")
+    ]
+
+
+def _carried_by_the_uprav(db: Session, version_id: uuid.UUID) -> Optional[list[dict[str, str]]]:
+    """DEV-221: what the Manažér's latest „Uprav“ took from the cards it interrupted (``None``: it interrupted none)
+    — read off its record, written when it was pressed (:func:`_decided_on_open_cards`)."""
+    payload = db.execute(
+        select(PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == "manazer",
+            PipelineMessage.kind == "return",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    carried = payload.get("carried_decisions") if isinstance(payload, dict) else None
+    return carried if isinstance(carried, list) else None
+
+
 def _chosen_on_card(answer: dict[str, Any]) -> str:
     """What the Manažér decided on one card, as the agent reads it in the apply directive. DEV-220: his own decision
     is named as his — not passed off as one of the options the agent offered (the label of a free answer is its
@@ -4256,6 +4305,16 @@ def dispatch_directive(
             + CONSULTATION_APPLY_CHECK
             + "\nTeraz PREPRACUJ Špecifikáciu/Návrh podľa týchto rozhodnutí a uzavri fázu (gate_report)."
         )
+    if action == "uprav":
+        # DEV-221: an Uprav that interrupted the cards takes the decided ones along and says the rest is cancelled.
+        directive = directive_for_action(action, payload, stage)
+        carried = _carried_by_the_uprav(db, version_id)
+        if directive is None or carried is None:
+            return directive
+        if not carried:
+            return f"{directive}\n\n{UPRAV_BEFORE_ANY_DECISION}"
+        lines = "\n".join(f"- {d.get('question', '')} → {d.get('chosen', '')}" for d in carried)
+        return f"{directive}\n\n{UPRAV_KEEPS_DECISIONS}\n{lines}\n{UPRAV_CANCELS_THE_REST}\n{CONSULTATION_APPLY_CHECK}"
     del db, version_id  # route-call signature parity; the v1 DB-fetch relay paths are retired (CR-V2-009)
     return directive_for_action(action, payload, stage)
 
@@ -14959,6 +15018,11 @@ async def apply_action(
                 _ensure_verifikacia_fix_task(db, version_id, scope=str(comment), findings=[str(comment)])
         # A paused Programovanie loop steered by ``uprav`` resumes from the pause (re-dispatch the loop).
         recipient = state.current_actor
+        record: dict[str, Any] = {"phase": state.current_stage}
+        # DEV-221: pressed at the Decision Cards → the record names the decided cards; the directive takes them.
+        carried = _decided_on_open_cards(db, state)
+        if carried is not None:
+            record["carried_decisions"] = carried
         _record_message(
             db,
             version_id=version_id,
@@ -14967,7 +15031,7 @@ async def apply_action(
             recipient=recipient,
             kind="return",
             content=str(comment),
-            payload={"phase": state.current_stage},
+            payload=record,
         )
         _begin_dispatch(db, state)
         return state
