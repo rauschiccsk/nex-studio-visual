@@ -26,7 +26,7 @@ from typing import Any, Optional
 import yaml
 
 from backend.core.test_seam import for_tests
-from backend.services import ci_runner, ci_runs, create_project_postscaffold, github_validation
+from backend.services import ci_runner, ci_runs, create_project_postscaffold
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,12 @@ def decide(
     if state == ci_runner.LEGACY:
         return f"Vykonávač kontrol {label} ešte používa ostrý Docker servera, nie vlastný.", RENEW
     if github_status == "online":
+        count = len(ci_runner.runners())
+        if count > 1:
+            return (
+                f"Kontroly bežia na {count} vlastných vykonávačoch {label} na ANDROSe, prihlásených na GitHube.",
+                None,
+            )
         return f"Kontroly bežia na vlastnom vykonávači {label} na ANDROSe, prihlásenom na GitHube.", None
     if github_error:
         return f"Vykonávač kontrol {label} je na ANDROSe; či je prihlásený na GitHube, sa teraz nedá zistiť.", None
@@ -205,7 +211,7 @@ def overview(*, slug: str, repo_url: Optional[str], archived: bool, checkout: Pa
     github_error = False
     if repo is not None:
         try:
-            github_status = github_validation.runner_status(repo, label, timeout=github_timeout)
+            github_status = ci_runner.github_status(repo, slug, timeout=github_timeout)
         except Exception as exc:  # noqa: BLE001 — an unreadable GitHub is said, never guessed as offline
             logger.warning("CI runner status of %s unreadable: %s", slug, exc)
             github_error = True
@@ -237,4 +243,4 @@ def overview(*, slug: str, repo_url: Optional[str], archived: bool, checkout: Pa
 
 def busy(repo: str, slug: str, *, github_timeout: float) -> bool:
     """Whether the runner is running a job now — renewing it would kill the job (as ``backend.scripts.ci_runners``)."""
-    return github_validation.runner_busy(repo, ci_runner.runner_label(slug), timeout=github_timeout)
+    return ci_runner.github_busy(repo, slug, timeout=github_timeout)

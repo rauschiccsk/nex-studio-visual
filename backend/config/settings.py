@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
     # asks for it at every new message of a build, and the history moves only when a build does.
     build_forecast_history_ttl_seconds: int = 600
+    # DEV-215: how many CI runners each project gets on ANDROS — every one a pair with a Docker of its own, all under
+    # the project's one label, so its jobs go to whichever is free. 23.10.2026 NEX Inbox's jobs waited up to 34 min for
+    # its only runner while the agent pushed after every task. Measured 24.10.2026: peak load 20.5 of 80 cores in a
+    # week, never less than 163 GiB of memory free — a second pair for every project fits with room to spare.
+    ci_runners_per_project: int = 2
     # DEV-94: what the cockpit writes into the Knowledge Base goes to GitHub — how long one exchange with GitHub may
     # take, and how often commits that did not get there are sent again (off in tests: it would reach for GitHub).
     kb_publish_timeout_seconds: int = 30

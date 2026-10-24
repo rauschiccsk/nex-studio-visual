@@ -36,6 +36,15 @@ REGISTRATION_TOKEN = "AINVENTEDREGISTRATIONTOKEN01"
 LIVE_DOCKER = "nex-andros-server"  # what ``docker info .Name`` says about ANDROS's live Docker
 
 
+@pytest.fixture(autouse=True)
+def _one_runner(monkeypatch):
+    """These tests pin the mechanics of ONE runner pair; the several runners of a project (DEV-215) are pinned in
+    tests/services/test_a_project_gets_several_ci_runners.py."""
+    from backend.config.settings import settings
+
+    monkeypatch.setattr(settings, "ci_runners_per_project", 1)
+
+
 @pytest.fixture(scope="module")
 def template() -> dict:
     return yaml.safe_load(ci_runner.COMPOSE_FILE.read_text(encoding="utf-8"))
@@ -126,7 +135,7 @@ def test_the_work_dir_is_the_same_path_in_the_runner_and_its_daemon(template: di
     database whose init script "did not exist"."""
     runner, daemon = template["services"]["runner"], template["services"]["docker"]
     workdir = runner["environment"]["RUNNER_WORKDIR"]
-    assert workdir == "/opt/ci-work/${SLUG}"
+    assert workdir == "/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}", "every runner of a project has a work dir of its own"
     assert f"{workdir}:{workdir}" in runner["volumes"] and f"{workdir}:{workdir}" in daemon["volumes"]
 
 
@@ -311,7 +320,7 @@ def test_compose_gets_the_project_the_hook_and_the_fingerprint(
 
     mod._provision_ci_runner("nex-demo", repo_url, github_org=github_org)
 
-    env = calls[-1][1]["env"]
+    env = next(kw["env"] for cmd, kw in reversed(calls) if cmd[-3:] == ["up", "-d", "--wait"])
     assert env["SLUG"] == "nex-demo"
     assert env["REPO_URL"] == "https://github.com/acme-org/nex-demo"
     assert env["CI_CLEANUP_HOOK"] == ci_runner.CLEANUP_HOOK.read_text(encoding="utf-8")

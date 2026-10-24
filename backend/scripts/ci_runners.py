@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models.projects import Project
 from backend.db.session import SessionLocal
-from backend.services import ci_runner, github_validation
+from backend.services import ci_runner
 from backend.services.template_bootstrap import _repo_from_url, resolve_github_org
 
 STATE_TEXT = {
@@ -59,9 +59,8 @@ def main(argv: list[str] | None = None, *, projects: Callable[[], list[tuple[str
 
     failed = 0
     for slug, repo_full in chosen:
-        label = ci_runner.runner_label(slug)
         try:
-            if github_validation.runner_busy(repo_full, label, timeout=ci_runner.GITHUB_TIMEOUT):
+            if ci_runner.github_busy(repo_full, slug, timeout=ci_runner.GITHUB_TIMEOUT):
                 print(f"{slug}: práve robí úlohu CI — nechaný tak; prevod spusti znovu po jej skončení")
                 failed += 1
                 continue
@@ -70,17 +69,17 @@ def main(argv: list[str] | None = None, *, projects: Callable[[], list[tuple[str
             print(f"{slug}: prevod zlyhal — {exc}")
             failed += 1
             continue
-        status = _wait_online(repo_full, label)
+        status = _wait_online(repo_full, slug)
         print(f"{slug}: prevedený — {STATE_TEXT[ci_runner.state(slug)]}; na GitHube {status}")
         failed += status != "online"
     return 1 if failed else 0
 
 
-def _wait_online(repo_full: str, label: str) -> str:
+def _wait_online(repo_full: str, slug: str) -> str:
     deadline = time.monotonic() + ONLINE_WAIT
     while True:
         try:
-            status = github_validation.runner_status(repo_full, label, timeout=ci_runner.GITHUB_TIMEOUT)
+            status = ci_runner.github_status(repo_full, slug, timeout=ci_runner.GITHUB_TIMEOUT)
         except RuntimeError as exc:
             return f"stav sa nedal zistiť ({exc})"
         if status == "online" or time.monotonic() >= deadline:

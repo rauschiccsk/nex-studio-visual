@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from backend.core.agent_env import agent_env
-from backend.services import build_provenance, ci_runner, git_push, github_validation, project_surfaces
+from backend.services import build_provenance, ci_runner, git_push, project_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -1011,11 +1011,11 @@ def _wait_for_ci_runner(
     from backend.services.template_bootstrap import _repo_from_url
 
     repo_full = _repo_from_url(repo_url, slug, default_owner=github_org)
-    label = ci_runner.runner_label(slug)
     deadline = time.monotonic() + wait
     while True:
         try:
-            status = github_validation.runner_status(repo_full, label, timeout=CI_RUNNER_STATUS_TIMEOUT)
+            # DEV-215: every runner of the project — a job is handed to whichever is free, so each must listen.
+            status = ci_runner.github_status(repo_full, slug, timeout=CI_RUNNER_STATUS_TIMEOUT)
         except Exception as exc:  # noqa: BLE001 — an unreadable status is reported, never waited on
             logger.warning("CI runner status unreadable (slug=%s): %s", slug, exc)
             return CI_RUNNER_CANNOT_ASK

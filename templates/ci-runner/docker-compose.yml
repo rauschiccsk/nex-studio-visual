@@ -23,7 +23,13 @@
 #
 # What the tests read matches the old runners on the server: Ubuntu 24.04 with git 2.43, an ordinary user (not root)
 # and the git identity ICC CI. On 19.10.2026 eight cockpit tests failed without it; Director: "Súhlasím".
-name: nex-ci-${SLUG:?SLUG is required}
+#
+# More runners for one project (DEV-215): every one is a whole pair of its own — its own daemon, work dir, compose
+# project and name on GitHub (the cleanup hook empties the WHOLE daemon at every job, so two runners sharing one would
+# wipe each other's running job) — and all of them carry the project's one label, so a job goes to whichever is free.
+# RUNNER_SUFFIX tells them apart: empty for the first (named as before), `_2`, `_3`… for the others. An underscore
+# never appears in a project's name, so the second runner of `x` can never take the name of the first of `x-2`.
+name: nex-ci-${SLUG:?SLUG is required}${RUNNER_SUFFIX:-}
 
 # The version GitHub asks for today; a newer one the runner fetches itself (run.sh below) — the tag is only where it
 # STARTS. On 24.09.2026 GitHub refused 2.335.1 and runners that were not allowed to update went into a nine-day restart
@@ -33,8 +39,8 @@ x-runner-image: &runner-image myoung34/github-runner:2.337.0-ubuntu-noble
 services:
   docker:
     image: docker:29.1.3-dind
-    container_name: nex-ci-docker-${SLUG}
-    hostname: nex-ci-docker-${SLUG}
+    container_name: nex-ci-docker-${SLUG}${RUNNER_SUFFIX:-}
+    hostname: nex-ci-docker-${SLUG}${RUNNER_SUFFIX:-}
     privileged: true
     restart: unless-stopped
     environment:
@@ -54,7 +60,7 @@ services:
     volumes:
       - docker-data:/var/lib/docker
       - docker-socket:/run/ci-docker
-      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+      - /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}:/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
     healthcheck:
       test: ["CMD", "docker", "-H", "unix:///run/ci-docker/docker.sock", "info"]
       interval: 5s
@@ -68,15 +74,15 @@ services:
   workdir:
     image: *runner-image
     user: root
-    entrypoint: ["chown", "-R", "runner", "/opt/ci-work/${SLUG}"]
+    entrypoint: ["chown", "-R", "runner", "/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}"]
     network_mode: none
     restart: "no"
     volumes:
-      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+      - /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}:/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
 
   runner:
     image: *runner-image
-    container_name: nex-ci-runner-${SLUG}
+    container_name: nex-ci-runner-${SLUG}${RUNNER_SUFFIX:-}
     restart: unless-stopped
     # run.sh, not the image's default command: on an update it waits for the swap of bin and relaunches the listener
     # in the SAME container. With the default one the container ends, Docker restarts it halfway through the swap and
@@ -96,21 +102,22 @@ services:
       RUNNER_TOKEN:
       REPO_URL: ${REPO_URL:?REPO_URL is required}
       RUNNER_SCOPE: repo
-      RUNNER_NAME: andros-ubuntu-${SLUG}
+      RUNNER_NAME: andros-ubuntu-${SLUG}${RUNNER_SUFFIX:-}
+      # The project's one label — every runner of the project carries it (DEV-215).
       LABELS: andros-ubuntu-${SLUG}
-      RUNNER_WORKDIR: /opt/ci-work/${SLUG}
+      RUNNER_WORKDIR: /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
       CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner-data
       DISABLE_AUTOMATIC_DEREGISTRATION: "true"
       UNSET_CONFIG_VARS: "true"
       RUN_AS_ROOT: "false"
       DOCKER_HOST: unix:///run/ci-docker/docker.sock
-      CI_DOCKER_NAME: nex-ci-docker-${SLUG}
+      CI_DOCKER_NAME: nex-ci-docker-${SLUG}${RUNNER_SUFFIX:-}
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /ci-hooks/cleanup.sh
       ACTIONS_RUNNER_HOOK_JOB_COMPLETED: /ci-hooks/cleanup.sh
     volumes:
       - runner-data:/runner-data
       - docker-socket:/run/ci-docker
-      - /opt/ci-work/${SLUG}:/opt/ci-work/${SLUG}
+      - /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}:/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
     configs:
       - source: cleanup-hook
         target: /ci-hooks/cleanup.sh

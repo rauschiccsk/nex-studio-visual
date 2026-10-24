@@ -22,6 +22,16 @@ import pytest
 from backend.services import create_project_postscaffold as mod
 from backend.services import github_validation
 
+
+@pytest.fixture(autouse=True)
+def _one_runner(monkeypatch):
+    """These tests pin the mechanics of ONE runner pair; the several runners of a project (DEV-215) are pinned in
+    tests/services/test_a_project_gets_several_ci_runners.py."""
+    from backend.config.settings import settings
+
+    monkeypatch.setattr(settings, "ci_runners_per_project", 1)
+
+
 NEVER_ONLINE = "Vykonávač kontrol sa do 120 s neprihlásil na GitHube — prvá kontrola počká, kým sa prihlási."
 CANNOT_ASK = "Nepodarilo sa overiť, či je vykonávač kontrol prihlásený na GitHube — prvá kontrola môže čakať."
 NOT_STARTED = "Vykonávač kontrol sa nepodarilo spustiť — kontroly počkajú, kým ho niekto spustí."

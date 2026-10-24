@@ -23,6 +23,16 @@ from backend.main import app
 from backend.services import ci_runner, claude_agent, create_project_postscaffold, github_validation
 from backend.services import project_ci_runner as pcr
 
+
+@pytest.fixture(autouse=True)
+def _one_runner(monkeypatch):
+    """These tests pin the mechanics of ONE runner pair; the several runners of a project (DEV-215) are pinned in
+    tests/services/test_a_project_gets_several_ci_runners.py."""
+    from backend.config.settings import settings
+
+    monkeypatch.setattr(settings, "ci_runners_per_project", 1)
+
+
 REPO = "rauschiccsk/nex-inbox"
 
 # NEX Inbox's two workflows as they stood on 20.10.2026, cut down to what decides where a job runs.
