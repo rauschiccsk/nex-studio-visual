@@ -23,6 +23,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.services.pipeline_status import OWN_DECISION_LABEL
+
 TAG = "volba"
 #: ``<volba karta="N">text</volba>`` or ``<volba>text</volba>``; the text may not span another choice.
 CHOICE_RE = re.compile(r'<volba(?:\s+karta="(\d{1,3})")?\s*>(.*?)</volba>', re.S)
@@ -33,9 +35,6 @@ ON_CARD = "on_card"
 NOT_ON_CARD = "not_on_card"
 #: No card — the answer Poradca suggests for the agent's question.
 ANSWER = "answer"
-
-#: How the card names its own free-text answer; Poradca recommends it by this name (charter, part 4).
-OTHER_ANSWER = "Iná odpoveď"
 
 
 @dataclass(frozen=True)
@@ -85,9 +84,9 @@ def choices(db: Session, content: str, version_id: Optional[UUID]) -> list[Choic
         if decision is None:
             out.append(Choice(card=card, label=label, status=NOT_ON_CARD))
             continue
-        offered = {_plain(str(o.get("label") or "")) for o in decision.get("options") or []}
-        if decision.get("allow_free_text"):
-            offered.add(OTHER_ANSWER)
+        offered = {_plain(str(o.get("label") or "")) for o in decision.get("options") or []} | {
+            OWN_DECISION_LABEL  # DEV-220: on every card, whatever the agent wrote
+        }
         out.append(
             Choice(
                 card=card,

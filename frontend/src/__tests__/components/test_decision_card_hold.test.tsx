@@ -45,7 +45,6 @@ const CARD = {
             { id: "fix_it", label: "Nechaj to opraviť", recommended: true },
             { id: "hold", label: "Zatiaľ podržať (rozhodnem neskôr)" },
           ],
-          allow_free_text: true,
         },
       ],
     },

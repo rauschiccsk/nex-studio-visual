@@ -143,7 +143,6 @@ const CONSULTATION = {
           { id: "b", label: "Skúšať bez obmedzenia", detail: "Faktúra nikdy neskončí v manuálnom rade." },
           { id: "c", label: "Skúšať 1 hodinu", detail: "Pri dlhšom výpadku pribudne práca obsluhe." },
         ],
-        allow_free_text: true,
       },
       {
         key: "oznamenie",

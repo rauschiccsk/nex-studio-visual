@@ -60,8 +60,15 @@ interface ConsultDecision {
   related?: { key: string; why?: string }[];
   options: ConsultOption[];
   rationale?: string;
-  allow_free_text?: boolean;
 }
+
+/**
+ * DEV-220 — every card offers the Manažér's own decision under the agent's options. Until then the card showed it
+ * only when the agent allowed it, and the agent allowed it only by exception; Director 24.10.2026: „na kartách
+ * otázok nie je možnosť zadať vlastné rozhodnutie … mne nevyhovuje ani jeden“. The server names it the same way
+ * (``OWN_DECISION_LABEL`` in ``backend/services/pipeline_status.py``) for Poradca and the agent.
+ */
+const OWN_DECISION_LABEL = "Vlastné rozhodnutie";
 /**
  * Veta o pôvode rozhodnutia (ICCINT-123). `null` pre staré karty bez toho údaja — vymyslená veta by
  * bola horšia než žiadna, lebo by tvrdila niečo o pôvode, ktorý nepoznáme.
@@ -206,6 +213,15 @@ interface Props {
   onBoard: (board: PipelineBoard) => void;
 }
 
+/** One look for every choice on the card — the agent's options and the Manažér's own decision (DEV-220). */
+function choiceClass(selected: boolean): string {
+  return `block w-full rounded border px-3 py-2 text-left text-xs transition-colors ${
+    selected
+      ? "border-primary-500 bg-[var(--color-surface-hover)]"
+      : "border-[var(--color-border-default)] hover:border-primary-500"
+  }`;
+}
+
 export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const messages = useMemo(() => board?.recent_messages ?? [], [board?.recent_messages]);
   const latest = useMemo(() => latestConsultation(messages), [messages]);
@@ -220,10 +236,6 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
     return decisions.find((d) => !(d.key in answered))?.key ?? null;
   }, [latest, answered]);
   const noteDraft = useDraft(currentKey ? draftKey(`karta.${currentKey}`, versionId) : null);
-  // DEV-32: his own answer to a card („Iná odpoveď") is a writing surface too — it survives leaving the screen.
-  const freeTextDraft = useDraft(currentKey ? draftKey(`karta-odpoved.${currentKey}`, versionId) : null);
-  const freeText = freeTextDraft.text;
-  const setFreeText = freeTextDraft.setText;
   const note = noteDraft.text;
   const noteRef = useAutoGrowTextarea(note);
   const { fromPoradca, dismiss: dismissPoradca } = usePoradcaHandoff({
@@ -238,7 +250,8 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
     setText: noteDraft.setText,
     restored: noteDraft.restored,
   });
-  const [showFree, setShowFree] = useState(false);
+  // DEV-220: his own decision is written in the same box — the text Poradca hands over lands there too.
+  const [own, setOwn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
 
@@ -263,25 +276,24 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const reopens = znovuOtvara(context);
   const held = latest ? heldNow(messages, current.key, latest.seq) : false;
 
-  const canSubmit = !submitting && (showFree ? freeText.trim().length > 0 : picked != null);
+  const canSubmit = !submitting && (own ? note.trim().length > 0 : picked != null);
 
   async function submit() {
     if (!current || !canSubmit) return;
     setError(null);
     setSubmitting(true);
     try {
-      const payload = showFree
-        ? { decision_key: current.key, free_text: freeText.trim(), note: note.trim() || undefined }
+      const payload = own
+        ? { decision_key: current.key, free_text: note.trim() }
         : { decision_key: current.key, option_id: picked!, note: note.trim() || undefined };
       const nextBoard = await postPipelineActionApi(versionId, { action: "decide", payload });
       onBoard(nextBoard);
       setPicked(null);
+      setOwn(false);
       // DEV-107: a hold sends nothing — what stands in the fields stays there for the decision still to come.
       if (!(latest && heldNow(nextBoard.recent_messages ?? [], current.key, latest.seq))) {
-        freeTextDraft.clear();
         noteDraft.clear();
         dismissPoradca();
-        setShowFree(false);
       }
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Rozhodnutie zlyhalo"));
@@ -406,31 +418,45 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
             }}
           />
 
-          {/* Options as clickable buttons; the recommended one is badged. */}
-          {!showFree && (
-            <div className="mt-3 space-y-2">
-              {current.options.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => setPicked(o.id)}
-                  className={`block w-full rounded border px-3 py-2 text-left text-xs transition-colors ${
-                    picked === o.id
-                      ? "border-primary-500 bg-[var(--color-surface-hover)]"
-                      : "border-[var(--color-border-default)] hover:border-primary-500"
-                  }`}
-                >
-                  <span className="font-medium text-[var(--color-text-primary)]">{o.label}</span>
-                  {o.recommended && (
-                    <span className="ml-2 rounded bg-[var(--color-status-success)] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
-                      Odporúčané
-                    </span>
-                  )}
-                  {o.detail && <span className="mt-0.5 block text-[var(--color-text-muted)]">{o.detail}</span>}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Options as clickable buttons; the recommended one is badged. DEV-220: under them, always, his own. */}
+          <div className="mt-3 space-y-2">
+            {current.options.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={!own && picked === o.id}
+                onClick={() => {
+                  setPicked(o.id);
+                  setOwn(false);
+                }}
+                className={choiceClass(!own && picked === o.id)}
+              >
+                <span className="font-medium text-[var(--color-text-primary)]">{o.label}</span>
+                {o.recommended && (
+                  <span className="ml-2 rounded bg-[var(--color-status-success)] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
+                    Odporúčané
+                  </span>
+                )}
+                {o.detail && <span className="mt-0.5 block text-[var(--color-text-muted)]">{o.detail}</span>}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-pressed={own}
+              onClick={() => {
+                setPicked(null);
+                setOwn(true);
+                noteRef.current?.focus();
+              }}
+              className={choiceClass(own)}
+            >
+              <span className="font-medium text-[var(--color-text-primary)]">{OWN_DECISION_LABEL}</span>
+              <span className="mt-0.5 block text-[var(--color-text-muted)]">
+                Žiadna možnosť ti nevyhovuje — do poľa nižšie napíš, ako to má byť. AI partner to zapracuje namiesto
+                ponúknutých možností.
+              </span>
+            </button>
+          </div>
 
           {/* ICCINT-123: cena voľby PRI voľbe, nie po nej. Údaj, nie odporúčanie — poradím ani
               značkou „odporúčané“ nehýbe. */}
@@ -445,29 +471,6 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
               <Lightbulb className="mt-0.5 h-3 w-3 flex-shrink-0" />
               {current.rationale}
             </p>
-          )}
-
-          {/* Free-text escape — only when the agent allowed it, never the default. */}
-          {current.allow_free_text && (
-            <button
-              type="button"
-              onClick={() => setShowFree((s) => !s)}
-              className="mt-2 text-[11px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-primary)]"
-            >
-              {showFree ? "← Späť na možnosti" : "Iná odpoveď (napíš vlastnú)"}
-            </button>
-          )}
-          {showFree && (
-            <textarea
-              data-draft="karta-odpoved"
-              spellCheck={true}
-              lang="sk"
-              value={freeText}
-              onChange={(e) => setFreeText(e.target.value)}
-              placeholder="Tvoja odpoveď…"
-              rows={2}
-              className="mt-2 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
-            />
           )}
 
           {fromPoradca && (
@@ -489,15 +492,20 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
               noteDraft.setText(e.target.value);
               if (fromPoradca) dismissPoradca(); // he edited it — the text is his now
             }}
-            rows={1}
-            placeholder="Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
+            rows={own ? 3 : 1}
+            placeholder={
+              own
+                ? "Tvoje rozhodnutie — napíš, ako to má byť"
+                : "Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
+            }
             className="mt-2 w-full resize-none rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
           />
 
           <div className="mt-3 flex items-center justify-between gap-3">
             {/* (3) Explicit "what happens" — the Manažér knows what the click does. */}
             <span className="text-[10px] text-[var(--color-text-muted)]">
-              Vyber možnosť a potvrď. Keď rozhodneš všetky body, AI partner sám zapracuje zmeny a pokračuje.
+              Vyber možnosť alebo napíš vlastné rozhodnutie a potvrď. Keď rozhodneš všetky body, AI partner sám
+              zapracuje zmeny a pokračuje.
             </span>
             <button
               type="button"

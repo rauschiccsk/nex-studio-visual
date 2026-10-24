@@ -31,6 +31,7 @@ from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
 from backend.services import version_notes
+from backend.services.pipeline_status import OWN_DECISION_LABEL
 from backend.services.poradca.context import UatInstallation, uat_installations
 from backend.services.poradca.mcp_server import Tool, ToolError
 
@@ -210,17 +211,22 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
                 + (" (odporúčané)" if option.get("recommended") else "")
                 + (f" — {option['detail']}" if option.get("detail") else "")
             )
+        # DEV-220: the card offers it under every agent's options — the screen adds it, the agent never writes it.
+        out.append(f"  možnosť „{OWN_DECISION_LABEL}“ — Manažér napíše do poľa pod kartou, ako to má byť")
         if d.get("rationale"):
             out.append(f"  Zdôvodnenie odporúčania: {d['rationale']}")
-        if d.get("allow_free_text"):
-            out.append("  dá sa napísať aj vlastná odpoveď (Iná odpoveď)")
         if answer:
-            note = (answer.get("note") or "").strip()
+            own = None if answer.get("option_id") else answer.get("free_text")
+            note = (own or answer.get("note") or "").strip()
             if len(note) > _MESSAGE_CHARS:
                 note = note[:_MESSAGE_CHARS] + " …"
-            out.append(
-                f"  Manažér zvolil „{answer.get('label', '')}“" + (f"; pokyn pre AI partnera: {note}" if note else "")
-            )
+            if own:
+                out.append(f"  Manažér rozhodol sám („{OWN_DECISION_LABEL}“): {note}")
+            else:
+                out.append(
+                    f"  Manažér zvolil „{answer.get('label', '')}“"
+                    + (f"; pokyn pre AI partnera: {note}" if note else "")
+                )
     return out
 
 

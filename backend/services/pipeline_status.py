@@ -389,6 +389,12 @@ class ConsultRelation(BaseModel):
     why: str = ""
 
 
+#: DEV-220: the choice every Decision Card offers under the agent's options — the Manažér writes the decision
+#: himself. The screen adds it (``OWN_DECISION_LABEL`` in ``DecisionCardsBar.tsx``), the agent never writes it.
+#: Director 24.10.2026: „na kartách otázok nie je možnosť zadať vlastné rozhodnutie … mne nevyhovuje ani jeden“.
+OWN_DECISION_LABEL = "Vlastné rozhodnutie"
+
+
 class ConsultDecision(BaseModel):
     """One decision the Manažér resolves: a plain-language (non-expert) problem + 2-3 options + the
     AI Agent's recommendation. ``key`` is the stable id the Manažér's answer is recorded against (the
@@ -399,7 +405,6 @@ class ConsultDecision(BaseModel):
     explanation: str = ""
     options: list[ConsultOption] = Field(min_length=2)
     rationale: str = ""
-    allow_free_text: bool = False
     #: ICCINT-122 — odkiaľ táto otázka prišla (:data:`CONSULT_ORIGINS`). ``None`` len pri starých
     #: záznamoch; nové karty ho musia niesť, inak sa veta na karte nedá napísať.
     origin: Optional[Literal["objav", "dosledok", "odklad"]] = Field(

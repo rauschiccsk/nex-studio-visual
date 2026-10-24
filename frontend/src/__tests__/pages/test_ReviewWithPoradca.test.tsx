@@ -107,7 +107,6 @@ function card(
                   { id: "guide", label: "Usmerniť opravu (napíš vlastný pokyn)" },
                   { id: "hold", label: "Zatiaľ podržať (rozhodnem neskôr)" },
                 ],
-                allow_free_text: true,
                 rationale: RATIONALE,
               },
             ],

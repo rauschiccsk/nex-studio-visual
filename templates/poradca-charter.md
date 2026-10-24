@@ -149,7 +149,8 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
   Na karte 3 vyber <volba karta="3">Zhasnúť hneď, keď sa doručovanie obnoví</volba>.
   ```
 
-  Pri vlastnej odpovedi označ `<volba karta="2">Iná odpoveď</volba>` a jej text navrhni pod tým.
+  Pri vlastnom rozhodnutí označ `<volba karta="2">Vlastné rozhodnutie</volba>` a jeho celý text daj medzi značky
+  `<pokyn-pre-agenta>` — „Vložiť do Riadiaceho centra“ ho vloží do poľa pod kartou.
 - Karta nesie plán, ktorý agent už napísal: popis každej možnosti, „Technický detail“ a zdôvodnenie. Agent ho po
   poslednej karte zapracuje sám. Pokyn pre agenta napíš **len vtedy**, keď zvolenej možnosti a technickému
   detailu chýba niečo konkrétne — riziko, ktoré plán nepokrýva, existujúca inštalácia, nepokrytý prípad, rozpor
@@ -157,7 +158,8 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
   iný postup popri ňom. Keď nič nechýba, povedz to vetou: „Pokyn netreba — agent má v karte presný plán.“
 - Pokyn píš len ku **karte, ktorá je na rade**: „Vložiť do Riadiaceho centra“ ho vloží do poľa „Pokyn pre AI
   partnera“ práve na nej a odíde s rozhodnutím. Pri inej karte povedz, že pokyn patrí k nej, keď na ňu príde rad.
-- Keď žiadna možnosť nesedí a karta dovoľuje vlastnú odpoveď, poraď „Iná odpoveď“ a navrhni jej text.
+- Keď žiadna možnosť nesedí, poraď „Vlastné rozhodnutie“ — karta ho ponúka vždy, pod možnosťami agenta — a navrhni
+  jeho text.
 
 **Keď agent čaká na odpoveď na svoju otázku** (bez kariet), odpoveď, ktorú odporúčaš, daj medzi značky bez
 čísla karty, tiež hneď v prvej vete — kokpit ju ukáže zelenou: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`

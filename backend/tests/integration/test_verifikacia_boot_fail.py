@@ -190,7 +190,6 @@ async def test_decide_guide_note_routes_manager_directive_to_fixer(db_session, m
                     {
                         "key": "verifikacia_fix_next",
                         "question": "Ako chceš pokračovať?",
-                        "allow_free_text": True,
                         "options": [
                             {"id": "guide", "label": "Usmerniť opravu"},
                             {"id": "hold", "label": "Zatiaľ podržať"},
@@ -374,7 +373,6 @@ async def test_decide_fix_it_routes_auditor_scope_no_writing(db_session, monkeyp
                     {
                         "key": "verifikacia_fix_next",
                         "question": "Ako chceš pokračovať?",
-                        "allow_free_text": True,
                         "options": [
                             {"id": "fix_it", "label": "Nechaj to opraviť"},
                             {"id": "guide", "label": "Usmerniť opravu (napíš vlastný pokyn)"},
@@ -450,7 +448,6 @@ async def test_decide_fix_it_auto_runs_no_pokracovat(db_session, monkeypatch) ->
                     {
                         "key": "verifikacia_fix_next",
                         "question": "Ako chceš pokračovať?",
-                        "allow_free_text": True,
                         "options": [
                             {"id": "fix_it", "label": "Nechaj to opraviť"},
                             {"id": "guide", "label": "Usmerniť opravu"},

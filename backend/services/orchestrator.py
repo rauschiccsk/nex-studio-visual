@@ -101,6 +101,7 @@ from backend.services.pipeline_status import (
     FINDINGS_AS_DATA_RULE,
     FIX_CRITIQUE_JSON_SCHEMA,
     ORIGIN_RULE,
+    OWN_DECISION_LABEL,
     PIPELINE_STATUS_JSON_SCHEMA,
     TASK_PLAN_FEAT_TASKS_JSON_SCHEMA,
     TASK_PLAN_SKELETON_JSON_SCHEMA,
@@ -2157,7 +2158,10 @@ def _consultation_directive(
         "  • `explanation` — 1 veta prečo to záleží.\n"
         "  • `options` — 2-3 možnosti, každá `label` + `detail` (krátky dôsledok voľby).\n"
         "  • práve JEDNU možnosť označ `recommended: true` a daj jednoriadkové `rationale` (prečo ju odporúčaš).\n"
-        "  • `allow_free_text: true` IBA ak sa bod nedá rozumne rozložiť na možnosti.\n" + ORIGIN_RULE + "\n"
+        # DEV-220: the card offers the Manažér's own decision under every option list; the agent's „iné“ would
+        # show it twice.
+        f"  • možnosť typu „iné“ či „vlastná odpoveď“ NEPÍŠ — kokpit ku každej karte pridá „{OWN_DECISION_LABEL}“ "
+        "sám.\n" + ORIGIN_RULE + "\n"
         # DEV-3 (ICCINT-122): the card's origin — the Manažér sees whether something broke or we just see more.
         # DEV-34: the cards used to be written one by one, each plan on its own — two decided cards then
         # contradicted each other, or a plan stopped half way, and only the next review round noticed.
@@ -4189,6 +4193,15 @@ def consultation_direction(db: Session, version_id: uuid.UUID) -> Optional[dict[
     }
 
 
+def _chosen_on_card(answer: dict[str, Any]) -> str:
+    """What the Manažér decided on one card, as the agent reads it in the apply directive. DEV-220: his own decision
+    is named as his — not passed off as one of the options the agent offered (the label of a free answer is its
+    text, so the agent could not tell the two apart)."""
+    if answer.get("free_text") and not answer.get("option_id"):
+        return f"{OWN_DECISION_LABEL} Manažéra (žiadna z ponúknutých možností): {answer['free_text']}"
+    return str(answer.get("label")) + (f" (poznámka: {answer['note']})" if answer.get("note") else "")
+
+
 def dispatch_directive(
     db: Session, version_id: uuid.UUID, action: str, payload: dict[str, Any], stage: str
 ) -> Optional[str]:
@@ -4232,7 +4245,7 @@ def dispatch_directive(
             )
         answers = _consultation_answers(db, version_id, c_seq)
         lines = [
-            f"- {d.get('question', '')} → {a.get('label')}" + (f" (poznámka: {a['note']})" if a.get("note") else "")
+            f"- {d.get('question', '')} → {_chosen_on_card(a)}"
             for d in c.get("decisions", [])
             if (a := answers.get(d.get("key"))) is not None
         ]
@@ -10958,7 +10971,6 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 technical_detail=scope,
                 options=options,
                 rationale=rationale,
-                allow_free_text=True,
             )
         ],
     )
@@ -11162,7 +11174,6 @@ async def _settle_verifikacia_verdict(
                     ],
                     rationale="Odporúčam usmerniť opravu — Auditor zvyčajne uviazol na konkrétnej veci, ktorú "
                     "vieš adresne opísať; pokyn dostane AI Agent (opravár), nie Auditor (nálezca).",
-                    allow_free_text=True,
                 )
             ],
         )
@@ -15281,7 +15292,7 @@ async def apply_action(
         # options BY CONSTRUCTION (e.g. accept_fix without a positive fix_critique — §2). Without this check the
         # handler would blindly execute a FORGED/replayed option_id (accept_fix on a guide-only card → a
         # one-click UN-VETTED fix — the exact footgun the CR exists to prevent). Reject any option_id not among
-        # this decision's offered options; the allow_free_text escape (option_id absent, free_text present)
+        # this decision's offered options; the Manažér's own decision (option_id absent, free_text present — DEV-220)
         # stays valid. Hardens ALL consultation cards, not just verifikacia_fix.
         offered_ids = {o.get("id") for o in decision.get("options", [])}
         if option_id and option_id not in offered_ids:

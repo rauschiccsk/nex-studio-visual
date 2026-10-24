@@ -59,7 +59,9 @@ def test_without_cards_a_card_choice_is_not_on_any_card(world):  # noqa: F811
     assert [(c.card, c.status) for c in found] == [(1, choices.NOT_ON_CARD)]
 
 
-def test_the_own_answer_is_on_the_card_only_where_the_card_allows_it(world):  # noqa: F811
+def test_the_own_decision_is_on_every_card_whatever_the_agent_wrote(world):  # noqa: F811
+    """DEV-220: the card offers „Vlastné rozhodnutie“ under every option list; until then only where the agent
+    allowed it („Iná odpoveď“), and Poradca's advice to write his own was orange on every other card."""
     db, version = world["db"], world["version"]
     _consultation_world(world, decided=False)
     db.add(
@@ -75,7 +77,7 @@ def test_the_own_answer_is_on_the_card_only_where_the_card_allows_it(world):  # 
                     "id": "navrh-3",
                     "round": 3,
                     "decisions": [
-                        {"key": "a", "question": "Q1", "options": [{"id": "x", "label": "X"}], "allow_free_text": True},
+                        {"key": "a", "question": "Q1", "options": [{"id": "x", "label": "X"}]},
                         {"key": "b", "question": "Q2", "options": [{"id": "y", "label": "Y"}]},
                     ],
                 }
@@ -84,9 +86,19 @@ def test_the_own_answer_is_on_the_card_only_where_the_card_allows_it(world):  # 
     )
     db.flush()
 
-    found = choices.choices(db, '<volba karta="1">Iná odpoveď</volba> <volba karta="2">Iná odpoveď</volba>', version.id)
+    found = choices.choices(
+        db,
+        '<volba karta="1">Vlastné rozhodnutie</volba> <volba karta="2">Vlastné rozhodnutie</volba> '
+        '<volba karta="3">Vlastné rozhodnutie</volba> <volba karta="2">Iná odpoveď</volba>',
+        version.id,
+    )
 
-    assert [(c.card, c.status) for c in found] == [(1, choices.ON_CARD), (2, choices.NOT_ON_CARD)]
+    assert [(c.card, c.status) for c in found] == [
+        (1, choices.ON_CARD),
+        (2, choices.ON_CARD),
+        (3, choices.NOT_ON_CARD),  # no third card
+        (2, choices.NOT_ON_CARD),  # the old name is on no card
+    ]
 
 
 def test_the_screen_gets_the_choices_of_a_finished_answer_only(world):  # noqa: F811
@@ -126,6 +138,6 @@ def test_the_charter_tells_poradca_to_mark_the_choice():
     # what the charter shows is what the cockpit reads
     assert choices.marked(text) == [
         (3, "Zhasnúť hneď, keď sa doručovanie obnoví"),
-        (2, "Iná odpoveď"),
+        (2, "Vlastné rozhodnutie"),
         (None, "Áno, súhlasím"),
     ]

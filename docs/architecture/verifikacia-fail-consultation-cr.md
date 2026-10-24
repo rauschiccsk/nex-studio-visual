@@ -77,7 +77,7 @@ nezrazili — self-audit našiel kolíziu na hardcoded key `verifikacia_fail_nex
 | Možnosť | Odporúčaná? | `decide` → apply |
 |---|---|---|
 | **Spustiť pripravenú opravu** (`accept_fix`) | iba ak `fix_critique.verdict ∈ {accept, narrow}` | `_begin_dispatch` na už-materializovaný fix-task (stage=programovanie ho vezme cez `get_next_todo_task`) — **žiadny 2. task, žiadny 2. bump** (D6) |
-| **Usmerniť opravu** (`guide`, `allow_free_text`) | inak (chýbajúci/`reject` kritik) | `_route_manazer_fix_to_ai_agent(comment=free_text)` (:4696) |
+| **Usmerniť opravu** (`guide`; vlastný text cez „Vlastné rozhodnutie" — DEV-220) | inak (chýbajúci/`reject` kritik) | `_route_manazer_fix_to_ai_agent(comment=free_text)` (:4696) |
 | **Zatiaľ podržať** (`hold`) | — | **re-block bez konzumácie bodu** (ako medziklik) — karta **ostáva** action-surface; Manažér vyberie accept_fix/guide neskôr. **Žiadny dead-end, žiadny sľub „Uprav"** (na `decision_needed` sa `uprav` neponúka — self-audit) |
 
 **decide handler** (`:6012`): pridaj vetvu `source=='verifikacia_fix'` (popri existujúcej `verifikacia_fail`),

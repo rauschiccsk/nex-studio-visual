@@ -116,7 +116,8 @@ nález padne v ďalšom verdikte a slučka sa zopakuje (ohraničené `AUDITOR_LO
 - `BLOCK_KINDS` + `"consultation"` (mimo `_QUESTION_KINDS`, lebo konzultácia nemá `question`).
 - `consultation: Optional[ConsultationBlock]` na `PipelineStatusBlock`, kde
   `ConsultationBlock = {id, intro, source, decisions[]}` a
-  `ConsultDecision = {key, question, explanation, options[{id,label,detail,recommended}], rationale, allow_free_text}`.
+  `ConsultDecision = {key, question, explanation, options[{id,label,detail,recommended}], rationale}`
+  (pole `allow_free_text` zaniklo v DEV-220 — vlastné rozhodnutie ponúka každá karta).
 - Validačné pravidlo: `consultation` vyžaduje neprázdne `decisions` s práve jednou odporúčanou možnosťou.
   `PIPELINE_STATUS_JSON_SCHEMA` sa regeneruje z modelu (grammar-constrainuje výstup zadarmo).
 
@@ -161,7 +162,8 @@ odmietnuté) + FE `test_DecisionCardStack.test.tsx` (re-konzultácia začína na
 - **Nový `DecisionCardStack.tsx`** (pri `blocked/decision_needed`): číta poslednú `kind=consultation` +
   zaznamenané `decide` odpovede, vypočíta kurzor, zobrazí **jednu kartu**: postup „Rozhodnutie k z N",
   otázka po ľudsky, vysvetlenie, možnosti ako tlačidlá (odporúčaná s odznakom **„Odporúčané"** + zdôvodnenie),
-  nepovinná poznámka, „Iná odpoveď" **iba** keď `allow_free_text` (opt-in únik, nikdy default), tlačidlo
+  nepovinná poznámka, pod možnosťami vždy **„Vlastné rozhodnutie"** (DEV-220: text v poli pod kartou je potom
+  rozhodnutie Manažéra a ide ako `free_text` bez `option_id`; predtým len pri `allow_free_text`), tlačidlo
   **„Rozhodnúť"** → `onAction("decide", {...})`. Vybavené rozhodnutia sa zbalia do stopy („✓ … → …").
 - `PipelineActionBar`: pri `decision_needed` **neotvára** voľnotextový box; „Spýtať sa" ostáva (Manažér môže
   kartu predtým preskúmať).
@@ -242,7 +244,7 @@ mid-build otázka) do **jedného modelu** — Manažér sa naučí jednu interak
    ich ukáže („Súvisí s kartou N …“) a vidí ich aj Poradca. Pokyn na zapracovanie (`CONSULTATION_APPLY_CHECK`)
    žiada prejsť všetky rozhodnutia SPOLU, medzery uzavrieť a vymenovať („Doplnené pri zlaďovaní rozhodnutí“),
    a čo vyžaduje nové rozhodnutie, vrátiť ako `kind=question`.
-5. **Otvorené nálezy bez čistých možností** → `allow_free_text` + univerzálna „Iná odpoveď" (nikdy slepá ulička).
+5. **Otvorené nálezy bez čistých možností** → „Vlastné rozhodnutie" na každej karte (nikdy slepá ulička; DEV-220).
 6. **Tokeny/latencia** → spúšťa sa len keď problém build aj tak zastaví; kliky 0 tokenov; teplý kontext.
 7. **Migrácia** → CR si nesie vlastnú malú migráciu (dve CHECK hodnoty).
 8. **FE prod-build** → nový komponent treba `docker compose build frontend` (nginx statický bundle).
@@ -256,6 +258,8 @@ S odporúčaniami; prosím o potvrdenie/úpravu pri revízii:
 1. **Re-consult strop** — koľko kôl verdikt→konzultácia pred eskaláciou? *Odporúčam `AUDITOR_LOOP_MAX` (=5).*
 2. **Veľký verdikt** (napr. 15 nálezov → 15 kariet) — soft-cap (~6–8) s dávkovaním zvyšku? *Odporúčam áno.*
 3. **„Iná odpoveď"** — agentom-opt-in per rozhodnutie + univerzálny únik na každej karte? *Odporúčam oboje.*
+   → Postavený bol len opt-in; univerzálny únik doplnil DEV-220 ako „Vlastné rozhodnutie" a opt-in zanikol
+   (Director 24.10.2026: „na kartách otázok nie je možnosť zadať vlastné rozhodnutie … mne nevyhovuje ani jeden“).
 4. **Surový Auditor verdikt** — ponechať viditeľný (zbalený „Detail"), alebo skryť nešpecialistovi? *Odporúčam zbalený disclosure.*
 5. **Rozsah CR-A** — len `auditor_upfront` teraz, zvyšok v CR-B? *Odporúčam áno (helper navrhnúť source-general).*
 6. **„Spýtať sa" počas konzultácie** — povoliť (Manažér preskúma kartu pred rozhodnutím)? *Odporúčam áno, ask-ťah nesmie re-emitnúť konzultáciu.*

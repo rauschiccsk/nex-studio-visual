@@ -765,7 +765,7 @@ async def send_dedo_proposal(
     # answering THAT one with text written for the previous one is worse than refusing.
     #
     # No option_id is sent. ``apply_action`` accepts free text alone, and the fix brief prefers ``free_text``
-    # over the option label — which is exactly the card's own "Iná odpoveď (napíš vlastnú)" path, reached
+    # over the option label — which is exactly the card's own „Vlastné rozhodnutie“ path (DEV-220), reached
     # without the Manažér typing it.
     if action == "decide":
         pinned = str((proposal.payload or {}).get("decision_key") or "")
