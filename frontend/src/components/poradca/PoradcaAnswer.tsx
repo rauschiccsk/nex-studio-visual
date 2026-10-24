@@ -4,16 +4,18 @@
 // Riadiaceho centra" is grey with a reason when the build field rejects an instruction. Nothing is sent by itself:
 // pokyn odošle človek v Riadiacom centre; požiadavka ide len do Zásobníka — verzia z nej nevzniká, o verziách
 // rozhoduje Director (DEV-29). DEV-119: a proposed ticket opens a preview; the person founds it in Plane.
+// DEV-218: the tickets the agent asked for — the cockpit reads them from Plane and attaches them as files; the lines
+// that say where go into the answer for the agent, which the Manažér sends himself.
 
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, Loader2, Send, Square, Ticket } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Loader2, Paperclip, Send, Square, Ticket } from "lucide-react";
 
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useCodePaths } from "@/hooks/useCodePaths";
-import { saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
+import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
 import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
@@ -43,8 +45,10 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   );
   const [ticketOpen, setTicketOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   const inFlight = useRef(false);
+  const agentTickets = message.agent_tickets ?? [];
   const steps = message.steps ?? [];
   // DEV-83: the choices the answer marks, checked by the server against the card they name.
   const choices = message.choices ?? [];
@@ -93,6 +97,21 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
     }
   }
 
+  // DEV-218 — the cockpit reads the tickets from Plane now and stores them for the agent; the lines go to the answer.
+  // The button is grey while it runs, so a second click attaches nothing twice.
+  async function attachTickets() {
+    setAttaching(true);
+    setError(null);
+    try {
+      const attached = await attachAgentTicketsApi(message.id);
+      handOff(attached.answer_text);
+    } catch (e: unknown) {
+      setError(humanizeApiError(e, "Tiket sa nepodarilo priložiť"));
+    } finally {
+      setAttaching(false);
+    }
+  }
+
   const instructionBlocked = !scopeVersion
     ? "Rozhovor je o celom projekte — hore vyber verziu, do ktorej stavby pokyn patrí."
     : scopeVersion.instruction_open
@@ -101,6 +120,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
 
   // DEV-135 / DEV-205 — „Vložiť do odpovede“ where the answer names the answer for the agent (DEV-208: only there).
   const answerInsert = { insert: handOff, blocked: instructionBlocked };
+  const hasActions = !!(message.instruction || message.backlog_request || message.ticket_proposal || agentTickets.length);
 
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
@@ -159,8 +179,24 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       )}
       {message.status === "stopped" && <p className="text-xs text-[var(--color-text-muted)]">Zastavené.</p>}
 
-      {!running && (message.instruction || message.backlog_request || message.ticket_proposal) && (
+      {!running && hasActions && (
         <div className="mt-2 flex flex-wrap gap-2">
+          {agentTickets.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void attachTickets()}
+              disabled={!!instructionBlocked || attaching}
+              title={
+                instructionBlocked ??
+                "Kokpit vezme tiket priamo z Plane, priloží ho agentovi ako súbor a do odpovede doplní, kde leží — " +
+                  "odpoveď odošleš sám."
+              }
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary-600"
+            >
+              {attaching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+              {`Priložiť k odpovedi agentovi: ${agentTickets.join(", ")}`}
+            </button>
+          )}
           {message.instruction && (
             <button
               type="button"
@@ -234,7 +270,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
           onClose={() => setTicketOpen(false)}
         />
       )}
-      {instructionBlocked && message.instruction && !running && (
+      {instructionBlocked && (message.instruction || agentTickets.length > 0) && !running && (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{instructionBlocked}</p>
       )}
       {error && <ErrorNote error={error} />}

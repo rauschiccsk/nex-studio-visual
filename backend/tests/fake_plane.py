@@ -1,6 +1,8 @@
 """Plane's API as far as the cockpit uses it, in memory.
 
-Shared by the tests of every door to Plane (DEV-117, DEV-121).
+Shared by the tests of every door to Plane (DEV-117, DEV-121). DEV-218: other registers than DEV, each with whether
+the cockpit's account is its member, and a ticket read by its identifier — as Plane answers (measured 24.10.2026: a
+register the account is not a member of is 403, an identifier in small letters too, a missing ticket 404).
 """
 
 from __future__ import annotations
@@ -44,6 +46,9 @@ class FakePlane:
         self.module_issues: dict[str, list[str]] = {}
         self.comments: dict[str, list[dict]] = {}
         self._seq = itertools.count(1)
+        #: Every register the account sees — ``is_member`` decides whether it may read its tickets.
+        self.registers: list[dict] = [{"id": "p1", "identifier": "DEV", "is_member": True}]
+        self.members: list[dict] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -54,7 +59,17 @@ class FakePlane:
         if path == "/api/v1/users/me/":
             return httpx.Response(200, json={"email": "nex-studio@icc.sk"})
         if path == "/api/v1/workspaces/icc/projects/":
-            return httpx.Response(200, json={"results": [{"id": "p1", "identifier": "DEV"}]})
+            return httpx.Response(200, json={"results": self.registers})
+        if path == "/api/v1/workspaces/icc/members/":
+            return httpx.Response(200, json=self.members)
+        if path.startswith("/api/v1/workspaces/icc/issues/"):
+            return self._by_identifier(path.removeprefix("/api/v1/workspaces/icc/issues/").strip("/"))
+        for register in self.registers:
+            other = f"/api/v1/workspaces/icc/projects/{register['id']}"
+            if register["id"] != "p1" and path.startswith(other + "/"):
+                if not register.get("is_member"):
+                    return httpx.Response(403, json={"detail": "not a member"})
+                path = P + path.removeprefix(other)
         if path == f"{P}/states/":
             return httpx.Response(
                 200,
@@ -109,6 +124,16 @@ class FakePlane:
                 200, json={"results": [self.issues.get(i, {"id": i}) for i in self.module_issues.get(parts[1], [])]}
             )
         return httpx.Response(404, json={"detail": f"unknown {method} {path}"})
+
+    def _by_identifier(self, identifier: str) -> httpx.Response:
+        prefix, _, number = identifier.rpartition("-")
+        register = next((r for r in self.registers if r["identifier"] == prefix), None)
+        if register is None or not register.get("is_member"):
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
+        for issue in self.issues.values():
+            if issue.get("project", "p1") == register["id"] and str(issue.get("sequence_id")) == number:
+                return httpx.Response(200, json=issue)
+        return httpx.Response(404, json={"detail": "The requested resource does not exist."})
 
 
 def gateway_for(plane: FakePlane, token: str = KEY) -> PlaneGateway:

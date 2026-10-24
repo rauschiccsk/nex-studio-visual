@@ -17,6 +17,7 @@ from typing import Iterable, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.core.local_time import local_time
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -370,3 +371,83 @@ def follow_fix(plane_factory, ticket: LinkedTicket, event: str, **words: str) ->
 def fix_failed(ticket: LinkedTicket, event: str, why: str) -> str:
     """The sentence when the ticket of a fast fix did not follow its version."""
     return f"{FIX_MOVES[event][2].format(ticket=ticket.identifier)}: {why}"
+
+
+# --- a ticket of any register, by its number, for the agent (DEV-218) ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TicketComment:
+    author: str
+    at: Optional[datetime]
+    text: str
+
+
+@dataclass(frozen=True)
+class RegisterTicket:
+    """A ticket as the agent gets it — what it says and what was said under it, never who works on it now."""
+
+    identifier: str
+    register: str
+    title: str
+    state: str
+    archived: bool
+    updated_at: Optional[datetime]
+    url: str
+    text: str
+    comments: tuple[TicketComment, ...]
+
+    def document(self) -> str:
+        """The ticket as one Markdown document — what Poradca reads and what the file for the agent holds."""
+        facts = [f"Tiket z evidencie {self.register} v Plane", f"stav: {self.state or 'neznámy'}"]
+        if self.archived:
+            facts.append("archivovaný")
+        if self.updated_at is not None:
+            facts.append(f"naposledy zmenený {_moment(self.updated_at)}")
+        lines = [
+            f"# {self.identifier} — {self.title}",
+            "",
+            " · ".join(facts),
+            self.url,
+            "",
+            self.text or "(bez popisu)",
+        ]
+        if not self.comments:
+            lines += ["", "Komentáre: žiadne."]
+        else:
+            lines += ["", f"## Komentáre ({len(self.comments)}, od najstaršieho)"]
+            for c in self.comments:
+                heading = " · ".join(p for p in (c.author, _moment(c.at) if c.at else "") if p)
+                lines += ["", f"### {heading}", "", c.text or "(prázdny)"]
+        return "\n".join(lines) + "\n"
+
+
+def _moment(at: datetime) -> str:
+    return local_time(at).strftime("%d.%m.%Y %H:%M")
+
+
+def read_ticket(gateway: PlaneGateway, identifier: str) -> RegisterTicket:
+    """The ticket ``identifier`` (``MAGER-66``) in any register the cockpit's account is a member of.
+
+    Raises :class:`PlaneError` with the sentence for a person when the cockpit cannot read it."""
+    register, issue, comments = gateway.ticket_by_identifier(identifier)
+    names = gateway.member_names() if comments else {}
+    prefix = register.get("identifier", "")
+    return RegisterTicket(
+        identifier=f"{prefix}-{issue.get('sequence_id')}",
+        register=prefix,
+        title=issue.get("name", ""),
+        state=gateway.register_states(register["id"]).get(issue.get("state"), ""),
+        archived=bool(issue.get("archived_at")),
+        updated_at=_when(issue.get("updated_at")),
+        url=gateway.issue_url(register["id"], issue["id"]),
+        text=ticket_text(issue),
+        comments=tuple(
+            TicketComment(
+                author=names.get(c.get("actor") or c.get("created_by") or "", "") or "neznámy autor",
+                at=_when(c.get("created_at")),
+                text=html_to_paragraphs(c.get("comment_html", "")),
+            )
+            for c in comments
+        ),
+    )

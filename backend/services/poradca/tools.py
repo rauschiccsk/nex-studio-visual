@@ -764,6 +764,20 @@ class PoradcaTools:
                 lines.append(line)
             return "\n".join(lines)
 
+    async def plane_tiket(self, args: dict) -> str:
+        """DEV-218 — one ticket of any register the cockpit is a member of, by its number: what the agent's brief
+        names without its content. The same document a click then attaches for the agent."""
+        from backend.services import plane_tickets
+        from backend.services.plane_gateway import PlaneError
+
+        try:
+            ticket = await asyncio.to_thread(
+                plane_tickets.read_ticket, plane_tickets.gateway(), str(args.get("cislo") or "")
+            )
+        except PlaneError as exc:
+            raise ToolError(str(exc)) from exc
+        return ticket.document()
+
     async def naklady(self, args: dict) -> str:
         """The Náklady screen: what each version cost and the project in total — in whole euros, as the screen."""
         from backend.services import metrics as metrics_service
@@ -1094,6 +1108,14 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             lambda a: "uzavreté" if a.get("uzavrete") else "otvorené",
         ),
         Tool(
+            "plane_tiket",
+            "Jeden tiket z Plane podľa čísla (napr. MAGER-66, DEV-186) z ktorejkoľvek evidencie, ktorej je kokpit "
+            "členom — názov, stav, celý popis a komentáre. Keď ho kokpit prečítať nemôže, povie prečo.",
+            _schema({"cislo": {"type": "string", "description": "Číslo tiketu, napr. MAGER-66."}}, ["cislo"]),
+            t.plane_tiket,
+            lambda a: str(a.get("cislo") or ""),
+        ),
+        Tool(
             "naklady",
             "Obrazovka Náklady: čo stála každá verzia a projekt spolu, v celých eurách ako obrazovka.",
             _schema(),
@@ -1119,7 +1141,7 @@ FILES = "Read/Grep/Glob"
 SCREENS: dict[str, tuple[str, ...]] = {
     "Verzie": ("verzie", "stavba"),
     "Zásobník": ("zasobnik", "poziadavka"),
-    "Plane tikety": ("plane_tikety",),
+    "Plane tikety": ("plane_tikety", "plane_tiket"),
     "Riadiace centrum": ("stavba", "plan_uloh", "zaznam_agenta"),
     "Dokumenty": (FILES,),
     "Repozitár": ("git_historia", "git_zmena", "ci"),

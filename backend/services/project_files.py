@@ -153,8 +153,11 @@ def _describe(project_root: Path, path: Path) -> PrivateFile:
     )
 
 
-def save(project_root: Path, filename: str, content: bytes, *, max_bytes: int) -> PrivateFile:
-    """Store ``content`` as ``private/<safe name>`` (``-2``, ``-3``… when the name is taken) and describe it."""
+def save(project_root: Path, filename: str, content: bytes, *, max_bytes: int, replace: bool = False) -> PrivateFile:
+    """Store ``content`` as ``private/<safe name>`` (``-2``, ``-3``… when the name is taken) and describe it.
+
+    ``replace`` writes over a file of the same name instead — a ticket attached again (DEV-218) is one file with what
+    the ticket says now, never two that differ."""
     root = Path(project_root)
     if len(content) > max_bytes:
         raise PrivateFileRefused(
@@ -168,7 +171,9 @@ def save(project_root: Path, filename: str, content: bytes, *, max_bytes: int) -
     if not dot or not stem:
         stem, suffix = name, ""
     dest, n = base / name, 2
-    while dest.exists() or dest.is_symlink():
+    if replace and (dest.is_symlink() or (dest.exists() and not dest.is_file())):
+        raise PrivateFileRefused(f"V priečinku {PRIVATE_DIR}/ je {name} niečo iné než súbor — súbor som neuložil.")
+    while not replace and (dest.exists() or dest.is_symlink()):
         dest = base / (f"{stem}-{n}.{suffix}" if suffix else f"{stem}-{n}")
         n += 1
     ensure_ignored(root, dest.relative_to(root).as_posix())
@@ -219,9 +224,9 @@ def delete(project_root: Path, rel: str) -> PrivateFile:
     return described
 
 
-def answer_line(f: PrivateFile) -> str:
-    """The line the screen puts into the Manažér's message — where the agent finds the file."""
+def answer_line(f: PrivateFile, label: str = "Priložený súbor") -> str:
+    """The line the screen puts into the Manažér's message — what the file is and where the agent finds it."""
     return (
-        f"Priložený súbor: `{f.path}` ({human_size(f.size_bytes)}) — leží v koreni projektu "
+        f"{label}: `{f.path}` ({human_size(f.size_bytes)}) — leží v koreni projektu "
         f"v priečinku {PRIVATE_DIR}/, mimo gitu."
     )

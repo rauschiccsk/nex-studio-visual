@@ -15,6 +15,10 @@ DEV-119: a third block proposes a ticket in Plane — ``<tiket-nsv>`` for a prob
 solves it), ``<tiket-projektu druh="…" cesta="…">`` for work on the project, proposed for the next version or for a
 fast fix. The ticket is founded by a person's click after a preview (:mod:`backend.services.poradca.tickets`).
 
+DEV-218: a fourth block names tickets the agent asked for — ``<tiket-pre-agenta>MAGER-66, DEV-186</tiket-pre-agenta>``.
+„Priložiť k odpovedi agentovi" attaches each one's content as a file, read from Plane at the click
+(:mod:`backend.services.poradca.agent_tickets`); Poradca never retypes a ticket.
+
 The request text is taken from the STORED answer (it passed the secret filter), never from the browser. The second
 kliknutie vráti už uloženú požiadavku — nezaloží druhú.
 """
@@ -48,6 +52,11 @@ _TICKET = re.compile(
     rf"<({BLOCK_TICKET_NSV}|{BLOCK_TICKET_PROJECT})((?:\s+[a-z-]+=\"[^\"]*\")*)\s*>\s*(.*?)\s*</\1>", re.S
 )
 _ATTRIBUTE = re.compile(r'([a-z-]+)="([^"]*)"')
+
+BLOCK_AGENT_TICKETS = "tiket-pre-agenta"
+#: The most tickets one answer attaches for the agent — a brief names a few, never a register.
+MAX_AGENT_TICKETS = 5
+_TICKET_IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]{0,11}-\d{1,7}\b")
 
 #: Najkratšia požiadavka, ktorú má zmysel ukladať.
 _MIN_REQUEST_CHARS = 10
@@ -106,6 +115,15 @@ def ticket_proposal(text: str) -> Optional[TicketProposal]:
         work_kind=TICKET_WORK_KINDS.get(attributes.get("druh", "")) if project else None,
         way=TICKET_WAYS.get(attributes.get("cesta", "")) if project else None,
     )
+
+
+def agent_tickets(text: str) -> list[str]:
+    """The tickets the first ``<tiket-pre-agenta>`` block names, as Plane writes them, each once, in its order."""
+    found: list[str] = []
+    for identifier in _TICKET_IDENTIFIER.findall(extract_block(text, BLOCK_AGENT_TICKETS) or ""):
+        if identifier.upper() not in found:
+            found.append(identifier.upper())
+    return found[:MAX_AGENT_TICKETS]
 
 
 def _title(summary: str) -> str:

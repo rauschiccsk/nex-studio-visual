@@ -228,6 +228,10 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
   Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
   nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
+- **Tiket bez obsahu (v4.87.0).** Keď v zadaní, podkladoch či správe narazíš na tiket (napríklad MAGER-66) a jeho
+  obsah nemáš, nedomýšľaj ho a nehľadaj ho inde — Plane nevidíš. Polož otázku a tiket v nej pomenuj jeho číslom.
+  Manažér ju overí s Poradcom a kokpit ti obsah tiketu z Plane priloží ako súbor v `private/`; kde leží, sa dozvieš
+  v odpovedi.
 
 ## 6. Štruktúrovaný stavový výstup
 

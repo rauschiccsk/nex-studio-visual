@@ -86,7 +86,8 @@ def _listing(db: Session, version_id: uuid.UUID, files: list[project_files.Priva
     }
 
 
-async def _record(db: Session, version_id: uuid.UUID, content: str, entry: dict[str, Any]) -> None:
+async def record_private_file(db: Session, version_id: uuid.UUID, content: str, entry: dict[str, Any]) -> None:
+    """A line in the build history — who did what with which file, never its content — shown to the open screens."""
     stage = db.execute(select(PipelineState.current_stage).where(PipelineState.version_id == version_id)).scalar()
     msg = orchestrator._record_message(
         db,
@@ -143,7 +144,7 @@ async def upload_private_file(
     root = _project_root(db, version_id)
     stored = await _offload(project_files.save, root, file.filename or "", content, max_bytes=limit)
     size = project_files.human_size(stored.size_bytes)
-    await _record(
+    await record_private_file(
         db,
         version_id,
         f"{current_user.username} priložil súbor {stored.path} ({size}) — leží v projekte mimo gitu.",
@@ -166,7 +167,7 @@ async def delete_private_file(
     authz.assert_version_access(db, current_user, version_id)
     root = _project_root(db, version_id)
     removed: Optional[project_files.PrivateFile] = await _offload(project_files.delete, root, path)
-    await _record(
+    await record_private_file(
         db,
         version_id,
         f"{current_user.username} zmazal súbor {removed.path} z priečinka projektu.",

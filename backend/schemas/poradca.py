@@ -93,6 +93,16 @@ class PoradcaMessageRead(BaseModel):
     ticket_proposal: Optional[PoradcaTicketProposalRead] = None
     plane_identifier: Optional[str] = None
     plane_url: Optional[str] = None
+    #: DEV-218 — the tickets the answer attaches for the agent (``<tiket-pre-agenta>``), as Plane writes them.
+    agent_tickets: list[str] = Field(default_factory=list)
+
+
+class PoradcaAgentTicketsAttached(BaseModel):
+    """DEV-218 — „Priložiť k odpovedi agentovi": each ticket's content read from Plane, stored in ``private/``."""
+
+    attached: list[str]
+    #: The lines the screen puts into the answer for the agent — where each ticket's file lies.
+    answer_text: str
 
 
 class PoradcaBacklogSaved(BaseModel):

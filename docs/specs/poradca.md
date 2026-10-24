@@ -147,6 +147,16 @@ Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
   na projekte: modul projektu, druh práce, zodpovedný a návrh „do ďalšej verzie“ alebo „do rýchlej opravy“ —
   len návrh, verziu tiket nezakladá ani nespúšťa (DEV-29). Náhľad ukáže podobné otvorené tikety modulu; druhé
   kliknutie vráti založený tiket, pod odpoveďou potom stojí „Tiket DEV-N je založený.“ s odkazom do Plane.
+- **„Priložiť k odpovedi agentovi"** (v4.87.0, DEV-218) — agent, ktorý v zadaní či podkladoch narazí na tiket bez
+  obsahu, sa naň spýta a tiket pomenuje číslom; Poradca ho prečíta nástrojom `plane_tiket` (popis aj komentáre,
+  z ktorejkoľvek evidencie, ktorej je účet kokpitu v Plane členom) a čísla tiketov dá do bloku
+  `<tiket-pre-agenta>MAGER-66, DEV-186</tiket-pre-agenta>` (najviac päť). Tlačidlo vezme tikety, ktoré menuje
+  uložená odpoveď, prečíta ich z Plane v chvíli kliknutia — Poradca ich neprepisuje —, cez filter tajomstiev ich uloží
+  do `private/<číslo>.md` (git ich nevidí, opätovné priloženie súbor prepíše) a zapíše do priebehu stavby, kto čo
+  priložil. Riadky, kde súbory ležia, vloží do poľa odpovede agentovi; odošle ich Manažér. Keď kokpit niektorý tiket
+  prečítať nemôže (nie je členom jeho evidencie, tiket nie je), nepriloží žiadny a povie prečo. Director 24.10.2026:
+  „ak Agent sa narazí na tiket (napríklad MAGER-66) bez priloženého obsahu tak požiadá (tlačítko ako to už máme
+  v iných mistach) Poradcu aby doplnil chýbajúce informácie.“
 
 ### Počas stavby
 Beží **vedľa** stavby: neprepína jej stav, nečaká na ňu, nezastaví ju. Agent stavby o rozhovore nevie.

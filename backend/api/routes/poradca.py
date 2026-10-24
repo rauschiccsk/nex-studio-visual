@@ -9,6 +9,7 @@
 * ``DELETE /conversations/{id}``                      → delete (text gone, cost stays in Costs)
 * ``POST  /conversations/{id}/messages``              → next question
 * ``POST  /messages/{id}/stop``                        → stop the answer
+* ``POST  /messages/{id}/agent-tickets``               → attach the tickets the answer names for the agent (DEV-218)
 * ``WS    /conversations/{id}/ws?token``               → live progress (steps, state)
 
 Access: to a project its owner or an admin account (as everywhere in the cockpit); to a conversation its author or
@@ -28,7 +29,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.api.routes.project_files import record_private_file
+from backend.config.settings import settings
 from backend.core import authz
+from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import get_current_user, verify_ws_token
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
@@ -38,6 +42,7 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
 from backend.schemas.poradca import (
+    PoradcaAgentTicketsAttached,
     PoradcaAsk,
     PoradcaBacklogSaved,
     PoradcaChoiceRead,
@@ -56,13 +61,17 @@ from backend.schemas.poradca import (
     PoradcaTicketProposalRead,
     PoradcaVersionInfo,
 )
-from backend.services import metrics, plane_tickets
+from backend.services import claude_agent, metrics, plane_tickets, project_files
 from backend.services.plane_gateway import PlaneError
-from backend.services.poradca import attachments, choices, handoff, readiness, review, runner, tickets
+from backend.services.poradca import agent_tickets, attachments, choices, handoff, readiness, review, runner, tickets
+from backend.services.poradca.context import known_secret_values
+from backend.services.poradca.secrets_filter import SecretFilter
 
 router = APIRouter(tags=["Poradca"])
 
 _TITLE_CHARS = 80
+#: DEV-218 — reading up to five tickets from Plane (a few requests each, 30 s apiece at worst) and writing their files.
+AGENT_TICKETS_CAP_SECONDS = 180
 
 
 def _title(question: str) -> str:
@@ -134,6 +143,7 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         ticket_proposal=_ticket_proposal(msg.content) if done_answer else None,
         plane_identifier=msg.plane_identifier,
         plane_url=msg.plane_url,
+        agent_tickets=handoff.agent_tickets(msg.content) if done_answer else [],
         choices=[
             PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
             for c in choices.choices(db, msg.content, msg.version_id)
@@ -494,6 +504,57 @@ def found_plane_ticket(
         db.rollback()
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return PoradcaTicketFounded(plane_identifier=msg.plane_identifier, plane_url=msg.plane_url, created=created)
+
+
+@router.post("/messages/{message_id}/agent-tickets", response_model=PoradcaAgentTicketsAttached)
+async def attach_agent_tickets(
+    message_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> PoradcaAgentTicketsAttached:
+    """DEV-218 — „Priložiť k odpovedi agentovi": the tickets the answer names, read from Plane now, become files in
+    ``private/`` of the build's project; the lines for the answer say where. Nothing is sent to the agent."""
+    msg = _answer_for(db, current_user, message_id)
+    try:
+        where = agent_tickets.target(db, msg)
+    except handoff.HandoffRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    authz.assert_version_access(db, current_user, where.version.id)
+    secret_filter = SecretFilter(known_secret_values(db, where.project))
+    try:
+        attached = await run_blocking(
+            agent_tickets.attach,
+            plane_tickets.gateway(),
+            claude_agent.PROJECTS_ROOT / where.project.slug,
+            where.identifiers,
+            secret_filter,
+            max_bytes=settings.private_file_max_bytes,
+            cap=AGENT_TICKETS_CAP_SECONDS,
+        )
+    except PlaneError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except project_files.PrivateFileRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except BlockingWorkTimedOut as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail="Plane neodpovedal včas — skús to znova o chvíľu."
+        ) from exc
+    for a in attached:
+        size = project_files.human_size(a.stored.size_bytes)
+        await record_private_file(
+            db,
+            where.version.id,
+            f"{current_user.username} priložil tiket {a.identifier} z Plane ako súbor {a.stored.path} ({size}) — "
+            "leží v projekte mimo gitu.",
+            {
+                "action": "uploaded",
+                "path": a.stored.path,
+                "size_bytes": a.stored.size_bytes,
+                "by": current_user.username,
+                "plane_ticket": a.identifier,
+            },
+        )
+    return PoradcaAgentTicketsAttached(
+        attached=[a.stored.path for a in attached], answer_text=agent_tickets.answer_text(attached)
+    )
 
 
 @router.websocket("/conversations/{conversation_id}/ws")

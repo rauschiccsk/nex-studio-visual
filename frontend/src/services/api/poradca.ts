@@ -2,6 +2,7 @@
 
 import api, { fetchBlob } from "../api";
 import type {
+  PoradcaAgentTicketsAttached,
   PoradcaConversation,
   PoradcaConversationDetail,
   PoradcaBacklogSaved,
@@ -98,6 +99,11 @@ export function getPoradcaTicketDraftApi(messageId: string): Promise<PoradcaTick
 /** DEV-119 — the edited proposal becomes a ticket in Plane, once; a second click returns the same ticket. */
 export function foundPoradcaTicketApi(messageId: string, body: PoradcaTicketCreate): Promise<PoradcaTicketFounded> {
   return api.post<PoradcaTicketFounded>(`/poradca/messages/${messageId}/plane-ticket`, body);
+}
+
+/** DEV-218 — the tickets the answer names, read from Plane by the cockpit, become files for the agent. */
+export function attachAgentTicketsApi(messageId: string): Promise<PoradcaAgentTicketsAttached> {
+  return api.post<PoradcaAgentTicketsAttached>(`/poradca/messages/${messageId}/agent-tickets`);
 }
 
 export function buildPoradcaWsUrl(conversationId: string, token: string): string {

@@ -11,6 +11,8 @@ const BLOCKS: { tag: string; heading: string }[] = [
   // DEV-119: a proposed ticket in Plane — the project's one carries its work kind and way as attributes.
   { tag: "tiket-nsv", heading: "Návrh tiketu pre kokpit (NEX Studio Visual)" },
   { tag: "tiket-projektu", heading: "Návrh tiketu projektu" },
+  // DEV-218: the tickets the agent asked for — the cockpit attaches their content from Plane.
+  { tag: "tiket-pre-agenta", heading: "Tiket pre agenta stavby" },
 ];
 
 /** DEV-83 — the link a marked choice becomes in the rendered answer; `#volba-3` names card 3, `#volba` no card. */
@@ -70,6 +72,7 @@ const STEP_VERBS: Record<string, string> = {
   znalostna_baza: "Hľadám v Znalostnej báze",
   znalostna_baza_dokument: "Čítam dokument zo Znalostnej bázy",
   databaza_uat: "Pýtam sa databázy UAT",
+  plane_tiket: "Čítam tiket v Plane",
   rad: "Čakám v rade",
 };
 

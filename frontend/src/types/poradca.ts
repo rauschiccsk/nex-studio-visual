@@ -20,6 +20,8 @@ export type PoradcaChoice = S["PoradcaChoiceRead"];
 export type PoradcaTicketDraft = S["PoradcaTicketDraft"];
 export type PoradcaTicketCreate = S["PoradcaTicketCreate"];
 export type PoradcaTicketFounded = S["PoradcaTicketFounded"];
+/** DEV-218 — the tickets „Priložiť k odpovedi agentovi" attached from Plane and the lines for the answer. */
+export type PoradcaAgentTicketsAttached = S["PoradcaAgentTicketsAttached"];
 
 /** Live progress event — tool and target, never content. */
 export type PoradcaEvent =

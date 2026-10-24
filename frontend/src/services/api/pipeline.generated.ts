@@ -1300,6 +1300,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/messages/{message_id}/agent-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Agent Tickets
+         * @description DEV-218 — „Priložiť k odpovedi agentovi": the tickets the answer names, read from Plane now, become files in
+         *     ``private/`` of the build's project; the lines for the answer say where. Nothing is sent to the agent.
+         */
+        post: operations["attach_agent_tickets_api_v1_poradca_messages__message_id__agent_tickets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/backlog": {
         parameters: {
             query?: never;
@@ -5892,6 +5913,16 @@ export interface components {
              */
             work_kind_label?: string | null;
         };
+        /**
+         * PoradcaAgentTicketsAttached
+         * @description DEV-218 — „Priložiť k odpovedi agentovi": each ticket's content read from Plane, stored in ``private/``.
+         */
+        PoradcaAgentTicketsAttached: {
+            /** Answer Text */
+            answer_text: string;
+            /** Attached */
+            attached: string[];
+        };
         /** PoradcaAsk */
         PoradcaAsk: {
             /** Attachments */
@@ -6061,6 +6092,8 @@ export interface components {
         };
         /** PoradcaMessageRead */
         PoradcaMessageRead: {
+            /** Agent Tickets */
+            agent_tickets?: string[];
             /** Attachments */
             attachments?: components["schemas"]["PoradcaAttachmentRead"][];
             /**
@@ -10632,6 +10665,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaConversationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_agent_tickets_api_v1_poradca_messages__message_id__agent_tickets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaAgentTicketsAttached"];
                 };
             };
             /** @description Validation Error */
