@@ -29,6 +29,20 @@
 # wipe each other's running job) — and all of them carry the project's one label, so a job goes to whichever is free.
 # RUNNER_SUFFIX tells them apart: empty for the first (named as before), `_2`, `_3`… for the others. An underscore
 # never appears in a project's name, so the second runner of `x` can never take the name of the first of `x-2`.
+#
+# Rootless (DEV-167). Until 25.10.2026 the daemon ran privileged: every step of every job could start a privileged
+# container in it and read and write the server's disks — measured, 512 B from both nvme0n1 and sda of ANDROS, where
+# the customers' installations live. Now the daemon runs as the runner's own user (1001:121 of the runner image) in a
+# user namespace, in a container that is NOT privileged: the server's disks are not in it, and a container a job
+# starts with --privileged does not start at all. Files a job's container writes into the work dir belong to the
+# runner, so the next checkout can remove them. Two things the host must have — the cockpit does not set them up:
+#   * the AppArmor profile nex-ci-dind-rootless.apparmor (next to this file) in /etc/apparmor.d, loaded: Ubuntu 24.04
+#     lets no unprivileged process create a user namespace (kernel.apparmor_restrict_unprivileged_userns=1) unless
+#     its profile says so, and this one says so only for the containers that name it;
+#   * nothing else — no package, no change to the server's Docker.
+# Rootless means no cgroups: limits a job puts on its containers (--memory, --cpus) are dropped with a warning. No CI
+# of ANDROS sets one (measured 25.10.2026). A job that needs a privileged container goes to the project's privileged
+# runner (docker-compose.privileged.yml) under a label of its own, and nothing else runs there.
 name: nex-ci-${SLUG:?SLUG is required}${RUNNER_SUFFIX:-}
 
 # The version GitHub asks for today; a newer one the runner fetches itself (run.sh below) — the tag is only where it
@@ -38,29 +52,59 @@ x-runner-image: &runner-image myoung34/github-runner:2.337.0-ubuntu-noble
 
 services:
   docker:
-    image: docker:29.1.3-dind
+    image: docker:29.1.3-dind-rootless
     container_name: nex-ci-docker-${SLUG}${RUNNER_SUFFIX:-}
     hostname: nex-ci-docker-${SLUG}${RUNNER_SUFFIX:-}
-    privileged: true
+    user: "1001:121"
+    security_opt:
+      - apparmor=nex-ci-dind-rootless
+      # rootlesskit and runc in the namespace unshare and mount (seccomp) and mount a /proc of their own (systempaths).
+      - seccomp=unconfined
+      - systempaths=unconfined
+    devices:
+      # The namespace's network (vpnkit).
+      - /dev/net/tun
     restart: unless-stopped
     environment:
       DOCKER_TLS_CERTDIR: ""
+      HOME: /home/ci
+      # rootlesskit asks for the user by name; the image knows only its own user 1000 (configs below).
+      USER: ci
+    tmpfs:
+      - /run/user/1001:uid=1001,gid=121,mode=0700
     command:
       # A socket in a shared volume only — no network access to this daemon.
       - --host=unix:///run/ci-docker/docker.sock
       # Address ranges of its own: CI networks must not overlap the office network (192.168.55.0/24) or the live Docker.
       - --bip=10.230.0.1/24
       - --default-address-pool=base=10.231.0.0/16,size=24
-      # The socket belongs to the docker group of user runner in the runner image (GID 500), else the runner may not use it.
-      - --group=500
+      # The socket belongs to the runner's own group (GID 121). Rootless, the runner owns it anyway (same user).
+      - --group=121
       # Images stored the classic way (overlay2), like the server's Docker. A fresh Docker 29 stores them through
       # containerd, and there several services built into one image at once collide: on 19.10.2026 career-asistent's
       # build failed with "image …-backend:latest: already exists" — worker, migrate and backend share that image.
       - --feature=containerd-snapshotter=false
     volumes:
-      - docker-data:/var/lib/docker
+      - docker-home:/home/ci
       - docker-socket:/run/ci-docker
       - /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}:/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
+    configs:
+      # The daemon's user for rootlesskit and newuidmap, and the ids of its namespace (DEV-167).
+      - source: rootless-passwd
+        target: /etc/passwd
+        mode: 0444
+      - source: rootless-group
+        target: /etc/group
+        mode: 0444
+      - source: rootless-subid
+        target: /etc/subuid
+        mode: 0444
+      - source: rootless-subid
+        target: /etc/subgid
+        mode: 0444
+    depends_on:
+      workdir:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "docker", "-H", "unix:///run/ci-docker/docker.sock", "info"]
       interval: 5s
@@ -71,14 +115,21 @@ services:
   # as root and left root-owned files there; on 19.10.2026 the converted runners of nex-websites and career-asistent
   # failed their first job on them ("Access to the path …/PipelineFolder.json is denied"). The image's own start only
   # takes over the top of the work dir.
+  # DEV-167: …and the daemon's home and socket volumes to the same user, whose daemon starts after it. Only their top:
+  # the images inside belong to the ids of the daemon's namespace and must keep them.
   workdir:
     image: *runner-image
     user: root
-    entrypoint: ["chown", "-R", "runner", "/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}"]
+    entrypoint:
+      - sh
+      - -c
+      - chown -R runner /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-} && chown runner:runner /home/ci /run/ci-docker
     network_mode: none
     restart: "no"
     volumes:
       - /opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}:/opt/ci-work/${SLUG}${RUNNER_SUFFIX:-}
+      - docker-home:/home/ci
+      - docker-socket:/run/ci-docker
 
   runner:
     image: *runner-image
@@ -135,8 +186,20 @@ configs:
       [user]
       	name = ICC CI
       	email = ci@icc.sk
+  # DEV-167: the rootless daemon's user — the runner's uid and gid (1001:121), so the work dir is one owner's.
+  rootless-passwd:
+    content: |
+      root:x:0:0:root:/root:/bin/sh
+      ci:x:1001:121:CI Docker:/home/ci:/bin/sh
+  rootless-group:
+    content: |
+      root:x:0:root
+      ci:x:121:
+  rootless-subid:
+    content: |
+      ci:100000:65536
 
 volumes:
-  docker-data:
+  docker-home:
   docker-socket:
   runner-data:

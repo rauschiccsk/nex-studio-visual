@@ -72,7 +72,11 @@ def _docker_ps(cmd: list[str], labels: dict[str, str] | None) -> str:
     from the format the code sends — so the row is the one Docker would give that code, not one the test made up."""
     if labels is None:
         return ""
-    name = cmd[cmd.index("--filter") + 1].removeprefix("name=^").removesuffix("$")
+    # The one runner container there is; a filter that does not name it finds nothing, as on Docker (DEV-167: the
+    # privileged runner's name was "found" while the fake echoed whatever name it was asked about).
+    name = "nex-ci-runner-nex-demo"
+    if not re.fullmatch(cmd[cmd.index("--filter") + 1].removeprefix("name=^").removesuffix("$"), name):
+        return ""
     row = cmd[cmd.index("--format") + 1].replace("{{.Names}}", name)
     return re.sub(r'\{\{\.Label "([^"]+)"\}\}', lambda m: labels.get(m.group(1), ""), row) + "\n"
 
@@ -142,14 +146,24 @@ def test_the_work_dir_is_the_same_path_in_the_runner_and_its_daemon(template: di
 def test_the_work_dir_is_handed_to_the_runner_user_before_the_runner_starts(template: dict) -> None:
     """A runner started the old way ran as root and left root-owned files in the work dir; the image's own start takes
     over only its top. On 19.10.2026 the converted runners of nex-websites and career-asistent failed their first job
-    on them ("Access to the path …/PipelineFolder.json is denied")."""
+    on them ("Access to the path …/PipelineFolder.json is denied").
+
+    DEV-167: the rootless daemon runs as that same user, so its home and socket volumes are handed over too — only
+    their top, the images inside belong to the ids of the daemon's namespace — and the daemon starts after it."""
     workdir, runner = template["services"]["workdir"], template["services"]["runner"]
+    daemon = template["services"]["docker"]
     path = runner["environment"]["RUNNER_WORKDIR"]
     assert workdir["image"] == runner["image"], "the runner image is the one that knows user runner"
     assert workdir["user"] == "root"
-    assert workdir["entrypoint"] == ["chown", "-R", "runner", path]
-    assert workdir["volumes"] == [f"{path}:{path}"] and workdir["network_mode"] == "none"
+    assert workdir["entrypoint"] == [
+        "sh",
+        "-c",
+        f"chown -R runner {path} && chown runner:runner /home/ci /run/ci-docker",
+    ]
+    assert workdir["volumes"] == [f"{path}:{path}", "docker-home:/home/ci", "docker-socket:/run/ci-docker"]
+    assert workdir["network_mode"] == "none"
     assert runner["depends_on"]["workdir"] == {"condition": "service_completed_successfully"}
+    assert daemon["depends_on"]["workdir"] == {"condition": "service_completed_successfully"}
 
 
 def test_the_runner_survives_its_own_update(template: dict) -> None:
@@ -168,7 +182,8 @@ def test_the_runner_reads_like_the_old_runners_on_the_server(template: dict) -> 
     runner, daemon = template["services"]["runner"], template["services"]["docker"]
     assert runner["image"].startswith("myoung34/github-runner:") and runner["image"].endswith("-ubuntu-noble")
     assert runner["environment"]["RUN_AS_ROOT"] == "false"
-    assert "--group=500" in daemon["command"], "user runner's docker group (GID 500) must own the socket"
+    # DEV-167: rootless, the daemon runs as user runner (1001:121) and owns the socket; the group is the runner's own.
+    assert "--group=121" in daemon["command"], "user runner's own group (GID 121) owns the socket"
     assert "--feature=containerd-snapshotter=false" in daemon["command"], "images stored like on the server (overlay2)"
     identity_at = {c["source"]: c["target"] for c in runner["configs"]}["git-identity"]
     assert identity_at == "/home/runner/.gitconfig"

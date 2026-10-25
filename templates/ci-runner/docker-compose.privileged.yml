@@ -1,0 +1,21 @@
+# DEV-167 — the project's privileged runner, laid over docker-compose.yml (everything not named here stays as there).
+#
+# Its Docker keeps full rights: the classic docker:dind, as root, privileged — a container a job starts in it can reach
+# the server's disks. It exists for the jobs that cannot run without that and for nothing else: it carries a label of
+# its own, `andros-ubuntu-<slug>-privileged`, never the project's, so only a job that names that label comes here.
+# The cockpit starts it for a project one of whose workflows names the label (ci_runner.needs_privileged). On ANDROS
+# 25.10.2026 that is one job: NEX Inbox's smb-blackhole — a real CIFS share and an iptables DROP in a privileged
+# container. Director 25.10.2026: „Áno, súhlasím, začni DEV-167“.
+services:
+  docker:
+    image: docker:29.1.3-dind
+    user: root
+    privileged: true
+    volumes:
+      - docker-data:/var/lib/docker
+  runner:
+    environment:
+      LABELS: andros-ubuntu-${SLUG}-privileged
+
+volumes:
+  docker-data:

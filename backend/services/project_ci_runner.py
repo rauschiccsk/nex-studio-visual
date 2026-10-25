@@ -21,7 +21,7 @@ import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import yaml
 
@@ -118,6 +118,8 @@ def jobs_elsewhere(checkout: Path, slug: str) -> tuple[list[JobElsewhere], list[
     A job calling a reusable workflow (``uses:``) has no ``runs-on`` of its own — the workflow it calls is read like
     any other when it lives in the repository."""
     label = ci_runner.runner_label(slug)
+    # DEV-167: a job on the project's privileged runner runs on the project's own runner too.
+    own = {label, ci_runner.privileged_label(slug)}
     folder = checkout / ".github" / "workflows"
     if not folder.is_dir():
         return [], []
@@ -136,21 +138,10 @@ def jobs_elsewhere(checkout: Path, slug: str) -> tuple[list[JobElsewhere], list[
         for name, job in jobs.items():
             if not isinstance(job, dict) or "runs-on" not in job:
                 continue
-            labels = _labels(job["runs-on"])
-            if label not in labels:
+            labels = ci_runner.runs_on_labels(job["runs-on"])
+            if own.isdisjoint(labels):
                 found.append(JobElsewhere(workflow=path.name, job=str(name), runs_on=", ".join(labels)))
     return found, unreadable
-
-
-def _labels(runs_on: Any) -> list[str]:
-    """The labels a ``runs-on`` asks for — a string, a list, or ``{group, labels}``."""
-    if isinstance(runs_on, list):
-        return [str(label) for label in runs_on]
-    if isinstance(runs_on, dict):
-        if "labels" in runs_on:
-            return _labels(runs_on["labels"])
-        return [f"group: {runs_on.get('group')}"]
-    return [str(runs_on)]
 
 
 def decide(

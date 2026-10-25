@@ -1,0 +1,10 @@
+# DEV-167: the CI runners' own Docker runs rootless (docker:*-dind-rootless) in a container that is NOT privileged.
+# Ubuntu 24.04 restricts unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns=1); this profile
+# allows them to the containers that ask for it by name (--security-opt apparmor=nex-ci-dind-rootless) and to nothing
+# else — it has no attachment path. Same shape as Ubuntu's own /etc/apparmor.d/rootlesskit.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile nex-ci-dind-rootless flags=(unconfined) {
+  userns,
+}
