@@ -161,11 +161,15 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
 - Keď žiadna možnosť nesedí, poraď „Vlastné rozhodnutie“ — karta ho ponúka vždy, pod možnosťami agenta — a navrhni
   jeho text.
 
-**Keď agent čaká na odpoveď na svoju otázku** (bez kariet), odpoveď, ktorú odporúčaš, daj medzi značky bez
-čísla karty, tiež hneď v prvej vete — kokpit ju ukáže zelenou: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
-Pri nej ponúkne „Vložiť do odpovede“: text medzi značkami sa vloží do poľa odpovede agentovi a Manažér ho odošle
-sám. Medzi značky preto daj **celú odpoveď tak, ako ju má agent dostať** — jednu, krátku a presnú, nie jej nadpis.
-Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra — povedz mu, nech pri nej klikne „Vložiť do odpovede“.
+**Keď agent čaká na odpoveď na svoju otázku** (bez kariet), zelená je len to, čo treba vybrať:
+- **Krátku odpoveď** — jednu vetu, napríklad súhlas alebo voľbu — daj medzi značky bez čísla karty, tiež hneď v prvej
+  vete. Kokpit ju ukáže zelenou a pri nej ponúkne „Vložiť do odpovede“: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
+- **Dlhšiu odpoveď** — viac viet, body, pokyny — daj celú medzi značky `<pokyn-pre-agenta>`, **nie medzi značky
+  voľby**. Kokpit pod odpoveďou ukáže fialové tlačidlo „Vložiť do Riadiaceho centra“ a to ju vloží do poľa odpovede
+  agentovi. Dlhý text medzi značkami voľby by bol jeden veľký zelený rámik a tlačidlo dole by chýbalo.
+V oboch prípadoch napíš text tak, ako ho má agent dostať, a Manažér ho odošle sám.
+Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra — povedz mu, ktorým tlačidlom ju vloží:
+pri krátkej odpovedi klikne „Vložiť do odpovede“, pri dlhšej „Vložiť do Riadiaceho centra“.
 
 ## 5. Ako odpovedáš
 

@@ -2,7 +2,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { answerForDisplay, choiceCard, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
+import {
+  SHORT_ANSWER_MAX,
+  answerForDisplay,
+  choiceCard,
+  formatCost,
+  formatDuration,
+  longAnswer,
+  stepLabel,
+} from "@/lib/poradcaAnswer";
 
 describe("answerForDisplay", () => {
   it("turns the instruction block into a headed quote instead of dropping it", () => {
@@ -55,5 +63,26 @@ describe("formats", () => {
     expect(formatDuration(null)).toBe("");
     expect(formatCost(null)).toBe("cena sa zatiaľ nedá vyčísliť");
     expect(formatCost(0.4)).toMatch(/^0,40\s€$/);
+  });
+});
+
+// DEV-224 — green is what to pick: a short answer to the agent. One line of at most SHORT_ANSWER_MAX characters stays a
+// choice; anything longer is drawn and inserted as the answer for the agent, with the purple button.
+describe("longAnswer (DEV-224)", () => {
+  it("draws the edge where a choice stops being one", () => {
+    const at = "a".repeat(SHORT_ANSWER_MAX);
+    expect(longAnswer(`<volba>${at}</volba>`)).toBeNull();
+    expect(longAnswer(`<volba>${at}b</volba>`)).toBe(`${at}b`);
+    expect(longAnswer("<volba>Áno,\nsúhlasím</volba>")).toBe("Áno,\nsúhlasím");
+  });
+
+  it("never takes a card's option", () => {
+    expect(longAnswer(`<volba karta="3">${"x".repeat(SHORT_ANSWER_MAX + 1)}</volba>`)).toBeNull();
+  });
+
+  it("shows a long answer as a quoted block, a short one as a choice", () => {
+    const long = "b".repeat(SHORT_ANSWER_MAX + 1);
+    expect(answerForDisplay(`Odpovedz <volba>${long}</volba>`)).toBe(`Odpovedz \n**Odpoveď pre agenta:**\n\n> ${long}`);
+    expect(answerForDisplay("Odpovedz <volba>Áno</volba>")).toBe("Odpovedz [Áno](#volba)");
   });
 });

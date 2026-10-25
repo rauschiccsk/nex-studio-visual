@@ -19,6 +19,30 @@ const BLOCKS: { tag: string; heading: string }[] = [
 export const CHOICE_HREF = "#volba";
 const CHOICE_RE = /<volba(?:\s+karta="(\d{1,3})")?\s*>([\s\S]*?)<\/volba>/g;
 
+/**
+ * DEV-224 — green is what to pick: a card's option, or a short answer to the agent's question. A no-card choice longer
+ * than this, or on more than one line, is the answer for the agent itself — drawn as a block and inserted with the
+ * purple „Vložiť do Riadiaceho centra“ below the answer. 25.10.2026 Poradca put 2 505 characters between the tags and
+ * the answer became one big green box; Director 26.10.2026: „zelené je to čo treba vybrať a dole má byť viditeľný
+ * fialový button ako predtým“.
+ * @internal — exported for its test.
+ */
+export const SHORT_ANSWER_MAX = 200;
+const LONG_ANSWER_HEADING = "Odpoveď pre agenta";
+
+function isLongAnswer(text: string): boolean {
+  return text.length > SHORT_ANSWER_MAX || text.includes("\n");
+}
+
+/** The answer for the agent Poradca marked as a choice but too long to be one — `null` when there is none. */
+export function longAnswer(content: string): string | null {
+  for (const [, card, body] of content.matchAll(CHOICE_RE)) {
+    const text = (body ?? "").trim();
+    if (!card && isLongAnswer(text)) return text;
+  }
+  return null;
+}
+
 /** The card a choice link names — `null` for an answer to the agent's question. */
 export function choiceCard(href: string): number | null {
   const m = /^#volba-(\d+)$/.exec(href);
@@ -47,8 +71,17 @@ export function answerForDisplay(content: string): string {
       return `\n**${heading}:**\n\n${quoted}\n`;
     });
   }
-  // DEV-83: a marked choice becomes a link the answer's renderer draws as a badge.
+  // DEV-83: a marked choice becomes a link the answer's renderer draws as a badge — DEV-224: a long answer for the
+  // agent a headed quote, like an instruction.
   out = out.replace(CHOICE_RE, (_m, card: string | undefined, label: string) => {
+    if (!card && isLongAnswer(label.trim())) {
+      const quoted = label
+        .trim()
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n");
+      return `\n**${LONG_ANSWER_HEADING}:**\n\n${quoted}\n`;
+    }
     const text = plainChoice(label);
     if (!text) return "";
     return `[${text.replace(/[\\[\]]/g, (c) => `\\${c}`)}](${CHOICE_HREF}${card ? `-${card}` : ""})`;

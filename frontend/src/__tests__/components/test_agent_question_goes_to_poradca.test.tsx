@@ -275,3 +275,69 @@ describe("Poradca's recommended answer comes back into the answer box", () => {
     }
   });
 });
+
+// DEV-224 — 25.10.2026 Poradca put a 2 505-character answer for the agent between the choice tags; it was drawn as one
+// big green box with a small grey button, and the purple button below the answer was gone. Director 26.10.2026: „zelené
+// je to čo treba vybrať a dole má byť viditeľný fialový button ako predtým“.
+const LONG =
+  "Tu je zvyšných sedem poznámok Auditora z verdiktu, doslova. " +
+  "Zapracuj ich do Špecifikácie a Návrhu a potom znova odovzdaj Návrh aj štruktúru databázy na schválenie. ".repeat(3);
+
+function renderContent(content: string, choices: PoradcaChoice[]) {
+  const msg = {
+    id: "p2",
+    author: "poradca",
+    content,
+    steps: [],
+    status: "done",
+    instruction: null,
+    backlog_request: null,
+    captured_backlog_number: null,
+    choices,
+  };
+  return render(
+    <MemoryRouter initialEntries={["/poradca"]}>
+      <Routes>
+        <Route path="/poradca" element={<PoradcaAnswer message={msg as never} scopeVersion={VERSION as never} />} />
+        <Route path="/riadiace-centrum" element={<Where />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("DEV-224 — green is what to pick; a longer answer for the agent is an instruction with the purple button", () => {
+  it("a long answer is no green box — a block „Odpoveď pre agenta“ and „Vložiť do Riadiaceho centra“ that inserts it", () => {
+    const { container } = renderContent(`Odpovedz agentovi <volba>${LONG}</volba>`, [
+      { card: null, label: LONG.trim(), status: "answer", question: null },
+    ]);
+
+    expect(container.querySelector("[data-choice]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Vložiť do odpovede" })).toBeNull();
+    expect(screen.getByText("Odpoveď pre agenta:")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Vložiť do Riadiaceho centra" }));
+
+    expect(screen.getByText("na adrese /riadiace-centrum")).toBeInTheDocument();
+    expect(takeHandoff("v1")).toBe(LONG.trim());
+  });
+
+  it("an answer on more than one line is an instruction too", () => {
+    const lines = "Áno, súhlasím.\nPoužij variant A.";
+    const { container } = renderContent(`Odpovedz agentovi <volba>${lines}</volba>`, [
+      { card: null, label: "Áno, súhlasím. Použij variant A.", status: "answer", question: null },
+    ]);
+
+    expect(container.querySelector("[data-choice]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Vložiť do Riadiaceho centra" }));
+    expect(takeHandoff("v1")).toBe(lines);
+  });
+
+  it("a short answer stays green with „Vložiť do odpovede“ and brings no purple button", () => {
+    const { container } = renderContent("Odpovedz agentovi <volba>Áno, súhlasím</volba>.", [
+      { card: null, label: "Áno, súhlasím", status: "answer", question: null },
+    ]);
+
+    expect(container.querySelector('[data-choice="answer"]')?.textContent).toBe("Áno, súhlasím");
+    expect(screen.getByRole("button", { name: "Vložiť do odpovede" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Vložiť do Riadiaceho centra" })).toBeNull();
+  });
+});

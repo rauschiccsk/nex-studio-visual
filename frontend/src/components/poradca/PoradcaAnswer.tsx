@@ -18,7 +18,7 @@ import { useCodePaths } from "@/hooks/useCodePaths";
 import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { handOffInstruction } from "@/lib/poradcaHandoff";
-import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, stepLabel } from "@/lib/poradcaAnswer";
+import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, longAnswer, stepLabel } from "@/lib/poradcaAnswer";
 import { InlineChoice } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
 import { modelDisplayName } from "@/utils/modelLabel";
@@ -63,8 +63,11 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
     }
   }
 
+  // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
+  const instruction = message.instruction ?? longAnswer(message.content ?? "");
+
   function insert() {
-    if (message.instruction) handOff(message.instruction);
+    if (instruction) handOff(instruction);
   }
 
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
@@ -120,7 +123,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
 
   // DEV-135 / DEV-205 — „Vložiť do odpovede“ where the answer names the answer for the agent (DEV-208: only there).
   const answerInsert = { insert: handOff, blocked: instructionBlocked };
-  const hasActions = !!(message.instruction || message.backlog_request || message.ticket_proposal || agentTickets.length);
+  const hasActions = !!(instruction || message.backlog_request || message.ticket_proposal || agentTickets.length);
 
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
@@ -197,7 +200,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
               {`Priložiť k odpovedi agentovi: ${agentTickets.join(", ")}`}
             </button>
           )}
-          {message.instruction && (
+          {instruction && (
             <button
               type="button"
               onClick={insert}
@@ -270,7 +273,7 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
           onClose={() => setTicketOpen(false)}
         />
       )}
-      {instructionBlocked && (message.instruction || agentTickets.length > 0) && !running && (
+      {instructionBlocked && (instruction || agentTickets.length > 0) && !running && (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{instructionBlocked}</p>
       )}
       {error && <ErrorNote error={error} />}
