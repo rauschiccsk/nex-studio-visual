@@ -76,6 +76,12 @@ services:
       # Address ranges of its own: CI networks must not overlap the office network (192.168.55.0/24) or the live Docker.
       - --bip=10.230.0.1/24
       - --default-address-pool=base=10.231.0.0/16,size=24
+      # DNS of its containers and image builds: the servers ANDROS's own resolver hands out (8.8.8.8, 8.8.4.4 —
+      # measured 25.10.2026 in a build of the old privileged daemon). Rootless they would ask vpnkit's DNS proxy
+      # (192.168.65.1), which answers a lookup of IPv4 and IPv6 at once with nothing: NEX Inbox's `npm ci` in its image
+      # build stopped at "getaddrinfo ENOTFOUND codeload.github.com", and node's lookup failed 5 of 5 (DEV-167).
+      - --dns=8.8.8.8
+      - --dns=8.8.4.4
       # The socket belongs to the docker group of user runner in the runner image (GID 500), else the runner may not use it.
       # Rootless too: 500 is one of the ids that pass through the namespace unshifted.
       - --group=500

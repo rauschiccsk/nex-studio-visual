@@ -114,6 +114,15 @@ def test_the_runners_ids_pass_through_the_namespace_unshifted():
     }
 
 
+def test_the_daemon_names_its_dns_servers():
+    """Rootless, containers and image builds would ask vpnkit's DNS proxy, which answers a lookup of IPv4 and IPv6 at
+    once with nothing — NEX Inbox's `npm ci` in its image build: "getaddrinfo ENOTFOUND codeload.github.com"
+    (25.10.2026). The daemon names the servers the old privileged one used."""
+    command = _raw()["services"]["docker"]["command"]
+
+    assert [c for c in command if c.startswith("--dns")] == ["--dns=8.8.8.8", "--dns=8.8.4.4"]
+
+
 def test_the_apparmor_profile_names_itself_and_nothing_else():
     """Ubuntu 24.04 lets no unprivileged process create a user namespace unless its profile says so. A profile with an
     attachment path would say so for every process that runs that path; this one only for a container naming it."""
