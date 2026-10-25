@@ -10,7 +10,16 @@
 // a verification card adds `?overit=1`: that visit sends the card's question by itself (DEV-103,
 // `@/lib/poradcaReview`).
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ImagePlus, Loader2, MessageSquarePlus, Send, X } from "lucide-react";
 
@@ -551,7 +560,9 @@ function PoradcaComposer({
   // DEV-52: Ctrl+V / Shift+Insert with a screenshot works ANYWHERE on Poradca's page, not only with the cursor in
   // the field (the Director 10.10.2026: „nechápem kde to mám stlačiť v editore chatu?“). Text still pastes where the
   // cursor is; a paste that brings nothing at all says why instead of doing nothing.
-  useEffect(() => {
+  // DEV-223: a layout effect, registered in the same commit that shows the attach button — a passive effect ran
+  // after the paint, and a screenshot pasted outside the field in between was lost (the CI test, 25.10.2026).
+  useLayoutEffect(() => {
     if (!canAttach) return;
     function onPaste(e: ClipboardEvent) {
       const pasted = imagesIn(e.clipboardData);

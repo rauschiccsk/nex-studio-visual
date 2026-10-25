@@ -437,6 +437,30 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     expect(screen.getAllByRole("img", { name: "v-poli.png" })).toHaveLength(1);
   });
 
+  // DEV-223: the page listened for a pasted screenshot only some time after its attach button was on the screen — the
+  // listener was registered in a passive effect, which React runs after the paint. Under the load of CI the test
+  // above pasted into that gap and the screenshot pasted outside the field was lost (25.10.2026, 1 run in 15 on
+  // 23.10.2026). A MutationObserver sees the button the moment it is in the page, whatever the machine's speed.
+  it("⚠️ stránka počúva vloženie snímky už vtedy, keď je na nej tlačidlo Priložiť", async () => {
+    const added = vi.spyOn(document, "addEventListener");
+    let listening: boolean | null = null;
+    const seen = new MutationObserver(() => {
+      if (listening === null && document.querySelector('[aria-label="Priložiť snímku obrazovky"]')) {
+        listening = added.mock.calls.some(([type]) => type === "paste");
+      }
+    });
+    seen.observe(document.body, { childList: true, subtree: true });
+    try {
+      renderPage();
+      await waitFor(() => expect(listening).not.toBeNull());
+    } finally {
+      seen.disconnect();
+      added.mockRestore();
+    }
+
+    expect(listening).toBe(true);
+  });
+
   it("⚠️ po odchode zo stránky Poradcu vloženie obrázka inde v kokpite nezachytáva", async () => {
     const { unmount } = renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
