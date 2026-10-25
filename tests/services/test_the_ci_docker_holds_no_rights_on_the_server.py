@@ -72,26 +72,45 @@ def test_the_daemon_is_rootless_and_not_privileged():
     assert not daemon.get("cap_add") and "/var/run/docker.sock" not in str(daemon)
 
 
-def test_the_daemon_runs_as_the_runners_own_user():
-    """The work dir is one owner's: what a job's container writes there, the runner can remove at the next checkout."""
-    template = _raw()
-    daemon = template["services"]["docker"]
-    configs = template["configs"]
-    uid, gid = daemon["user"].split(":")
-    passwd = {line.split(":")[0]: line.split(":") for line in configs["rootless-passwd"]["content"].splitlines()}
-    name = daemon["environment"]["USER"]
+#: The image's user, the one rootlesskit maps the namespace's 0 to (docker:*-dind-rootless).
+DAEMON_USER, DAEMON_ID = "rootless", 1000
+#: What a job's containers use toward the runner: its user, its group and the socket's group (runner image).
+RUNNER_UID, RUNNER_GIDS = 1001, (121, 500)
 
-    assert (uid, gid) == ("1001", "121"), "user runner of the runner image"
-    assert passwd[name][2:4] == [uid, gid] and passwd[name][5] == daemon["environment"]["HOME"]
-    assert f"{name}:x:{gid}:" in configs["rootless-group"]["content"].splitlines()
-    assert configs["rootless-subid"]["content"].startswith(f"{name}:")
-    assert f"/run/user/{uid}:uid={uid},gid={gid},mode=0700" in daemon["tmpfs"]
-    targets = {c["target"]: c["source"] for c in daemon["configs"]}
-    assert targets == {
-        "/etc/passwd": "rootless-passwd",
-        "/etc/group": "rootless-group",
-        "/etc/subuid": "rootless-subid",
-        "/etc/subgid": "rootless-subid",
+
+def _namespace(content: str) -> dict[int, int]:
+    """The namespace id → server id map rootlesskit builds: 0 → the daemon's own, then the ranges in file order."""
+    mapping, inside = {0: DAEMON_ID}, 1
+    for line in content.splitlines():
+        owner, start, count = line.split(":")
+        assert owner == DAEMON_USER, line
+        for offset in range(int(count)):
+            mapping[inside] = int(start) + offset
+            inside += 1
+    return mapping
+
+
+def test_the_runners_ids_pass_through_the_namespace_unshifted():
+    """A tool container run as the runner (NEX Inbox: -u 1001:121 --group-add 500) reaches the socket and leaves files
+    the runner removes. Measured 25.10.2026 with every id shifted: NEX Inbox's lint stopped at "setgroups: invalid
+    argument" — the socket's group was 100120 from the runner's side."""
+    template = _raw()
+    daemon, configs = template["services"]["docker"], template["configs"]
+    uids = _namespace(configs["rootless-subuid"]["content"])
+    gids = _namespace(configs["rootless-subgid"]["content"])
+
+    assert "user" not in daemon, "the image's own user runs the daemon"
+    assert len(uids) == len(gids) == 65537, "a full namespace — 0 and 65536 ids"
+    assert uids[RUNNER_UID] == RUNNER_UID
+    assert all(gids[g] == g for g in RUNNER_GIDS)
+    assert "--group=500" in daemon["command"]
+    passing = {0, RUNNER_UID, *RUNNER_GIDS}
+    assert all(server >= 100000 for inside, server in uids.items() if inside not in passing)
+    assert all(server >= 100000 for inside, server in gids.items() if inside not in passing)
+    assert len(set(uids.values())) == len(uids) and len(set(gids.values())) == len(gids), "no server id twice"
+    assert {c["target"]: c["source"] for c in daemon["configs"]} == {
+        "/etc/subuid": "rootless-subuid",
+        "/etc/subgid": "rootless-subgid",
     }
 
 
@@ -116,7 +135,7 @@ def test_the_privileged_runner_is_the_old_docker_under_a_label_of_its_own():
     over = _rendered(ci_runner.COMPOSE_FILE, ci_runner.PRIVILEGED_FILE, suffix="_privileged")
     daemon, runner = over["services"]["docker"], over["services"]["runner"]
 
-    assert daemon["privileged"] is True and daemon["user"] == "root"
+    assert daemon["privileged"] is True and "user" not in daemon, "docker:dind runs as root"
     assert daemon["image"] == base["services"]["docker"]["image"].removesuffix("-rootless"), "the same Docker"
     assert {v["target"]: v["source"] for v in daemon["volumes"]}["/var/lib/docker"] == "docker-data"
     assert runner["environment"]["LABELS"] == "andros-ubuntu-nex-demo-privileged"
