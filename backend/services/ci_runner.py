@@ -14,6 +14,10 @@ for its only one. Each is a whole pair of its own (the cleanup hook empties the 
 ``RUNNER_SUFFIX`` (:func:`suffix`); all carry the project's one label (:func:`runner_label`), so a job goes to whichever
 is free. The first keeps the names it always had. Director: „Áno, súhlasím, založ všetkých päť tiketov.“, „Súhlasím“.
 
+DEV-226: a runner counts as started once its own log says it listens for jobs (:func:`wait_listening`) — GitHub
+reports it „online“ while it still holds the replaced runner's session, and a job queued in that gap waits for nobody
+(26.10.2026 nex-websites: 14 min, until cancelled). Director 26.10.2026: „Áno, súhlasím, založ tikety a implementuj“.
+
 DEV-167: the runners' Docker is rootless and holds no rights on the server (the template's header says why). A project
 whose workflow names :func:`privileged_label` also gets :data:`PRIVILEGED` — one runner with the old privileged Docker
 (``docker-compose.privileged.yml`` laid over the template) that only the jobs naming that label reach. Director
@@ -26,6 +30,7 @@ import hashlib
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +53,10 @@ TEMPLATE_LABEL = "icc.ci-runner.template"
 COMPOSE_TIMEOUT = 600
 GITHUB_TIMEOUT = 20
 DOCKER_TIMEOUT = 60
+#: DEV-226: what the runner logs once GitHub gave it a session of its own — only then are jobs handed to it.
+LISTENING = "Listening for Jobs"
+#: How often a starting runner's log is read while it waits for its session.
+SESSION_POLL = 5
 
 #: What :func:`state` says about a project's runner.
 NONE = "none"  # no runner container
@@ -239,7 +248,7 @@ def provision(slug: str, repo_full: str) -> None:
     A runner started the old way is removed first; GitHub then lets the new one take over its name (``--replace``).
     A current pair is only started if it stopped. The registration token is asked for once, only when a runner is
     (re)created, and goes only to one-off containers — if the stored registration exists, that container keeps it and
-    the token is never used."""
+    the token is never used. DEV-226: returns once every runner it started listens for jobs (:func:`wait_listening`)."""
     token: str | None = None
     for index in project_runners(slug):
         current = runner_state(slug, index)
@@ -251,10 +260,28 @@ def provision(slug: str, repo_full: str) -> None:
             token = token or github_validation.runner_registration_token(repo_full, timeout=GITHUB_TIMEOUT)
             _docker([*_compose(index), "run", "--rm", "--no-TTY", "runner", "true"], env={**env, "RUNNER_TOKEN": token})
         _docker([*_compose(index), "up", "-d", "--wait"], env=env)
+        wait_listening(slug, index)
         logger.info("CI runner %s runs with a Docker of its own (was: %s)", runner_container(slug, index), current)
     for index in _extra_runners(slug):
         _down(slug, index)
         logger.info("CI runner %s the project should not have removed", runner_container(slug, index))
+
+
+def wait_listening(slug: str, index: int = 1) -> None:
+    """Return once runner ``index`` has logged :data:`LISTENING` since it last started — a runner that has had its
+    session since then returns at once. Raises, naming the runner, after ``settings.ci_runner_session_wait_seconds``."""
+    container = runner_container(slug, index)
+    started = _docker(
+        ["docker", "inspect", "--format", "{{.State.StartedAt}}", container], timeout=DOCKER_TIMEOUT
+    ).strip()
+    deadline = time.monotonic() + settings.ci_runner_session_wait_seconds
+    while LISTENING not in _docker(["docker", "logs", "--since", started, container], timeout=DOCKER_TIMEOUT):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"CI runner {container} has no session of its own on GitHub "
+                f"{settings.ci_runner_session_wait_seconds} s after its start (docker logs {container})"
+            )
+        time.sleep(SESSION_POLL)
 
 
 def deprovision(slug: str) -> None:

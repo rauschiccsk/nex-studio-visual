@@ -31,6 +31,7 @@ from backend.scripts import ci_runners
 from backend.services import ci_runner, github_validation
 from backend.services import create_project_postscaffold as mod
 from backend.services import system_setting as system_setting_service
+from tests.services.test_a_project_gets_several_ci_runners import READS, _read
 
 REGISTRATION_TOKEN = "AINVENTEDREGISTRATIONTOKEN01"
 LIVE_DOCKER = "nex-andros-server"  # what ``docker info .Name`` says about ANDROS's live Docker
@@ -89,7 +90,8 @@ def _record_docker(
 
     def fake_run(cmd, **kwargs):
         calls.append((list(cmd), kwargs))
-        return _Completed(stdout=_docker_ps(list(cmd), existing) if "ps" in cmd else "")
+        read = _read(list(cmd))  # DEV-226: a started runner has its session at once
+        return read or _Completed(stdout=_docker_ps(list(cmd), existing) if "ps" in cmd else "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(github_validation, "runner_registration_token", _issue_token)
@@ -103,7 +105,7 @@ def _compose_calls(calls: list[tuple[list[str], dict]]) -> list[str]:
         f"token={'yes' if (kw.get('env') or {}).get('RUNNER_TOKEN') else 'no'} "
         + " ".join(cmd).replace(template, "TEMPLATE")
         for cmd, kw in calls
-        if cmd[1] != "ps"
+        if cmd[1] not in READS
     ]
 
 

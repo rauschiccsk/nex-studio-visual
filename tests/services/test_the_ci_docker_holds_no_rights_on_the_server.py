@@ -23,7 +23,7 @@ import yaml
 
 from backend.config.settings import settings
 from backend.services import ci_runner
-from tests.services.test_a_project_gets_several_ci_runners import _docker
+from tests.services.test_a_project_gets_several_ci_runners import READS, _docker
 
 SLUG = "nex-demo"
 
@@ -188,7 +188,7 @@ def _current(index: int) -> dict[str, str]:
 def _work(calls) -> list[str]:
     out = []
     for cmd, kw in calls:
-        if cmd[1] == "ps":
+        if cmd[1] in READS:
             continue
         env = kw.get("env") or {}
         who = f"[{env['RUNNER_SUFFIX'] or '1'}] " if "RUNNER_SUFFIX" in env else ""

@@ -113,6 +113,21 @@ class _Completed:
         self.returncode, self.stdout, self.stderr = 0, stdout, ""
 
 
+#: DEV-226: what a started runner answers when the cockpit waits for its session — it has one at once.
+STARTED_AT = "2026-10-26T04:01:43.000000000Z"
+#: The calls that only read Docker — left out of what was done.
+READS = ("ps", "inspect", "logs")
+
+
+def _read(cmd: list[str]) -> _Completed | None:
+    """The start time and the log of a started runner, or None for a call that is not such a read."""
+    if cmd[1] == "inspect":
+        return _Completed(STARTED_AT + "\n")
+    if cmd[1] == "logs":
+        return _Completed(f"√ Connected to GitHub\n2026-10-26 04:02:00Z: {ci_runner.LISTENING}\n")
+    return None
+
+
 def _docker(monkeypatch, existing: dict[str, dict[str, str]]):
     """A Docker with the runner containers ``existing`` (name → labels); records every call and every token asked."""
     calls: list[tuple[list[str], dict]] = []
@@ -121,6 +136,8 @@ def _docker(monkeypatch, existing: dict[str, dict[str, str]]):
     def fake_run(cmd, **kwargs):
         cmd = list(cmd)
         calls.append((cmd, kwargs))
+        if cmd[1] in ("inspect", "logs"):
+            return _read(cmd)
         if cmd[1] != "ps":
             return _Completed()
         pattern = cmd[cmd.index("--filter") + 1].removeprefix("name=")
@@ -152,7 +169,7 @@ def _work(calls) -> list[str]:
     """What was done, as text: compose with the runner it was for, and whether a token went along."""
     out = []
     for cmd, kw in calls:
-        if cmd[1] == "ps":
+        if cmd[1] in READS:
             continue
         env = kw.get("env") or {}
         who = f"[{env['RUNNER_SUFFIX'] or '1'}] " if "RUNNER_SUFFIX" in env else ""

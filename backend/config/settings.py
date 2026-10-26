@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # its only runner while the agent pushed after every task. Measured 24.10.2026: peak load 20.5 of 80 cores in a
     # week, never less than 163 GiB of memory free — a second pair for every project fits with room to spare.
     ci_runners_per_project: int = 2
+    # DEV-226: how long a started runner may take to get a session of its own on GitHub. GitHub keeps the replaced
+    # runner's session up to ~3 min (measured 19.10.2026) and reports the runner „online“ meanwhile; 26.10.2026 the new
+    # nex-websites runners got theirs 65 s and 125 s after the start, and a job queued in that gap waited 14 min.
+    ci_runner_session_wait_seconds: int = 300
     # DEV-94: what the cockpit writes into the Knowledge Base goes to GitHub — how long one exchange with GitHub may
     # take, and how often commits that did not get there are sent again (off in tests: it would reach for GitHub).
     kb_publish_timeout_seconds: int = 30
