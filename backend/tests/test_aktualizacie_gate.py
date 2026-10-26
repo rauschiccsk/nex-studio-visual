@@ -318,7 +318,7 @@ def test_2b_missing_route(tmp_path) -> None:
     proj.mkdir()
     _seed_frontend(proj, route=False)
     msg = orchestrator._check_aktualizacie_frontend(proj)
-    assert msg is not None and "/updates route" in msg
+    assert msg is not None and "cesta v routeri" in msg
 
 
 def test_2b_missing_nav(tmp_path) -> None:
@@ -347,7 +347,7 @@ def test_2b_commented_out_route_is_not_wired(tmp_path) -> None:
     (src / "App.tsx").write_text('{/* <Route path="updates" element={<UpdatesPage />} /> */}\n')
     (src / "components" / "layout" / "Sidebar.tsx").write_text('// <NavItem label="Aktualizácie" />\n')
     msg = orchestrator._check_aktualizacie_frontend(proj)
-    assert msg is not None and "/updates route" in msg
+    assert msg is not None and "cesta v routeri" in msg
 
 
 # --- Fix 2 (per-app-changelog-part2-followup.md): detector robustness -------------------------------------
@@ -409,7 +409,7 @@ def test_2b_filepath_string_is_not_a_route(tmp_path) -> None:
     (src / "App.tsx").write_text('const filepath = "updates";\n<Route path="home" element={<Home />} />\n')
     (src / "components" / "layout" / "Sidebar.tsx").write_text('<NavItem onClick={() => navigate("/updates")} />\n')
     msg = orchestrator._check_aktualizacie_frontend(proj)
-    assert msg is not None and "/updates route" in msg
+    assert msg is not None and "cesta v routeri" in msg
 
 
 def test_2b_renamed_page_detected(tmp_path) -> None:

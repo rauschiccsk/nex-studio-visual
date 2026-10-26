@@ -1522,7 +1522,7 @@ ICC_STANDARDS: tuple[IccStandard, ...] = (
         name="Aktualizácie (zoznam noviniek)",
         scope_sentence=(
             "Karta „Aktualizácie“ — celoICC štandard: každá aplikácia má obrazovku so zoznamom noviniek "
-            "(stránka + cesta /updates + položka v menu) a chrbticu, ktorá vydáva GET "
+            "(stránka + cesta v routeri + položka v menu; šablóna ju má na /updates) a chrbticu, ktorá vydáva GET "
             "/api/v1/release-notes s práve vydávanou verziou. Tento projekt ju ešte nemá, takže je to "
             "RIADNA POLOŽKA tejto verzie: patrí do Špecifikácie, do Návrhu aj do Vizuálu ako každá iná "
             "obrazovka. Brána vydania ju na konci overí — ale to je posledná poistka, nie zadanie."
@@ -8345,12 +8345,12 @@ _UPDATES_PAGE_IMPORT_RE = re.compile(r"""\bfrom\s+["'][^"'\n]*updates[^"'\n]*["'
 #:
 #: So stop matching FORMS and match the TARGET: a quoted path ending in ``…/updates`` — however it is passed.
 #: The one thing that must still not satisfy this is the ROUTE declaration itself (``path="/updates"``), or a
-#: page's self-route would paper over a dropped sidebar entry; :func:`_has_updates_nav` excludes exactly that.
+#: page's self-route would paper over a dropped sidebar entry; :func:`_has_nav_to` excludes exactly that.
 #: Everything the old regex protected is kept: the leading ``/`` means a bare ``path="updates"`` is not a nav
 #: target, the ``["'/]`` lookahead keeps ``/updates-log`` out, keying on the PATH (not the accent-stem) keeps
 #: "Naposledy aktualizované" from false-PASSing and an English "Updates" label from false-FAILing, and
 #: comments are stripped before any of this runs.
-_UPDATES_NAV_TARGET_RE = re.compile(r"""["'][^"'\n]*/updates(?=["'/])""")
+#: DEV-230: the same target rule, for the path the Updates page actually lives at — :func:`_has_nav_to`.
 #: The route declaration immediately before a target — ``path="/updates"``, ``path: "/updates"``, ``path={"…"``.
 _UPDATES_PATH_PROP_RE = re.compile(r"""\bpath\s*[=:]\s*\{?\s*$""")
 
@@ -8363,15 +8363,82 @@ def _strip_ts_comments(text: str) -> str:
     return re.sub(r"(?m)//.*$", "", text)
 
 
-def _has_updates_nav(body: str) -> bool:
-    """True iff *body* navigates somewhere ending in ``/updates`` — regardless of how the target is passed
-    (ICCINT-46). A ``path=`` declaration directly before the string is the ROUTE, not a nav entry, and is
-    skipped: the route is checked separately, and letting it double as the nav would hide a dropped menu item.
-    """
-    for match in _UPDATES_NAV_TARGET_RE.finditer(body):
-        if not _UPDATES_PATH_PROP_RE.search(body[max(0, match.start() - 40) : match.start()]):
-            return True
-    return False
+#: DEV-230 — what a component exported by the Updates page file is called (``export function UpdatesPage``,
+#: ``export default function UpdatesView``, ``export const UpdatesPage = …``).
+_EXPORTED_COMPONENT_RE = re.compile(r"""\bexport\s+(?:default\s+)?(?:function|const|class)\s+([A-Z]\w*)""")
+#: …and what a source imports from a module whose path names the updates page (``from "./pages/updates/…"``).
+_IMPORTED_FROM_UPDATES_RE = re.compile(
+    r"""\bimport\s+(?:\{([^}]*)\}|([A-Z]\w*))\s+from\s+["'][^"'\n]*updates[^"'\n]*["']""", re.IGNORECASE
+)
+#: A route in either react-router form: JSX ``<Route path="x" element={<Page />} />`` (attributes in any order —
+#: read in the window up to the next route) and the data-router object ``{ path: "x", element: <Page /> }`` /
+#: ``{ path: "x", Component: Page }``.
+_ROUTE_TAG_RE = re.compile(r"<Route\b")
+_ROUTE_PATH_ATTR_RE = re.compile(r"""\bpath\s*=\s*\{?\s*["']([^"']*)["']""")
+_ROUTE_ELEMENT_ATTR_RE = re.compile(r"""\belement\s*=\s*\{\s*<\s*([A-Z]\w*)""")
+_ROUTE_OBJECT_RE = re.compile(
+    r"""\{[^{}]*?\bpath\s*:\s*["']([^"']*)["'][^{}]*?\b(?:element\s*:\s*<\s*([A-Z]\w*)|Component\s*:\s*([A-Z]\w*))""",
+    re.DOTALL,
+)
+
+
+def _updates_components(fe_src: Path, page_files: "frozenset[Path]") -> set[str]:
+    """The names the Updates page goes by — exported by an ``Updates*.tsx`` file or imported from an updates module."""
+    names: set[str] = set()
+    for page in page_files:
+        try:
+            names |= set(_EXPORTED_COMPONENT_RE.findall(page.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            continue
+    for pat in ("*.tsx", "*.ts"):
+        for f in fe_src.rglob(pat):
+            try:
+                body = _strip_ts_comments(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            for braced, default in _IMPORTED_FROM_UPDATES_RE.findall(body):
+                names |= {n.split(" as ")[-1].strip() for n in braced.split(",") if n.strip()} | {default}
+    return {n for n in names if n}
+
+
+def _updates_route_paths(fe_src: Path, page_files: "frozenset[Path]") -> list[str]:
+    """DEV-230 — every path a route renders the Updates page at, whatever the path is called (``/aktualizacie`` in
+    Author Asistent 0.1.0, approved in its Vizuál). The page's own file does not count as its route."""
+    names = _updates_components(fe_src, page_files)
+    paths: list[str] = []
+    for pat in ("*.tsx", "*.ts"):
+        for f in fe_src.rglob(pat):
+            if f in page_files:
+                continue
+            try:
+                body = _strip_ts_comments(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            starts = [m.start() for m in _ROUTE_TAG_RE.finditer(body)]
+            for i, start in enumerate(starts):
+                window = body[start : starts[i + 1] if i + 1 < len(starts) else len(body)]
+                path, element = _ROUTE_PATH_ATTR_RE.search(window), _ROUTE_ELEMENT_ATTR_RE.search(window)
+                if path and element and element.group(1) in names:
+                    paths.append(path.group(1))
+            for path, element, component in _ROUTE_OBJECT_RE.findall(body):
+                if (element or component) in names:
+                    paths.append(path)
+    return [p.strip("/") for p in paths if p.strip("/")]
+
+
+def _has_nav_to(path: str) -> "Callable[[str], bool]":
+    """True for a body that navigates somewhere ending in ``…/<path>`` — the Updates path wherever it lives (DEV-230)
+    — regardless of how the target is passed (ICCINT-46). A ``path=`` declaration directly before the string is the
+    ROUTE, not a nav entry, and is skipped: letting it double as the nav would hide a dropped menu item."""
+    target = re.compile(r"""["'][^"'\n]*/""" + re.escape(path) + r"""(?=["'/])""")
+
+    def check(body: str) -> bool:
+        for match in target.finditer(body):
+            if not _UPDATES_PATH_PROP_RE.search(body[max(0, match.start() - 40) : match.start()]):
+                return True
+        return False
+
+    return check
 
 
 def _fe_src_matches(
@@ -8422,11 +8489,17 @@ def _check_aktualizacie_frontend(proj_root: Path) -> Optional[str]:
     page_files = frozenset(fe_src.rglob("Updates*.tsx"))
     if not page_files and not _fe_src_matches(fe_src, _UPDATES_PAGE_IMPORT_RE):
         return "chýba stránka Aktualizácie (napr. frontend/src/pages/UpdatesPage.tsx)"
-    if not _fe_src_matches(fe_src, _UPDATES_ROUTE_RE, exclude=page_files):
-        return "chýba /updates route v routeri"
-    if not _fe_src_matches(fe_src, _has_updates_nav, exclude=page_files):
-        return "chýba navigácia na /updates v menu (sidebar)"
-    return None
+    # DEV-230: the route that RENDERS the page, at whatever path — the template's ``updates`` (still recognised by
+    # its name, e.g. a lazy element) or the app's own, like Author Asistent's approved ``aktualizacie``.
+    paths = _updates_route_paths(fe_src, page_files)
+    if _fe_src_matches(fe_src, _UPDATES_ROUTE_RE, exclude=page_files):
+        paths.append("updates")
+    if not paths:
+        return "chýba cesta v routeri, ktorá ukáže stránku Aktualizácie"
+    for path in dict.fromkeys(paths):
+        if _fe_src_matches(fe_src, _has_nav_to(path), exclude=page_files):
+            return None
+    return f"chýba položka v menu, ktorá vedie na stránku Aktualizácie (/{paths[0]})"
 
 
 def _bare_version(version_number: str) -> str:
