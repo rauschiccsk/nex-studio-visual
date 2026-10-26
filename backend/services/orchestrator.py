@@ -7361,6 +7361,8 @@ _SMOKE_ENV_PASSWORD = "ci"  # same value as scripts/ci_render_dotenv.py CI_PASSW
 _SMOKE_ENV_HOST = "db"  # the compose ``db`` service name (ci_render_dotenv CI_HOST) — the in-network DB target.
 #: DEV-229: what an ``@public-url`` variable is in the throwaway smoke stack — it lives on this machine only.
 SMOKE_PUBLIC_URL = "http://localhost"
+#: DEV-229: a REQUIRED customer value that is not a secret (a login name, …) in the throwaway smoke stack.
+SMOKE_CUSTOMER_VALUE = "smoke"
 
 
 def _rewrite_smoke_database_url(value: str) -> str:
@@ -7441,14 +7443,25 @@ def _smoke_contract_value(key: str, contract: env_contract.Contract) -> Optional
     """DEV-229 — what an EMPTY variable of the example gets in the smoke env: the contract a UAT installation is
     rendered by (:mod:`uat_provisioner`). ``@public-url`` / ``@public-url-admin`` → the smoke stack's address; a secret
     (``*_password/_secret/_key/_token``) → a value by UAT's own rule (:func:`uat_provisioner.synthetic_secret`).
-    ``None`` = stays unset: what the customer enters (``@customer``/``@customer-secret``), the database password (the
-    smoke database has its own, :data:`_SMOKE_ENV_PASSWORD`) and everything without a contract (ICCINT-40).
+    A REQUIRED customer value (``@customer required`` / ``@customer-secret required``) — the Manažér enters it for a
+    UAT install, the throwaway stack has nobody to — gets a test value: a secret by the same rule, any other
+    :data:`SMOKE_CUSTOMER_VALUE`. ``None`` = stays unset: an optional customer value, the database password (the smoke
+    database has its own, :data:`_SMOKE_ENV_PASSWORD`) and everything without a contract (ICCINT-40).
 
     26.10.2026 Author Asistent 0.1.0 left PUBLIC_URL, SESSION_SECRET and SETTINGS_ENCRYPTION_KEY empty, as the contract
-    says; UAT fills them, the launch check dropped them and the backend never booted."""
+    says; UAT fills them, the launch check dropped them and the backend never booted. Filled, it stopped at its first
+    account: AUTHOR_USERNAME and AUTHOR_INITIAL_PASSWORD, required customer values its release smoke logs in with."""
     if key in contract.public_url_keys or key in contract.public_url_admin_keys:
         return SMOKE_PUBLIC_URL
-    if key in contract.customer_keys or key in ("DB_PASSWORD", "POSTGRES_PASSWORD", "DATABASE_URL"):
+    customer = next(
+        (s for s in contract.of_kind(env_contract.CUSTOMER, env_contract.CUSTOMER_SECRET) if s.key == key), None
+    )
+    if customer is not None:
+        if not customer.required:
+            return None
+        secret = customer.kind == env_contract.CUSTOMER_SECRET or key.lower().endswith(env_contract.SECRET_SUFFIXES)
+        return uat_provisioner.synthetic_secret(key) if secret else SMOKE_CUSTOMER_VALUE
+    if key in ("DB_PASSWORD", "POSTGRES_PASSWORD", "DATABASE_URL"):
         return None
     if key.lower().endswith(env_contract.SECRET_SUFFIXES):
         return uat_provisioner.synthetic_secret(key)

@@ -9,6 +9,12 @@ empty values (ICCINT-40) and generated nothing. Director: „Áno, súhlasím, z
 Pinned: an empty secret gets a value by UAT's own rule; an ``@public-url`` address the smoke stack's; what the customer
 enters (``@customer``/``@customer-secret``) and what has no contract stay unset; the database password stays the one
 the smoke database has.
+
+Extended the same day: with its configuration filled the backend stopped at its first account — ``AUTHOR_USERNAME``
+(``@customer required``) and ``AUTHOR_INITIAL_PASSWORD`` (``@customer-secret required``), which the Manažér enters for a
+UAT install and the project's ``release_smoke_test.sh`` logs in with. A REQUIRED customer value gets a test value in
+the throwaway stack — a secret by UAT's rule, any other a fixed one; an optional one stays unset. Director: „Áno,
+súhlasím, rozšír DEV-229 a oprav to“.
 """
 
 from __future__ import annotations
@@ -18,7 +24,14 @@ import base64
 from backend.services import orchestrator, uat_provisioner
 
 #: The shape of Author Asistent's ``.env.example`` (no values copied), plus a customer secret and a plain empty one.
-EXAMPLE = """# --- Address the browser opens (the cockpit fills it in per installation) ---
+EXAMPLE = """# --- Customer settings (the cockpit asks for them at installation) ---
+# @customer required: „Prihlasovacie meno“
+AUTHOR_USERNAME=
+# @customer: „Zobrazované meno“
+AUTHOR_DISPLAY_NAME=
+# @customer-secret required: „Počiatočné heslo“
+AUTHOR_INITIAL_PASSWORD=
+# --- Address the browser opens (the cockpit fills it in per installation) ---
 # @public-url
 PUBLIC_URL=
 # @public-url-admin
@@ -70,10 +83,19 @@ def test_a_public_address_is_the_smoke_stacks(tmp_path):
     assert (env["PUBLIC_URL"], env["ADMIN_URL"]) == (orchestrator.SMOKE_PUBLIC_URL, orchestrator.SMOKE_PUBLIC_URL)
 
 
-def test_what_the_customer_enters_and_what_has_no_contract_stay_unset(tmp_path):
+def test_a_required_customer_value_gets_a_test_value(tmp_path):
+    """The throwaway stack has nobody to enter it; the app needs it to boot and the smoke script to log in."""
     env = _render(tmp_path)
 
-    assert "SMTP_PASSWORD" not in env  # @customer-secret: never a synthetic, as on UAT with nothing entered
+    assert env["AUTHOR_USERNAME"] == orchestrator.SMOKE_CUSTOMER_VALUE
+    assert len(env["AUTHOR_INITIAL_PASSWORD"]) == 64  # a secret: by UAT's rule (token_hex(32)), never a constant
+
+
+def test_what_the_customer_enters_optionally_and_what_has_no_contract_stay_unset(tmp_path):
+    env = _render(tmp_path)
+
+    assert "AUTHOR_DISPLAY_NAME" not in env  # @customer, optional: the app keeps its own default
+    assert "SMTP_PASSWORD" not in env  # @customer-secret, optional: never a synthetic, as on UAT with nothing entered
     assert "CORS_ALLOW_ORIGINS" not in env  # ICCINT-40: empty means unset, not the empty string
     assert env["LOG_LEVEL"] == "info"
 
