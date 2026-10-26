@@ -1257,6 +1257,7 @@ def _verdict_message(
     version_id: uuid.UUID,
     content: str,
     payload: dict[str, Any],
+    after_seq: int,
 ) -> PipelineMessage:
     """The Auditor's verdict as ONE message on the Manažér's screen (ICCINT-49).
 
@@ -1273,7 +1274,12 @@ def _verdict_message(
     So enrich the message that already exists rather than adding another — the report and the decision fields
     end up on the SAME bubble. When no such message is on record (an engine-built verdict with no agent turn
     behind it — the runtime-floor override), insert as before; the fields must never be lost to a merge that
-    found nothing."""
+    found nothing.
+
+    DEV-233: the message is the Auditor's of THIS round — written after *after_seq*, the last message before its turn
+    — not the one with the same text. The round adds findings of its own to the Auditor's summary (the dead-code
+    notes, „Verzia funguje, ale …“), and the lookup by identical text found nothing: 26.10.2026 Author Asistent's
+    thread carried the verdict twice. The joined message shows the cockpit's whole text."""
     existing = db.execute(
         select(PipelineMessage)
         .where(
@@ -1281,7 +1287,7 @@ def _verdict_message(
             PipelineMessage.stage == "verifikacia",
             PipelineMessage.author == "auditor",
             PipelineMessage.kind == "verdict",
-            PipelineMessage.content == _human_text(content),
+            PipelineMessage.seq > after_seq,
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
@@ -1290,6 +1296,7 @@ def _verdict_message(
     # never overwrite the previous round's recorded outcome.
     if existing is not None and not (isinstance(existing.payload, dict) and existing.payload.get("verdict")):
         existing.payload = {**(existing.payload or {}), **payload}
+        existing.content = _human_text(content)
         db.flush()
         return existing
     return _record_message(
@@ -11871,6 +11878,10 @@ async def _run_verifikacia_round(
 
     # 2. The Auditor's verdict turn (independent, READ + RUN-ONLY). Recorded author=auditor / recipient=manazer
     # / stage=verifikacia / kind=verdict by invoke_agent — all valid v2 tokens. Effort scales with the dial.
+    # DEV-233: what the thread held before the turn — the verdict joins the message the turn writes after it.
+    before_turn = (
+        db.execute(select(func.max(PipelineMessage.seq)).where(PipelineMessage.version_id == version_id)).scalar() or 0
+    )
     review = await invoke_agent_with_parse_retry(
         db,
         version_id=version_id,
@@ -11964,6 +11975,7 @@ async def _run_verifikacia_round(
     verdict_msg = _verdict_message(
         db,
         version_id=version_id,
+        after_seq=before_turn,
         content=(f"Verzia funguje, ale {' a '.join(floor_sentences)}. " if floor_only else "")
         + (review.summary or f"Verifikácia {verdict_str}.")
         + "".join(f" {note}" for note in dead_code_notes),

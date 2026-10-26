@@ -135,6 +135,7 @@ def test_the_verdict_enriches_the_block_instead_of_repeating_it(db_session) -> N
     orchestrator._verdict_message(
         db_session,
         version_id=version.id,
+        after_seq=0,  # DEV-233: the round began before the block above
         content=LEAKED,
         payload={"verdict": "PASS", "verified_sha": "abc123", "findings": ["NEBLOKUJÚCE — x"]},
     )
@@ -153,7 +154,7 @@ def test_a_verdict_with_no_block_behind_it_is_still_recorded(db_session) -> None
     nothing must insert, never drop the decision."""
     version = _version(db_session)
     orchestrator._verdict_message(
-        db_session, version_id=version.id, content="Verifikácia FAIL.", payload={"verdict": "FAIL"}
+        db_session, version_id=version.id, after_seq=0, content="Verifikácia FAIL.", payload={"verdict": "FAIL"}
     )
     rows = _verdicts(db_session, version.id)
     assert len(rows) == 1 and rows[0].payload["verdict"] == "FAIL"
@@ -163,10 +164,10 @@ def test_a_second_round_never_overwrites_the_first_verdict(db_session) -> None:
     """Two rounds can produce the same summary text. The earlier outcome is a record, not a slot to reuse."""
     version = _version(db_session)
     orchestrator._verdict_message(
-        db_session, version_id=version.id, content="Verifikácia FAIL.", payload={"verdict": "FAIL"}
+        db_session, version_id=version.id, after_seq=0, content="Verifikácia FAIL.", payload={"verdict": "FAIL"}
     )
     orchestrator._verdict_message(
-        db_session, version_id=version.id, content="Verifikácia FAIL.", payload={"verdict": "PASS"}
+        db_session, version_id=version.id, after_seq=0, content="Verifikácia FAIL.", payload={"verdict": "PASS"}
     )
     rows = _verdicts(db_session, version.id)
     assert [r.payload["verdict"] for r in rows] == ["FAIL", "PASS"], "a round rewrote history"
