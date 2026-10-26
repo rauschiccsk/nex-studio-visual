@@ -58,6 +58,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
+from urllib.parse import urlsplit
 
 import httpx
 import jinja2
@@ -1147,33 +1148,65 @@ def _reads_env_file(service: dict[str, Any]) -> bool:
     return False
 
 
-def _own_database_address(environment: Any) -> Optional[str]:
-    """The service's own ``DATABASE_URL`` in compose, or ``None`` when it sets none. A name without a value (a bare list
-    entry, or ``DATABASE_URL:`` with nothing) is taken from the project's environment, ``.env`` included —
-    ``"${DATABASE_URL}"``."""
+def _own_compose_value(environment: Any, key: str) -> Optional[str]:
+    """The service's own value of *key* in compose, or ``None`` when it sets none. A name without a value (a bare list
+    entry, or ``KEY:`` with nothing) is taken from the project's environment, ``.env`` included — ``"${KEY}"``."""
     if isinstance(environment, dict):
-        if "DATABASE_URL" not in environment:
+        if key not in environment:
             return None
-        value = environment["DATABASE_URL"]
-        return "${DATABASE_URL}" if value is None else str(value)
+        value = environment[key]
+        return f"${{{key}}}" if value is None else str(value)
     for entry in environment or []:
         name, eq, value = str(entry).partition("=")
-        if name == "DATABASE_URL":
-            return value if eq else "${DATABASE_URL}"
+        if name == key:
+            return value if eq else f"${{{key}}}"
     return None
 
 
-def _database_address_readers(services: dict[str, Any]) -> list[str]:
-    """The services that take ``DATABASE_URL`` from the installation's ``.env``: forwarded (``${DATABASE_URL…}``), or
-    through ``env_file`` without an address of their own."""
+def _env_readers(services: dict[str, Any], key: str) -> list[str]:
+    """The services that take *key* from the installation's ``.env``: forwarded (``${KEY…}``), or through ``env_file``
+    without a value of their own."""
     readers = []
     for name, service in services.items():
         if not isinstance(service, dict):
             continue
-        own = _own_database_address(service.get("environment"))
-        if (own is None and _reads_env_file(service)) or (own is not None and "${DATABASE_URL" in own):
+        own = _own_compose_value(service.get("environment"), key)
+        if (own is None and _reads_env_file(service)) or (own is not None and f"${{{key}" in own):
             readers.append(name)
     return readers
+
+
+#: DEV-235 — connection settings a redeploy fills when the installation holds them EMPTY. Not the database's own name,
+#: user and password: those made the database when it was created, and another value would no longer open it.
+DB_CONNECTION_FILLABLE = DB_CONNECTION_VARS - {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_PASSWORD"}
+
+
+def fill_empty_database_connection(
+    env: dict[str, str], rendered: dict[str, str], services: dict[str, Any]
+) -> list[str]:
+    """DEV-235 — a redeploy keeps the installation's settings (ICCINT-133); a connection to the database it holds EMPTY
+    while a service reads it is filled from the cockpit's render, and said. Returns the warning, or ``[]``.
+
+    26.10.2026 Author Asistent's UAT: the first deploy wrote ``DATABASE_URL`` empty (a cockpit bug), every redeploy kept
+    it, migrate died „DATABASE_URL is not set“, and nothing in the cockpit could repair the installation. An address is
+    filled only when it opens the database the installation has — its password is the installation's own; otherwise
+    the address stays empty and :func:`validate_rendered_database_address` refuses the deploy."""
+    own_passwords = {env.get("POSTGRES_PASSWORD"), env.get("DB_PASSWORD")} - {None, ""}
+    filled = []
+    for key in sorted(DB_CONNECTION_FILLABLE):
+        value = rendered.get(key, "")
+        if key not in env or env[key].strip() or not value or not _env_readers(services, key):
+            continue
+        if "://" in value and urlsplit(value).password not in own_passwords:
+            continue
+        env[key] = value
+        filled.append(key)
+    if not filled:
+        return []
+    return [
+        f"Inštalácia mala prázdne {', '.join(filled)} (nechalo ich tak skoršie nasadenie) — kokpit ich doplnil, aby "
+        "viedli na jej databázu; ostatné nastavenia inštalácie sa nezmenili."
+    ]
 
 
 def validate_rendered_database_address(env_content: str, services: dict[str, Any]) -> list[str]:
@@ -1186,7 +1219,7 @@ def validate_rendered_database_address(env_content: str, services: dict[str, Any
     address = _parse_env_text(env_content).get("DATABASE_URL")
     if address is None or address.strip():
         return []
-    readers = _database_address_readers(services)
+    readers = _env_readers(services, "DATABASE_URL")
     if not readers:
         return []
     return [
@@ -3064,7 +3097,6 @@ def provision_uat(
         )
     declared_drivers = detect_sqlalchemy_pg_drivers(project_path)
     fail_msgs, warn_msgs = validate_rendered_db_drivers(env_content, declared_drivers, project_slug=project_slug)
-    fail_msgs += validate_rendered_database_address(env_content, src_services)  # DEV-235
     if fail_msgs:
         raise ValueError("; ".join(fail_msgs))
     warnings.extend(warn_msgs)
@@ -3221,9 +3253,20 @@ def provision_uat(
         warnings.extend(
             _undo_inner_mount_paths(env_riadky, src_services, roles["backend"], env_example, remote=bool(deploy_host))
         )
+        warnings.extend(
+            fill_empty_database_connection(env_riadky, _parse_env_text(env_content), (povysene.get("services") or {}))
+        )
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
+        instalacia = povysene
     else:
         compose_text = render_uat_compose(compose)
+        instalacia = compose
+
+    # DEV-235: before anything is written, what the installation will RUN with — on a redeploy its own ``.env``, not
+    # the render. Checked on the render alone, the guard passed while the installation started with an empty address.
+    prazdna_adresa = validate_rendered_database_address(env_content, instalacia.get("services") or {})
+    if prazdna_adresa:
+        raise ValueError("; ".join(prazdna_adresa))
 
     compose_path.write_text(compose_text, encoding="utf-8")
 

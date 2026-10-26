@@ -172,3 +172,94 @@ def test_a_filled_address_passes():
     services = {"backend": {"environment": {"DATABASE_URL": "${DATABASE_URL:-}"}}}
 
     assert P.validate_rendered_database_address("DATABASE_URL=postgresql+pg8000://u:p@db:5432/d\n", services) == []
+
+
+# ── a redeploy into the installation the first deploy left broken (DEV-235, second half) ─────────────────────────────
+#
+# 22:45 UTC the same day, after the fix above was deployed, the Director pressed „Nasadiť“ again and migrate died the
+# same way. A redeploy keeps the installation's settings (ICCINT-133) — and the installation's ``.env`` was the one the
+# first, broken deploy had written, with the address empty. The fixed render never reached it, and the guard checked
+# the render, not what the installation runs with. Director: „Áno, súhlasím, rozšír DEV-235 a oprav to“.
+
+
+def _installed_with_an_empty_address(tmp_path, *, passwords_too=False):
+    """Author Asistent on UAT as the 21:48 deploy left it: everything rendered, ``DATABASE_URL`` empty."""
+    first = _provision(
+        tmp_path, "author-asistent", "aa", AA_COMPOSE, env_example=AA_ENV_EXAMPLE, backend_pyproject=_PG8000_PYPROJECT
+    )
+    lines = []
+    for line in first.env_path.read_text().splitlines():
+        key = line.partition("=")[0]
+        if key == "DATABASE_URL" or (passwords_too and key in ("POSTGRES_PASSWORD", "DB_PASSWORD")):
+            line = f"{key}="
+        lines.append(line)
+    lines.append("AUTHOR_DISPLAY_NAME=Tata")  # set by hand in the installation
+    first.env_path.write_text("\n".join(lines) + "\n")
+    return first.env_path
+
+
+def _redeploy(tmp_path):
+    return P.provision_uat("author-asistent", "aa", projects_root=tmp_path / "projects", uat_root=tmp_path / "uat")
+
+
+def test_a_redeploy_fills_the_address_the_first_deploy_left_empty(tmp_path):
+    env_path = _installed_with_an_empty_address(tmp_path)
+    before = _env(env_path.read_text())
+
+    res = _redeploy(tmp_path)
+
+    env = _env(env_path.read_text())
+    url = urlsplit(env["DATABASE_URL"])
+    assert url.scheme == "postgresql+pg8000" and url.password == before["POSTGRES_PASSWORD"]
+    assert (url.username, url.path.lstrip("/")) == (before["POSTGRES_USER"], before["POSTGRES_DB"])
+    assert env["AUTHOR_DISPLAY_NAME"] == "Tata" and env["POSTGRES_PASSWORD"] == before["POSTGRES_PASSWORD"]
+    assert any("DATABASE_URL" in w and "doplnil" in w for w in res.warnings), res.warnings
+
+
+def test_a_redeploy_keeps_an_address_the_installation_has(tmp_path):
+    env_path = _installed_with_an_empty_address(tmp_path)
+    own = "postgresql+pg8000://author:own@elsewhere:5432/author"
+    env_path.write_text(env_path.read_text().replace("DATABASE_URL=\n", f"DATABASE_URL={own}\n"))
+
+    res = _redeploy(tmp_path)
+
+    assert _env(env_path.read_text())["DATABASE_URL"] == own
+    assert not any("doplnil" in w for w in res.warnings)
+
+
+def test_a_redeploy_that_cannot_open_the_database_refuses_before_writing(tmp_path):
+    """Without the installation's own password the cockpit's address would not open its database — say so instead."""
+    env_path = _installed_with_an_empty_address(tmp_path, passwords_too=True)
+    before = env_path.read_text()
+
+    with pytest.raises(ValueError, match=r"DATABASE_URL.*prázdn"):
+        _redeploy(tmp_path)
+
+    assert env_path.read_text() == before, "the installation was written although the deploy was refused"
+
+
+def test_the_databases_own_name_user_and_password_are_never_filled():
+    """They made the database when it was created — another value would no longer open it."""
+    env = {"POSTGRES_PASSWORD": "", "DB_PASSWORD": "", "POSTGRES_USER": "", "POSTGRES_DB": "", "DB_HOST": ""}
+    rendered = {
+        "POSTGRES_PASSWORD": "new",
+        "DB_PASSWORD": "new",
+        "POSTGRES_USER": "u",
+        "POSTGRES_DB": "d",
+        "DB_HOST": "db",
+    }
+    services = {"db": {"env_file": [".env"]}}
+
+    warnings = P.fill_empty_database_connection(env, rendered, services)
+
+    assert env == {"POSTGRES_PASSWORD": "", "DB_PASSWORD": "", "POSTGRES_USER": "", "POSTGRES_DB": "", "DB_HOST": "db"}
+    assert len(warnings) == 1 and "DB_HOST" in warnings[0]
+
+
+def test_a_setting_no_service_reads_is_left_as_it_is():
+    env = {"DB_HOST": "", "DATABASE_URL": ""}
+    rendered = {"DB_HOST": "db", "DATABASE_URL": "postgresql+pg8000://u:p@db:5432/d"}
+    services = {"backend": {"environment": {"DATABASE_URL": "postgresql+pg8000://u:p@db:5432/d"}}}
+
+    assert P.fill_empty_database_connection(env, rendered, services) == []
+    assert env == {"DB_HOST": "", "DATABASE_URL": ""}
