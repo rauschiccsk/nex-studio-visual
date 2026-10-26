@@ -118,6 +118,17 @@ def _isolate_smoke_scratch(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_smoke_crash_window(monkeypatch):
+    """Let the launch check look at the services a second time at once (DEV-232).
+
+    Live, the second look waits until ``settings.smoke_crash_window_seconds`` passed since the first, so a service
+    caught running between two crashes is seen restarted; here every passing launch check would sleep for it. The
+    window is pinned by its own test, which sets it explicitly.
+    """
+    monkeypatch.setattr(settings, "smoke_crash_window_seconds", 0)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_audit_browser(monkeypatch):
     """Keep the suite from preparing the Auditor's browser image on the LIVE Docker (DEV-70).
 

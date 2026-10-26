@@ -20,6 +20,22 @@ import re
 #: Boot timeout shape: ``app did not boot / not responding within 900s: <probe error>`` (``_run_app_starts_smoke``).
 _BOOT_TIMEOUT_RE = re.compile(r"within\s+(\d+)\s*s", re.IGNORECASE)
 
+#: Prefix of a launch-check failure caused by a service that is down — exited non-zero, never settled, or restarted by
+#: Docker during the check (``orchestrator._boot_leg``). The orchestrator writes it, :func:`failed_services` reads it
+#: back, so the detail and the Manažér's headline never drift.
+CONTAINER_FAILED = "kontajner zlyhal: "
+
+#: One named service of that detail: ``egress (exit 1, dookola sa reštartuje)`` — the name before its parenthesis.
+_FAILED_SERVICE_RE = re.compile(r"(?:^|, )([A-Za-z0-9][A-Za-z0-9._-]*) \(")
+
+
+def failed_services(detail: str) -> list[str]:
+    """The services a container-failure *detail* names, in its order; ``[]`` for any other detail."""
+    text = (detail or "").strip()
+    if not text.startswith(CONTAINER_FAILED):
+        return []
+    return _FAILED_SERVICE_RE.findall(text[len(CONTAINER_FAILED) :].split("\n", 1)[0])
+
 
 def humanize_release_failure(raw: str) -> str:
     """A plain-Slovak WHY clause for a raw release-smoke / boot / acceptance failure *detail*.
@@ -44,6 +60,12 @@ def humanize_release_failure(raw: str) -> str:
         )
     if "port is already allocated" in low or "address already in use" in low or "bind for" in low:
         return "potrebný sieťový port už používa iný program — nie je to chyba v kóde aplikácie"
+
+    # DEV-232: a service of the stack is down — name it. Without this the generic ``exit N`` branch below told the
+    # Manažér „niektoré kontroly zlyhali“ although no check had run (Author Asistent's egress, 26.10.2026).
+    services = failed_services(r)
+    if services:
+        return f"zlyhala služba {services[0]}" if len(services) == 1 else f"zlyhali služby {', '.join(services)}"
 
     # Boot never came up — the app (or its DB) failed to start within the boot window.
     if "did not boot" in low or "not responding within" in low:

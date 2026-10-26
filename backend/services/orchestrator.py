@@ -7682,6 +7682,9 @@ class _SmokeStack:
     #: previerky volá ``docker compose`` sám, a bez tohto by interpoloval zo živého ``.env`` projektu — iného
     #: a často neúplného (dedo-home 04.10.2026: dva riadky, osem povinných premenných chýbalo).
     interpolation_env: dict[str, str] = field(default_factory=dict)
+    #: DEV-232: ``service -> how many times Docker restarted it`` when the launch check passed. A service restarted
+    #: after that crashed during the release check, and the release check's failure carries its log.
+    restarts: dict[str, int] = field(default_factory=dict)
 
     @property
     def up_ok(self) -> bool:
@@ -7871,9 +7874,10 @@ async def _build_provenance_env(compose: Path) -> dict[str, str]:
         return {}
 
 
-#: Prefix of a boot-leg failure caused by a container that EXITED NON-ZERO. Parsed back by
-#: :func:`_recheck_headline` to name the container in the Manažér's sentence, so the two never drift.
-_SMOKE_CONTAINER_FAILED = "kontajner zlyhal: "
+#: Prefix of a boot-leg failure caused by a service that is down (DEV-232: exited non-zero, never settled, or
+#: restarted by Docker during the check). Parsed back by :func:`failure_framing.failed_services` to name the service
+#: in the Manažér's sentence, so the two never drift.
+_SMOKE_CONTAINER_FAILED = failure_framing.CONTAINER_FAILED
 
 #: How much of a failed service's own log the boot failure carries. Enough to hold a Python traceback's
 #: last frames (where the cause is), short enough that the Manažér's screen stays readable.
@@ -7893,8 +7897,8 @@ BOOT_FAIL_FIX_BRIEF = (
 )
 
 
-async def _smoke_failure_logs(base: list[str]) -> str:
-    """The logs of the containers that EXITED NON-ZERO, appended to a boot failure (ICCINT-37).
+async def _smoke_failure_logs(base: list[str], since: Optional[dict[str, int]] = None) -> str:
+    """The services of the stack that are down, named and with their own logs — or ``""`` (ICCINT-37, DEV-232).
 
     Without this, a boot failure said only ``container …-migrate-1 exited (1)`` — the fact, never the reason.
     On 29.–30.08.2026 that cost a day on nex-productcatalogs: Dedo read the reason off his OWN differently
@@ -7903,30 +7907,59 @@ async def _smoke_failure_logs(base: list[str]) -> str:
     log the whole time — ``value too long for type character varying(32)``, a 33-character alembic revision
     id — and neither of them ever saw it. Two people, two wrong diagnoses, from one withheld log.
 
+    DEV-232: a failed release check carries it too. 26.10.2026 Author Asistent's release check said only „egress
+    proxy not reachable (gaierror)“ while the egress service crashed on its config the whole time. *since* is the
+    restart count of each service at the launch check — a service Docker restarted after it is down even when caught
+    running.
+
     Best-effort by construction: any failure to collect returns ``""`` and the caller keeps the compose
     output it already had. A diagnostic must never be able to break the thing it is diagnosing."""
-    code, out = await _compose_smoke_step(base + ["ps", "-a", "--format", "json"], 30)
-    if code != 0 or not out.strip():
-        return ""
-    failed: list[str] = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        # ``docker compose ps --format json`` emits one object per line (older builds emit a single array).
-        rows = row if isinstance(row, list) else [row]
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            if r.get("ExitCode"):  # non-zero exit — 0 and None are both "did not fail"
-                name = r.get("Service") or r.get("Name")
-                if name:
-                    failed.append(str(name))
-    return await _smoke_service_logs(base, failed)
+    states = await _smoke_container_states(base)
+    restarted = _smoke_restarted(since, await _smoke_restart_counts(base)) if since else {}
+    down = _smoke_down(states, restarted)
+    return await _smoke_failure_detail(base, down, states, restarted) if down else ""
+
+
+#: DEV-232 — the states of a service that is up or done. In any other state Docker reports (``restarting``,
+#: ``created``, ``dead``, ``paused``, ``removing``) the service is not doing its job when the check looks.
+_SMOKE_SETTLED_STATES = ("running", "exited")
+
+#: Docker Compose reports a service Docker keeps restarting as ``restarting`` with ExitCode 0; its real exit code is
+#: only in the status text (measured 26.10.2026 on Compose 2.37.1 and 5.6.1).
+_SMOKE_RESTARTING_STATUS_RE = re.compile(r"^Restarting \((\d+)\)")
+
+
+def _smoke_down(states: dict[str, tuple[str, int]], restarted: Optional[dict[str, int]] = None) -> list[str]:
+    """The services the launch check fails on, by name (DEV-232): exited non-zero, in a state that is neither up nor
+    done, or restarted by Docker between two looks (*restarted*). An unknown state is not judged — never invented."""
+    unsettled = {s for s, (state, code) in states.items() if code or (state and state not in _SMOKE_SETTLED_STATES)}
+    return sorted(unsettled | set(restarted or {}))
+
+
+def _smoke_restarted(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """``service -> how many times Docker restarted it`` between two looks. A service the first look could not count
+    is left out — a restart while it waited for its database, before the check, is not a crash."""
+    return {s: n - before[s] for s, n in after.items() if s in before and n > before[s]}
+
+
+def _smoke_down_name(service: str, states: dict[str, tuple[str, int]], restarted: dict[str, int]) -> str:
+    """How the failure names one service that is down — the name first, then why, in parentheses."""
+    state, code = states.get(service, ("", 0))
+    if state == "restarting":
+        return f"{service} (exit {code}, dookola sa reštartuje)"
+    if code:
+        return f"{service} (exit {code})"
+    if state and state not in _SMOKE_SETTLED_STATES:
+        return f"{service} (stav {state})"
+    return f"{service} (počas skúšky sa {restarted.get(service, 0)}× reštartovala)"
+
+
+async def _smoke_failure_detail(
+    base: list[str], down: list[str], states: dict[str, tuple[str, int]], restarted: Optional[dict[str, int]] = None
+) -> str:
+    """The failure for services that are down: which, why, and the tail of each one's own log (ICCINT-37)."""
+    named = ", ".join(_smoke_down_name(s, states, restarted or {}) for s in down)
+    return f"{_SMOKE_CONTAINER_FAILED}{named}{await _smoke_service_logs(base, down, states)}"
 
 
 async def _smoke_service_logs(
@@ -8289,7 +8322,9 @@ async def _run_release_acceptance(
     }
     rc, out = await _run_acceptance_script(script, env)
     if rc != 0:
-        return False, f"release_smoke_test.sh exit {rc}: {out.strip()[-400:]}", False
+        # DEV-232: a service that crashed meanwhile is named with its log — the script sees only the symptom.
+        down = await _smoke_failure_logs(stack.base, since=stack.restarts)
+        return False, f"release_smoke_test.sh exit {rc}: {out.strip()[-400:]}" + (f"\n{down}" if down else ""), False
     total = _parse_assertions_run(out)
     feature = _parse_last_sentinel(out, _FEATURE_ASSERTIONS_RUN_RE) or 0
     negative = _parse_last_sentinel(out, _NEGATIVE_ASSERTIONS_RUN_RE) or 0
@@ -8673,16 +8708,12 @@ def _project_frontends(project_slug: str) -> tuple[project_surfaces.Surface, ...
     return project_surfaces.surfaces_of_type(claude_agent._project_type(project_slug) or project_surfaces.STANDARD)
 
 
-async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]:
-    """``service -> (state, exit code)`` for every container of the stack, or ``{}`` when it cannot be read.
-
-    The measured truth about what the compose actually did, as opposed to ``up``'s opinion about it. The STATE
-    rides along because "still running when we looked" is something the Manažér has to be TOLD (ICCINT-44),
-    not only something the engine silently declines to judge."""
+async def _smoke_ps_rows(base: list[str]) -> list[dict[str, Any]]:
+    """The stack's containers as ``docker compose ps`` reports them, or ``[]`` when it cannot be read."""
     code, out = await _compose_smoke_step(base + ["ps", "-a", "--format", "json"], 30)
     if code != 0 or not out.strip():
-        return {}
-    states: dict[str, int] = {}
+        return []
+    rows: list[dict[str, Any]] = []
     for line in out.splitlines():
         line = line.strip()
         if not line:
@@ -8691,18 +8722,55 @@ async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]
             row = json.loads(line)
         except ValueError:
             continue
-        for r in row if isinstance(row, list) else [row]:
-            if not isinstance(r, dict):
-                continue
-            name = r.get("Service") or r.get("Name")
-            if not name:
-                continue
-            state = str(r.get("State") or "")
-            try:
-                states[str(name)] = (state, int(r.get("ExitCode") or 0))
-            except (TypeError, ValueError):
-                states[str(name)] = (state, 0)
+        # ``docker compose ps --format json`` emits one object per line (older builds emit a single array).
+        rows.extend(r for r in (row if isinstance(row, list) else [row]) if isinstance(r, dict))
+    return rows
+
+
+async def _smoke_container_states(base: list[str]) -> dict[str, tuple[str, int]]:
+    """``service -> (state, exit code)`` for every container of the stack, or ``{}`` when it cannot be read.
+
+    The measured truth about what the compose actually did, as opposed to ``up``'s opinion about it. The STATE
+    rides along because "still running when we looked" is something the Manažér has to be TOLD (ICCINT-44),
+    not only something the engine silently declines to judge. A service Docker keeps restarting gets the exit
+    code of its last crash, which compose hides (DEV-232)."""
+    states: dict[str, tuple[str, int]] = {}
+    for r in await _smoke_ps_rows(base):
+        name = r.get("Service") or r.get("Name")
+        if not name:
+            continue
+        state = str(r.get("State") or "")
+        try:
+            code = int(r.get("ExitCode") or 0)
+        except (TypeError, ValueError):
+            code = 0
+        restarting = _SMOKE_RESTARTING_STATUS_RE.match(str(r.get("Status") or ""))
+        if state == "restarting" and restarting:
+            code = int(restarting.group(1))
+        states[str(name)] = (state, code)
     return states
+
+
+async def _smoke_restart_counts(base: list[str]) -> dict[str, int]:
+    """``service -> how many times Docker restarted its container`` (DEV-232), or ``{}`` when it cannot be read.
+
+    ``docker compose ps`` does not say; ``docker inspect`` does, by container name."""
+    services = {
+        str(r["Name"]): str(r["Service"]) for r in await _smoke_ps_rows(base) if r.get("Name") and r.get("Service")
+    }
+    if not services:
+        return {}
+    code, out = await _compose_smoke_step(
+        ["docker", "inspect", "--format", "{{.Name}} {{.RestartCount}}", *services], 30
+    )
+    if code != 0:
+        return {}
+    counts: dict[str, int] = {}
+    for line in out.splitlines():
+        name, _, count = line.strip().lstrip("/").rpartition(" ")
+        if name in services and count.isdigit():
+            counts[services[name]] = int(count)
+    return counts
 
 
 #: What the boot probe itself established: the app came up and answered. The rest of the sentence is built
@@ -8756,22 +8824,38 @@ async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
 
     A container that exited NON-ZERO is a real failure and is named, with its log. Otherwise the app probe
     decides — it asks the app itself, which is the question this leg exists to answer. A one-shot container
-    still running when we look is not judged (the acceptance leg is where suite depth belongs)."""
+    still running when we look is not judged (the acceptance leg is where suite depth belongs).
+
+    **A service that is down fails it too (DEV-232)** — one Docker keeps restarting, or one that never started.
+    26.10.2026 Author Asistent's egress crashed on its config the whole check long; compose reported it
+    ``restarting`` with exit code 0, ``up --wait`` called it healthy, and the check said „aplikácia sa spustila“
+    without a word about it. After the app answered the leg looks again, no sooner than
+    ``settings.smoke_crash_window_seconds`` after the first look: a service Docker restarted in between is crashing
+    even when the second look catches it running."""
     states = await _smoke_container_states(stack.base)
-    failed = sorted(service for service, (_state, code) in states.items() if code)
-    if failed:
+    restarts = await _smoke_restart_counts(stack.base)
+    looked = perf_counter()
+    down = _smoke_down(states)
+    if down:
         # ICCINT-37: the compose output says WHICH container died; its own log says WHY. Both, or the
         # reader is left guessing — and two of them did.
-        why = await _smoke_failure_logs(stack.base)
-        named = ", ".join(f"{s} (exit {states[s][1]})" for s in failed)
-        return False, f"{_SMOKE_CONTAINER_FAILED}{named}{why}"
+        return False, await _smoke_failure_detail(stack.base, down, states)
     if not stack.up_ok and not states:
         # Could not look at all — keep the compose output rather than invent a verdict.
         return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"
     ok, detail = await _run_app_starts_smoke(stack, states)
+    if not ok:
+        return ok, detail
+    await asyncio.sleep(max(0.0, settings.smoke_crash_window_seconds - (perf_counter() - looked)))
+    states = await _smoke_container_states(stack.base) or states
+    stack.restarts = await _smoke_restart_counts(stack.base) or restarts
+    restarted = _smoke_restarted(restarts, stack.restarts)
+    down = _smoke_down(states, restarted)
+    if down:
+        return False, await _smoke_failure_detail(stack.base, down, states, restarted)
     # ICCINT-44: on the way through, say what was MEASURED — the constant below told the Manažér the same
     # sentence every round and hid that the test container was still running.
-    return (True, _boot_pass_detail(stack, states)) if ok else (ok, detail)
+    return True, _boot_pass_detail(stack, states)
 
 
 async def _app_starts_after_fix(project_slug: str) -> tuple[bool, str]:
@@ -12170,11 +12254,9 @@ def _recheck_headline(detail: str) -> str:
     The first version of this sentence asserted "aplikácia sa stále nespustí" in every case, and the very first
     run it met had a healthy app and a failed test container."""
     text = (detail or "").strip()
-    if text.startswith(_SMOKE_CONTAINER_FAILED):
-        first_line = text[len(_SMOKE_CONTAINER_FAILED) :].split("\n", 1)[0]
-        services = ", ".join(part.split(" (exit")[0].strip() for part in first_line.split(", ") if part.strip())
-        if services:
-            return f"zlyhal kontajner {services}"
+    services = failure_framing.failed_services(text)
+    if services:
+        return f"zlyhal kontajner {', '.join(services)}"
     if text.startswith("up exit "):
         return "spustenie neprešlo"
     return "aplikácia sa nespustila"

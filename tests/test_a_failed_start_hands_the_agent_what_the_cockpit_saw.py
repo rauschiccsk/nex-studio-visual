@@ -123,7 +123,11 @@ async def test_the_log_of_a_container_that_exited_is_masked_too(monkeypatch):
 
     detail = await orchestrator._smoke_failure_logs(["docker", "compose"])
 
-    assert detail == "\n\n--- migrate ---\nalembic: connecting with POSTGRES_PASSWORD=[REDACTED]\nboom"
+    # DEV-232: it returns the whole failure — the service named, then its log under its state, like every other path.
+    assert detail == (
+        "kontajner zlyhal: migrate (exit 1)"
+        "\n\n--- migrate (state: exited) ---\nalembic: connecting with POSTGRES_PASSWORD=[REDACTED]\nboom"
+    )
 
 
 @pytest.mark.parametrize(

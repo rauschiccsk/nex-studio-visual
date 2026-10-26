@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # runner's session up to ~3 min (measured 19.10.2026) and reports the runner „online“ meanwhile; 26.10.2026 the new
     # nex-websites runners got theirs 65 s and 125 s after the start, and a job queued in that gap waited 14 min.
     ci_runner_session_wait_seconds: int = 300
+    # DEV-232: the least time between the launch check's two looks at the services — before the app is probed and after
+    # it answered. A service Docker restarts between them is crashing even when the second look catches it running;
+    # 26.10.2026 one look in ten caught a service that exits at once „running“, and early restarts come 0.1–1.6 s apart.
+    smoke_crash_window_seconds: float = 10.0
     # DEV-94: what the cockpit writes into the Knowledge Base goes to GitHub — how long one exchange with GitHub may
     # take, and how often commits that did not get there are sent again (off in tests: it would reach for GitHub).
     kb_publish_timeout_seconds: int = 30
