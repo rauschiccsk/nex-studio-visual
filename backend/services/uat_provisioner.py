@@ -1070,6 +1070,16 @@ def generate_uat_env(
             if chosen:
                 rendered[key_str] = chosen
             continue
+        if key_str in DB_CONNECTION_VARS:
+            # DEV-235: a connection to the database ALWAYS points at the UAT database — also when the compose only
+            # forwards it from ``.env`` (``DATABASE_URL: ${DATABASE_URL:-}``). That forwarding overlaid the example's
+            # address, the ``${…}`` branch below ran first and wrote the compose default: nothing. Author Asistent's
+            # UAT, 26.10.2026: „DATABASE_URL is not set“. The driver (``+pg8000``) comes from the example's address.
+            source = source_env_example.get(key_str, value) if _is_var_expansion(value) else value
+            rendered[key_str] = _rewrite_db_connection_var(
+                key_str, source, user=db_user, db_name=db_name, password=shared_db_password, db_host=db_host
+            )
+            continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
             # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing the placeholder crashed apps
@@ -1096,10 +1106,6 @@ def generate_uat_env(
                 rendered[key_str] = _own_value(key_str, default) or default
             else:
                 rendered[key_str] = USER_SECRET_PLACEHOLDER
-        elif key_str in DB_CONNECTION_VARS:
-            rendered[key_str] = _rewrite_db_connection_var(
-                key_str, value, user=db_user, db_name=db_name, password=shared_db_password, db_host=db_host
-            )
         elif key_str == ADMIN_LOGIN_ENV_KEY and admin_password:
             # The manager's initial admin login — set it to the customer secret they KNOW (not a random
             # synthetic they could never discover). Wins over both the synthetic path and preserved_secrets so a
@@ -1129,6 +1135,66 @@ def generate_uat_env(
             lines.append(f"{key}={rendered[key]}")
 
     return "\n".join(lines) + "\n"
+
+
+def _reads_env_file(service: dict[str, Any]) -> bool:
+    """Whether compose hands the service the installation's ``.env`` as a whole (``env_file``)."""
+    files = service.get("env_file") or []
+    for entry in files if isinstance(files, list) else [files]:
+        path = entry.get("path") if isinstance(entry, dict) else entry
+        if path and Path(str(path)).name == ".env":
+            return True
+    return False
+
+
+def _own_database_address(environment: Any) -> Optional[str]:
+    """The service's own ``DATABASE_URL`` in compose, or ``None`` when it sets none. A name without a value (a bare list
+    entry, or ``DATABASE_URL:`` with nothing) is taken from the project's environment, ``.env`` included —
+    ``"${DATABASE_URL}"``."""
+    if isinstance(environment, dict):
+        if "DATABASE_URL" not in environment:
+            return None
+        value = environment["DATABASE_URL"]
+        return "${DATABASE_URL}" if value is None else str(value)
+    for entry in environment or []:
+        name, eq, value = str(entry).partition("=")
+        if name == "DATABASE_URL":
+            return value if eq else "${DATABASE_URL}"
+    return None
+
+
+def _database_address_readers(services: dict[str, Any]) -> list[str]:
+    """The services that take ``DATABASE_URL`` from the installation's ``.env``: forwarded (``${DATABASE_URL…}``), or
+    through ``env_file`` without an address of their own."""
+    readers = []
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        own = _own_database_address(service.get("environment"))
+        if (own is None and _reads_env_file(service)) or (own is not None and "${DATABASE_URL" in own):
+            readers.append(name)
+    return readers
+
+
+def validate_rendered_database_address(env_content: str, services: dict[str, Any]) -> list[str]:
+    """DEV-235 — ``DATABASE_URL`` rendered EMPTY while a service reads it from ``.env``: the failure, in the Manažér's
+    language, or ``[]``.
+
+    The driver check below skips an empty address on purpose — a project whose compose builds the address itself
+    has nothing to put there. Author Asistent's compose forwards it, the address rendered empty, and its UAT died at
+    ``migrate`` with „DATABASE_URL is not set“ after everything had been written and started. Raised before writing."""
+    address = _parse_env_text(env_content).get("DATABASE_URL")
+    if address is None or address.strip():
+        return []
+    readers = _database_address_readers(services)
+    if not readers:
+        return []
+    return [
+        "Adresa databázy (DATABASE_URL) vyšla v nastaveniach UAT prázdna, hoci ju služby "
+        + ", ".join(readers)
+        + " čítajú z .env — aplikácia by sa k databáze nepripojila. Nasadenie sa zastavilo pred štartom; je to "
+        "chyba kokpitu, nie projektu."
+    ]
 
 
 def validate_rendered_db_drivers(
@@ -2998,6 +3064,7 @@ def provision_uat(
         )
     declared_drivers = detect_sqlalchemy_pg_drivers(project_path)
     fail_msgs, warn_msgs = validate_rendered_db_drivers(env_content, declared_drivers, project_slug=project_slug)
+    fail_msgs += validate_rendered_database_address(env_content, src_services)  # DEV-235
     if fail_msgs:
         raise ValueError("; ".join(fail_msgs))
     warnings.extend(warn_msgs)
