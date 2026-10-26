@@ -141,7 +141,8 @@ async def test_a_red_ci_takes_the_version_back_to_the_fix(db_session, monkeypatc
     await orchestrator.settle_ci_waits(db_session)
 
     last = _verdicts(db_session, version.id)[-1]
-    assert (last.content, last.payload.get("engine_override")) == ("FAIL", "ci_red")
+    assert (last.payload["verdict"], last.payload.get("engine_override")) == ("FAIL", "ci_red")
+    assert last.content.startswith("Verifikácia neprešla pre kontroly projektu na GitHube")  # DEV-236
     assert orchestrator._verifikacia_passed(db_session, version.id) is False
     assert state.ci_pending_since is None
     assert (state.status, state.block_reason) == ("blocked", "decision_needed")

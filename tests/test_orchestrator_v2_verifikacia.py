@@ -801,7 +801,8 @@ async def test_manual_pass_override_cannot_cross_red_floor(db_session, monkeypat
     )
     # the manual PASS was floored to FAIL → the fix loop, not the sign-off
     verdicts = [m for m in _msgs(db_session, version.id) if m.kind == "verdict"]
-    assert verdicts[-1].content == "FAIL" and verdicts[-1].payload["verdict"] == "FAIL"
+    # DEV-236: the content is a sentence that says why; the verdict is in the payload
+    assert verdicts[-1].content == orchestrator.MANUAL_PASS_FLOORED_TEXT and verdicts[-1].payload["verdict"] == "FAIL"
     assert verdicts[-1].payload.get("engine_override") == "runtime_floor_red"
     # CR-V2-058 Part A: the floored FAIL re-enters Programovanie behind a Decision Card (blocked/decision_needed)
     assert new_state.current_stage == "programovanie"
@@ -1905,7 +1906,8 @@ async def test_a_red_ci_floors_a_pass(db_session, monkeypatch):
 
     last = await _pass_verdict(db_session, monkeypatch)
 
-    assert last.content == "FAIL", "červené CI musí zraziť PASS"
+    assert last.payload["verdict"] == "FAIL", "červené CI musí zraziť PASS"
+    assert last.content.startswith("Verifikácia neprešla pre kontroly projektu na GitHube")  # DEV-236
     assert last.payload.get("engine_override") == "ci_red"
     assert "42" in str(last.payload.get("ci")), "Manažér musí vidieť, ktorý beh padol"
 
@@ -2001,7 +2003,7 @@ async def test_a_green_ci_lets_the_pass_through(db_session, monkeypatch):
 
     last = await _pass_verdict(db_session, monkeypatch)
 
-    assert last.content == "PASS"
+    assert last.payload["verdict"] == "PASS"  # DEV-236: the content is a sentence, the verdict is in the payload
     assert last.payload.get("engine_override") is None
 
 
@@ -2017,7 +2019,7 @@ async def test_an_undeterminable_ci_never_blocks(db_session, monkeypatch):
 
     last = await _pass_verdict(db_session, monkeypatch)
 
-    assert last.content == "PASS"
+    assert last.payload["verdict"] == "PASS"  # DEV-236: the content is a sentence, the verdict is in the payload
     assert last.payload.get("engine_override") is None
 
 
@@ -2032,7 +2034,7 @@ async def test_a_ci_that_never_finishes_in_the_wait_leaves_the_version_waiting(d
 
     last = await _pass_verdict(db_session, monkeypatch)
 
-    assert last.content == "PASS"
+    assert last.payload["verdict"] == "PASS"  # DEV-236: the content is a sentence, the verdict is in the payload
     assert orchestrator._verifikacia_passed(db_session, last.version_id) is False, (
         "beh, ktorý ešte beží, nič nepotvrdil"
     )

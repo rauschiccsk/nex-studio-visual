@@ -7187,6 +7187,19 @@ async def _ci_status_for_head(
     return stav, detail
 
 
+#: DEV-236 — what the Manažér reads when a verdict is the cockpit's or a manual one. A bare „FAIL“/„PASS“ told him
+#: nothing (Author Asistent 0.1.0, 26.10.2026: message 5843); the reason stood only in the technical detail.
+CI_RED_VERDICT_TEXT = (
+    "Verifikácia neprešla pre kontroly projektu na GitHube — {ci}. Kým nebudú zelené, verzia sa nedá vyhlásiť za "
+    "overenú."
+)
+MANUAL_VERDICT_TEXT = {
+    "PASS": "Verifikácia prešla (ručné rozhodnutie).",
+    "FAIL": "Verifikácia neprešla (ručné rozhodnutie).",
+}
+MANUAL_PASS_FLOORED_TEXT = "Verifikácia neprešla: ručné „prešla“ neplatí, lebo skúška po spustení bola červená."
+
+
 def _record_ci_red_verdict(db: Session, version_id: uuid.UUID, ci_detail: str) -> PipelineMessage:
     """The Auditor's PASS floored by red CI — its OWN verdict message, not just a note (ICCINT-64).
 
@@ -7199,7 +7212,7 @@ def _record_ci_red_verdict(db: Session, version_id: uuid.UUID, ci_detail: str) -
         author="auditor",
         recipient="manazer",
         kind="verdict",
-        content="FAIL",
+        content=CI_RED_VERDICT_TEXT.format(ci=ci_detail),
         payload={
             "phase": "verifikacia",
             "verdict": "FAIL",
@@ -15929,7 +15942,9 @@ async def apply_action(
             author="auditor",
             recipient="manazer",
             kind="verdict",
-            content=effective_verdict,
+            content=MANUAL_PASS_FLOORED_TEXT
+            if effective_verdict != verdict
+            else MANUAL_VERDICT_TEXT[effective_verdict],
             payload=verdict_payload,
         )
         # Apply the verdict via the SHARED settle (CR-V2-014) so the MANUAL path here and the AUTONOMOUS path
