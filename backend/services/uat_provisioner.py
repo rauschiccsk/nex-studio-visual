@@ -608,8 +608,8 @@ def detect_internal_port(svc: dict[str, Any], default: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _synthetic_secret(key: str) -> str:
-    """Synthetic value for a secret env var (format heuristic).
+def synthetic_secret(key: str) -> str:
+    """Synthetic value for a secret env var (format heuristic) — DEV-229: the launch check's rule too.
 
     ``*_KEY`` → standard-alphabet base64 of 32 random bytes (decodes to 32 bytes for strict
     AES-key readers AND urlsafe decoders); all other secret suffixes → ``token_hex(32)``.
@@ -1089,7 +1089,7 @@ def generate_uat_env(
             default = _var_expansion_default(value)
             if key_str.lower().endswith(SECRET_SUFFIXES):
                 kept = preserved_secrets.get(key_str)
-                rendered[key_str] = kept or _synthetic_secret(key_str)
+                rendered[key_str] = kept or synthetic_secret(key_str)
                 if not kept and synthesised_secrets is not None:
                     synthesised_secrets.append(key_str)
             elif default is not None:
@@ -1107,7 +1107,7 @@ def generate_uat_env(
             rendered[key_str] = admin_password
         elif key_str.lower().endswith(SECRET_SUFFIXES):
             kept = preserved_secrets.get(key_str)
-            rendered[key_str] = kept or _synthetic_secret(key_str)
+            rendered[key_str] = kept or synthetic_secret(key_str)
             if not kept and synthesised_secrets is not None:
                 synthesised_secrets.append(key_str)
         elif is_template_placeholder(value):

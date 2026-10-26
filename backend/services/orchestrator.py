@@ -74,6 +74,7 @@ from backend.services import (
     dedo_message,
     delivery_statement,
     deploy_progress,
+    env_contract,
     failure_framing,
     fast_fix,
     git_push,
@@ -7358,6 +7359,8 @@ def _acceptance_smoke_override(compose_path: Path, smoke_env: Optional[Path] = N
 # ``POSTGRES_PASSWORD``), so the smoke boots against the SAME shape CI migrates against.
 _SMOKE_ENV_PASSWORD = "ci"  # same value as scripts/ci_render_dotenv.py CI_PASSWORD (smoke render == CI render).
 _SMOKE_ENV_HOST = "db"  # the compose ``db`` service name (ci_render_dotenv CI_HOST) — the in-network DB target.
+#: DEV-229: what an ``@public-url`` variable is in the throwaway smoke stack — it lives on this machine only.
+SMOKE_PUBLIC_URL = "http://localhost"
 
 
 def _rewrite_smoke_database_url(value: str) -> str:
@@ -7393,6 +7396,7 @@ def _render_smoke_env(env_example: Path, dst: Path) -> bool:
         raw_lines = env_example.read_text(encoding="utf-8").splitlines()
     except OSError:
         return False
+    contract = env_contract.parse("\n".join(raw_lines))
     out: list[str] = []
     seen_postgres_password = False
     for raw in raw_lines:
@@ -7412,6 +7416,10 @@ def _render_smoke_env(env_example: Path, dst: Path) -> bool:
             and not stripped.startswith("#")
             and uat_provisioner.is_template_placeholder(stripped.split("=", 1)[1])
         ):
+            key = stripped.split("=", 1)[0].strip()
+            filled = _smoke_contract_value(key, contract)
+            if filled is not None:
+                out.append(f"{key}={filled}")
             continue
         if stripped.startswith("DATABASE_URL="):
             key, _, val = raw.partition("=")
@@ -7427,6 +7435,24 @@ def _render_smoke_env(env_example: Path, dst: Path) -> bool:
         out.append(f"POSTGRES_PASSWORD={_SMOKE_ENV_PASSWORD}")
     dst.write_text("\n".join(out) + "\n", encoding="utf-8")
     return True
+
+
+def _smoke_contract_value(key: str, contract: env_contract.Contract) -> Optional[str]:
+    """DEV-229 — what an EMPTY variable of the example gets in the smoke env: the contract a UAT installation is
+    rendered by (:mod:`uat_provisioner`). ``@public-url`` / ``@public-url-admin`` → the smoke stack's address; a secret
+    (``*_password/_secret/_key/_token``) → a value by UAT's own rule (:func:`uat_provisioner.synthetic_secret`).
+    ``None`` = stays unset: what the customer enters (``@customer``/``@customer-secret``), the database password (the
+    smoke database has its own, :data:`_SMOKE_ENV_PASSWORD`) and everything without a contract (ICCINT-40).
+
+    26.10.2026 Author Asistent 0.1.0 left PUBLIC_URL, SESSION_SECRET and SETTINGS_ENCRYPTION_KEY empty, as the contract
+    says; UAT fills them, the launch check dropped them and the backend never booted."""
+    if key in contract.public_url_keys or key in contract.public_url_admin_keys:
+        return SMOKE_PUBLIC_URL
+    if key in contract.customer_keys or key in ("DB_PASSWORD", "POSTGRES_PASSWORD", "DATABASE_URL"):
+        return None
+    if key.lower().endswith(env_contract.SECRET_SUFFIXES):
+        return uat_provisioner.synthetic_secret(key)
+    return None
 
 
 def _compose_backend_port(compose_path: Path) -> Optional[int]:
