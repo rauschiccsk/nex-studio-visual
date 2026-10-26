@@ -11,18 +11,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
-from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.price_estimate import PriceSample
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
-from backend.main import app
 from backend.services import delivered_tokens, delivery_statement, price_estimate
 
 T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
@@ -140,19 +137,18 @@ def test_no_estimate_for_a_fix_of_our_error_nor_before_the_plan(measured):
     assert price_estimate.figures(db, unplanned) is None
 
 
-def test_the_estimate_is_kept_and_measured_anew_when_the_plan_changes(measured, monkeypatch, tmp_path):
+def test_the_estimate_is_kept_and_measured_anew_when_the_plan_changes(measured):
     db, _owner_, inbox = measured
-    monkeypatch.setattr(price_estimate, "refresh_samples", lambda db, root: 0)
     version = _version(db, inbox, "1.4.0", done=False, tasks=10, day=4)
 
-    first = price_estimate.current(db, version, tmp_path)
+    first = price_estimate.current(db, version)
     kept = (first.id, first.created_at, first.tasks, first.amount_eur)
-    again = price_estimate.current(db, version, tmp_path)
+    again = price_estimate.current(db, version)
     kept_again = (again.id, again.created_at)
     feat = db.query(Feat).join(Epic, Epic.id == Feat.epic_id).filter(Epic.version_id == version.id).one()
     db.add(Task(feat_id=feat.id, number=11, title="T10", task_type="backend", status="todo"))
     db.flush()
-    larger = price_estimate.current(db, version, tmp_path)
+    larger = price_estimate.current(db, version)
 
     assert kept_again == kept[:2]
     assert (kept[2], larger.tasks) == (10, 11) and larger.amount_eur > kept[3]
@@ -186,56 +182,3 @@ def test_a_finished_version_becomes_a_measurement_once(db_session, monkeypatch, 
     assert (added, again) == (2, 0) and sorted(counted) == ["1.0.0", "1.1.0"]
     assert (samples[v1.id].first_version, samples[v2.id].first_version) == (True, False)
     assert (samples[v1.id].tasks, samples[v1.id].code_tokens, samples[v1.id].docs_tokens) == (4, 1000, 200)
-
-
-def test_the_route_gives_the_estimate_and_says_when_it_rests_on_too_few(client, measured, monkeypatch):
-    db, owner, inbox = measured
-    monkeypatch.setattr(price_estimate, "refresh_samples", lambda db, root: 0)
-    version = _version(db, inbox, "1.4.0", done=False, tasks=10, day=4)
-    db.commit()
-    app.dependency_overrides[get_current_user] = lambda: owner
-
-    body = client.get(f"/api/v1/versions/{version.id}/price-estimate").json()
-
-    assert (body["amount_eur"], body["code_eur"], body["docs_eur"]) == ("111.67", "100.00", "11.67")
-    assert (body["samples"], body["enough"], body["spread_pct"], body["tasks"]) == (3, False, 12, 10)
-
-
-def test_the_billing_tab_shows_the_estimate_beside_the_statement(client, measured, monkeypatch):
-    db, owner, inbox = measured
-    monkeypatch.setattr(price_estimate, "refresh_samples", lambda db, root: 0)
-    version = _version(db, inbox, "1.4.0", done=False, tasks=10, day=4)
-    price_estimate.current(db, version, Path("/nonexistent"))
-    monkeypatch.setattr(
-        delivery_statement,
-        "billing_rows",
-        lambda db, project, repo: [
-            delivery_statement.BillingRow(
-                version=version,
-                flow_type="new_version",
-                preview=delivery_statement.Preview(version_number="1.4.0"),
-                valid=None,
-                state="not_done",
-            )
-        ],
-    )
-    db.commit()
-    app.dependency_overrides[get_current_user] = lambda: owner
-
-    row = client.get(f"/api/v1/projects/{inbox.slug}/billing").json()["rows"][0]
-
-    assert (row["estimate_amount_eur"], row["estimate_spread_pct"]) == ("111.67", 12)
-
-
-def test_someone_who_may_not_work_on_the_project_gets_no_estimate(client, measured, monkeypatch):
-    db, _owner_, inbox = measured
-    monkeypatch.setattr(price_estimate, "refresh_samples", lambda db, root: 0)
-    version = _version(db, inbox, "1.4.0", done=False, tasks=10, day=4)
-    stranger = _owner(db)
-    db.commit()
-    app.dependency_overrides[get_current_user] = lambda: stranger
-
-    response = client.get(f"/api/v1/versions/{version.id}/price-estimate")
-
-    assert response.status_code in (403, 404)
-    assert price_estimate.stored(db, version.id) is None

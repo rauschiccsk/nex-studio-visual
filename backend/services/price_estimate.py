@@ -12,7 +12,8 @@ after a project's first (each estimated from the others: 22 % off on average), t
   versions strayed from their mean; fewer than ``settings.price_estimate_min_samples`` of them is said, not hidden.
 * A fix of our own error is not billed and gets no estimate; a version without a plan has none yet.
 * It is kept at the version (:class:`PriceEstimate`) — no invoice: the statement after the delivery says what is
-  billed, and the billing tab shows the two side by side.
+  billed, and the billing tab shows the two side by side. DEV-225: the billing tab measures it for every version
+  (Director 26.10.2026: „vecne patrí skôr do priečinku Fakturácia“) — the version's page has none of its own.
 """
 
 from __future__ import annotations
@@ -151,9 +152,11 @@ def stored(db: Session, version_id) -> Optional[PriceEstimate]:
     return db.execute(select(PriceEstimate).where(PriceEstimate.version_id == version_id)).scalar_one_or_none()
 
 
-def current(db: Session, version: Version, projects_root: Path) -> Optional[PriceEstimate]:
-    """The version's estimate, measured anew when its plan or the measurements changed; kept at the version."""
-    refresh_samples(db, projects_root)
+def current(db: Session, version: Version) -> Optional[PriceEstimate]:
+    """The version's estimate, measured anew when its plan or the measurements changed; kept at the version.
+
+    The measurements are the caller's to refresh first (:func:`refresh_samples`) — once for a whole screen of
+    versions, not once per version."""
     found = figures(db, version)
     kept = stored(db, version.id)
     if found is None:

@@ -1,4 +1,4 @@
-"""Orientačná cena verzie (DEV-154)."""
+"""Orientačná cena verzie (DEV-154) — on the billing tab, beside the statement (DEV-225)."""
 
 from __future__ import annotations
 

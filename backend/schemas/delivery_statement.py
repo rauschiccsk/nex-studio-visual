@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.schemas.price_estimate import PriceEstimateRead
 from backend.schemas.task import BillingCategory
 
 #: DEV-50: a fix of an error in delivered code, or a change; DEV-118: or a gift — an attention of ICC for the whole
@@ -237,10 +238,10 @@ class BillingRowRead(BaseModel):
     preview_amount_eur: Optional[Decimal] = Field(default=None, description="What a statement issued now would say.")
     issued: Optional[IssuedStatementRead] = Field(default=None, description="The valid statement, if any.")
     differs: bool = Field(default=False, description="Issued, but counted today the amount would differ.")
-    estimate_amount_eur: Optional[Decimal] = Field(
-        default=None, description="DEV-154: the orientačná cena given after Návrh — beside the statement's amount."
+    estimate: Optional[PriceEstimateRead] = Field(
+        default=None,
+        description="DEV-154, DEV-225: the orientačná cena from the version's plan — beside the statement's amount.",
     )
-    estimate_spread_pct: Optional[int] = None
     rate_code: Optional[Decimal] = Field(default=None, description="DEV-74: the rates the version counts with now.")
     rate_docs: Optional[Decimal] = None
     own_rates: bool = Field(default=False, description="DEV-74: the version has a rate of its own.")

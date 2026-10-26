@@ -4,21 +4,31 @@
 // versions between 1.5.0 and 1.7.1 looked lost although nothing was. Here each version says where it stands — issued,
 // ready to issue, waiting for its work kind, not countable, still in build — with its amount, and opens its own
 // statement in place (the same panel as under „Verzia“), so a statement is issued without switching the version.
+//
+// DEV-225 — the orientačná cena lives here, at every version with a plan, right under the statement's amount so the
+// two can be compared. Director 26.10.2026: „podľa mňa táto informácia vecne patrí skôr do priečinku Fakturácia“ —
+// before, it was measured only when someone opened the version's page, and seven versions with a plan had none here.
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
-import { amountWords } from "@/lib/priceEstimate";
+import { amountWords, fromVersionsWords, onVersionsWords, tasksWords } from "@/lib/priceEstimate";
 import { WORK_KIND_OPTIONS } from "@/lib/workKind";
-import { getProjectBilling, type BillingOverview, type BillingRow } from "@/services/api/deliveryStatements";
+import {
+  getProjectBilling,
+  type BillingOverview,
+  type BillingRow,
+  type PriceEstimate,
+} from "@/services/api/deliveryStatements";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { formatDate, formatEur } from "@/utils/format";
 
 const eur = formatEur;
 const day = (iso: string) => formatDate(iso);
 const sha = (v: string | null) => (v ? v.slice(0, 7) : "?");
+const tokens = (n: number) => n.toLocaleString("sk-SK");
 
 const STATE: Record<BillingRow["state"], { label: string; tone: string }> = {
   issued: { label: "vydaný", tone: "bg-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]" },
@@ -45,6 +55,47 @@ function Total({ label, value, hint }: { label: string; value: string; hint?: st
       <div className="mt-1 text-xl font-semibold text-[var(--color-text-primary)]">{value}</div>
       {hint && <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{hint}</div>}
     </div>
+  );
+}
+
+/** DEV-154, DEV-225 — the orientačná cena of one version: the amount with its spread, what it rests on, how it is
+ * made up, and when it rests on too few finished versions. */
+function Estimate({ estimate }: { estimate: PriceEstimate }) {
+  const pool = estimate.first_version
+    ? "prvých verzií projektov, ktoré stavajú kostru aplikácie"
+    : "ďalších verzií projektov";
+  return (
+    <section
+      aria-label="Orientačná cena"
+      className="mt-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div className="min-w-0 flex-1 text-xs text-[var(--color-text-secondary)]">
+          <span className="font-medium text-[var(--color-text-primary)]">Orientačná cena</span> — odhad podľa{" "}
+          {tasksWords(estimate.tasks)} v pláne verzie, z {fromVersionsWords(estimate.samples)} — {pool}.
+        </div>
+        <div
+          className="text-sm font-semibold text-[var(--color-text-primary)]"
+          title={
+            estimate.spread_pct != null
+              ? "Plus-mínus hovorí, o koľko sa hotové verzie, z ktorých odhad vychádza, líšili od priemeru."
+              : undefined
+          }
+        >
+          {amountWords(estimate)}
+        </div>
+      </div>
+      <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+        Kód a skúšky ≈ {tokens(estimate.code_tokens)} tokenov = {eur(estimate.code_eur)} · dokumentácia ≈{" "}
+        {tokens(estimate.docs_tokens)} tokenov = {eur(estimate.docs_eur)}
+      </div>
+      {!estimate.enough && (
+        <div className="mt-1 text-[11px] text-[var(--color-state-warning-fg)]">
+          Opiera sa len o {onVersionsWords(estimate.samples)}, preto je hrubý — spresní sa s každou ďalšou hotovou
+          verziou.
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -86,7 +137,8 @@ export default function BillingTab({ slug }: { slug: string }) {
     <div className="space-y-4">
       <p className="text-xs text-[var(--color-text-muted)]">
         Súpis dodávky patrí vždy jednej verzii a počíta len to, čo dodala ona — od dodaného stavu predchádzajúcej
-        verzie. Pri každej verzii otvoríš jej súpis a vydáš ho priamo tu.
+        verzie. Pri každej verzii otvoríš jej súpis a vydáš ho priamo tu. Orientačná cena je odhad z plánu úloh verzie,
+        nie faktúra — účtuje sa podľa súpisu dodávky.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Total label="Vydané súpisy spolu" value={eur(billing.issued_total_eur)} />
@@ -148,17 +200,9 @@ export default function BillingTab({ slug }: { slug: string }) {
                 <div className="text-right">
                   <div className="text-sm font-semibold text-[var(--color-text-primary)]">{eur(amount)}</div>
                   {row.state === "ready" && <div className="text-[10px] text-[var(--color-text-muted)]">náhľad</div>}
-                  {row.estimate_amount_eur != null && (
-                    <div
-                      className="text-[10px] text-[var(--color-text-muted)]"
-                      title="Orientačná cena daná po Návrhu podľa plánu úloh — vedľa súpisu, aby bolo vidieť, ako odhad sedel."
-                    >
-                      orientačná cena{" "}
-                      {amountWords({ amount_eur: row.estimate_amount_eur, spread_pct: row.estimate_spread_pct })}
-                    </div>
-                  )}
                 </div>
               </div>
+              {row.estimate && <Estimate estimate={row.estimate} />}
               {row.state !== "not_done" && (
                 <button
                   type="button"

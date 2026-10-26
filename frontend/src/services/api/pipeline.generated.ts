@@ -3089,23 +3089,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/versions/{version_id}/price-estimate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Version Price Estimate */
-        get: operations["version_price_estimate_api_v1_versions__version_id__price_estimate_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/versions/{version_id}/task-categories": {
         parameters: {
             query?: never;
@@ -3606,13 +3589,8 @@ export interface components {
              * @default false
              */
             differs: boolean;
-            /**
-             * Estimate Amount Eur
-             * @description DEV-154: the orientačná cena given after Návrh — beside the statement's amount.
-             */
-            estimate_amount_eur?: string | null;
-            /** Estimate Spread Pct */
-            estimate_spread_pct?: number | null;
+            /** @description DEV-154, DEV-225: the orientačná cena from the version's plan — beside the statement's amount. */
+            estimate?: components["schemas"]["PriceEstimateRead"] | null;
             /** Flow Type */
             flow_type?: string | null;
             /** @description The valid statement, if any. */
@@ -13443,37 +13421,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionNoteRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    version_price_estimate_api_v1_versions__version_id__price_estimate_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PriceEstimateRead"] | null;
                 };
             };
             /** @description Validation Error */

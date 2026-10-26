@@ -8,7 +8,7 @@ time it is counted (seconds of ``git blame`` per version), so the next reading d
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from backend.core import authz
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.foundation import User
+from backend.db.models.price_estimate import PriceEstimate
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import get_db
@@ -45,6 +46,7 @@ from backend.schemas.delivery_statement import (
     WorkKindRead,
     WorkKindWrite,
 )
+from backend.schemas.price_estimate import PriceEstimateRead
 from backend.services import billing_category, claude_agent, delivered_tokens, price_estimate
 from backend.services import delivery_statement as statements
 
@@ -54,6 +56,28 @@ router = APIRouter(tags=["Súpis dodaných tokenov"])
 def _repo(db: Session, version: Version):
     slug = db.execute(select(Project.slug).where(Project.id == version.project_id)).scalar_one()
     return claude_agent.PROJECTS_ROOT / slug
+
+
+def _eur(tokens: int, rate: Decimal) -> Decimal:
+    return (Decimal(tokens) / Decimal(1000) * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _estimate_read(estimate: PriceEstimate) -> PriceEstimateRead:
+    return PriceEstimateRead(
+        tasks=estimate.tasks,
+        first_version=estimate.first_version,
+        code_tokens=estimate.code_tokens,
+        docs_tokens=estimate.docs_tokens,
+        rate_code=estimate.rate_code,
+        rate_docs=estimate.rate_docs,
+        code_eur=_eur(estimate.code_tokens, estimate.rate_code),
+        docs_eur=_eur(estimate.docs_tokens, estimate.rate_docs),
+        amount_eur=estimate.amount_eur,
+        spread_pct=estimate.spread_pct,
+        samples=estimate.samples,
+        enough=price_estimate.enough(estimate),
+        created_at=estimate.created_at,
+    )
 
 
 def _preview_read(p: statements.Preview) -> StatementPreviewRead:
@@ -127,14 +151,15 @@ def get_billing(
     Sync like the rest: counting reads git."""
     project = authz.assert_project_slug_access(db, current_user, slug)
     rows = statements.billing_rows(db, project, claude_agent.PROJECTS_ROOT / project.slug)
+    # DEV-225: the orientačná cena is measured here, for every version — the measurements refreshed once for the tab.
+    price_estimate.refresh_samples(db, claude_agent.PROJECTS_ROOT)
 
     def read(r: statements.BillingRow) -> BillingRowRead:
         p, count = r.preview, r.preview.count
         # DEV-154: the orientačná cena given after Návrh, beside what the statement counts — how well it estimated.
-        estimate = price_estimate.stored(db, r.version.id)
+        estimate = price_estimate.current(db, r.version)
         return BillingRowRead(
-            estimate_amount_eur=estimate.amount_eur if estimate else None,
-            estimate_spread_pct=estimate.spread_pct if estimate else None,
+            estimate=_estimate_read(estimate) if estimate else None,
             version_id=r.version.id,
             version_number=r.version.version_number,
             flow_type=r.flow_type,

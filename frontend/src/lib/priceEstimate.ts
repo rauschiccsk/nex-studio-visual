@@ -1,6 +1,6 @@
-// DEV-154 — the words of the orientačná cena, shared by the version's page and the billing tab.
+// DEV-154 — the words of the orientačná cena on the billing tab (DEV-225: its only place).
 import { formatEur } from "@/utils/format";
-import type { PriceEstimate } from "@/services/api/priceEstimate";
+import type { PriceEstimate } from "@/services/api/deliveryStatements";
 
 /** „podľa 1 úlohy“, „podľa 12 úloh“. */
 export const tasksWords = (n: number) => `${n} ${n === 1 ? "úlohy" : "úloh"}`;

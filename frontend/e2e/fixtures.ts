@@ -828,22 +828,6 @@ export function registerFixtures(): void {
       created_at: T2,
     },
   ]);
-  // DEV-154 — the orientačná cena on the version's page: resting on too few versions, so the rough note shows too.
-  answer("get", "/api/v1/versions/{version_id}/price-estimate", {
-    tasks: 42,
-    first_version: false,
-    code_tokens: 210_000,
-    docs_tokens: 30_000,
-    rate_code: "2.0000",
-    rate_docs: "1.0000",
-    code_eur: "420.00",
-    docs_eur: "30.00",
-    amount_eur: "450.00",
-    spread_pct: 26,
-    samples: 3,
-    enough: false,
-    created_at: T2,
-  });
   // DEV-150 — „Kde stojíme“ on the Prehľad: one project waiting on the Manažér with a long name, one at work, one still.
   answer("get", "/api/v1/standing", {
     projects: [
@@ -1466,11 +1450,27 @@ export function registerFixtures(): void {
     rate_docs: "1",
     own_rates: false,
   };
+  // DEV-154, DEV-225 — the orientačná cena on the billing tab: resting on too few versions, so the rough note shows too.
+  const estimate = {
+    tasks: 42,
+    first_version: false,
+    code_tokens: 210_000,
+    docs_tokens: 30_000,
+    rate_code: "2.0000",
+    rate_docs: "1.0000",
+    code_eur: "420.00",
+    docs_eur: "30.00",
+    amount_eur: "450.00",
+    spread_pct: 26,
+    samples: 3,
+    enough: false,
+    created_at: T2,
+  };
   answer("get", "/api/v1/projects/{slug}/billing", {
     rows: [
-      { ...billingRow, version_id: VERSION.id, version_number: "1.8.0", state: "not_done", reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", delivered_sha: null, base_sha: null, preview_amount_eur: null, tokens_code: null, tokens_docs: null },
+      { ...billingRow, version_id: VERSION.id, version_number: "1.8.0", state: "not_done", reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", delivered_sha: null, base_sha: null, preview_amount_eur: null, tokens_code: null, tokens_docs: null, estimate },
       { ...billingRow, version_id: RELEASED.id, version_number: "1.7.1", flow_type: "fast_fix", work_kind: "fix", state: "issued", issued: issued("0.00", "fix"), preview_amount_eur: "0.00" },
-      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222170", version_number: "1.7.0", state: "issued", issued: issued("249.98", "change"), preview_amount_eur: "423.87", differs: true, estimate_amount_eur: "230.00", estimate_spread_pct: 26 },
+      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222170", version_number: "1.7.0", state: "issued", issued: issued("249.98", "change"), preview_amount_eur: "423.87", differs: true, estimate: { ...estimate, amount_eur: "230.00" } },
       { ...billingRow, version_id: "22222222-2222-4222-8222-222222222160", version_number: "1.6.0", state: "ready", preview_amount_eur: "93.03", rate_code: "1.5", own_rates: true },
       {
         ...billingRow,

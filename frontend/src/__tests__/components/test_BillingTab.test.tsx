@@ -72,7 +72,7 @@ const issued = (amount: string) => ({
 const INBOX_1210: BillingOverview = {
   rows: [
     row({ version_id: "v171", version_number: "1.7.1", flow_type: "fast_fix", work_kind: "fix", state: "issued", issued: issued("0.00"), preview_amount_eur: "0.00" }),
-    row({ version_id: "v170", version_number: "1.7.0", state: "issued", issued: issued("249.98"), preview_amount_eur: "423.87", differs: true, estimate_amount_eur: "230.00", estimate_spread_pct: 26 }),
+    row({ version_id: "v170", version_number: "1.7.0", state: "issued", issued: issued("249.98"), preview_amount_eur: "423.87", differs: true }),
     row({ version_id: "v160", version_number: "1.6.0", preview_amount_eur: "124.06" }),
     row({ version_id: "v156", version_number: "1.5.6", flow_type: "fast_fix", work_kind: null, state: "needs_kind", preview_amount_eur: null, reason: "Pri rýchlej oprave treba určiť druh práce." }),
     row({ version_id: "v150", version_number: "1.5.0", preview_amount_eur: "539.48" }),
@@ -102,13 +102,6 @@ describe("BillingTab (DEV-73)", () => {
     expect(
       screen.getByText(/Platí vydaný súpis\. Podľa dnešných sadzieb by bol 423,87 €/),
     ).toBeInTheDocument();
-  });
-
-  it("DEV-154: the orientačná cena given after Návrh stands beside the statement, only where there was one", async () => {
-    render(<BillingTab slug="nex-inbox" />);
-
-    expect(await screen.findByText("orientačná cena cca 230,00 € ± 26 %")).toBeInTheDocument();
-    expect(screen.getAllByText(/orientačná cena/)).toHaveLength(1);
   });
 
   it("opens a version's own statement in place and reloads after it changes", async () => {

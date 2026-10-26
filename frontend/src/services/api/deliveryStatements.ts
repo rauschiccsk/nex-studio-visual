@@ -176,6 +176,26 @@ export interface RateChange {
   rate_docs: string | null;
 }
 
+/** DEV-154 — the orientačná cena of a version: the tasks of its plan × what a task of the finished versions
+ * delivered × the version's rates. An estimate, not an invoice — the statement after the delivery says what is billed. */
+export interface PriceEstimate {
+  tasks: number;
+  /** The first version of a new project — measured apart, it carries the skeleton of the application. */
+  first_version: boolean;
+  code_tokens: number;
+  docs_tokens: number;
+  rate_code: string;
+  rate_docs: string;
+  code_eur: string;
+  docs_eur: string;
+  amount_eur: string;
+  spread_pct: number | null;
+  /** How many finished versions it rests on, and whether that is enough to be firm. */
+  samples: number;
+  enough: boolean;
+  created_at: string;
+}
+
 /** DEV-73 — one version on the billing tab: where it stands for invoicing. */
 export interface BillingRow {
   version_id: string;
@@ -196,9 +216,9 @@ export interface BillingRow {
   issued: IssuedStatement | null;
   /** Issued, but counted today the amount would differ (other rates or delivery). */
   differs: boolean;
-  /** DEV-154 — the orientačná cena given after Návrh, beside what the statement says; null when there was none. */
-  estimate_amount_eur?: string | null;
-  estimate_spread_pct?: number | null;
+  /** DEV-154, DEV-225 — the orientačná cena from the version's plan, beside what the statement says; null for a fix
+   * of our own error, a version without a plan, or nothing measured yet. */
+  estimate?: PriceEstimate | null;
   /** DEV-74 — the rates the version counts with now, and whether it has one of its own. */
   rate_code: string | null;
   rate_docs: string | null;
