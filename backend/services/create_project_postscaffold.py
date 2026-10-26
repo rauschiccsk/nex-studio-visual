@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from backend.core.agent_env import agent_env
+from backend.core.agent_env import project_env
 from backend.core.local_time import local_time
 from backend.services import build_provenance, ci_runner, git_push, project_files, project_surfaces
 
@@ -684,7 +684,7 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
 
     # ICCINT-166: z ktorej zmeny sa obraz stavia — ako pri každej stavbe, ktorú kokpit spúšťa. To isté prostredie
     # dostane aj ``up`` a ``down``: projekt, ktorý by premennú v compose vyžadoval, by inak ostal bežať.
-    compose_env = agent_env(build_provenance.build_env(compose_file))
+    compose_env = project_env(build_provenance.build_env(compose_file))  # DEV-227
 
     # Minimal smoke: docker compose build (always run)
     build_result = subprocess.run(

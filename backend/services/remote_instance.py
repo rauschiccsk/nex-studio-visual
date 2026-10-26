@@ -18,13 +18,14 @@ a argumenty procesu vidí na cieľovom stroji ktokoľvek (``ps``). Preto sa posi
 from __future__ import annotations
 
 import io
-import os
 import subprocess
 import tarfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
+
+from backend.core.agent_env import project_env
 
 #: Obraz, v ktorom sa na cieli čítajú a zapisujú súbory. Malý a všade dostupný; nič z neho nebeží ďalej.
 IMAGE = "alpine:3.20"
@@ -38,7 +39,7 @@ def docker_env(deploy_host: Optional[str]) -> Optional[dict[str, str]]:
     ciel = (deploy_host or "").strip()
     if not ciel:
         return None
-    env = dict(os.environ)
+    env = project_env()  # DEV-227: the target's Docker gets nothing of the cockpit's configuration
     env["DOCKER_HOST"] = f"ssh://{ciel}"
     return env
 

@@ -28,7 +28,6 @@ nezávislých previerkach a to platí ďalej.
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -36,6 +35,7 @@ from typing import Any, NamedTuple, Optional
 
 import yaml
 
+from backend.core.agent_env import project_env
 from backend.services import remote_instance, uat_provisioner
 from backend.services.deploy import RunnerResult, _prod_url, _url_for_instance_slug, _vrat_predpis_po_zlyhani
 
@@ -223,7 +223,7 @@ def read_instance_state(instance_dir: Path, *, deploy_host: Optional[str] = None
     # z neho — na úrovni súboru by z toho bol kruh.
     from backend.services.orchestrator import _docker_env_for_target
 
-    env = _docker_env_for_target(dict(os.environ), ciel)
+    env = _docker_env_for_target(project_env(), ciel)  # DEV-227
     try:
         vysledok = subprocess.run(  # noqa: S603 — pevné argumenty, žiadny vstup od používateľa
             _remote_state_cmd(instance_dir),

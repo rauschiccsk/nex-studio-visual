@@ -46,7 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
-from backend.core.agent_env import agent_env
+from backend.core.agent_env import project_env
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User, UserAgentSettings
@@ -6195,7 +6195,7 @@ def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str
     """
     if not (deploy_host or "").strip():
         return None
-    return _docker_env_for_target(dict(os.environ), deploy_host)
+    return _docker_env_for_target(project_env(), deploy_host)  # DEV-227: nothing of the cockpit's own
 
 
 #: Ako dlho sa čaká na upratanie po nasadení. Je to údržba, nie brána — keď sa nestihne, nevadí.
@@ -6475,7 +6475,7 @@ async def _run_uat_deploy(
     build_note = f" {clean.note()}" if clean else (f" {prepared.note}" if prepared.note else "")
     provenance = {build_provenance.APP_COMMIT_ENV: clean.commit} if clean else await _build_provenance_env(compose)
     env = _docker_env_for_target(
-        agent_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
+        project_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
     )
     limit = REMOTE_DEPLOY_TIMEOUT if (deploy_host or "").strip() else UAT_DEPLOY_TIMEOUT
     deadline = asyncio.get_running_loop().time() + limit
@@ -7949,7 +7949,8 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
         up_detail="",
         interpolation_env=interpolation_env,
     )
-    compose_env = agent_env(interpolation_env)
+    # DEV-227: the project's compose interpolates from this — the cockpit's DATABASE_URL must not be in it.
+    compose_env = project_env(interpolation_env)
     try:
         # Isolate — ephemeral override stripping container_name + host ports — then up (build + boot;
         # ``--wait`` blocks until healthchecks pass; Ollama reached via the app's own extra_hosts).
@@ -8129,7 +8130,7 @@ async def _run_acceptance_script(script: Path, env: dict[str, str]) -> tuple[int
     # NOT ``{**os.environ, **env}``: ``release_smoke_test.sh`` lives in the built project's work tree, which
     # the AI Agent WRITES — running it hands the agent a shell with this process's environment. Dedo's
     # machine token (ICCINT-14) is withheld from it, same as from the agent itself.
-    full_env = agent_env(env)
+    full_env = project_env(env)  # DEV-227: not even the agent's tools — a project script, nothing of the cockpit
     try:
         scratch = await run_blocking(smoke_scratch.new_scratch, cap=SMOKE_SCRATCH_CAP)
     except (smoke_scratch.ScratchUnavailable, BlockingWorkTimedOut) as exc:
