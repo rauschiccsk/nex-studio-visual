@@ -7213,6 +7213,136 @@ def _record_ci_red_verdict(db: Session, version_id: uuid.UUID, ci_detail: str) -
     )
 
 
+def _ci_floored_pass(db: Session, version_id: uuid.UUID) -> Optional[PipelineMessage]:
+    """DEV-234 — the Auditor's PASS that only red CI stopped, or ``None``.
+
+    The latest verdict is the CI floor (:func:`_record_ci_red_verdict`) — once or after every red re-run — and the
+    newest verdict behind those floors is a PASS bound to a commit."""
+    verdicts = (
+        db.execute(
+            select(PipelineMessage)
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.kind == "verdict",
+            )
+            .order_by(PipelineMessage.seq.desc())
+        )
+        .scalars()
+        .all()
+    )
+    floored = False
+    for message in verdicts:
+        payload = message.payload or {}
+        if payload.get("engine_override") == "ci_red":
+            floored = True
+            continue
+        return message if floored and payload.get("verdict") == "PASS" and payload.get("verified_sha") else None
+    return None
+
+
+def _ci_rerun_commit(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-234 — the commit „Spustiť kontroly znova“ runs the checks of: the commit of the Auditor's PASS that only red
+    CI stopped, while it is still HEAD. ``None`` → the card does not offer it and the engine refuses it — on another
+    commit the Auditor's verdict says nothing."""
+    passed = _ci_floored_pass(db, version_id)
+    if passed is None:
+        return None
+    sha = str(passed.payload["verified_sha"])
+    head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+    return sha if head == sha else None
+
+
+def _restore_ci_floored_pass(
+    db: Session, version_id: uuid.UUID, passed: PipelineMessage, ci_detail: str
+) -> PipelineMessage:
+    """DEV-234 — the Auditor's PASS stands again once the re-run checks of its commit passed.
+
+    Its OWN verdict message, as the floor was (:func:`_verifikacia_passed` reads the latest verdict). It carries only
+    what decides — the verdict and its commit — not the Auditor's report, which would stand on the screen twice, nor
+    the turn's usage, which the costs would count twice."""
+    return _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content=f"Kontroly projektu po opätovnom spustení prešli ({ci_detail}) — platí verdikt Audítora pre tento "
+        "commit: Verifikácia prešla.",
+        payload={
+            "phase": "verifikacia",
+            "verdict": "PASS",
+            "verified_sha": passed.payload["verified_sha"],
+            "ci": ci_detail,
+            "ci_rerun_of": passed.seq,
+        },
+    )
+
+
+async def _rerun_project_ci(db: Session, state: PipelineState) -> PipelineState:
+    """DEV-234 — „Spustiť kontroly znova“: re-run the failed jobs of the red runs of the commit the Auditor passed, and
+    let the version wait for them like for checks still running (:func:`settle_ci_waits`). No Auditor round, no fix,
+    no round of fixes spent.
+
+    26.10.2026 Author Asistent 0.1.0: the build could not download a library, the Auditor's PASS was floored, and the
+    card's „Znova over bez opravy“ would have spent a whole Auditor round on the same red run — nothing ran the checks
+    again. Runs already green (re-run on GitHub meanwhile) are just waited for."""
+    version_id = state.version_id
+    sha = _ci_rerun_commit(db, version_id)
+    if sha is None:
+        raise OrchestratorError(
+            "Kontroly projektu sa dajú spustiť znova, len keď Audítor overil commit, ktorý je stále posledný, "
+            "a zastavili ho len červené kontroly — over verziu znova."
+        )
+    root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+    rc, remote = await _run_publish_step(
+        ["git", "-C", str(root), "config", "--get", "remote.origin.url"], RELEASE_PUBLISH_STEP_TIMEOUT
+    )
+    repo = _repo_full_from_remote(remote) if rc == 0 else None
+    if not repo:
+        raise OrchestratorError("Projekt nemá čitateľný vzdialený repozitár — kontroly sa nedajú spustiť znova.")
+    rc, out = await _run_publish_step(ci_status.prikaz_na_behy(repo, sha), RELEASE_PUBLISH_STEP_TIMEOUT)
+    try:
+        rows = json.loads(out) if rc == 0 else None
+    except ValueError:
+        rows = None
+    if not isinstance(rows, list):
+        raise OrchestratorError(f"Stav kontrol na GitHube sa nepodarilo zistiť ({out.strip()[:100]}).")
+    red = ci_status.zlyhane_behy(rows)
+    for run in red:
+        rc, out = await _run_publish_step(
+            ["gh", "run", "rerun", str(run.get("databaseId")), "--failed", "-R", repo], RELEASE_PUBLISH_STEP_TIMEOUT
+        )
+        if rc != 0:
+            raise OrchestratorError(f"GitHub {ci_status.pomenuj_beh(run)} znova nespustil: {out.strip()[:200]}")
+    named = ", ".join(ci_status.pomenuj_beh(run) for run in red)
+    state.current_stage = "verifikacia"
+    state.current_actor = AUDITOR_ROLE
+    state.status = "awaiting_manazer"
+    state.block_reason = None
+    state.ci_pending_since = datetime.now(timezone.utc)
+    state.next_action = CI_PENDING_NEXT_ACTION.format(runs=named or "kontroly projektu")
+    _record_message(
+        db,
+        version_id=version_id,
+        stage="verifikacia",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            f"Kontroly projektu sa spustili znova ({named}) — keď prejdú, platí verdikt Audítora pre tento commit; "
+            "kokpit ich výsledok dorieši sám."
+            if red
+            else "Kontroly projektu už nie sú červené — keď dobehnú, platí verdikt Audítora pre tento commit; kokpit "
+            "ich výsledok dorieši sám."
+        ),
+        payload={"phase": "verifikacia", "ci_pending": True, "ci_rerun": [run.get("databaseId") for run in red]},
+    )
+    db.flush()
+    return state
+
+
 async def settle_ci_waits(db: Session, *, on_message: Optional[MessageCallback] = None) -> list[PipelineState]:
     """DEV-201 — settle every version that waits for the CI of its last commit; returns the states it changed.
 
@@ -7241,11 +7371,27 @@ async def settle_ci_waits(db: Session, *, on_message: Optional[MessageCallback] 
         if ci_state in ("pending", "unknown") and not overdue:
             continue
         state.ci_pending_since = None
-        if ci_state == "red":
+        # DEV-234: a wait of „Spustiť kontroly znova“ — only green lets the Auditor's PASS stand again, on its commit.
+        passed = _ci_floored_pass(db, version_id)
+        rerun_green = passed is not None and ci_state == "green" and _ci_rerun_commit(db, version_id) is not None
+        if ci_state == "red" or (passed is not None and not rerun_green):
+            if ci_state != "red":
+                ci_detail = (
+                    f"kontroly projektu nedobehli ani po {settings.ci_pending_cap_hours} h ({ci_detail})"
+                    if ci_state != "green"
+                    else f"posledný commit nie je ten, ktorý Audítor overil ({ci_detail})"
+                )
             floored = _record_ci_red_verdict(db, version_id, ci_detail)
             if on_message is not None:
                 await on_message(floored)
             await _settle_verifikacia_verdict(db, state, verdict="FAIL", on_message=on_message)
+        elif rerun_green:
+            restored = _restore_ci_floored_pass(db, version_id, passed, ci_detail)
+            if on_message is not None:
+                await on_message(restored)
+            state.status = "awaiting_manazer"
+            state.next_action = VERIFIKACIA_PASS_NEXT_ACTION
+            _settle_phase_boundary(db, state)
         else:
             content = (
                 f"Kontroly projektu dobehli: {ci_detail}"
@@ -11036,6 +11182,23 @@ def _verifikacia_same_cause_confirmed(db: Session, version_id: uuid.UUID) -> boo
     return False
 
 
+#: DEV-234 — „Spustiť kontroly znova“, on the card of a FAIL round and on the round cap's: the Auditor passed the commit
+#: and only red checks stopped it (:func:`_ci_rerun_commit`); the engine runs it in :func:`_rerun_project_ci`.
+_RERUN_CI_OPTION = ConsultOption(
+    id="rerun_ci",
+    label="Spustiť kontroly znova",
+    detail=(
+        "Kontroly projektu na GitHube sa spustia znova — len časti, ktoré zlyhali. Keď prejdú, platí verdikt Audítora "
+        "pre ten istý commit; nové kolo Audítora ani oprava netreba a nemíňa sa kolo."
+    ),
+    recommended=True,
+)
+_RERUN_CI_RATIONALE = (
+    "Odporúčam spustiť kontroly znova — Audítor verziu uznal a zastavili ju len kontroly na GitHube, ktoré "
+    "zlyhali pri zostavení. Keď prejdú, verzia ide rovno na schválenie."
+)
+
+
 def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineState) -> ConsultationBlock:
     """CR-V2-058 Part A — the deliberated Decision Card on a Verifikácia FAIL (the FIRST FAIL onward, not only
     loop exhaustion). The SHARED, engine-side card builder that enforces the §2 nosný invariant BY
@@ -11163,6 +11326,10 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 recommended=not stuck and not override_reason,
             )
         )
+    # DEV-234: the Auditor passed this very commit and only red checks stopped it — run them again, no Auditor round.
+    rerun = _ci_rerun_commit(db, version_id) is not None
+    if rerun:
+        options.append(_RERUN_CI_OPTION)
     if override_reason:
         # ICCINT-131 — R16 z NEX Inboxu: akcia sa ponúka tam, kde môže uspieť. Pri červenom zostavení
         # je „nechaj to opraviť“ nesprávny nástroj — v kóde niet čo opravovať, a kolo AI Agenta aj
@@ -11177,7 +11344,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                     "Zostavenie sa medzitým mohlo opraviť inde. Overenie sa zopakuje nad aktuálnym "
                     "stavom — nespustí sa žiadna oprava a nemíňa sa kolo."
                 ),
-                recommended=True,
+                recommended=not rerun,
             )
         )
     options.append(
@@ -11217,7 +11384,15 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             f"fix-consultation invariant violated: expected exactly one recommended option, got {recommended_count}"
         )
 
-    if stuck:
+    if rerun:
+        rationale = _RERUN_CI_RATIONALE
+    elif override_reason:
+        # DEV-234: the card recommended the re-verify while this sentence recommended a fix — two advices on one card.
+        rationale = (
+            "Odporúčam overiť znova bez opravy — v kóde projektu niet čo opravovať; keď sa zostavenie medzitým "
+            "opravilo, overenie prejde."
+        )
+    elif stuck:
         rationale = (
             "Odporúčam build ZASTAVIŤ a odovzdať vývojárovi — rovnaké zlyhanie sa opakovalo už niekoľkokrát a "
             "automatická oprava nekonverguje; ďalší pokus pravdepodobne nepomôže, len minie čas a tokeny."
@@ -11429,6 +11604,7 @@ async def _settle_verifikacia_verdict(
         # fixer/finder split. block_reason=decision_needed (not agent_error) so 'decide' is valid + the route
         # never auto-dispatches. The scope (why it is stuck) is the card's explanation.
         scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor nevie verziu dostať cez Verifikáciu."
+        rerun = _ci_rerun_commit(db, version_id) is not None  # DEV-234: the floor may come from the CI watcher
         consult = ConsultationBlock(
             id=_verifikacia_fail_consultation_id(db, version_id, state),
             intro=f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — potrebné je tvoje rozhodnutie.",
@@ -11440,12 +11616,13 @@ async def _settle_verifikacia_verdict(
                     origin="objav",  # DEV-3: found by the check, not caused by a decision of the Manažér
                     explanation=scope,
                     options=[
+                        *([_RERUN_CI_OPTION] if rerun else []),
                         ConsultOption(
                             id="guide_fix",
                             label="Usmerniť opravu pre AI Agenta",
                             detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa AI Agentovi ako cielená "
                             "oprava a Auditor ju znova overí.",
-                            recommended=True,
+                            recommended=not rerun,
                         ),
                         ConsultOption(
                             id="hold",
@@ -11454,7 +11631,9 @@ async def _settle_verifikacia_verdict(
                             "aj cez 'Uprav'.",
                         ),
                     ],
-                    rationale="Odporúčam usmerniť opravu — Auditor zvyčajne uviazol na konkrétnej veci, ktorú "
+                    rationale=_RERUN_CI_RATIONALE
+                    if rerun
+                    else "Odporúčam usmerniť opravu — Auditor zvyčajne uviazol na konkrétnej veci, ktorú "
                     "vieš adresne opísať; pokyn dostane AI Agent (opravár), nie Auditor (nálezca).",
                 )
             ],
@@ -15630,6 +15809,8 @@ async def apply_action(
                 state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
                 db.flush()
                 return state
+            if ans.get("option_id") == "rerun_ci" and not ans.get("free_text") and not ans.get("note"):
+                return await _rerun_project_ci(db, state)  # DEV-234
             brief = (
                 ans.get("free_text") or ans.get("note") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie."
             ).strip()
@@ -15657,6 +15838,8 @@ async def apply_action(
                 # programovanie / actor=ai_agent and bumped the counter; _begin_dispatch just flips to working.
                 _begin_dispatch(db, state)
                 return state
+            if opt == "rerun_ci" and not ans.get("free_text") and not ans.get("note"):
+                return await _rerun_project_ci(db, state)  # DEV-234: the checks again, no Auditor round
             if opt == "overit_bez_opravy" and not ans.get("free_text") and not ans.get("note"):
                 # ICCINT-131: voľba z karty musí robiť to, čo sľubuje. Bez tejto vetvy by prepadla
                 # nižšie do ``guide`` a poslala by AI Agentovi text „Znova over bez opravy“ ako pokyn

@@ -117,13 +117,20 @@ def bezi(rows: list[dict]) -> list[dict]:
     return [r for r in counted_runs(rows) if r.get("status") != "completed"]
 
 
+def zlyhane_behy(rows: list[dict]) -> list[dict]:
+    """DOKONČENÉ behy, ktoré zlyhali a rátajú sa (:func:`counted_runs`) — tie, ktoré robia commit červeným a ktoré
+    „Spustiť kontroly znova“ spúšťa znova (DEV-234)."""
+    return [
+        row
+        for row in counted_runs(rows)
+        if row.get("status") == "completed" and row.get("conclusion") in CI_CONCLUSIONS_RED
+    ]
+
+
 def prvy_zlyhany(rows: list[dict]) -> Optional[dict]:
-    """Prvý DOKONČENÝ beh, ktorý zlyhal a rátá sa (:func:`counted_runs`). Poradie v zozname nič neznamená, takže
+    """Prvý DOKONČENÝ beh, ktorý zlyhal a rátá sa (:func:`zlyhane_behy`). Poradie v zozname nič neznamená, takže
     ktorýkoľvek je odpoveď."""
-    for row in counted_runs(rows):
-        if row.get("status") == "completed" and row.get("conclusion") in CI_CONCLUSIONS_RED:
-            return row
-    return None
+    return next(iter(zlyhane_behy(rows)), None)
 
 
 def verdikt(rows: list[dict]) -> tuple[str, str]:
