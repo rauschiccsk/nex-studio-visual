@@ -1,4 +1,4 @@
-# v4.95.8
+# v4.96.0
 
 **Kontroly projektu na GitHube sa dajú spustiť znova priamo z kokpitu.** Keď Audítor verziu uznal a zastavili ju
 len kontroly na GitHube (napríklad pri zostavení zlyhalo stiahnutie knižnice), karta Verifikácie ponúkne
