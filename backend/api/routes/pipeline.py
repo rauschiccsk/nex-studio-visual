@@ -303,7 +303,9 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and state.status == "blocked"
         and state.block_reason in orchestrator.VERIF_STALL_BLOCK_REASONS
     )
-    if (_in_fix_loop or _verif_stall) and "overit_bez_opravy" not in available_actions:
+    # DEV-231: and on the round cap — the cause may have been outside the project and be gone by now.
+    _at_round_cap = state is not None and orchestrator.verifikacia_round_cap_reached(state)
+    if (_in_fix_loop or _verif_stall or _at_round_cap) and "overit_bez_opravy" not in available_actions:
         available_actions = sorted([*available_actions, "overit_bez_opravy"])
     # ICCINT-13 — THE SINGLE-BUTTON CLAMP. A build stopped on a NEX Studio bug, and a build Dedo has just
     # released from one, are the two states whose whole point is that the Manažér has exactly ONE move:

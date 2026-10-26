@@ -10767,6 +10767,25 @@ def _latest_verifikacia_manager_lead(db: Session, version_id: uuid.UUID) -> Opti
 _VERDICT_TOKENS = frozenset({"FAIL", "PASS", "FAIL.", "PASS."})
 
 
+def verifikacia_round_cap_reached(state: PipelineState) -> bool:
+    """DEV-231 — the build stands on the Verifikácia round cap (the „Auditor po N kolách stále FAIL“ card). The board
+    offers „Znova overiť bez opravy“ there too and the engine takes it: when the cause was outside the project and is
+    gone, re-running the check is the way on — 26.10.2026 Author Asistent 0.1.0 had only „Usmerniť opravu“ and
+    „Zatiaľ podržať“ left after four verdicts and not one fix of the agent."""
+    return (
+        state.current_stage == "verifikacia"
+        and state.status == "blocked"
+        and state.block_reason == "decision_needed"
+        and state.iteration >= AUDITOR_LOOP_MAX
+    )
+
+
+def _verifikacia_fail_consultation_id(db: Session, version_id: uuid.UUID, state: PipelineState) -> str:
+    """The cap card's id. The cap does not move the counter and a re-verify no longer does (DEV-231), so the counter
+    alone would name the next cap card like the last one — the number of cap cards so far keeps them apart."""
+    return f"verifikacia-fail-{version_id}-{state.iteration}-{_consult_rounds_used(db, version_id, 'verifikacia_fail')}"
+
+
 def _engine_override_reason(db: Session, version_id: uuid.UUID) -> Optional[str]:
     """Prečo posledné zlyhanie Verifikácie ohlásil ENGINE a nie Auditor — rečou, alebo ``None``.
 
@@ -11320,7 +11339,7 @@ async def _settle_verifikacia_verdict(
         # never auto-dispatches. The scope (why it is stuck) is the card's explanation.
         scope = _latest_verifikacia_fix_scope(db, version_id) or "Auditor nevie verziu dostať cez Verifikáciu."
         consult = ConsultationBlock(
-            id=f"verifikacia-fail-{version_id}-{state.iteration}",
+            id=_verifikacia_fail_consultation_id(db, version_id, state),
             intro=f"Auditor po {AUDITOR_LOOP_MAX} kolách stále FAIL — potrebné je tvoje rozhodnutie.",
             source="verifikacia_fail",
             decisions=[
@@ -15293,14 +15312,15 @@ async def apply_action(
             and state.status == "blocked"
             and state.block_reason in VERIF_STALL_BLOCK_REASONS
         )
-        if not (_fix_loop or _verif_stall):
+        if not (_fix_loop or _verif_stall or verifikacia_round_cap_reached(state)):
             raise OrchestratorError(
                 "Znova spustiť overenie je platné len v opravnej slučke po Verifikácii, "
                 "alebo keď zlyhal samotný overovací beh vo Verifikácii."
             )
         state.current_stage = "verifikacia"
         state.is_regate = True
-        state.iteration += 1
+        # DEV-231: NOT ``state.iteration += 1`` — no fix runs, so no round of fixes is spent (the card says so). A FAIL
+        # of this re-verify is counted where every FAIL is: when its fix is routed.
         state.block_reason = None  # leaving the fix-loop block; the re-verify turn is a fresh agent_working
         state.dispatch_baseline_sha = None  # fresh dispatch → re-capture the baseline from a clean HEAD
         db.flush()
@@ -15550,8 +15570,7 @@ async def apply_action(
                 # vyzerala, že funguje.
                 state.current_stage = "verifikacia"
                 state.is_regate = True
-                state.iteration += 1
-                state.block_reason = None
+                state.block_reason = None  # DEV-231: no ``iteration += 1`` — no fix, no round (see the action)
                 state.dispatch_baseline_sha = None
                 db.flush()
                 _begin_dispatch(db, state)

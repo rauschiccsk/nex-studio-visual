@@ -39,7 +39,9 @@ export default function ReverifyNoFixBar({ board, versionId, onBoard }: Props) {
   // is never told "chyba bola mimo projektu" when the real reason is a stalled check.
   //   • verifikacia block  → the Auditor's OWN turn stalled (timed out); the app already passed the smoke.
   //   • programovanie loop → the root cause was fixed OUTSIDE the project; skip the fix, re-run the gate.
-  const isVerifStall = board.state?.current_stage === "verifikacia";
+  // DEV-231: the round cap is in Verifikácia too, but there the check RAN and failed — that is the "mimo projektu" case.
+  const isVerifStall =
+    board.state?.current_stage === "verifikacia" && board.state?.block_reason !== "decision_needed";
   const heading = isVerifStall
     ? "Overenie sa zaseklo — spusti ho znova"
     : "Chyba bola mimo projektu? Znova over bez opravy";
