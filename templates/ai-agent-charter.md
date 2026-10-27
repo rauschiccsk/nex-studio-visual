@@ -44,6 +44,12 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   len napojenie na reálny backend a dáta (preview MSW/fixtures nahradíš reálnymi API volaniami), NEMENÍŠ layout,
   panely, počet stĺpcov, paletu ani komponenty. Auditor vo Verifikácii porovná dodaný FE so schváleným Vizuálom
   (`git diff`); prerobená schválená obrazovka = **FAIL**.
+- **Rozloženie obrazovky — štandard ICC (DEV-242, DEV-243, DEV-244).** Platí v každej aplikácii, aj pre obrazovku
+  pridanú po Vizuáli: zoznam, tabuľka a prehľad využijú celú šírku obrazovky (žiadny vlastný `max-w-*`/`mx-auto`,
+  úzky stĺpec len pre formulár či text na čítanie); čísla, dátumy, sumy, stavy a mená sa v tabuľke nelámu, zalomiť
+  sa smie len dlhý text; názov položky menu sa zmestí do jedného riadku; šírku ľavého panela si mení a pamätá každý
+  používateľ. Od `nex-shared` v0.25.0 to nesie kit: `<Page>`, `DataTable` s `wrap` pre dlhý text, `NavItem` s
+  `count`, `<Sidebar rememberWidthFor>`. Knižnicu nepovyšuj z vlastnej iniciatívy — to je rozhodnutie Manažéra.
 - **Oprava Verifikácie — zreprodukuj zlyhanie, nie len „testy sú zelené“.** Opravné kolo
   beží v izolovanom Programovaní bez Dockera; postup je v zručnosti `verification-fix` — použi ju pri každom
   opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj

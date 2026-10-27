@@ -80,6 +80,7 @@ from backend.services import (
     git_push,
     host_docker_guard,
     instance_data_dirs,
+    nexshared,
     predeploy_backup,
     preview_switch,
     project_surfaces,
@@ -1857,6 +1858,7 @@ def _vizual_directive(
         "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
         "konzistentnému vzhľadu naprieč aplikáciami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
+        + _vizual_layout_rule(_project_slug_for_version(db, version_id), surfaces)
         + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
         + _vizual_preview_rule_others(surfaces)
         + task_line
@@ -1871,6 +1873,58 @@ def _vizual_directive(
         + "\n"
         + "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
     )
+
+
+# ── DEV-242, DEV-243, DEV-244: one ICC layout standard for every app ────────────────────────────────────────────
+# 27.10.2026 NEX Knowledge 0.1.0 at 1920 px: dates and states in tables broke into two lines, a menu entry took two
+# lines, the sidebar width could not be changed, every page capped itself and left about 270 px empty on each side.
+# Director: „Tieto veci tiež chcem mať natrvalo zabudované do kokpitu, aby nebolo potrebné pri každom projekte osobitne
+# riešiť.“ The Vizuál brief is composed in every turn (a charter is read once per session), so it carries the rule.
+
+#: The nex-shared release whose kit carries the standard — Page, DataTable ``wrap``, NavItem ``count``, Sidebar
+#: ``rememberWidthFor``.
+LAYOUT_KIT_VERSION = "0.25.0"
+
+_LAYOUT_RULE_KIT = (
+    "   ROZLOŽENIE — štandard ICC pre každú aplikáciu: každá stránka je `<Page title subtitle actions>` z "
+    "`nex-shared`; "
+    'zoznam, tabuľka a prehľad využijú celú šírku obrazovky, `width="narrow"` dostane len formulár alebo text na '
+    "čítanie — vlastný strop šírky (`max-w-*`, `mx-auto`) stránke nedávaj. Tabuľky cez `DataTable`: čísla, dátumy, "
+    "sumy, stavy a mená ostávajú v jednom riadku, `wrap: true` označ len stĺpec s dlhým textom. Ľavý panel: "
+    "`<Sidebar rememberWidthFor={…}>` s identifikátorom prihláseného používateľa (`rememberWidthFor`) — šírka sa dá "
+    "meniť a každému sa zapamätá. Názov položky menu je krátky a zmestí sa do jedného riadku (asi 20 znakov); počet "
+    "patrí do `count`, nie do textu názvu.\n"
+)
+
+_LAYOUT_RULE_PLAIN = (
+    "   ROZLOŽENIE — štandard ICC pre každú aplikáciu: zoznam, tabuľka a prehľad využijú celú šírku obrazovky — "
+    "vlastný strop šírky (`max-w-*`, `mx-auto`) stránke nedávaj, úzky stĺpec dostane len formulár alebo text na "
+    "čítanie. Čísla, dátumy, sumy, stavy a mená v tabuľkách ostávajú v jednom riadku (`whitespace-nowrap`), zalomiť "
+    "sa smie len dlhý text. Názov položky menu je krátky a zmestí sa do jedného riadku (asi 20 znakov). Projekt je na "
+    "`nex-shared` {version}; od v{kit} to nesie kit sám — knižnicu nepovyšuj z vlastnej iniciatívy, povýšenie je "
+    "rozhodnutie Manažéra pri založení verzie.\n"
+)
+
+
+def layout_rule_version(versions: list[Optional[str]]) -> Optional[str]:
+    """The kit the layout rule speaks for — the lowest of the project's frontends (a Web project has two and the rule
+    must hold in both); ``None`` when any of them cannot be read."""
+    if not versions or any(v is None for v in versions):
+        return None
+    return min(versions, key=nexshared._key)  # type: ignore[arg-type]
+
+
+def layout_rule_for(version: Optional[str]) -> str:
+    """The layout rule of the Vizuál brief for a project on nex-shared ``version`` (``None`` = unknown)."""
+    if version is not None and nexshared._key(version) >= nexshared._key(LAYOUT_KIT_VERSION):
+        return _LAYOUT_RULE_KIT
+    shown = f"v{version}" if version is not None else "neznámej verzii"
+    return _LAYOUT_RULE_PLAIN.format(version=shown, kit=LAYOUT_KIT_VERSION)
+
+
+def _vizual_layout_rule(slug: str, surfaces: tuple[project_surfaces.Surface, ...]) -> str:
+    root = str(claude_agent.PROJECTS_ROOT / slug)
+    return layout_rule_for(layout_rule_version([nexshared.effective_version(root, s.directory) for s in surfaces]))
 
 
 def _vizual_checklist_rule(
