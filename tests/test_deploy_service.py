@@ -309,6 +309,8 @@ def test_default_runner_passes_rotate_secrets_through(monkeypatch):
         return True, "OK"
 
     monkeypatch.setattr(uat_provisioner, "provision_uat", _fake_provision)
+    # DEV-238: force_fresh on UAT takes the installation down first — never a live one from a test.
+    monkeypatch.setattr(uat_provisioner, "compose_down_with_volumes", lambda path, **_kw: (True, "OK"))
     from backend.services import orchestrator
 
     monkeypatch.setattr(orchestrator, "_run_uat_deploy", _fake_run_uat_deploy)

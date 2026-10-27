@@ -3360,6 +3360,29 @@ def reclaim_port(uat_slug: str, *, port_state_file: Path = PORT_STATE_FILE) -> b
         return False
 
 
+def compose_down_with_volumes(compose_path: Path, *, timeout: int = TEARDOWN_TIMEOUT) -> tuple[bool, str]:
+    """DEV-238 — an installation taken down WITH its volumes (``down -v --remove-orphans``): its database and stored
+    data are gone. ``(ok, detail)``; never raises. No compose there = nothing to take down.
+
+    „Postaviť nanovo“ on UAT runs it before the installation is rendered again: rendered anew, its database password
+    is new, and a volume that kept the old data would keep the old password too — the app could not connect."""
+    if not compose_path.is_file():
+        return True, "no compose — nothing to take down"
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "-f", str(compose_path), "down", "-v", "--remove-orphans"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"teardown failed to run: {exc}"
+    if proc.returncode == 0:
+        return True, "OK"
+    tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-300:]
+    return False, (f"exit {proc.returncode}: {tail}" if tail else f"exit {proc.returncode}")
+
+
 def teardown_uat(
     uat_slug: str,
     *,

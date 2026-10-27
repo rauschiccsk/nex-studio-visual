@@ -7,6 +7,7 @@ import {
   Loader2,
   Lock,
   RefreshCw,
+  RotateCcw,
   UploadCloud,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ import {
 import UatGuidePanel from "@/components/deploy/UatGuidePanel";
 import { ApiError } from "@/services/api";
 import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
+import RebuildUatDialog from "@/components/deploy/RebuildUatDialog";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
@@ -115,6 +117,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
   // ICCINT-102: riadok, pre ktorý je otvorený dialóg prevzatia inštalácie (null = zavretý).
   const [adopting, setAdopting] = useState<DeployMatrixRow | null>(null);
+  // DEV-238: the UAT row whose „Postaviť nanovo“ waits for the Manažér's consent in the dialog.
+  const [rebuilding, setRebuilding] = useState<DeployMatrixRow | null>(null);
   // Per-customer chosen version in the Nasadiť dropdown (keyed by customer_id).
   const [picked, setPicked] = useState<Record<string, string>>({});
   // The customer_id currently mid-action (deploy/accept) → disables its row.
@@ -331,7 +335,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     return null;
   }
 
-  async function handleDeploy(row: DeployMatrixRow) {
+  async function handleDeploy(row: DeployMatrixRow, fresh = false) {
     const version = pickedVersion(row);
     if (!version) return;
     setRowMsg(row.customer_id, null);
@@ -342,7 +346,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     });
     setBusy(row.customer_id);
     try {
-      const result = await deployCustomer(row.customer_id, { version_number: version, environment });
+      // DEV-238: „Postaviť nanovo“ — the backend takes the UAT installation down with its data first.
+      const result = await deployCustomer(row.customer_id, {
+        version_number: version,
+        environment,
+        ...(fresh ? { force_fresh: true } : {}),
+      });
       setRowResult((prev) => ({ ...prev, [row.customer_id]: result }));
       load();
     } catch (err) {
@@ -760,6 +769,22 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           )}
                           {redeploy ? "Nasadiť znova" : "Nasadiť"}
                         </button>
+                        {/* DEV-238: a UAT installation an earlier deploy left broken can be built again from scratch —
+                            only where one exists, and only after the consent in RebuildUatDialog. Never on PROD. */}
+                        {environment === "uat" && row.uat_version && verified.length > 0 && (
+                          <button
+                            onClick={() => setRebuilding(row)}
+                            disabled={isBusy || blocked !== null}
+                            title={
+                              (progress ? RUNNING_REASON : null) ??
+                              blocked?.title ??
+                              `Zruší inštaláciu UAT aj s jej dátami a postaví ju nanovo z verzie ${fmtVer(chosen)}.`
+                            }
+                            className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" /> Postaviť nanovo
+                          </button>
+                        )}
                       </div>
                       {/* v4.0.54: this line used to be PROD-only and hardcoded to the acceptance gate — so on
                           UAT (the incident tab) a disabled button got no visible line at all, and on PROD it
@@ -781,6 +806,20 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
       {/* DEV-90: what to try in UAT — the agent's test guide of the version, under the table. */}
       {environment === "uat" && slug && <UatGuidePanel slug={slug} versions={verified} rows={rows} />}
+
+      {/* DEV-238: „Postaviť nanovo“ on UAT — only after the explicit consent in the dialog. */}
+      {rebuilding && (
+        <RebuildUatDialog
+          customerName={rebuilding.customer_name}
+          versionLabel={fmtVer(pickedVersion(rebuilding) ?? "")}
+          onCancel={() => setRebuilding(null)}
+          onConfirm={() => {
+            const row = rebuilding;
+            setRebuilding(null);
+            void handleDeploy(row, true);
+          }}
+        />
+      )}
 
       {/* ICCINT-102: prevzatie ručne písanej inštalácie — samostatné rozhodnutie s náhľadom
           a odpísaným potvrdením. NIE je to prepínač pri „Nasadiť“. */}

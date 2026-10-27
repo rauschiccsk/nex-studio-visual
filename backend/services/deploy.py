@@ -880,6 +880,12 @@ def _vrat_predpis_po_zlyhani(
     return f"{detail} Predpis na cieli vrátený do stavu pred nasadením."
 
 
+#: DEV-238 — why „nanovo“ is refused on a production installation; the deploy screen shows the sentence as it is.
+FRESH_PROD_REFUSAL = (
+    "Ostrá inštalácia sa nanovo nestavia — zahodili by sa dáta zákazníka. „Postaviť nanovo“ je len pre UAT."
+)
+
+
 async def _default_deploy_runner(
     *,
     project_slug: str,
@@ -940,6 +946,17 @@ async def _default_deploy_runner(
             deploy_host=deploy_host if is_prod else None,
             private=private_network,
         )
+
+    if force_fresh and not is_prod:
+        # DEV-238: built anew, the installation gets a new database password — the old volume would keep the old data
+        # and the old password, and the app could not connect. So its volumes go first, and nothing is rendered when
+        # that fails. (Until 27.10.2026 force_fresh rotated the secrets and kept the volume.)
+        installation = orchestrator._uat_compose_path(
+            uat_slug, environment="uat", customer_slug=customer_slug, full_project_slug=project_slug
+        )
+        removed, why = await asyncio.to_thread(uat_provisioner.compose_down_with_volumes, installation)
+        if not removed:
+            return RunnerResult(False, f"Inštaláciu UAT sa nepodarilo zrušiť pred novou stavbou: {why}", None)
 
     try:
         result = await asyncio.to_thread(_provision)
@@ -1111,6 +1128,9 @@ async def deploy(
     """
     if environment not in ("uat", "prod"):
         raise ValueError(f"Unknown environment {environment!r} (expected 'uat' or 'prod')")
+    if force_fresh and environment == "prod":
+        # DEV-238: „nanovo“ takes the installation down with its data — on PROD those are the customer's.
+        raise ValueError(FRESH_PROD_REFUSAL)
 
     # Resolve the runner at call time (NOT a parameter default) so a caller / test
     # that monkeypatches the module-level ``_default_deploy_runner`` is respected

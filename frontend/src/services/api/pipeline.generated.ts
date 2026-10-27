@@ -5052,10 +5052,10 @@ export interface components {
          *
          *     ``customer_id`` is supplied by the route path. The body carries the chosen
          *     verified ``version_number`` and the target ``environment`` (uat | prod).
-         *     ``force_fresh`` is the explicit, opt-in escape hatch that re-provisions the
-         *     instance from scratch (rotating secrets, wiping data); it defaults to False
-         *     so EVERY redeploy preserves data + secrets + extra_hosts (§3.7, the
-         *     inbox-UAT lesson). It maps to ``uat_provisioner.provision_uat(rotate_secrets=...)``.
+         *     ``force_fresh`` is the explicit, opt-in escape hatch — „Postaviť nanovo“, UAT only (DEV-238): the installation is
+         *     taken down WITH its volumes (``uat_provisioner.compose_down_with_volumes``), then rendered with new secrets
+         *     (``provision_uat(rotate_secrets=True)``) and started. Refused on PROD. It defaults to False so EVERY redeploy
+         *     preserves data + secrets + extra_hosts (§3.7, the inbox-UAT lesson).
          */
         DeployRequest: {
             /**
@@ -5066,7 +5066,7 @@ export interface components {
             environment: "uat" | "prod";
             /**
              * Force Fresh
-             * @description Opt-in: re-provision from scratch (rotate secrets, fresh data). Default False — a redeploy PRESERVES data + secrets + extra_hosts and runs migrations (§3.7).
+             * @description Opt-in, UAT only: take the installation down with its data and build it again with new secrets (DEV-238); refused on PROD. Default False — a redeploy PRESERVES data + secrets + extra_hosts and runs migrations (§3.7).
              * @default false
              */
             force_fresh: boolean;
