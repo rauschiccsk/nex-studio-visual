@@ -291,6 +291,10 @@ def _preview(monkeypatch, tmp_path, *, running_host):
         vizual_sandbox, "_inspect_state", lambda name: {"exists": state["running"] or bool(calls), "running": True}
     )
     monkeypatch.setattr(vizual_sandbox, "_running_public_host", lambda name: running_host)
+    # DEV-241: a preview is reused only on the libraries its frontend has now — these previews are; the zone decides.
+    monkeypatch.setattr(
+        vizual_sandbox, "_running_dependencies", lambda name: vizual_sandbox.dependencies_fingerprint(tmp_path)
+    )
     monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: calls.append(("rm", name)))
     monkeypatch.setattr(vizual_sandbox, "_ensure_node_modules", lambda path, slug: None)
     monkeypatch.setattr(vizual_sandbox, "_write_override_config", lambda path: path)

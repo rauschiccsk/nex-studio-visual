@@ -13742,6 +13742,11 @@ def read_vizual_mockup(db: Session, version_id: uuid.UUID) -> Optional[str]:
 
 #: DEV-127: reading a preview's state is two short docker calls (inspect, and logs when it stopped).
 VIZUAL_PREVIEW_STATE_CAP = 30.0
+#: DEV-241: what the Manažér reads when a preview on old libraries could not be built anew — the strip then offers
+#: „Spustiť náhľad znova“, which tries again.
+VIZUAL_PREVIEW_REBUILD_FAILED = (
+    "Knižnice aplikácie sa zmenili a náhľad sa nepodarilo spustiť nanovo — skús „Spustiť náhľad znova“."
+)
 #: DEV-127: why „Schváliť vizuál" is refused while the preview does not run — the same words the button gives.
 VIZUAL_PREVIEW_DOWN = (
     "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ."
@@ -13776,6 +13781,10 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
             **_preview_of(surface),
             cap=VIZUAL_PREVIEW_STATE_CAP,
         )
+        if found["state"] == "running" and not await run_blocking(
+            vizual_sandbox.preview_is_current, slug, **_preview_of(surface), cap=VIZUAL_PREVIEW_STATE_CAP
+        ):
+            found = await _rebuild_preview_on_current_libraries(slug, private, surface)
         frontends.append({"name": surface.name, "label": surface.label, "directory": surface.directory, **found})
     down = [f for f in frontends if f["state"] != "running"]
     overall = "running" if not down else ("stopped" if any(f["state"] == "stopped" for f in down) else "missing")
@@ -13787,12 +13796,29 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     return {**found, "frontends": frontends} if len(frontends) > 1 else found
 
 
+async def _rebuild_preview_on_current_libraries(slug: str, private: bool, surface: project_surfaces.Surface) -> dict:
+    """DEV-241: a preview bundling libraries its frontend no longer has is built anew — the Manažér would otherwise walk
+    the old app with no way to refresh it. ``spin_up`` sees the old fingerprint and recreates the container; a rebuild
+    that fails reads as a preview that does not run (:data:`VIZUAL_PREVIEW_REBUILD_FAILED`)."""
+    from backend.services import vizual_sandbox
+
+    try:
+        await run_blocking(vizual_sandbox.spin_up, slug, private=private, **_preview_of(surface), cap=VIZUAL_SPINUP_CAP)
+    except Exception:  # noqa: BLE001 — a failed rebuild is a preview that does not run, never a failed state check
+        logger.exception("vizual sandbox: rebuilding the preview of %s on its current libraries failed", slug)
+        return {"state": "stopped", "url": None, "reason": VIZUAL_PREVIEW_REBUILD_FAILED}
+    return await run_blocking(
+        vizual_sandbox.preview_state, slug, private=private, **_preview_of(surface), cap=VIZUAL_PREVIEW_STATE_CAP
+    )
+
+
 async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     """DEV-127: start the live preview again without an agent turn — one click of the Manažér.
 
     Only in the Vizuál step and only for a live preview (a mockup needs no container). ``spin_up`` removes a
     stopped leftover and creates the preview anew; it runs off the event loop like every spin-up (ICCINT-74).
-    DEV-162: every frontend whose preview is down is started; one that runs is left alone.
+    DEV-162: every frontend whose preview is down is started; one that runs is left alone. DEV-241: one that runs on
+    old libraries is built anew already by :func:`vizual_preview`, which this asks first.
     Raises :class:`OrchestratorError` with a sentence for the Manažér when it cannot start.
     """
     now = await vizual_preview(db, version_id)
@@ -14077,6 +14103,14 @@ async def _run_vizual_round(
         )
         if isinstance(follow_up, PipelineStatusBlock):
             checklist = follow_up.vizual_checklist
+
+    # DEV-241: the agent may have raised or added a library — HMR carries code, not libraries Vite bundled at start.
+    # Looking at the preview builds it anew on the libraries the agent left, BEFORE the Manažér is sent to walk it.
+    if mockup_rel is None:
+        try:
+            await vizual_preview(db, version_id)
+        except Exception:  # noqa: BLE001 — the turn's work is done; the state check of the Riadiace centrum retries
+            logger.exception("vizual: checking the preview after the turn failed for %s", slug)
 
     # The AI applied the change (edited the FE + committed; HMR reflected it) → hand the turn BACK to the
     # Manažér. NEVER advance the stage here — only a ``schvalit`` action moves vizual → programovanie.

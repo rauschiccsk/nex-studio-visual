@@ -35,10 +35,12 @@ upgrade for the matched router by default, so no extra label is required.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -122,6 +124,16 @@ _VITE_SCRATCH_DIRS = ("/app/node_modules/.vite", "/app/node_modules/.vite-temp")
 _NPM_INSTALL_TIMEOUT = 600
 #: Bound the short-lived ``docker`` control calls (run/inspect/rm).
 _DOCKER_CALL_TIMEOUT = 60
+
+#: DEV-241: the label a preview carries — the fingerprint of the libraries it was started with. Vite bundles the
+#: libraries once, when it starts (into the tmpfs cache above), so a preview started before the AI Agent raised or
+#: added a library serves the old one for as long as it runs: NEX Knowledge 0.1.0 kept the card without its inner
+#: spacing after nex-shared v0.24.0 was installed (27.10.2026). A preview whose fingerprint is not its frontend's
+#: current one is built anew wherever the cockpit starts it (:func:`spin_up`) or looks at it
+#: (:func:`preview_is_current`).
+DEPENDENCIES_LABEL = "nex-studio.vizual.dependencies"
+#: What the fingerprint is read from — the lock file names the exact libraries; package.json where there is none.
+_DEPENDENCY_FILES = ("package-lock.json", "package.json")
 
 
 # ---------------------------------------------------------------------------
@@ -330,8 +342,24 @@ def _release_notes_mount(frontend_host_path: Path) -> list[str]:
     return ["--mount", f"type=bind,source={resolved},target={RELEASE_NOTES_IN_SANDBOX},readonly"]
 
 
+def dependencies_fingerprint(frontend_host_path: Path) -> str:
+    """DEV-241: the libraries a preview of ``frontend_host_path`` bundles — 16 hex of the SHA-256 of its
+    ``package-lock.json`` (``package.json`` without one); ``""`` when the frontend has neither."""
+    for name in _DEPENDENCY_FILES:
+        try:
+            return hashlib.sha256((frontend_host_path / name).read_bytes()).hexdigest()[:16]
+        except OSError:
+            continue
+    return ""
+
+
 def build_run_argv(
-    *, slug: str, frontend_host_path: Path, private: bool = False, directory: str = MAIN_FRONTEND
+    *,
+    slug: str,
+    frontend_host_path: Path,
+    private: bool = False,
+    directory: str = MAIN_FRONTEND,
+    dependencies: Optional[str] = None,
 ) -> list[str]:
     """Compose the EXACT ``docker run`` argv for the sandbox (every option is load-bearing).
 
@@ -359,6 +387,10 @@ def build_run_argv(
     ]
     for label in _traefik_labels(slug, private=private, directory=directory):
         argv += ["--label", label]
+    # DEV-241: the libraries this preview bundles — compared with its frontend's by spin_up / preview_is_current.
+    if dependencies is None:
+        dependencies = dependencies_fingerprint(frontend_host_path)
+    argv += ["--label", f"{DEPENDENCIES_LABEL}={dependencies}"]
     for scratch in _VITE_SCRATCH_DIRS:
         # Writable RAM scratch shadowing Vite's node_modules cache/temp — keeps the host node_modules
         # pristine AND immune to pre-existing root-owned scratch dirs (see _VITE_SCRATCH_DIRS).
@@ -444,6 +476,35 @@ def _running_public_host(name: str) -> Optional[str]:
     return None
 
 
+def _running_dependencies(name: str) -> Optional[str]:
+    """DEV-241: the fingerprint a preview was started with (``""`` for one started before the label existed), or
+    ``None`` when docker cannot be asked (never raises)."""
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "-f", f'{{{{index .Config.Labels "{DEPENDENCIES_LABEL}"}}}}', name],
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_CALL_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+#: DEV-241: one spin-up of a preview at a time — the round, its end, the state check of every open Riadiace centrum
+#: and „Spustiť náhľad znova“ may all find the same preview on old libraries; the first builds it anew, the others
+#: then find it current. Without it two of them each removed and started the container.
+_SPIN_LOCKS: dict[str, threading.Lock] = {}
+_SPIN_LOCKS_GUARD = threading.Lock()
+
+
+def _spin_lock(name: str) -> threading.Lock:
+    with _SPIN_LOCKS_GUARD:
+        return _SPIN_LOCKS.setdefault(name, threading.Lock())
+
+
 def _force_remove(name: str) -> None:
     """``docker rm -f -v <name>`` — with its unnamed volumes (DEV-172); idempotent, never raises (a missing container is
     a no-op success)."""
@@ -507,9 +568,10 @@ def spin_up(
     Starts container ``vizual-<slug>`` for ``/opt/projects/<slug>/frontend`` (or the explicit
     ``frontend_path``), on ``nex-proxy-net``, with Traefik labels routing
     ``Host(vizual-<slug>.isnex.eu)`` → the internal Vite port. If a container of that name is already
-    RUNNING under the expected name, returns the URL without recreating; a leftover STOPPED container — or a
-    running one under the other zone's name, after the project's private-network option changed (DEV-42) — is
-    removed and recreated. Returns ``https://vizual-<slug>.isnex.eu`` (``.int.isnex.eu`` when ``private``).
+    RUNNING under the expected name and on the libraries its frontend has now, returns the URL without recreating; a
+    leftover STOPPED container — a running one under the other zone's name, after the project's private-network
+    option changed (DEV-42), or one started with other libraries (DEV-241) — is removed and recreated. One spin-up
+    of a preview runs at a time. Returns ``https://vizual-<slug>.isnex.eu`` (``.int.isnex.eu`` when ``private``).
 
     Raises:
         ValueError: unsafe slug / frontend path escaping the projects root.
@@ -521,19 +583,33 @@ def spin_up(
     name = container_name(slug, directory)
 
     host = public_host(slug, private=private, directory=directory)
+    with _spin_lock(name):
+        return _spin_up_locked(slug, name, host, frontend_host_path, private=private, directory=directory)
+
+
+def _spin_up_locked(slug: str, name: str, host: str, frontend_host_path: Path, *, private: bool, directory: str) -> str:
     state = _inspect_state(name)
     if state["running"] and _running_public_host(name) == host:
-        logger.info("vizual sandbox: %s already running — reusing", name)
-        return public_url(slug, private=private, directory=directory)
+        if _running_dependencies(name) == dependencies_fingerprint(frontend_host_path):
+            logger.info("vizual sandbox: %s already running — reusing", name)
+            return public_url(slug, private=private, directory=directory)
+        logger.info("vizual sandbox: %s runs on other libraries than its frontend has now — building it anew", name)
     if state["exists"]:
-        # A stopped/crashed leftover, or one still answering under the other zone's name (DEV-42: a preview of a
-        # private project must not keep its public name) — recreate clean.
+        # A stopped/crashed leftover, one still answering under the other zone's name (DEV-42: a preview of a
+        # private project must not keep its public name), or one bundling old libraries (DEV-241) — recreate clean.
         _force_remove(name)
 
     _ensure_node_modules(frontend_host_path, slug=slug)
     _write_override_config(frontend_host_path)
 
-    argv = build_run_argv(slug=slug, frontend_host_path=frontend_host_path, private=private, directory=directory)
+    # After _ensure_node_modules: an install may rewrite the lock file, and the label must name what Vite bundles.
+    argv = build_run_argv(
+        slug=slug,
+        frontend_host_path=frontend_host_path,
+        private=private,
+        directory=directory,
+        dependencies=dependencies_fingerprint(frontend_host_path),
+    )
     logger.info("vizual sandbox: starting %s for %s", name, frontend_host_path)
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=_DOCKER_CALL_TIMEOUT)
@@ -602,6 +678,23 @@ def preview_state(slug: str, *, private: bool = False, directory: str = MAIN_FRO
     if seen["exists"]:
         return {"state": "stopped", "url": None, "reason": _stopped_reason(name)}
     return {"state": "missing", "url": None, "reason": None}
+
+
+def preview_is_current(slug: str, *, directory: str = MAIN_FRONTEND) -> bool:
+    """DEV-241: does the preview of ``slug`` bundle the libraries its frontend has now?
+
+    ``True`` when it cannot be told — no such frontend, or docker cannot be asked: a preview is never rebuilt on a
+    guess. A preview started before the fingerprint existed has none and is not current.
+    """
+    _validate_project_slug(slug)
+    try:
+        frontend_host_path = _resolve_frontend_path(slug, None, directory)
+    except (ValueError, FileNotFoundError):
+        return True
+    started_with = _running_dependencies(container_name(slug, directory))
+    if started_with is None:
+        return True
+    return started_with == dependencies_fingerprint(frontend_host_path)
 
 
 def status(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> dict:
