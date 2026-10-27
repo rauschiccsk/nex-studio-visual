@@ -340,6 +340,44 @@ def test_the_official_image_in_every_form_a_project_writes_it_is_accepted(tmp_pa
     assert _plan(tmp_path, f"services:\n  db:\n    image: {image}\n").image == image
 
 
+#: DEV-246 — 27.10.2026 NEX Knowledge 0.1.0 stopped at its first database task: its search needs the pgvector
+#: extension, its compose file names ``pgvector/pgvector:pg16`` and the allow-list knew only the official image.
+#: pgvector's image is the official one with the extension built in (``FROM postgres:$PG_MAJOR-…``), published by
+#: the pgvector project itself; it starts and is configured exactly like ``postgres``. Director: „Súhlasím“.
+_PGVECTOR_FORMS = [
+    "pgvector/pgvector",
+    "pgvector/pgvector:pg16",
+    "pgvector/pgvector:0.8.0-pg17",
+    "pgvector/pgvector:pg16@sha256:" + "b" * 64,
+]
+
+
+@pytest.mark.parametrize("image", _PGVECTOR_FORMS)
+def test_the_pgvector_image_in_every_form_a_project_writes_it_is_accepted(tmp_path, image) -> None:
+    assert build_db.is_supported_postgres_image(image) is True
+    assert _plan(tmp_path, f"services:\n  db:\n    image: {image}\n").image == image
+
+
+#: What a turn could write to ride on the second entry — a registry host, another namespace, another repository
+#: of the same namespace, a lookalike name, or the namespace dropped.
+_PGVECTOR_LOOKALIKES = (
+    "evil.example.com/pgvector/pgvector:pg16",
+    "docker.io/pgvector/pgvector:pg16",
+    "attacker/pgvector:pg16",
+    "pgvector/pgvector-backdoor:v1",
+    "pgvector/other:pg16",
+    "pgvector:pg16",
+)
+
+
+@pytest.mark.parametrize("image", _PGVECTOR_LOOKALIKES)
+def test_a_lookalike_of_the_pgvector_image_is_refused_by_name(tmp_path, image) -> None:
+    assert build_db.is_supported_postgres_image(image) is False
+    with pytest.raises(build_db.UnsupportedProjectService) as exc:
+        _plan(tmp_path, f"services:\n  db:\n    image: {image}\n")
+    assert image in str(exc.value)
+
+
 def test_the_default_image_is_itself_on_the_allow_list() -> None:
     """The fallback for a project that has not written its compose file yet must satisfy the same rule —
     otherwise the first Programovanie turn of every new project dies in ``_assert_runnable``."""

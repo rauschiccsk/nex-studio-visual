@@ -120,9 +120,10 @@ DEFAULT_ALIAS = "db"
 DEFAULT_DRIVER = "postgresql+asyncpg"
 POSTGRES_PORT = 5432
 
-#: An image that merely CLAIMS to be a Postgres by repository name. Used ONLY to give a rejected image a
-#: message that names the real reason (see :func:`rejected_postgres_images`) — never to decide what runs.
-_POSTGRES_IMAGE_PREFIX = "postgres"
+#: An image that merely CLAIMS to be a Postgres by name — a path segment starting with one of these. Used ONLY to
+#: give a rejected image a message that names the real reason (see :func:`rejected_postgres_images`) — never to
+#: decide what runs.
+_POSTGRES_NAME_PREFIXES = ("postgres", "pgvector")
 
 #: THE ONLY IMAGES THIS MODULE STARTS — an ALLOW-LIST of one repository, and the narrowness is the point.
 #:
@@ -140,11 +141,18 @@ _POSTGRES_IMAGE_PREFIX = "postgres"
 #: and ``attacker/postgres-backdoor:v1`` were accepted by the same rule. A check an attacker satisfies by
 #: NAMING his image is not a check.
 #:
+#: DEV-246 (27.10.2026, Director: „Súhlasím“) — the second entry, ``pgvector/pgvector`` from Docker Hub, exactly that
+#: namespace and repository: NEX Knowledge searches by meaning and its database needs the pgvector extension. That
+#: image is the official one with the extension built in (``FROM postgres:$PG_MAJOR-…``), published by the pgvector
+#: project itself, so it starts and is configured exactly like ``postgres``. Still a list, still no registry host.
+#:
 #: Hence: the official Docker Hub ``postgres`` repository, with NO registry host and NO namespace, an
 #: optional tag and an optional digest pin — nothing else. A legitimate ``mycorp/postgres-with-extensions``
 #: is refused too, by name and out loud, which was always the honest answer for it: we would not know how to
 #: configure it. Widening this is a deliberate act with a threat model attached, not a convenience edit.
-_ALLOWED_POSTGRES_IMAGE_RE = re.compile(r"^postgres(:[A-Za-z0-9_][A-Za-z0-9._-]{0,126})?(@sha256:[a-f0-9]{64})?$")
+_ALLOWED_POSTGRES_IMAGE_RE = re.compile(
+    r"^(postgres|pgvector/pgvector)(:[A-Za-z0-9_][A-Za-z0-9._-]{0,126})?(@sha256:[a-f0-9]{64})?$"
+)
 
 #: PostgreSQL identifiers we are willing to put into an environment variable and a URL. Anything else
 #: (an unresolved ``${VAR}``, a quote, a slash) falls back to the slug-derived name instead of being
@@ -404,12 +412,15 @@ def _repository(image: str) -> str:
 
 
 def _names_itself_postgres(image: str) -> bool:
-    """Whether an image CLAIMS to be a Postgres by repository name — the OLD, insufficient test.
+    """Whether an image CLAIMS to be a Postgres by name — the OLD, insufficient test.
 
     Kept for exactly one purpose: telling a rejected project WHY. "Unsupported service ``db``" would send
     somebody reading YAML; "``attacker/postgres-backdoor:v1`` is not the official postgres image" does not.
+    DEV-246: any path segment counts, so ``pgvector/other`` and ``attacker/pgvector`` are named too.
     """
-    return _repository(image).startswith(_POSTGRES_IMAGE_PREFIX)
+    head, _sep, _last = image.split("@", 1)[0].rpartition("/")
+    segments = [*filter(None, head.split("/")), _repository(image)]
+    return any(segment.startswith(_POSTGRES_NAME_PREFIXES) for segment in segments)
 
 
 def _postgres_services(services: dict[str, dict]) -> list[tuple[str, dict, str]]:
@@ -504,13 +515,13 @@ def plan_database(*, slug: str, host_project_dir: str, token: str) -> BuildDatab
         # generic "supporting service" bucket otherwise, and the operator would go looking for a Redis.
         raise UnsupportedProjectService(
             f"{_LABEL}: the project's database service(s) "
-            f"{', '.join(f'{name} ({image})' for name, image in rejected)} do NOT use the official Docker Hub "
-            f"``postgres`` image, and the engine starts nothing else. The image named in a compose file is "
-            f"chosen by the build turn and started by the ENGINE — as root, with the default capability set, "
-            f"on the build's own network — so the set of images that may run is fixed here and not derived "
-            f"from a name. Use ``postgres:<tag>`` (no registry, no namespace); if this project genuinely "
-            f"needs a different database image, teaching the engine to supply it is a deliberate change with "
-            f"a threat model attached (ICCINT-16 STEP 2)."
+            f"{', '.join(f'{name} ({image})' for name, image in rejected)} do NOT use an image the engine starts — "
+            f"the official Docker Hub ``postgres`` or ``pgvector/pgvector`` — and it starts nothing else. The image "
+            f"named in a compose file is chosen by the build turn and started by the ENGINE — as root, with the "
+            f"default capability set, on the build's own network — so the set of images that may run is fixed here "
+            f"and not derived from a name. Use ``postgres:<tag>`` or ``pgvector/pgvector:<tag>`` (no registry); if "
+            f"this project genuinely needs a different database image, teaching the engine to supply it is a "
+            f"deliberate change with a threat model attached (ICCINT-16 STEP 2, DEV-246)."
         )
     extras = unsupported_services(services)
     if extras:
