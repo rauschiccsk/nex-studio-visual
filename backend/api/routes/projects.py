@@ -1064,6 +1064,8 @@ def create_project(
                 project.name,
                 adopted=not scaffolded_here,
                 project_type=project.type,
+                # DEV-253: an adopted project keeps its own frame, so its agents get no template rules either.
+                template=None if adopting else payload.template,
             )
         except ProvisioningError as exc:
             db.rollback()

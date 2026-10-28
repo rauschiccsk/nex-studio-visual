@@ -122,7 +122,7 @@ def test_a_skill_write_failure_stops_founding_but_not_a_build(tmp_path, monkeypa
     root = _scaffold(tmp_path)
     cps.provision_v2_agent_charters(root, "projekt", "Projekt", adopted=False)
 
-    def _disk_full(_claude_dir):
+    def _disk_full(_claude_dir, _template=None):
         raise OSError("No space left on device")
 
     with monkeypatch.context() as m:

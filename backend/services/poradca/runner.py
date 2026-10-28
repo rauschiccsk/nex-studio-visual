@@ -286,11 +286,11 @@ TYPE_RULES_INTRO = (
 )
 
 
-def _charter_text(project_type: str) -> str:
-    """Poradca's rules — and in a project of a type with rules of its own (Web), the rules its build agents read, from
-    the same file (DEV-171)."""
+def _charter_text(project_type: str, template: str | None = None) -> str:
+    """Poradca's rules — and in a project with rules of its own (Web, an app template), the rules its build agents
+    read, from the same files (DEV-171, DEV-253)."""
     text = _CHARTER.read_text(encoding="utf-8")
-    rules = postscaffold.project_type_rules(project_type)
+    rules = postscaffold.project_type_rules(project_type, template)
     if not rules:
         return text
     return text.rstrip() + "\n\n---\n\n" + TYPE_RULES_INTRO + "\n\n" + rules
@@ -389,7 +389,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             project = db.get(Project, conversation.project_id)
             # DEV-171: the rules follow the project's type — a project switched to Web gives its conversation the
             # Web rules at its next question (the sha differs, DEV-30).
-            charter = _charter_text(project.type)
+            charter = _charter_text(project.type, project.template)
             charter_sha = _charter_sha(charter)
             user = db.get(User, user_id)
             limit = max_concurrent(db)

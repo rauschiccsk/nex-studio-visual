@@ -61,6 +61,18 @@ class TemplateChoice:
     ai: bool
 
 
+def template_of_slug(slug: str) -> str | None:
+    """The app template the project was founded on (``projects.template``), or ``None`` — for the steps that know a
+    project only by its slug (a build turn's rules, the Vizuál brief, the boot check)."""
+    from sqlalchemy import select
+
+    from backend.db.models.projects import Project
+    from backend.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        return db.execute(select(Project.template).where(Project.slug == slug)).scalar_one_or_none()
+
+
 def _run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, timeout=STEP_TIMEOUT, check=False, **kwargs)
 

@@ -18,6 +18,7 @@ convention (Phase 3).
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import hashlib
@@ -60,6 +61,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    app_template,
     build_db,
     build_forecast,
     build_leftovers,
@@ -1128,6 +1130,13 @@ def _frontend_dirs_text(surfaces: tuple[project_surfaces.Surface, ...]) -> str:
     return ", ".join(f"`{s.directory}/` ({s.label})" for s in surfaces)
 
 
+def _project_template_for_version(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-253: the app template the version's project was founded on (``projects.template``), or ``None``."""
+    return db.execute(
+        select(Project.template).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+    ).scalar_one_or_none()
+
+
 def _project_slug_for_version(db: Session, version_id: uuid.UUID) -> str:
     slug = db.execute(
         select(Project.slug).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
@@ -1844,6 +1853,15 @@ def _vizual_directive(
         else f"4. Manažér žiada TÚTO zmenu: «{manager_request}». Aplikuj PRESNE ju — nič navyše, nič menej.\n"
     )
     surfaces = _surfaces_for_version(db, version_id)
+    slug = _project_slug_for_version(db, version_id)
+    # DEV-253: a project on an app template — its frame is the template's, so is its preview.
+    frame_rules = (
+        _VIZUAL_TEMPLATE_RULES
+        if _project_template_for_version(db, version_id)
+        else _vizual_layout_rule(slug, surfaces)
+        + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / slug)
+        + _vizual_preview_rule_others(surfaces)
+    )
     where = (
         "VÝHRADNE vo FRONTENDE (adresár `frontend/`)"
         if len(surfaces) == 1
@@ -1858,9 +1876,7 @@ def _vizual_directive(
         "2. Obrazovky skladaj zo zdieľaného kitu `nex-shared` (rovnaké komponenty a štýl) — kvôli "
         "konzistentnému vzhľadu naprieč aplikáciami. Staviaš REÁLNE obrazovky, nie kresbu: to, čo Manažér "
         "schváli, sa presne toto aj postaví vo fáze Programovanie.\n"
-        + _vizual_layout_rule(_project_slug_for_version(db, version_id), surfaces)
-        + _vizual_preview_rule(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
-        + _vizual_preview_rule_others(surfaces)
+        + frame_rules
         + task_line
         + "5. Výsledok iba ZAPÍŠ do FE zdrojov — NEcommituj (živý náhľad ho cez HMR premietne < 1 s aj bez commitu). "
         "Počas Vizuálu môže byť takýchto drobných úprav veľa; všetky sa spoločne uložia JEDNÝM commitom až keď "
@@ -1885,15 +1901,34 @@ def _vizual_directive(
 #: ``rememberWidthFor``.
 LAYOUT_KIT_VERSION = "0.25.0"
 
-_LAYOUT_RULE_KIT = (
+#: The pages part of the layout rule — also what a project on an app template is told (its left panel is the frame's).
+_LAYOUT_RULE_PAGES = (
     "   ROZLOŽENIE — štandard ICC pre každú aplikáciu: každá stránka je `<Page title subtitle actions>` z "
     "`nex-shared`; "
     'zoznam, tabuľka a prehľad využijú celú šírku obrazovky, `width="narrow"` dostane len formulár alebo text na '
     "čítanie — vlastný strop šírky (`max-w-*`, `mx-auto`) stránke nedávaj. Tabuľky cez `DataTable`: čísla, dátumy, "
-    "sumy, stavy a mená ostávajú v jednom riadku, `wrap: true` označ len stĺpec s dlhým textom. Ľavý panel: "
+    "sumy, stavy a mená ostávajú v jednom riadku, `wrap: true` označ len stĺpec s dlhým textom."
+)
+
+_LAYOUT_RULE_KIT = _LAYOUT_RULE_PAGES + (
+    " Ľavý panel: "
     "`<Sidebar rememberWidthFor={…}>` s identifikátorom prihláseného používateľa (`rememberWidthFor`) — šírka sa dá "
     "meniť a každému sa zapamätá. Názov položky menu je krátky a zmestí sa do jedného riadku (asi 20 znakov); počet "
     "patrí do `count`, nie do textu názvu.\n"
+)
+
+#: DEV-253: what a project on an app template is told in the Vizuál brief instead of the left-panel rule and the
+#: preview harness — its frame is the template's and answers in the preview by itself.
+_VIZUAL_TEMPLATE_RULES = (
+    "   RÁM ŠABLÓNY (zručnosť `sablona-aplikacie`): ľavý panel, horná lišta, prihlásenie, Ako začať, Aktualizácie a "
+    "Nastavenia sú zo šablóny aplikácie — nekreslíš ich, nemeníš ani nenapodobňuješ. Obrazovka aplikácie je "
+    "`<Route>` vnútri `<TemplateApp>` vo `frontend/src/App.tsx`, jej položka ľavého panela je vo "
+    "`frontend/app.manifest.json` (`nav`: krátky názov do 22 znakov, ikona, cesta) a počet pri nej cez `counts` vo "
+    "`frontend/src/app.ts`, nie v texte názvu.\n" + _LAYOUT_RULE_PAGES + "\n"
+    "3. NÁHĽAD: beží bez servera a rám šablóny v ňom odpovedá sám — `frontend/src/preview/handlers.ts` začína "
+    "`...previewHandlers({ manifest })` z `nex-app-kit/preview`, takže sa náhľad otvorí prihlásený s celým rámom. "
+    "Za ne doplň LEN odpovede vlastných obrazoviek s reprezentatívnymi dátami (cesty `*/api/v1/…`); "
+    "`frontend/src/main.tsx` a `frontend/src/preview/isPreview.ts` nechaj presne tak, ako sú.\n"
 )
 
 _LAYOUT_RULE_PLAIN = (
@@ -8741,6 +8776,8 @@ def _check_aktualizacie_frontend(proj_root: Path) -> Optional[str]:
     Mirrors the flagship-app drop (nex-payables: page + route + nav all missing → the first, page, message). A
     missing ``frontend/src`` surfaces as the page message — the caller only runs this for a full web app."""
     fe_src = Path(proj_root) / "frontend" / "src"
+    if _fe_src_matches(fe_src, _renders_template_app):
+        return None  # DEV-253: the app template's frame carries Aktualizácie — its page, route and left-panel entry
     page_files = frozenset(fe_src.rglob("Updates*.tsx"))
     if not page_files and not _fe_src_matches(fe_src, _UPDATES_PAGE_IMPORT_RE):
         return "chýba stránka Aktualizácie (napr. frontend/src/pages/UpdatesPage.tsx)"
@@ -8755,6 +8792,170 @@ def _check_aktualizacie_frontend(proj_root: Path) -> Optional[str]:
         if _fe_src_matches(fe_src, _has_nav_to(path), exclude=page_files):
             return None
     return f"chýba položka v menu, ktorá vedie na stránku Aktualizácie (/{paths[0]})"
+
+
+# ── DEV-253: the frame of a project on an app template ──────────────────────────────────────────────────────────
+# The left panel, sign-in, Ako začať, Aktualizácie, Nastavenia and the server's standard interface are the template's
+# (nex-app-kit). Director 28.10.2026: „Na ľavom panely vždy rovnako pomenovať záložky … ľahko rozširovateľná … bez
+# potreby refaktoringu jednotlivých aplikácii.“ A frame rebuilt or bypassed inside the app is the drift the template
+# exists to end, so a project founded on a template is checked before anything is built for Overenie.
+
+_TEMPLATE_APP_IMPORT_RE = re.compile(r"""import\s*\{[^}]*\bTemplateApp\b[^}]*\}\s*from\s*["']nex-app-kit["']""")
+#: A value import from nex-shared — ``import type { … }`` and ``type X`` names render nothing, so they are no frame.
+_NEX_SHARED_IMPORT_RE = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*["']nex-shared["']""")
+#: nex-shared's frame components — in a project on a template only the template (TemplateApp) composes them.
+_TEMPLATE_FRAME_COMPONENTS = frozenset(
+    {
+        "AgentsPanel",
+        "AppShell",
+        "Header",
+        "LoginForm",
+        "MyAccountPanel",
+        "NavItem",
+        "ReleaseNotes",
+        "SessionsPanel",
+        "SettingsShell",
+        "Sidebar",
+        "SystemSettingsPanel",
+        "UsersPanel",
+    }
+)
+#: The frame's own pages (nex-app-kit ``TEMPLATE_PATHS`` and the sign-in) — an app's own ``<Route>`` never takes one.
+_TEMPLATE_FRAME_ROUTE_RE = re.compile(
+    r"""<Route\b[^>]*\bpath\s*=\s*\{?\s*["'](/|/login|/getting-started|/updates|/settings(?:/[^"']*)?)["']"""
+)
+#: The first segments of the server's standard interface under /api/v1 (nex-app-kit KONTRAKT.md) — sign-in, the launch
+#: from NEX Manager, people, sessions, settings, agents, layout, Aktualizácie, Ako začať.
+_TEMPLATE_API_SEGMENTS = frozenset(
+    {
+        "agent-settings",
+        "auth",
+        "getting-started",
+        "launch",
+        "release-notes",
+        "session",
+        "sessions",
+        "system-settings",
+        "user-layout",
+        "users",
+    }
+)
+_ROUTE_DECORATORS = frozenset({"get", "post", "put", "patch", "delete", "api_route"})
+
+
+def _renders_template_app(body: str) -> bool:
+    """A frontend source that imports ``TemplateApp`` from nex-app-kit and renders it."""
+    return bool(_TEMPLATE_APP_IMPORT_RE.search(body)) and "<TemplateApp" in body
+
+
+def _api_segment(path: str) -> str:
+    """The first segment of an API path under ``/api/v1`` (``/api/v1/auth/login`` and ``/auth/login`` → ``auth``)."""
+    rest = path.removeprefix("/api/v1")
+    return rest.lstrip("/").split("/", 1)[0]
+
+
+def _own_frame_routes(source: str) -> list[str]:
+    """The paths of the standard interface a backend module defines itself — route decorators and router prefixes."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        candidates = []
+        if name in _ROUTE_DECORATORS and node.args:
+            candidates.append(node.args[0])
+        if name in ("APIRouter", "include_router"):
+            candidates += [kw.value for kw in node.keywords if kw.arg == "prefix"]
+        for arg in candidates:
+            if (
+                isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and _api_segment(arg.value) in _TEMPLATE_API_SEGMENTS
+            ):
+                found.append(arg.value)
+    return found
+
+
+def _stands_on_app_kit(source: str) -> tuple[bool, bool]:
+    """Whether a backend module builds ``AppKit(…)`` and whether it calls ``….install(…)``."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False, False
+    builds = installs = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            builds |= isinstance(func, ast.Name) and func.id == "AppKit"
+            installs |= isinstance(func, ast.Attribute) and func.attr == "install"
+    return builds, installs
+
+
+def _sources(root: Path, patterns: tuple[str, ...]) -> list[tuple[Path, str]]:
+    """The readable sources under *root* (``frontend/src``, ``backend/app`` — no installed packages live there)."""
+    out = []
+    for pattern in patterns:
+        for path in sorted(root.rglob(pattern)):
+            try:
+                out.append((path, path.read_text(encoding="utf-8", errors="replace")))
+            except OSError:
+                continue
+    return out
+
+
+def check_template_frame(proj_root: Path, template: str) -> list[str]:
+    """DEV-253 (STATIC, pure) — what is wrong with the frame of a project founded on the app template *template*, one
+    Slovak sentence per problem; ``[]`` when the frame is whole. The frame is whole when the manifest names the
+    template, the frontend renders ``TemplateApp`` from nex-app-kit and composes none of the frame itself (no frame
+    component of nex-shared, no route over a frame page), and the server is built on ``AppKit`` and defines none of
+    the standard interface itself."""
+    root = Path(proj_root)
+    problems: list[str] = []
+    manifest_path = root / "frontend" / "app.manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        manifest = None
+        problems.append("chýba frontend/app.manifest.json — manifest, z ktorého rám berie názov, prihlásenie a menu")
+    except (OSError, ValueError):
+        manifest = None
+        problems.append("frontend/app.manifest.json nie je platný JSON")
+    if isinstance(manifest, dict) and manifest.get("template") != template:
+        problems.append(
+            f"frontend/app.manifest.json hovorí o šablóne „{manifest.get('template')}“, projekt je založený na "
+            f"„{template}“"
+        )
+
+    frontend = [(p, _strip_ts_comments(t)) for p, t in _sources(root / "frontend" / "src", ("*.tsx", "*.ts"))]
+    if not any(_renders_template_app(body) for _p, body in frontend):
+        problems.append("frontend nevykresľuje rám šablóny — <TemplateApp> z nex-app-kit vo frontend/src/App.tsx")
+    for path, body in frontend:
+        rel = path.relative_to(root)
+        names = {
+            name.split(" as ")[0].strip()
+            for clause in _NEX_SHARED_IMPORT_RE.findall(body)
+            for name in clause.split(",")
+        }
+        own = sorted(names & _TEMPLATE_FRAME_COMPONENTS)
+        if own:
+            problems.append(f"{rel} skladá vlastný rám z nex-shared ({', '.join(own)}) — rám je zo šablóny")
+        for route in sorted(set(_TEMPLATE_FRAME_ROUTE_RE.findall(body))):
+            problems.append(f"{rel} má vlastnú cestu „{route}“ — tú stránku má rám šablóny")
+
+    backend = _sources(root / "backend" / "app", ("*.py",))
+    built = [_stands_on_app_kit(text) for _p, text in backend]
+    if not any(b for b, _i in built) or not any(i for _b, i in built):
+        problems.append("server nestojí na šablóne — AppKit z nex_app_kit a kit.install(app) v backend/app/")
+    for path, text in backend:
+        for route in _own_frame_routes(text):
+            problems.append(
+                f"{path.relative_to(root)} má vlastnú cestu servera „{route}“ — štandardné rozhranie má šablóna"
+            )
+    return list(dict.fromkeys(problems))  # a path answered by GET and POST is one sentence
 
 
 def _bare_version(version_number: str) -> str:
@@ -8894,6 +9095,17 @@ def _smoke_compose_target(
         logger.info("smoke SKIPPED (slug=%s) — no docker-compose.yml", project_slug)
         return compose, {}, (True, "SKIPPED — no docker-compose.yml")
     services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+    # DEV-253: a project founded on an app template keeps the template's frame — said before anything is built.
+    template = app_template.template_of_slug(project_slug)
+    if template:
+        problems = check_template_frame(claude_agent.PROJECTS_ROOT / project_slug, template)
+        if problems:
+            logger.warning("smoke FAIL (slug=%s) — the app template's frame is not whole: %s", project_slug, problems)
+            return (
+                compose,
+                uat_provisioner.identify_service_roles(services),
+                (False, "Rám šablóny aplikácie nie je celý: " + "; ".join(problems) + "."),
+            )
     # DEV-163: a Web project has a service for every frontend (the charter's contract: `frontend` and `web`). One
     # that is missing is said by its name before anything is built — the web would otherwise be skipped silently.
     surfaces = _project_frontends(project_slug)

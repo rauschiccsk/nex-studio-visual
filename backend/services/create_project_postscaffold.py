@@ -85,25 +85,32 @@ _CHARTER_SEP = "\n\n---\n\n"
 #: the second (its table of frontends). A Štandardný project's files stay byte-for-byte as they were.
 _WEB_CHARTER_ADDENDUM = "web-project-charter.md"
 _WEB_CLAUDE_MD_ADDENDUM = "web-project-claude-md.md"
+#: DEV-253: what the agents of a project on an app template read on top — the frame is the template's, the app adds
+#: only its own screens, settings and tables. A project without a template keeps its files byte-for-byte.
+_APP_TEMPLATE_CHARTER_ADDENDUM = "app-template-charter.md"
 
 
 def _is_web(project_type: str) -> bool:
     return project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project_type)
 
 
-def project_type_rules(project_type: str) -> str:
-    """The rules a project of *project_type* adds to the charters — the Web addendum in a Web project, else nothing.
-    The build agents (DEV-165) and Poradca (DEV-171) read them from here, so they never judge by different rules."""
-    if not _is_web(project_type):
-        return ""
-    return (NEX_STUDIO_TEMPLATES / _WEB_CHARTER_ADDENDUM).read_text(encoding="utf-8")
+def project_type_rules(project_type: str, template: str | None = None) -> str:
+    """The rules a project adds to the charters — the Web addendum in a Web project (DEV-165), the app template's in a
+    project founded on one (DEV-253), else nothing. The build agents and Poradca (DEV-171) read them from here, so
+    they never judge by different rules."""
+    addenda = ([_WEB_CHARTER_ADDENDUM] if _is_web(project_type) else []) + (
+        [_APP_TEMPLATE_CHARTER_ADDENDUM] if template else []
+    )
+    return _CHARTER_SEP.join(
+        (NEX_STUDIO_TEMPLATES / name).read_text(encoding="utf-8").rstrip() + "\n" for name in addenda
+    )
 
 
-def role_charter_text(base_text: str, role_template: Path, project_type: str) -> str:
-    """A role's charter as the project gets it: the shared base, the role's template and — in a Web project — the
-    Web addendum (DEV-165)."""
+def role_charter_text(base_text: str, role_template: Path, project_type: str, template: str | None = None) -> str:
+    """A role's charter as the project gets it: the shared base, the role's template and the project's addenda —
+    Web (DEV-165), app template (DEV-253)."""
     text = base_text + _CHARTER_SEP + role_template.read_text(encoding="utf-8")
-    rules = project_type_rules(project_type)
+    rules = project_type_rules(project_type, template)
     if rules:
         text = text.rstrip() + _CHARTER_SEP + rules
     return text
@@ -148,30 +155,36 @@ COCKPIT_SKILL_MARKER = (
 #: What the old project template (Knowledge Base ``templates/claude-project/init.sh``) copied as loose files. Claude
 #: Code never loaded them; the same skills now come from ``templates/skills/``, so the loose copies are removed.
 _LOOSE_TEMPLATE_SKILLS = ("tdd.md", "systematic-debugging.md")
+#: DEV-253: skills only a project on an app template gets — and the ones the template makes wrong there (its sign-in
+#: and the launch from NEX Manager are the template's, so a procedure for building them would mislead the agent).
+TEMPLATE_ONLY_SKILLS = frozenset({"sablona-aplikacie"})
+SKILLS_THE_TEMPLATE_REPLACES = frozenset({"nex-manager-launch"})
 _FRONT_MATTER_END = "\n---\n"
 
 
-def cockpit_skills() -> dict[str, str]:
-    """Every skill the cockpit ships, name → the ``SKILL.md`` text a project gets (marker included)."""
+def cockpit_skills(app_template: str | None = None) -> dict[str, str]:
+    """The skills the cockpit ships to a project, name → the ``SKILL.md`` text it gets (marker included) — a project on
+    an app template gets the template's skills instead of those the template replaces (DEV-253)."""
     if not SKILLS_TEMPLATE_DIR.is_dir():
         return {}
+    left_out = SKILLS_THE_TEMPLATE_REPLACES if app_template else TEMPLATE_ONLY_SKILLS
     skills = {}
     for skill_dir in sorted(SKILLS_TEMPLATE_DIR.iterdir()):
         template = skill_dir / SKILL_FILE
-        if template.is_file():
+        if template.is_file() and skill_dir.name not in left_out:
             front, end, body = template.read_text(encoding="utf-8").partition(_FRONT_MATTER_END)
             skills[skill_dir.name] = f"{front}{end}\n{COCKPIT_SKILL_MARKER}\n{body}"
     return skills
 
 
-def _sync_skills(claude_dir: Path) -> int:
+def _sync_skills(claude_dir: Path, app_template: str | None = None) -> int:
     """Make the project's cockpit skills equal to the templates. Returns how many files were written or removed.
 
     Writes only what differs (so an unchanged project keeps its modification times), removes a retired cockpit
     skill (one carrying :data:`COCKPIT_SKILL_MARKER` whose template is gone) and the old template's loose files.
     A skill the cockpit did not write stays. Raises :class:`OSError`; the callers decide whether that is fatal."""
     skills_dir = claude_dir / "skills"
-    wanted = cockpit_skills()
+    wanted = cockpit_skills(app_template)
     changed = 0
     for name, text in wanted.items():
         target = skills_dir / name / SKILL_FILE
@@ -215,7 +228,9 @@ def role_settings_text(settings_tpl: Path, project_root: Path) -> str:
     return settings_tpl.read_text(encoding="utf-8").replace("<PROJECT_ROOT>", "//" + str(project_root).lstrip("/"))
 
 
-def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: str = project_surfaces.STANDARD) -> int:
+def refresh_v2_agent_charters(
+    project_root: Path, slug: str, *, project_type: str = project_surfaces.STANDARD, template: str | None = None
+) -> int:
     """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
 
     Chartu píše :func:`provision_v2_agent_charters` RAZ, pri založení projektu, a engine ju pri každom
@@ -237,6 +252,7 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
     v najhoršom prípade bežal podľa starších pravidiel, čo je presne dnešný stav — nie zhoršenie.
 
     DEV-165: ``project_type`` rozhoduje o dodatku Web projektu — volajúci ho berie z kokpitu (``Project.type``).
+    DEV-253: ``template`` (``Project.template``) o doplnku a zručnostiach šablóny aplikácie.
 
     DEV-196: pravidlá agenta nie sú v gite projektu, takže projekt znovu naklonovaný z GitHubu ich nemá — obnova
     preto založí aj chýbajúci priečinok roly a zapíše aj nastavenia roly (``settings.json``), ako pri založení.
@@ -258,7 +274,7 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
         if not charter_tpl.is_file() or not settings_tpl.is_file():
             continue
         wanted = {
-            role_dir / "CLAUDE.md": role_charter_text(base_text, charter_tpl, project_type),
+            role_dir / "CLAUDE.md": role_charter_text(base_text, charter_tpl, project_type, template),
             role_dir / "settings.json": role_settings_text(settings_tpl, project_root),
         }
         try:
@@ -280,7 +296,7 @@ def refresh_v2_agent_charters(project_root: Path, slug: str, *, project_type: st
         logger.warning("retired roles not archived for slug=%s: %s", slug, exc)
     # DEV-46: the skills travel with the charters — the same template owner, the same moment, the same leniency.
     try:
-        skills_changed = _sync_skills(claude_dir)
+        skills_changed = _sync_skills(claude_dir, template)
     except OSError as exc:
         skills_changed = 0
         logger.warning("skill refresh failed for slug=%s: %s", slug, exc)
@@ -336,6 +352,7 @@ def provision_v2_agent_charters(
     *,
     adopted: bool,
     project_type: str = project_surfaces.STANDARD,
+    template: str | None = None,
 ) -> None:
     """Write the v2 two-agent ``Pravidlá agenta`` charters into the freshly-scaffolded project and
     normalise it to v2 shape. HARD requirement (raises :class:`ProvisioningError` on failure).
@@ -391,7 +408,7 @@ def provision_v2_agent_charters(
                 _preserve_before_overwrite(role_dir / "CLAUDE.md", slug=slug)
                 _preserve_before_overwrite(role_dir / "settings.json", slug=slug)
             (role_dir / "CLAUDE.md").write_text(
-                role_charter_text(base_text, charter_tpl, project_type),
+                role_charter_text(base_text, charter_tpl, project_type, template),
                 encoding="utf-8",
             )
             (role_dir / "settings.json").write_text(role_settings_text(settings_tpl, project_root), encoding="utf-8")
@@ -401,7 +418,7 @@ def provision_v2_agent_charters(
             ) from exc
     # DEV-46: the charters name the skills, so a project gets both or neither.
     try:
-        _sync_skills(claude_dir)
+        _sync_skills(claude_dir, template)
     except OSError as exc:
         raise ProvisioningError(f"v2 charter provisioning failed (slug={slug}): writing skills: {exc}") from exc
 

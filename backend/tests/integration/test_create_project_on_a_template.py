@@ -12,6 +12,7 @@ import pytest
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.services import app_template
+from backend.services import create_project_postscaffold as postscaffold
 
 pytestmark = pytest.mark.usefixtures("_isolate_create_project_kb")
 
@@ -124,6 +125,7 @@ def test_an_adopted_project_keeps_its_own_frame_and_is_told_so(client, manager, 
     with (
         patch.object(app_template, "apply_template", recorder),
         patch.object(routes, "_workspace_holds_foreign_files", return_value=True),
+        patch.object(postscaffold, "provision_v2_agent_charters") as provision,
     ):
         response = client.post("/api/v1/projects", json=payload(manager, source_path=str(tmp_path / "nex-ukazka")))
 
@@ -131,6 +133,18 @@ def test_an_adopted_project_keeps_its_own_frame_and_is_told_so(client, manager, 
     assert recorder.calls == []
     assert response.json()["template"] is None
     assert routes.ADOPTED_WITHOUT_TEMPLATE in response.json()["setup_warnings"]
+    assert provision.call_args.kwargs["template"] is None
+
+
+def test_the_agents_of_a_project_on_a_template_get_its_rules(client, manager):
+    with (
+        patch.object(app_template, "apply_template", Recorder()),
+        patch.object(postscaffold, "provision_v2_agent_charters") as provision,
+    ):
+        response = client.post("/api/v1/projects", json=payload(manager))
+
+    assert response.status_code == 201, response.text
+    assert provision.call_args.kwargs["template"] == "nsv-standard"
 
 
 @pytest.mark.parametrize(

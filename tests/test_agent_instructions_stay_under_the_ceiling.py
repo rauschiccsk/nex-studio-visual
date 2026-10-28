@@ -24,18 +24,18 @@ from pathlib import Path
 import pytest
 import yaml
 
-from backend.services import create_project_postscaffold
+from backend.services import app_template, create_project_postscaffold
 from backend.services.poradca import runner as poradca_runner
 
 #: Director 09.10.2026 (DEV-45). Changed only by the Director.
 CEILING = 37_000
 
 
-def _scaffold(tmp_path: Path, project_type: str) -> Path:
-    root = tmp_path / project_type / "projekt"
+def _scaffold(tmp_path: Path, project_type: str, template: str | None = None) -> Path:
+    root = tmp_path / project_type / (template or "bez-sablony") / "projekt"
     (root / ".claude").mkdir(parents=True)
     create_project_postscaffold.provision_v2_agent_charters(
-        root, "projekt", "Projekt", adopted=False, project_type=project_type
+        root, "projekt", "Projekt", adopted=False, project_type=project_type, template=template
     )
     return root
 
@@ -51,25 +51,33 @@ def _skill_listing(root: Path) -> str:
 
 #: DEV-165: every kind of project the cockpit founds is measured — a Web project's agents read the Web addendum too.
 PROJECT_TYPES = ("standard", "web")
+#: DEV-253: and a Štandardný project on each app template the cockpit offers — its agents read the template's addendum
+#: and skill (a Web project is founded without a template).
+PROJECT_KINDS = [(t, None) for t in PROJECT_TYPES] + [("standard", tpl) for tpl in app_template.TEMPLATES]
 
 
-def instruction_texts(tmp_path: Path, project_type: str = "standard") -> dict[str, list[str]]:
+def instruction_texts(
+    tmp_path: Path, project_type: str = "standard", template: str | None = None
+) -> dict[str, list[str]]:
     """Per agent, the texts it reads at every turn: its charter, the project's root ``CLAUDE.md`` and the listing
     of the project's skills."""
-    root = _scaffold(tmp_path, project_type)
+    root = _scaffold(tmp_path, project_type, template)
     project_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
     skills = _skill_listing(root)
     texts = {
         role: [(root / ".claude" / "agents" / role / "CLAUDE.md").read_text(encoding="utf-8"), project_md, skills]
         for role in create_project_postscaffold._V2_AGENTS
     }
-    texts["poradca"] = [poradca_runner._charter_text(project_type), project_md, skills]
+    texts["poradca"] = [poradca_runner._charter_text(project_type, template), project_md, skills]
     return texts
 
 
-@pytest.mark.parametrize("project_type", PROJECT_TYPES)
-def test_every_agent_reads_less_than_the_ceiling(tmp_path, project_type):
-    sizes = {agent: sum(len(t) for t in parts) for agent, parts in instruction_texts(tmp_path, project_type).items()}
+@pytest.mark.parametrize(("project_type", "template"), PROJECT_KINDS)
+def test_every_agent_reads_less_than_the_ceiling(tmp_path, project_type, template):
+    sizes = {
+        agent: sum(len(t) for t in parts)
+        for agent, parts in instruction_texts(tmp_path, project_type, template).items()
+    }
 
     over = {agent: size for agent, size in sizes.items() if size > CEILING}
     assert over == {}, (

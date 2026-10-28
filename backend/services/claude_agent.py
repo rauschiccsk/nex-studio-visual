@@ -214,7 +214,11 @@ def _refresh_rules(project_slug: str) -> None:
     The refresh writes only what differs and never commits — the project's HEAD does not move, so neither the
     verified commit nor the Nasadiť button is affected. Best effort: a refresh failure is logged and the turn runs
     on the rules already in the project, which is exactly the situation before DEV-47."""
-    from backend.services import create_project_postscaffold, project_surfaces  # local — keeps the CLI primitive light
+    from backend.services import (  # local — keeps the CLI primitive light
+        app_template,
+        create_project_postscaffold,
+        project_surfaces,
+    )
 
     try:
         # DEV-165: a Web project's charters carry the Web addendum — the type is the cockpit's, never guessed from
@@ -222,7 +226,11 @@ def _refresh_rules(project_slug: str) -> None:
         # refreshed as Štandardný; a database that cannot be asked raises, and the turn keeps the rules it has.
         project_type = _project_type(project_slug) or project_surfaces.STANDARD
         create_project_postscaffold.refresh_v2_agent_charters(
-            PROJECTS_ROOT / project_slug, project_slug, project_type=project_type
+            PROJECTS_ROOT / project_slug,
+            project_slug,
+            project_type=project_type,
+            # DEV-253: a project on an app template — its frame is the template's, its agents read so.
+            template=app_template.template_of_slug(project_slug),
         )
     except Exception:  # noqa: BLE001 — a stale rule set must never cost the turn
         logger.warning(
