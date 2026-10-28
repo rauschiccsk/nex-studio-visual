@@ -9,11 +9,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import DeployMatrixPage from "@/components/deploy/DeployMatrixPage";
-import {
-  acceptCustomerUat,
-  getDeployMatrix,
-  getUatChecks,
-} from "@/services/api/deploy";
+import { acceptCustomerUat, getDeployMatrix, getUatChecks } from "@/services/api/deploy";
 import type { DeployMatrix, UatProgress } from "@/types/deploy";
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -25,36 +21,21 @@ vi.mock("@/services/api/deploy", () => ({
   deployCustomer: vi.fn(),
   acceptCustomerUat: vi.fn(),
   uatLaunch: vi.fn(),
-  getDeployProgress: vi.fn(() =>
-    Promise.resolve({
-      bezi: false,
-      krok: null,
-      trva_sekund: 0,
-      krok_trva_sekund: 0,
-    }),
-  ),
+  getDeployProgress: vi.fn(() => Promise.resolve({ bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 })),
   getUatGuide: vi.fn(() => new Promise(() => {})),
   getUatChecks: vi.fn(),
 }));
 
-const contextMock = {
-  selectedProject: { slug: "nex-manager", name: "NEX Manager" },
-};
+const contextMock = { selectedProject: { slug: "nex-manager", name: "NEX Manager" } };
 vi.mock("@/store/activeContextStore", () => ({
-  useActiveContextStore: (selector: (s: typeof contextMock) => unknown) =>
-    selector(contextMock),
+  useActiveContextStore: (selector: (s: typeof contextMock) => unknown) => selector(contextMock),
 }));
 
 const MATRIX = {
   project_slug: "nex-manager",
   auth_mode: "password",
   verified_versions: ["1.4.1", "1.2.2"],
-  deployability: {
-    cause: "ok",
-    version_number: null,
-    version_id: null,
-    can_reverify: false,
-  },
+  deployability: { cause: "ok", version_number: null, version_id: null, can_reverify: false },
   can_accept: true,
   can_deploy_prod: true,
   can_deploy: true,
@@ -86,39 +67,19 @@ const PROGRESS: Record<string, UatProgress> = {
   "1.4.0": {
     version_number: "1.4.0",
     items: ["Založenie skupiny", "Pridelenie aplikácie skupine"],
-    checks: [
-      {
-        item: "Založenie skupiny",
-        status: "tested",
-        note: null,
-        checked_by: "Z",
-        updated_at: "2026-10-28T12:00:00Z",
-      },
-    ],
+    checks: [{ item: "Založenie skupiny", status: "tested", note: null, checked_by: "Z", updated_at: "2026-10-28T12:00:00Z" }],
     tested: 1,
     total: 2,
     untested: ["Pridelenie aplikácie skupine"],
     broken: [],
   } as unknown as UatProgress,
-  "1.4.1": {
-    version_number: "1.4.1",
-    items: [],
-    checks: [],
-    tested: 0,
-    total: 0,
-    untested: [],
-    broken: [],
-  } as unknown as UatProgress,
+  "1.4.1": { version_number: "1.4.1", items: [], checks: [], tested: 0, total: 0, untested: [], broken: [] } as unknown as UatProgress,
 };
 
 beforeEach(() => {
   vi.mocked(getDeployMatrix).mockReset().mockResolvedValue(MATRIX);
   vi.mocked(acceptCustomerUat).mockReset();
-  vi.mocked(getUatChecks)
-    .mockReset()
-    .mockImplementation((_c, version) =>
-      Promise.resolve(PROGRESS[version] as UatProgress),
-    );
+  vi.mocked(getUatChecks).mockReset().mockImplementation((_c, version) => Promise.resolve(PROGRESS[version] as UatProgress));
 });
 
 describe("Akceptovať counts every version not accepted (DEV-247)", () => {
@@ -131,13 +92,9 @@ describe("Akceptovať counts every version not accepted (DEV-247)", () => {
     await waitFor(() => expect(confirm).toHaveBeenCalled());
     const question = confirm.mock.calls[0]?.[0] ?? "";
     expect(question).toContain("Otestované 1 z 2.");
-    expect(question).toContain(
-      "Neotestované: 1.4.0: Pridelenie aplikácie skupine.",
-    );
+    expect(question).toContain("Neotestované: 1.4.0: Pridelenie aplikácie skupine.");
     // the UAT guide panel on the same page asks too — what counts is that every version was asked about
-    expect(
-      [...new Set(vi.mocked(getUatChecks).mock.calls.map((c) => c[1]))].sort(),
-    ).toEqual(["1.4.0", "1.4.1"]);
+    expect([...new Set(vi.mocked(getUatChecks).mock.calls.map((c) => c[1]))].sort()).toEqual(["1.4.0", "1.4.1"]);
     expect(acceptCustomerUat).not.toHaveBeenCalled();
     confirm.mockRestore();
   });

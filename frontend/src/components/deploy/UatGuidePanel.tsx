@@ -39,12 +39,8 @@ interface Change {
 }
 
 /** DEV-247: the versions to try — for the version the customer runs on UAT, every one it has not accepted. */
-function versionsToTry(
-  row: DeployMatrixRow | undefined,
-  version: string,
-): string[] {
-  const pending =
-    row?.uat_version === version ? (row?.uat_versions_to_test ?? []) : [];
+function versionsToTry(row: DeployMatrixRow | undefined, version: string): string[] {
+  const pending = row?.uat_version === version ? (row?.uat_versions_to_test ?? []) : [];
   return pending.length > 0 ? pending : [version];
 }
 
@@ -56,31 +52,19 @@ function key(version: string, title: string): string {
 /** The changes of a guide — its sections, or the release note's changes of a version from before the guide. */
 function changesOf(guide: UatGuide | undefined): Change[] {
   return guide?.source === "guide"
-    ? (guide.sections ?? []).map((s) => ({
-        ...s,
-        steps: s.steps ?? [],
-        expected: s.expected ?? [],
-      }))
-    : (guide?.changes ?? []).map((c) => ({
-        title: c,
-        steps: [],
-        expected: [],
-      }));
+    ? (guide.sections ?? []).map((s) => ({ ...s, steps: s.steps ?? [], expected: s.expected ?? [] }))
+    : (guide?.changes ?? []).map((c) => ({ title: c, steps: [], expected: [] }));
 }
 
 /** The customer whose UAT is being tried: the one that runs this version there, else the first. */
 function defaultCustomer(rows: DeployMatrixRow[], version: string): string {
-  return (
-    (rows.find((r) => r.uat_version === version) ?? rows[0])?.customer_id ?? ""
-  );
+  return (rows.find((r) => r.uat_version === version) ?? rows[0])?.customer_id ?? "";
 }
 
 export default function UatGuidePanel({ slug, versions, rows }: Props) {
   const navigate = useNavigate();
   const [version, setVersion] = useState<string>(versions[0] ?? "");
-  const [customerId, setCustomerId] = useState<string>(() =>
-    defaultCustomer(rows, versions[0] ?? ""),
-  );
+  const [customerId, setCustomerId] = useState<string>(() => defaultCustomer(rows, versions[0] ?? ""));
   const [guides, setGuides] = useState<Record<string, UatGuide>>({});
   const [progresses, setProgresses] = useState<Record<string, UatProgress>>({});
   const [error, setError] = useState<HumanError | null>(null);
@@ -93,8 +77,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
   }, [versions, version]);
 
   useEffect(() => {
-    if (!rows.some((r) => r.customer_id === customerId))
-      setCustomerId(defaultCustomer(rows, version));
+    if (!rows.some((r) => r.customer_id === customerId)) setCustomerId(defaultCustomer(rows, version));
   }, [rows, customerId, version]);
 
   const customer = rows.find((r) => r.customer_id === customerId);
@@ -109,13 +92,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
     for (const v of toTryKey.split(" ")) {
       getUatGuide(slug, v)
         .then((g) => live && setGuides((all) => ({ ...all, [v]: g })))
-        .catch(
-          (e) =>
-            live &&
-            setError(
-              humanizeApiError(e, "Návod na skúšku sa nepodarilo načítať"),
-            ),
-        );
+        .catch((e) => live && setError(humanizeApiError(e, "Návod na skúšku sa nepodarilo načítať")));
     }
     return () => {
       live = false;
@@ -129,13 +106,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
     for (const v of toTryKey.split(" ")) {
       getUatChecks(customerId, v)
         .then((p) => live && setProgresses((all) => ({ ...all, [v]: p })))
-        .catch(
-          (e) =>
-            live &&
-            setError(
-              humanizeApiError(e, "Čo už je vyskúšané, sa nepodarilo načítať"),
-            ),
-        );
+        .catch((e) => live && setError(humanizeApiError(e, "Čo už je vyskúšané, sa nepodarilo načítať")));
     }
     return () => {
       live = false;
@@ -144,34 +115,17 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
 
   if (!versions.length) return null;
   const guide = guides[version];
-  const login = new Map(
-    (guide?.logins ?? []).map((l) => [l.customer_id, l.login]),
-  );
-  const loaded = toTry
-    .map((v) => progresses[v])
-    .filter((p): p is UatProgress => p != null);
-  const progress =
-    loaded.length === toTry.length && loaded.length > 0
-      ? combineProgress(loaded)
-      : null;
+  const login = new Map((guide?.logins ?? []).map((l) => [l.customer_id, l.login]));
+  const loaded = toTry.map((v) => progresses[v]).filter((p): p is UatProgress => p != null);
+  const progress = loaded.length === toTry.length && loaded.length > 0 ? combineProgress(loaded) : null;
   const earlier = toTry.slice(0, -1);
 
-  async function record(
-    v: string,
-    item: string,
-    status: "tested" | "broken" | null,
-    text?: string,
-  ): Promise<boolean> {
+  async function record(v: string, item: string, status: "tested" | "broken" | null, text?: string): Promise<boolean> {
     if (!customerId) return false;
     setBusy(true);
     setError(null);
     try {
-      const saved = await setUatCheck(customerId, {
-        version_number: v,
-        item,
-        status,
-        note: text ?? null,
-      });
+      const saved = await setUatCheck(customerId, { version_number: v, item, status, note: text ?? null });
       setProgresses((all) => ({ ...all, [v]: saved }));
       return true;
     } catch (e) {
@@ -200,9 +154,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
       setNote("");
       navigate(where);
     } catch (e) {
-      setError(
-        humanizeApiError(e, "Zadanie rýchlej opravy sa nepodarilo pripraviť"),
-      );
+      setError(humanizeApiError(e, "Zadanie rýchlej opravy sa nepodarilo pripraviť"));
     }
   }
 
@@ -210,9 +162,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
   function renderVersion(v: string) {
     const g = guides[v];
     const changes = changesOf(g);
-    const checks = new Map(
-      (progresses[v]?.checks ?? []).map((c) => [c.item, c]),
-    );
+    const checks = new Map((progresses[v]?.checks ?? []).map((c) => [c.item, c]));
     return (
       <div key={v}>
         {toTry.length > 1 && (
@@ -220,180 +170,139 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
             Verzia {v}
           </h3>
         )}
-        {!g && !error && (
-          <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-            Načítavam návod…
-          </p>
-        )}
+          {!g && !error && <p className="mt-3 text-xs text-[var(--color-text-muted)]">Načítavam návod…</p>}
 
-        {g?.source === "guide" && g.nothing_to_test && changes.length === 0 && (
-          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-            Nie je čo skúšať: {g.nothing_to_test}
-          </p>
-        )}
-        {g?.source === "release_notes" && (
-          <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-            Návod na skúšku pre túto verziu nevznikol — toto sú zmeny z jej
-            poznámok k vydaniu:
-          </p>
-        )}
-        {changes.length > 0 && (
-          <ol className="mt-3 space-y-3">
-            {changes.map((change) => {
-              const check = checks.get(change.title);
-              const broken = check?.status === "broken";
-              return (
-                <li
-                  key={change.title}
-                  className="rounded border border-[var(--color-border-default)] p-3"
-                >
-                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                    {change.title}
-                  </h3>
-                  {(change.screen || change.data) && (
-                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                      {change.screen && <>Obrazovka: {change.screen}</>}
-                      {change.screen && change.data && " · "}
-                      {change.data && <>Testovacie údaje: {change.data}</>}
-                    </p>
-                  )}
-                  {change.steps.length > 0 && (
-                    <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-sm text-[var(--color-text-primary)]">
-                      {change.steps.map((step, j) => (
-                        <li key={j}>{step}</li>
-                      ))}
-                    </ol>
-                  )}
-                  {change.expected.map((e, j) => (
-                    <p
-                      key={j}
-                      className="mt-2 text-sm text-[var(--color-state-success-fg)]"
-                    >
-                      Očakávané: {e}
-                    </p>
-                  ))}
+          {g?.source === "guide" && g.nothing_to_test && changes.length === 0 && (
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">Nie je čo skúšať: {g.nothing_to_test}</p>
+          )}
+          {g?.source === "release_notes" && (
+            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+              Návod na skúšku pre túto verziu nevznikol — toto sú zmeny z jej poznámok k vydaniu:
+            </p>
+          )}
+          {changes.length > 0 && (
+            <ol className="mt-3 space-y-3">
+              {changes.map((change) => {
+                const check = checks.get(change.title);
+                const broken = check?.status === "broken";
+                return (
+                  <li key={change.title} className="rounded border border-[var(--color-border-default)] p-3">
+                    <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{change.title}</h3>
+                    {(change.screen || change.data) && (
+                      <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        {change.screen && <>Obrazovka: {change.screen}</>}
+                        {change.screen && change.data && " · "}
+                        {change.data && <>Testovacie údaje: {change.data}</>}
+                      </p>
+                    )}
+                    {change.steps.length > 0 && (
+                      <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-sm text-[var(--color-text-primary)]">
+                        {change.steps.map((step, j) => (
+                          <li key={j}>{step}</li>
+                        ))}
+                      </ol>
+                    )}
+                    {change.expected.map((e, j) => (
+                      <p key={j} className="mt-2 text-sm text-[var(--color-state-success-fg)]">
+                        Očakávané: {e}
+                      </p>
+                    ))}
 
-                  {customerId && progresses[v] && (
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                      {broken ? (
-                        <>
-                          <span className="inline-flex items-center gap-1 text-[var(--color-state-warning-fg)]">
-                            <AlertTriangle
-                              className="h-3.5 w-3.5"
-                              aria-hidden
-                            />{" "}
-                            Nefunguje
-                            {check?.note ? `: ${check.note}` : ""}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              void prepareFix(v, change, check?.note ?? "")
-                            }
-                            className="rounded border border-[var(--color-border-default)] px-2 py-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
-                          >
-                            Pripraviť rýchlu opravu
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void record(v, change.title, null)}
-                            className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
-                          >
-                            Zrušiť záznam
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <label className="inline-flex cursor-pointer items-center gap-1.5 text-[var(--color-text-secondary)] pointer-coarse:min-h-11">
-                            <input
-                              type="checkbox"
-                              checked={check?.status === "tested"}
+                    {customerId && progresses[v] && (
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                        {broken ? (
+                          <>
+                            <span className="inline-flex items-center gap-1 text-[var(--color-state-warning-fg)]">
+                              <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> Nefunguje
+                              {check?.note ? `: ${check.note}` : ""}
+                            </span>
+                            <button
+                              type="button"
                               disabled={busy}
-                              onChange={(e) =>
-                                void record(
-                                  v,
-                                  change.title,
-                                  e.target.checked ? "tested" : null,
-                                )
-                              }
-                            />
-                            Vyskúšané
-                          </label>
-                          <button
-                            type="button"
-                            aria-expanded={noting === key(v, change.title)}
-                            disabled={busy}
-                            onClick={() => {
-                              setNoting(
-                                noting === key(v, change.title)
-                                  ? null
-                                  : key(v, change.title),
-                              );
-                              setNote("");
-                            }}
-                            className="rounded border border-[var(--color-border-default)] px-2 py-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
-                          >
-                            Nefunguje
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {noting === key(v, change.title) && !broken && (
-                    <div className="mt-2 space-y-2">
-                      <label className="block text-xs text-[var(--color-text-secondary)]">
-                        Čo sa stalo?
-                        <textarea
-                          data-no-draft="krátka poznámka ku skúške — hneď sa z nej stane zadanie rýchlej opravy, ktoré sa už pamätá"
-                          lang="sk"
-                          spellCheck={true}
-                          rows={3}
-                          value={note}
-                          onChange={(e) => setNote(e.target.value)}
-                          className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        disabled={busy || !note.trim()}
-                        onClick={() => void prepareFix(v, change, note)}
-                        className="rounded bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
-                      >
-                        Pripraviť rýchlu opravu
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-        {g?.source === "none" && (
-          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-            Pre túto verziu nie je čo ukázať — nemá návod na skúšku ani poznámky
-            k vydaniu.
-          </p>
-        )}
+                              onClick={() => void prepareFix(v, change, check?.note ?? "")}
+                              className="rounded border border-[var(--color-border-default)] px-2 py-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+                            >
+                              Pripraviť rýchlu opravu
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void record(v, change.title, null)}
+                              className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+                            >
+                              Zrušiť záznam
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <label className="inline-flex cursor-pointer items-center gap-1.5 text-[var(--color-text-secondary)] pointer-coarse:min-h-11">
+                              <input
+                                type="checkbox"
+                                checked={check?.status === "tested"}
+                                disabled={busy}
+                                onChange={(e) => void record(v, change.title, e.target.checked ? "tested" : null)}
+                              />
+                              Vyskúšané
+                            </label>
+                            <button
+                              type="button"
+                              aria-expanded={noting === key(v, change.title)}
+                              disabled={busy}
+                              onClick={() => {
+                                setNoting(noting === key(v, change.title) ? null : key(v, change.title));
+                                setNote("");
+                              }}
+                              className="rounded border border-[var(--color-border-default)] px-2 py-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
+                            >
+                              Nefunguje
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {noting === key(v, change.title) && !broken && (
+                      <div className="mt-2 space-y-2">
+                        <label className="block text-xs text-[var(--color-text-secondary)]">
+                          Čo sa stalo?
+                          <textarea
+                            data-no-draft="krátka poznámka ku skúške — hneď sa z nej stane zadanie rýchlej opravy, ktoré sa už pamätá"
+                            lang="sk"
+                            spellCheck={true}
+                            rows={3}
+                            value={note}
+                            onChange={(e) => setNote(e.target.value)}
+                            className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)]"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={busy || !note.trim()}
+                          onClick={() => void prepareFix(v, change, note)}
+                          className="rounded bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
+                        >
+                          Pripraviť rýchlu opravu
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {g?.source === "none" && (
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+              Pre túto verziu nie je čo ukázať — nemá návod na skúšku ani poznámky k vydaniu.
+            </p>
+          )}
       </div>
     );
   }
 
   return (
-    <section
-      aria-labelledby="uat-guide-heading"
-      className="mt-6 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] p-4"
-    >
+    <section aria-labelledby="uat-guide-heading" className="mt-6 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <ListChecks
-          className="h-4 w-4 text-[var(--color-text-secondary)]"
-          aria-hidden
-        />
-        <h2
-          id="uat-guide-heading"
-          className="text-sm font-semibold text-[var(--color-text-primary)]"
-        >
+        <ListChecks className="h-4 w-4 text-[var(--color-text-secondary)]" aria-hidden />
+        <h2 id="uat-guide-heading" className="text-sm font-semibold text-[var(--color-text-primary)]">
           Čo otestovať vo verzii
         </h2>
         <select
@@ -425,8 +334,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
         {progress && progress.total > 0 && (
           <span className="text-xs text-[var(--color-text-secondary)]">
             Otestované {progress.tested} z {progress.total}
-            {(progress.broken ?? []).length > 0 &&
-              ` · nefunguje ${(progress.broken ?? []).length}`}
+            {(progress.broken ?? []).length > 0 && ` · nefunguje ${(progress.broken ?? []).length}`}
           </span>
         )}
       </div>
@@ -436,13 +344,8 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
           {rows
             .filter((r) => r.uat_url)
             .map((r) => (
-              <li
-                key={r.customer_id}
-                className="flex flex-wrap items-center gap-x-2"
-              >
-                <span className="font-medium text-[var(--color-text-primary)]">
-                  {r.customer_name}:
-                </span>
+              <li key={r.customer_id} className="flex flex-wrap items-center gap-x-2">
+                <span className="font-medium text-[var(--color-text-primary)]">{r.customer_name}:</span>
                 {(r.uat_urls ?? []).length === 0 ? (
                   <a
                     href={r.uat_url ?? undefined}
@@ -462,14 +365,11 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 text-primary-400 hover:text-primary-300 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                     >
-                      <ExternalLink className="h-3 w-3" aria-hidden />{" "}
-                      {link.label}
+                      <ExternalLink className="h-3 w-3" aria-hidden /> {link.label}
                     </a>
                   ))
                 )}
-                {login.get(r.customer_id) && (
-                  <span>prihlásenie: {login.get(r.customer_id)}</span>
-                )}
+                {login.get(r.customer_id) && <span>prihlásenie: {login.get(r.customer_id)}</span>}
               </li>
             ))}
         </ul>
