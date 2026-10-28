@@ -728,6 +728,35 @@ def accepted_versions(db: Session, customer_id: UUID) -> list[str]:
     return result
 
 
+def uat_versions_to_test(db: Session, project: Project, customer_id: UUID) -> list[str]:
+    """DEV-247 — the versions a customer's UAT installation carries that the customer has not accepted, oldest first.
+
+    28.10.2026, NEX Manager for MÁGERSTAV: PROD ran 1.2.2, UAT got 1.4.1 — a fast fix carrying the never-accepted
+    1.3.0 and 1.4.0 — and the guide showed 1.4.1 alone („Nie je čo skúšať“). The range runs from the newest version
+    the customer accepted or runs on PROD (exclusive) to the one on UAT (inclusive), finished builds only. A customer
+    with nothing accepted and nothing on PROD tries the version on UAT alone: it gets the app whole, and the
+    walkthroughs of every earlier version would help nobody. No UAT installation — nothing to try.
+    """
+    on_uat = current_version(db, customer_id, "uat")
+    if on_uat is None:
+        return []
+    known = [v for v in (*accepted_versions(db, customer_id), current_version(db, customer_id, "prod")) if v]
+    if not known:
+        return [on_uat]
+    base = max(number_order_key(v) for v in known)
+    top = number_order_key(on_uat)
+    finished = db.execute(
+        select(Version.version_number)
+        .join(PipelineState, PipelineState.version_id == Version.id)
+        .where(Version.project_id == project.id, PipelineState.current_stage == VERIFIED_STAGE)
+    ).scalars()
+    between = sorted(
+        (v for v in finished if base < number_order_key(v) < top),
+        key=number_order_key,
+    )
+    return [*between, on_uat]
+
+
 def build_matrix(
     db: Session,
     project: Project,
@@ -789,6 +818,8 @@ def build_matrix(
                 "prod_last_deploy_detail": prod_detail,
                 "prod_last_deploy_warnings": prod_warnings,
                 "accepted_versions": accepted_versions(db, customer.id),
+                # DEV-247: what the UAT guide asks this customer to try — every version on UAT it has not accepted.
+                "uat_versions_to_test": uat_versions_to_test(db, project, customer.id),
                 # Each tab links to its live instance only once it has a deploy there (§3.5 "link to the URL");
                 # None hides the link. Audit Theme 4: PROD now carries its own link, mirroring UAT.
                 "uat_url": _instance_url(customer, "uat", project) if uat_version else None,

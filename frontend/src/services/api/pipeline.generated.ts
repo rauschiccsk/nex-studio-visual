@@ -5045,6 +5045,11 @@ export interface components {
              * @description Currently deployed UAT version (None = never).
              */
             uat_version?: string | null;
+            /**
+             * Uat Versions To Test
+             * @description DEV-247: the versions the customer's UAT carries that it has not accepted, oldest first, ending with the one on UAT — the UAT guide shows the walkthrough of each. Empty without a UAT installation.
+             */
+            uat_versions_to_test?: string[];
         };
         /**
          * DeployRequest

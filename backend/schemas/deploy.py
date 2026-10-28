@@ -176,6 +176,13 @@ class DeployMatrixRow(BaseModel):
         default_factory=list,
         description="Versions accepted-for-PROD for this customer — the only versions whose PROD Nasadiť is open.",
     )
+    uat_versions_to_test: list[str] = Field(
+        default_factory=list,
+        description=(
+            "DEV-247: the versions the customer's UAT carries that it has not accepted, oldest first, ending with "
+            "the one on UAT — the UAT guide shows the walkthrough of each. Empty without a UAT installation."
+        ),
+    )
     uat_url: Optional[str] = Field(
         default=None,
         description="Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.",

@@ -98,6 +98,8 @@ export interface DeployMatrixRow {
   /** DEV-164: a Web project's link for every frontend (Administrácia, Web); empty for one frontend. */
   uat_urls?: FrontendLink[];
   prod_urls?: FrontendLink[];
+  /** DEV-247: the versions the customer's UAT carries that it has not accepted, oldest first — the UAT guide shows each. */
+  uat_versions_to_test?: string[];
 }
 
 /**

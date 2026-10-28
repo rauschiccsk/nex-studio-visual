@@ -26,8 +26,13 @@ import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
 import RebuildUatDialog from "@/components/deploy/RebuildUatDialog";
 import { humanizeApiError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
-import { acceptanceTesting } from "@/lib/uatTesting";
+import type {
+  DeployEnvironment,
+  DeployMatrix,
+  DeployMatrixRow,
+  DeployResult,
+} from "@/types/deploy";
+import { acceptanceTesting, combineProgress } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
 import { fmtDeployTime, fmtVer } from "./version";
 import { popisPriebehu } from "./popisPriebehu";
@@ -60,26 +65,31 @@ export interface DeployMatrixPageProps {
 // ``introPaused`` (v4.0.55): while nothing is deployable, the normal intro instructs a sequence the manager
 // CANNOT start — and it sat directly above the notice explaining why. Telling someone to do the impossible
 // is the same defect as the silent grey button, one line higher up.
-const LABELS: Record<DeployEnvironment, { title: string; intro: string; introPaused: string; column: string }> =
-  {
-    uat: {
-      title: "UAT",
-      intro:
-        "Per-zákazník testovacie nasadenie. Nasaď overenú verziu, otestuj ju na UAT URL a klikni Akceptovať — tým sa otvorí PROD pre danú verziu.",
-      introPaused: "Per-zákazník testovacie nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
-      column: "Verzia na UAT",
-    },
-    prod: {
-      title: "PROD",
-      intro:
-        "Per-zákazník produkčné nasadenie. PROD je možné nasadiť až po akceptácii UAT danej verzie — bez akceptácie je Nasadiť zablokované.",
-      introPaused: "Per-zákazník produkčné nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
-      column: "Verzia v PROD",
-    },
-  };
+const LABELS: Record<
+  DeployEnvironment,
+  { title: string; intro: string; introPaused: string; column: string }
+> = {
+  uat: {
+    title: "UAT",
+    intro:
+      "Per-zákazník testovacie nasadenie. Nasaď overenú verziu, otestuj ju na UAT URL a klikni Akceptovať — tým sa otvorí PROD pre danú verziu.",
+    introPaused:
+      "Per-zákazník testovacie nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
+    column: "Verzia na UAT",
+  },
+  prod: {
+    title: "PROD",
+    intro:
+      "Per-zákazník produkčné nasadenie. PROD je možné nasadiť až po akceptácii UAT danej verzie — bez akceptácie je Nasadiť zablokované.",
+    introPaused:
+      "Per-zákazník produkčné nasadenie. Práve je pozastavené — dôvod aj ďalší krok sú nižšie.",
+    column: "Verzia v PROD",
+  },
+};
 
 // The one reason string for a role-blocked Akceptovať — used by the button tooltip and its visible note.
-const ACCEPT_ROLE_REASON = "Akceptáciu (otvorenie PROD) môže vykonať iba Manažér.";
+const ACCEPT_ROLE_REASON =
+  "Akceptáciu (otvorenie PROD) môže vykonať iba Manažér.";
 // The same treatment for the PROD "Nasadiť": the deploy route lets the project owner deploy to UAT but
 // keeps PROD for the Manažér (ri), so on the PROD tab the button looked live to a Junior/Medior and then
 // failed with 403 after the click. Disabled WITH a reason, exactly like Akceptovať.
@@ -96,16 +106,21 @@ const BACKUP_SENTENCE = "Záloha databázy pred nasadením:";
 function backupNote(detail: string | null): string | null {
   const report = detail ?? "";
   const at = report.indexOf(BACKUP_SENTENCE);
-  return at < 0 ? null : (report.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
+  return at < 0
+    ? null
+    : (report.slice(at).split(" Upratané na cieli")[0] ?? "").trim();
 }
 
 // DEV-115 — how often a row asks whether a deploy runs on its installation: often while one runs (the step and the
 // time are what tells work from a freeze), rarely otherwise (a deploy started from another window or by someone else).
 const PROGRESS_POLL_RUNNING_MS = 2000;
 const PROGRESS_POLL_IDLE_MS = 15000;
-const RUNNING_REASON = "Na tejto inštalácii práve beží nasadenie — počkaj, kým skončí.";
+const RUNNING_REASON =
+  "Na tejto inštalácii práve beží nasadenie — počkaj, kým skončí.";
 
-export default function DeployMatrixPage({ environment }: DeployMatrixPageProps) {
+export default function DeployMatrixPage({
+  environment,
+}: DeployMatrixPageProps) {
   const navigate = useNavigate();
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const slug = selectedProject?.slug;
@@ -146,8 +161,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           // of what the button did.
           setPicked((prev) => {
             const allowed = new Set(next.verified_versions);
-            const kept = Object.fromEntries(Object.entries(prev).filter(([, v]) => allowed.has(v)));
-            return Object.keys(kept).length === Object.keys(prev).length ? prev : kept;
+            const kept = Object.fromEntries(
+              Object.entries(prev).filter(([, v]) => allowed.has(v)),
+            );
+            return Object.keys(kept).length === Object.keys(prev).length
+              ? prev
+              : kept;
           });
         })
         .catch((err) => {
@@ -175,10 +194,14 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // Self-refresh while a re-verification is in flight, so "Nasadiť" re-opens on its own when it goes green —
   // and, DEV-51, while the project's checks on the code to deploy are still running.
   const reverifyRunning =
-    matrix?.deployability?.cause === "reverify_running" || matrix?.deployability?.cause === "ci_running";
+    matrix?.deployability?.cause === "reverify_running" ||
+    matrix?.deployability?.cause === "ci_running";
   useEffect(() => {
     if (!reverifyRunning) return;
-    const timer = window.setInterval(() => load(true), REVERIFY_POLL_INTERVAL_MS);
+    const timer = window.setInterval(
+      () => load(true),
+      REVERIFY_POLL_INTERVAL_MS,
+    );
     return () => window.clearInterval(timer);
   }, [reverifyRunning, load]);
 
@@ -208,14 +231,19 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         if (cancelled) return;
         const next: Record<string, DeployProgress> = {};
         for (const [id, p] of answers) if (p?.bezi) next[id] = p;
-        const ended = Object.keys(runningRef.current).some((id) => !(id in next));
+        const ended = Object.keys(runningRef.current).some(
+          (id) => !(id in next),
+        );
         runningRef.current = next;
         setRunning(next);
         if (ended) load(true);
       });
     };
     tick();
-    const timer = window.setInterval(tick, askOften ? PROGRESS_POLL_RUNNING_MS : PROGRESS_POLL_IDLE_MS);
+    const timer = window.setInterval(
+      tick,
+      askOften ? PROGRESS_POLL_RUNNING_MS : PROGRESS_POLL_IDLE_MS,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -255,7 +283,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       setRowMsg(
         customerId,
         curated ??
-          (err instanceof ApiError ? humanizeApiError(err, "Spustenie zlyhalo").message : "Sieťová chyba pri spúšťaní."),
+          (err instanceof ApiError
+            ? humanizeApiError(err, "Spustenie zlyhalo").message
+            : "Sieťová chyba pri spúšťaní."),
       );
     } finally {
       setLaunching(null);
@@ -311,7 +341,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
    *   3. the PROD acceptance gate (§3.5) — that (version, customer) has no recorded UAT acceptance.
    * Returns null when the deploy is allowed.
    */
-  function deployBlock(row: DeployMatrixRow): { title: string; note: string } | null {
+  function deployBlock(
+    row: DeployMatrixRow,
+  ): { title: string; note: string } | null {
     // The route's FIRST gate (owner-or-ri) applies to BOTH tabs, so it is checked before the
     // PROD-only one. Without it a Medior who does not own the project loaded the page — the matrix
     // read is laxer — and met a live-looking "Nasadiť" on UAT that 403s: the same defect one tab over.
@@ -325,7 +357,11 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       return { title: DEPLOY_PROD_ROLE_REASON, note: "nasadzuje Manažér" };
     }
     const version = pickedVersion(row);
-    if (!version) return { title: "Žiadna overená verzia na nasadenie.", note: "pozastavené — dôvod hore" };
+    if (!version)
+      return {
+        title: "Žiadna overená verzia na nasadenie.",
+        note: "pozastavené — dôvod hore",
+      };
     if (environment === "prod" && !row.accepted_versions.includes(version)) {
       return {
         title: `PROD je zablokované: verzia ${fmtVer(version)} nemá akceptované UAT pre tohto zákazníka.`,
@@ -362,7 +398,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           // acceptance gate; (b) a verification that went stale between page load and click — the matrix is
           // a snapshot and the page does not poll while a deploy is still possible. Never echo the raw
           // English backend text; reload so the notice above states the real, current cause in Slovak.
-          const acceptanceGate = environment === "prod" && !row.accepted_versions.includes(version);
+          const acceptanceGate =
+            environment === "prod" && !row.accepted_versions.includes(version);
           setRowMsg(
             row.customer_id,
             acceptanceGate
@@ -371,7 +408,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           );
           load();
         } else if (err.status === 403) {
-          setRowMsg(row.customer_id, "Nasadenie je dostupné len pre rolu Manažér.");
+          setRowMsg(
+            row.customer_id,
+            "Nasadenie je dostupné len pre rolu Manažér.",
+          );
         } else {
           // v4.0.58: the deploy gates (missing admin password, missing launch wiring) answer with a curated
           // plain-Slovak sentence that NAMES what to fix. Passing those through `humanizeApiError` replaced
@@ -385,7 +425,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
             err.message !== "[object Object]"
               ? err.message
               : null;
-          setRowMsg(row.customer_id, curated ?? humanizeApiError(err, "Nasadenie zlyhalo").message);
+          setRowMsg(
+            row.customer_id,
+            curated ?? humanizeApiError(err, "Nasadenie zlyhalo").message,
+          );
         }
       } else {
         setRowMsg(row.customer_id, "Sieťová chyba pri nasadení.");
@@ -397,8 +440,18 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
 
   async function handleAccept(row: DeployMatrixRow) {
     if (!row.uat_version) return;
-    // DEV-91: the question says how much of the version was tried — the decision stays his.
-    const tested = await getUatChecks(row.customer_id, row.uat_version).then(acceptanceTesting, () => "");
+    // DEV-91: the question says how much of the version was tried — the decision stays his. DEV-247: of every version
+    // the UAT carries that the customer has not accepted, each change named with its version.
+    const uatVersion = row.uat_version;
+    const toTry = row.uat_versions_to_test?.length
+      ? row.uat_versions_to_test
+      : [uatVersion];
+    const tested = await Promise.all(
+      toTry.map((v) => getUatChecks(row.customer_id, v)),
+    ).then(
+      (all) => acceptanceTesting(combineProgress(all)),
+      () => "",
+    );
     if (
       !window.confirm(
         `Akceptovať UAT verziu ${fmtVer(row.uat_version)} pre zákazníka ${row.customer_name}? ` +
@@ -410,14 +463,22 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     setRowMsg(row.customer_id, null);
     setBusy(row.customer_id);
     try {
-      await acceptCustomerUat(row.customer_id, { version_number: row.uat_version });
+      await acceptCustomerUat(row.customer_id, {
+        version_number: row.uat_version,
+      });
       load();
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 403) {
-          setRowMsg(row.customer_id, "Akceptácia je dostupná len pre rolu Manažér.");
+          setRowMsg(
+            row.customer_id,
+            "Akceptácia je dostupná len pre rolu Manažér.",
+          );
         } else {
-          setRowMsg(row.customer_id, humanizeApiError(err, "Akceptácia zlyhala").message);
+          setRowMsg(
+            row.customer_id,
+            humanizeApiError(err, "Akceptácia zlyhala").message,
+          );
         }
       } else {
         setRowMsg(row.customer_id, "Sieťová chyba pri akceptácii.");
@@ -432,9 +493,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
         <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
-        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Nemáš vybraný projekt</h2>
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Nemáš vybraný projekt
+        </h2>
         <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-          {labels.title} je viazané na projekt. Otvor <span className="font-mono">Projekty</span> a pripni projekt.
+          {labels.title} je viazané na projekt. Otvor{" "}
+          <span className="font-mono">Projekty</span> a pripni projekt.
         </p>
         <button
           onClick={() => navigate("/projects")}
@@ -459,12 +523,17 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   // The intro tells the manager to deploy → test → accept. While deployment is paused that is an instruction
   // they cannot follow, sitting directly above a notice saying so — so the paused state gets its own line.
   const deployPaused = (matrix?.deployability?.cause ?? "ok") !== "ok";
-  const currentCol = environment === "uat" ? (r: DeployMatrixRow) => r.uat_version : (r: DeployMatrixRow) => r.prod_version;
+  const currentCol =
+    environment === "uat"
+      ? (r: DeployMatrixRow) => r.uat_version
+      : (r: DeployMatrixRow) => r.prod_version;
 
   return (
     <div className="mx-auto max-w-5xl p-6">
       <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-base font-bold text-[var(--color-text-primary)]">{labels.title}</h1>
+        <h1 className="text-base font-bold text-[var(--color-text-primary)]">
+          {labels.title}
+        </h1>
         <button
           onClick={() => load()}
           title="Obnoviť"
@@ -474,8 +543,11 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         </button>
       </div>
       <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-        Projekt <span className="text-[var(--color-text-secondary)]">{selectedProject.name}</span>.{" "}
-        {deployPaused ? labels.introPaused : labels.intro}
+        Projekt{" "}
+        <span className="text-[var(--color-text-secondary)]">
+          {selectedProject.name}
+        </span>
+        . {deployPaused ? labels.introPaused : labels.intro}
       </p>
 
       {/* v4.0.54: WHY Nasadiť is closed + the way out, on BOTH tabs. Renders nothing when a version is
@@ -499,7 +571,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
         </div>
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-6 text-center text-sm text-[var(--color-text-muted)]">
-          Zatiaľ žiadni zákazníci. Pridaj zákazníka v <span className="font-mono">Zákazníci</span>, potom sem nasadíš
+          Zatiaľ žiadni zákazníci. Pridaj zákazníka v{" "}
+          <span className="font-mono">Zákazníci</span>, potom sem nasadíš
           verziu.
         </div>
       ) : (
@@ -518,40 +591,60 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
             <tbody className="divide-y divide-[var(--color-border-default)] max-md:block">
               {rows.map((row) => {
                 const progress = running[row.customer_id];
-                const isBusy = busy === row.customer_id || progress !== undefined;
+                const isBusy =
+                  busy === row.customer_id || progress !== undefined;
                 const blocked = deployBlock(row);
                 const current = currentCol(row);
                 const chosen = pickedVersion(row);
                 // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
-                const liveUrl = environment === "uat" ? row.uat_url : row.prod_url;
+                const liveUrl =
+                  environment === "uat" ? row.uat_url : row.prod_url;
                 // DEV-164: a Web project's installation has a link for every frontend (Administrácia, Web).
-                const liveUrls = (environment === "uat" ? row.uat_urls : row.prod_urls) ?? [];
+                const liveUrls =
+                  (environment === "uat" ? row.uat_urls : row.prod_urls) ?? [];
                 // Audit #5: the newest attempt failed → flag it so the last-good/empty cell isn't read as green.
                 const lastAttemptFailed =
-                  environment === "uat" ? row.uat_last_attempt_failed : row.prod_last_attempt_failed;
+                  environment === "uat"
+                    ? row.uat_last_attempt_failed
+                    : row.prod_last_attempt_failed;
                 const result = rowResult[row.customer_id];
                 // ICCINT-117 — čo o nasadení vie SERVER, nie prehliadač. Potvrdenie z kliku (`result`)
                 // žije v pamäti a prvý F5 ho zmaže; toto prežije, lebo je to append-only audit.
                 const lastDeployAt =
-                  environment === "uat" ? row.uat_last_deploy_at : row.prod_last_deploy_at;
+                  environment === "uat"
+                    ? row.uat_last_deploy_at
+                    : row.prod_last_deploy_at;
                 const lastDeployDetail =
-                  environment === "uat" ? row.uat_last_deploy_detail : row.prod_last_deploy_detail;
+                  environment === "uat"
+                    ? row.uat_last_deploy_detail
+                    : row.prod_last_deploy_detail;
                 const lastDeployBackup = backupNote(lastDeployDetail);
                 // DEV-129: upozornenia úspešného nasadenia hovorí len tento riadok — zo servera, každé raz.
                 const lastDeployWarnings =
-                  environment === "uat" ? row.uat_last_deploy_warnings : row.prod_last_deploy_warnings;
+                  environment === "uat"
+                    ? row.uat_last_deploy_warnings
+                    : row.prod_last_deploy_warnings;
                 // Vybraná verzia je UŽ nasadená → nie je to ďalší krok, je to opakovanie. Neskrývame
                 // ani nevypíname (prestavba po zásahu je legitímna) — len to pomenujeme, aby obrazovka
                 // prestala vyzerať, že o nasadení nevie.
                 const redeploy = !!chosen && !!current && chosen === current;
                 const accepted =
-                  environment === "uat" && !!row.uat_version && row.accepted_versions.includes(row.uat_version);
+                  environment === "uat" &&
+                  !!row.uat_version &&
+                  row.accepted_versions.includes(row.uat_version);
                 return (
-                  <tr key={row.customer_id} className="align-top max-md:block max-md:py-2">
+                  <tr
+                    key={row.customer_id}
+                    className="align-top max-md:block max-md:py-2"
+                  >
                     {/* Customer */}
                     <td className="px-3 py-3 max-md:block max-md:py-1.5">
-                      <div className="font-medium text-[var(--color-text-primary)]">{row.customer_name}</div>
-                      <div className="font-mono text-[11px] text-[var(--color-text-muted)]">{row.customer_slug}</div>
+                      <div className="font-medium text-[var(--color-text-primary)]">
+                        {row.customer_name}
+                      </div>
+                      <div className="font-mono text-[11px] text-[var(--color-text-muted)]">
+                        {row.customer_slug}
+                      </div>
                     </td>
 
                     {/* Currently deployed version in this environment */}
@@ -565,7 +658,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                             {fmtVer(current)}
                           </span>
                         ) : (
-                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                          <span className="text-xs text-[var(--color-text-muted)]">
+                            —
+                          </span>
                         )}
                         {accepted && (
                           <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -616,7 +711,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           role="status"
                           className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary-600 dark:text-primary-400"
                         >
-                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadenie beží: {popisPriebehu(progress)}
+                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadenie
+                          beží: {popisPriebehu(progress)}
                         </div>
                       )}
                       {lastDeployAt && (
@@ -625,14 +721,21 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         </div>
                       )}
                       {lastDeployBackup && (
-                        <div className="mt-0.5 break-all text-[11px] text-[var(--color-text-muted)]">{lastDeployBackup}</div>
+                        <div className="mt-0.5 break-all text-[11px] text-[var(--color-text-muted)]">
+                          {lastDeployBackup}
+                        </div>
                       )}
                       {lastDeployWarnings.map((w, idx) => (
-                        <div key={idx} className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                        <div
+                          key={idx}
+                          className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400"
+                        >
                           ⚠ {w}
                         </div>
                       ))}
-                      {liveUrl && liveUrls.length === 0 && renderLaunchOrOpen(row.customer_id, liveUrl)}
+                      {liveUrl &&
+                        liveUrls.length === 0 &&
+                        renderLaunchOrOpen(row.customer_id, liveUrl)}
                       {liveUrls.map((link) => (
                         <a
                           key={link.url}
@@ -641,7 +744,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           rel="noreferrer"
                           className="mt-1 flex items-center gap-1 text-[11px] text-primary-500 hover:underline pointer-coarse:min-h-11"
                         >
-                          <ExternalLink className="h-3 w-3" /> Otvoriť: {link.label}
+                          <ExternalLink className="h-3 w-3" /> Otvoriť:{" "}
+                          {link.label}
                         </a>
                       ))}
                     </td>
@@ -660,7 +764,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           value={chosen}
                           disabled={isBusy}
                           onChange={(e) =>
-                            setPicked((prev) => ({ ...prev, [row.customer_id]: e.target.value }))
+                            setPicked((prev) => ({
+                              ...prev,
+                              [row.customer_id]: e.target.value,
+                            }))
                           }
                           className="rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 font-mono text-xs text-[var(--color-text-primary)]"
                         >
@@ -675,7 +782,8 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           running line says it, and „~2 min“ would contradict its measured minutes. */}
                       {isBusy && !progress && (
                         <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
-                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadzujem… (~2 min, počkaj)
+                          <Loader2 className="h-3 w-3 animate-spin" />{" "}
+                          Nasadzujem… (~2 min, počkaj)
                         </div>
                       )}
                       {rowError[row.customer_id] && (
@@ -697,21 +805,35 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           }`}
                         >
                           {result.ok ? (
-                            <div>✓ Nasadené{result.bumped_to ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}` : ""}</div>
+                            <div>
+                              ✓ Nasadené
+                              {result.bumped_to
+                                ? ` — projekt povýšený na ${fmtVer(result.bumped_to)}`
+                                : ""}
+                            </div>
                           ) : (
                             <div>
-                              ✗ Nasadenie zlyhalo{result.event.detail ? ` — ${result.event.detail}` : ""}
+                              ✗ Nasadenie zlyhalo
+                              {result.event.detail
+                                ? ` — ${result.event.detail}`
+                                : ""}
                             </div>
                           )}
-                          {result.ok && result.url && renderLaunchOrOpen(row.customer_id, result.url)}
+                          {result.ok &&
+                            result.url &&
+                            renderLaunchOrOpen(row.customer_id, result.url)}
                           {/* DEV-129: a successful deploy's warnings are said by the row above, read back from the
                               server after the click — here they would be said twice. A failed deploy is not the
                               row's last good one, so its warnings are said only here. */}
-                          {!result.ok && result.warnings.map((w, i) => (
-                            <div key={i} className="text-amber-600 dark:text-amber-400">
-                              ⚠ {w}
-                            </div>
-                          ))}
+                          {!result.ok &&
+                            result.warnings.map((w, i) => (
+                              <div
+                                key={i}
+                                className="text-amber-600 dark:text-amber-400"
+                              >
+                                ⚠ {w}
+                              </div>
+                            ))}
                         </div>
                       )}
                     </td>
@@ -727,10 +849,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                               progress
                                 ? RUNNING_REASON
                                 : !canAccept
-                                ? ACCEPT_ROLE_REASON
-                                : row.uat_version
-                                  ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
-                                  : "Najprv nasaď verziu na UAT"
+                                  ? ACCEPT_ROLE_REASON
+                                  : row.uat_version
+                                    ? `Akceptovať UAT verziu ${fmtVer(row.uat_version)}`
+                                    : "Najprv nasaď verziu na UAT"
                             }
                             className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
                           >
@@ -744,7 +866,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         )}
                         <button
                           onClick={() => handleDeploy(row)}
-                          disabled={isBusy || verified.length === 0 || blocked !== null}
+                          disabled={
+                            isBusy || verified.length === 0 || blocked !== null
+                          }
                           title={
                             (progress ? RUNNING_REASON : null) ??
                             blocked?.title ??
@@ -771,20 +895,23 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         </button>
                         {/* DEV-238: a UAT installation an earlier deploy left broken can be built again from scratch —
                             only where one exists, and only after the consent in RebuildUatDialog. Never on PROD. */}
-                        {environment === "uat" && row.uat_version && verified.length > 0 && (
-                          <button
-                            onClick={() => setRebuilding(row)}
-                            disabled={isBusy || blocked !== null}
-                            title={
-                              (progress ? RUNNING_REASON : null) ??
-                              blocked?.title ??
-                              `Zruší inštaláciu UAT aj s jej dátami a postaví ju nanovo z verzie ${fmtVer(chosen)}.`
-                            }
-                            className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" /> Postaviť nanovo
-                          </button>
-                        )}
+                        {environment === "uat" &&
+                          row.uat_version &&
+                          verified.length > 0 && (
+                            <button
+                              onClick={() => setRebuilding(row)}
+                              disabled={isBusy || blocked !== null}
+                              title={
+                                (progress ? RUNNING_REASON : null) ??
+                                blocked?.title ??
+                                `Zruší inštaláciu UAT aj s jej dátami a postaví ju nanovo z verzie ${fmtVer(chosen)}.`
+                              }
+                              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" /> Postaviť
+                              nanovo
+                            </button>
+                          )}
                       </div>
                       {/* v4.0.54: this line used to be PROD-only and hardcoded to the acceptance gate — so on
                           UAT (the incident tab) a disabled button got no visible line at all, and on PROD it
@@ -805,7 +932,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       )}
 
       {/* DEV-90: what to try in UAT — the agent's test guide of the version, under the table. */}
-      {environment === "uat" && slug && <UatGuidePanel slug={slug} versions={verified} rows={rows} />}
+      {environment === "uat" && slug && (
+        <UatGuidePanel slug={slug} versions={verified} rows={rows} />
+      )}
 
       {/* DEV-238: „Postaviť nanovo“ on UAT — only after the explicit consent in the dialog. */}
       {rebuilding && (
@@ -830,7 +959,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
           environment={environment}
           versionNumber={pickedVersion(adopting) ?? ""}
           onClose={() => setAdopting(null)}
-          onAdopted={(sprava) => { setRowMsg(adopting.customer_id, sprava); void load(); }}
+          onAdopted={(sprava) => {
+            setRowMsg(adopting.customer_id, sprava);
+            void load();
+          }}
         />
       )}
     </div>
