@@ -6560,6 +6560,12 @@ export interface components {
          */
         ProjectCreate: {
             /**
+             * Ai
+             * @description The app runs AI agents (only with a template).
+             * @default false
+             */
+            ai: boolean;
+            /**
              * Auth Mode
              * @description Login flavour wired onto every surface: password | token. Required.
              * @enum {string}
@@ -6664,6 +6670,11 @@ export interface components {
              */
             status: "active" | "archived" | "paused";
             /**
+             * Template
+             * @description App template (nex-app-kit) the project is founded on, e.g. 'nsv-standard'; None = no template.
+             */
+            template?: string | null;
+            /**
              * Type
              * @description Project archetype (surface composition): standard | web.
              * @enum {string}
@@ -6681,6 +6692,8 @@ export interface components {
             branch_protection_note?: string | null;
             /** Custom Development Enabled */
             custom_development_enabled: boolean;
+            /** Default Template */
+            default_template?: string | null;
             /** Enable Branch Protection */
             enable_branch_protection: boolean;
             /** Enable Cicd */
@@ -6689,6 +6702,8 @@ export interface components {
             full_smoke: boolean;
             /** Private Network */
             private_network: boolean;
+            /** Templates */
+            templates?: components["schemas"]["TemplateOption"][];
             /**
              * Web Available
              * @default false
@@ -6785,6 +6800,8 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "archived" | "paused";
+            /** Template */
+            template?: string | null;
             /**
              * Type
              * @enum {string}
@@ -7354,6 +7371,18 @@ export interface components {
             category?: ("bug" | "request" | "gift") | null;
             /** Task Ids */
             task_ids: string[];
+        };
+        /**
+         * TemplateOption
+         * @description An app template the new-project form offers (DEV-253).
+         */
+        TemplateOption: {
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
         };
         /**
          * UatCheckRead

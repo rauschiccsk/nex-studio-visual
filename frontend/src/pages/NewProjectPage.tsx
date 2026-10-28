@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createProjectApi, getProjectCreatePresetsApi, suggestPortBlockApi } from "@/services/api/projects";
+import {
+  createProjectApi,
+  getProjectCreatePresetsApi,
+  suggestPortBlockApi,
+  type ProjectCreatePresets,
+} from "@/services/api/projects";
 import ErrorNote from "@/components/common/ErrorNote";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { getSystemSettingApi } from "@/services/api/systemSettings";
@@ -97,6 +102,14 @@ export default function NewProjectPage() {
   // deploy its second frontend — the backend says so with the presets; until it answers, it is not offered.
   const [webAvailable, setWebAvailable] = useState(false);
   const [webNote, setWebNote] = useState<string>("");
+  // DEV-253: the app template — its frame, sign-in, Nastavenia and server come from nex-app-kit and the agents build
+  // only the app's own screens (Director 28.10.2026: „pri každom novom projekte by som mal možnosť vybrať vytvoriť
+  // vizuál novej aplikácie podľa nejakého šablónu“). "" = none. Offered as the backend lists them; a Web project is
+  // founded without one (the backend refuses the pair by the same rule), so the choice counts only for Štandardný.
+  const [templates, setTemplates] = useState<NonNullable<ProjectCreatePresets["templates"]>>([]);
+  const [template, setTemplate] = useState("");
+  const [ai, setAi] = useState(false);
+  const chosenTemplate = type === "standard" ? template : "";
   function touchOption<T>(set: (v: T) => void) {
     return (v: T) => {
       optionsTouched.current = true;
@@ -155,6 +168,9 @@ export default function NewProjectPage() {
         setProtectionNote(p.branch_protection_note ?? "");
         setWebAvailable(p.web_available ?? false);
         setWebNote(p.web_note ?? "");
+        // The template is offered only once listed, so it cannot have been chosen before — always preset.
+        setTemplates(p.templates ?? []);
+        setTemplate(p.default_template ?? "");
         if (optionsTouched.current) return;
         setEnableCicd(p.enable_cicd);
         setFullSmoke(p.full_smoke);
@@ -271,6 +287,8 @@ export default function NewProjectPage() {
         // STEP 6 (R9): create-only "Vývoj na zákazku" flag.
         custom_development_enabled: customDevelopment,
         private_network: privateNetwork,
+        template: chosenTemplate || null,
+        ai: chosenTemplate ? ai : false,
       });
       navigate(`/projects/${project.slug}`, {
         state: {
@@ -406,6 +424,67 @@ export default function NewProjectPage() {
               </div>
               {errors.authMode && <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.authMode}</p>}
             </div>
+
+            {/* DEV-253: Šablóna aplikácie — shown once the backend has listed the templates. */}
+            {templates.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">Šablóna aplikácie</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {templates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setTemplate(t.id)}
+                      disabled={type !== "standard"}
+                      aria-pressed={chosenTemplate === t.id}
+                      className={`p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        chosenTemplate === t.id
+                          ? "border-primary-500 bg-primary-500/10 text-primary-400"
+                          : "border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{t.label}</div>
+                      <div className="text-[10px] opacity-70 mt-0.5">{t.description}</div>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setTemplate("")}
+                    disabled={type !== "standard"}
+                    aria-pressed={chosenTemplate === ""}
+                    className={`p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        chosenTemplate === ""
+                          ? "border-primary-500 bg-primary-500/10 text-primary-400"
+                          : "border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]"
+                      }`}
+                  >
+                    <div className="text-sm font-medium">Bez šablóny</div>
+                    <div className="text-[10px] opacity-70 mt-0.5">Agent postaví celú aplikáciu sám, aj ľavý panel a Nastavenia.</div>
+                  </button>
+                </div>
+                {type !== "standard" && (
+                  <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
+                    Šablóna je zatiaľ len pre štandardný projekt — Web projekt sa zakladá bez nej.
+                  </p>
+                )}
+                {chosenTemplate && (
+                  <label className="mt-3 flex items-start gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ai}
+                      onChange={(e) => setAi(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-canvas)] text-primary-500 focus:ring-primary-500"
+                    />
+                    <span>
+                      Aplikácia používa AI agentov
+                      <span className="block text-xs text-[var(--color-text-muted)]">
+                        V Nastaveniach pribudne záložka Agenti — model a úsilie pre každú rolu agenta.
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
 
             {/* Name */}
             <Field label="Názov projektu *" error={errors.name}>

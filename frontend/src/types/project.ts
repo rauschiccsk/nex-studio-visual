@@ -66,6 +66,11 @@ export interface ProjectCreate {
   custom_development_enabled?: boolean;
   /** DEV-42: installations and the Vizuál preview only in the private network (Tailscale). Default false. */
   private_network?: boolean;
+  /** DEV-253: the app template (nex-app-kit) the project is founded on, e.g. ``nsv-standard``; ``null`` = none.
+   *  Only for a ``standard`` project. */
+  template?: string | null;
+  /** DEV-253: the app runs AI agents (Nastavenia → Agenti); only together with a template. Default false. */
+  ai?: boolean;
 }
 
 /**

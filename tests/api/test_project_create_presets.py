@@ -50,6 +50,16 @@ def test_the_form_starts_with_ci_and_the_full_check_on(router_client, db_session
         # DEV-164: Web is open — the cockpit builds, previews, verifies and deploys its second frontend.
         "web_available": True,
         "web_note": None,
+        # DEV-253: the app templates, NSV štandard offered first.
+        "templates": [
+            {
+                "id": "nsv-standard",
+                "label": "NSV štandard",
+                "description": "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky "
+                "aplikácie.",
+            }
+        ],
+        "default_template": "nsv-standard",
     }
 
 

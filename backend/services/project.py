@@ -209,6 +209,7 @@ def create(db: Session, data: ProjectCreate) -> Project:
         slug=data.slug,
         type=data.type,
         auth_mode=data.auth_mode,
+        template=data.template,
         description=data.description,
         status=data.status,
         backend_port=data.backend_port,

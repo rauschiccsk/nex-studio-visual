@@ -32,6 +32,7 @@ from backend.core.offload import BlockingWorkTimedOut, run_blocking
 #: Zoznam sa NEVYPISUJE ručne — dopĺňa ho stráž nižšie, ktorá ho porovná so skutočnosťou. Pri prvom
 #: písaní bol ručný a hneď mu chýbali dva moduly.
 SHELLING_MODULES = {
+    "app_template",
     "build_db",
     "build_leftovers",
     "build_provenance",

@@ -37,6 +37,9 @@ class Project(Base, UUIDMixin, TimestampMixin):
     #   * ``password`` → username+password login (like NEX Studio).
     #   * ``token``    → token-launch (like NEX Inbox).
     auth_mode = Column(String(20), nullable=False)
+    # DEV-253: the app template the project was founded on (nex-app-kit, e.g. ``nsv-standard``); NULL = none. The frame
+    # of a project on a template — left panel, sign-in, Nastavenia, the standard server — comes from the template.
+    template = Column(String(50), nullable=True)
     description = Column(Text, nullable=False)
     status = Column(String(20), nullable=False, server_default="active")
     backend_port = Column(Integer, nullable=True)

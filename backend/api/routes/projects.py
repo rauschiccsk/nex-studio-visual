@@ -62,8 +62,10 @@ from backend.schemas.project import (
     ProjectStatus,
     ProjectType,
     ProjectUpdate,
+    TemplateOption,
 )
 from backend.schemas.version import VersionCreate
+from backend.services import app_template as app_template_service
 from backend.services import dedo_project_proposal as dedo_proposal_service
 from backend.services import deploy as deploy_service
 from backend.services import fast_fix as fast_fix_service
@@ -332,6 +334,12 @@ def _uat_teardown_destroys_data(db: Session, project_id: UUID, uat_slug: str) ->
     )
 
 
+#: DEV-253: said to the Manažér when a project founded on a template turns out to be an adoption.
+ADOPTED_WITHOUT_TEMPLATE = (
+    "Šablóna aplikácie sa nepoužila — prevzatý projekt má vlastný rám, preto je vedený bez šablóny."
+)
+
+
 def _workspace_holds_foreign_files(source_path: str | None) -> bool:
     """True when ``source_path`` already holds files — i.e. it is NOT ours to delete.
 
@@ -547,6 +555,11 @@ def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
         branch_protection_note=None if available else BRANCH_PROTECTION_NOTE,
         web_available=project_surfaces_service.WEB_PROJECTS_AVAILABLE,
         web_note=None if project_surfaces_service.WEB_PROJECTS_AVAILABLE else project_surfaces_service.WEB_NOT_YET,
+        templates=[
+            TemplateOption(id=k, label=t.label, description=t.description)
+            for k, t in app_template_service.TEMPLATES.items()
+        ],
+        default_template=app_template_service.DEFAULT_TEMPLATE,
     )
 
 
@@ -1060,6 +1073,30 @@ def create_project(
                 detail=f"v2 agent charter provisioning failed: {exc}",
             ) from exc
 
+        # DEV-253: a project on an app template gets the template's frame — frontend, server, compose, its settings —
+        # filled from the newest nex-app-kit over what init.sh made, and committed before the first push. HARD step
+        # like the charters: a project announced on the template without its frame would send the agent to build one.
+        if payload.template and adopting:
+            # An adopted project keeps its own frame: the template is not filled over it, so it is not remembered
+            # on it either — the agents would build it as a project on the template.
+            project.template = None
+        elif payload.template:
+            try:
+                app_template_service.apply_template(
+                    PROJECTS_ROOT / project.slug,
+                    app_template_service.TemplateChoice(template=payload.template, ai=payload.ai),
+                    name=project.name,
+                    slug=project.slug,
+                    auth_mode=project.auth_mode,
+                    ports=(project.backend_port or 0, project.frontend_port or 0, project.db_port or 0),
+                )
+            except app_template_service.AppTemplateError as exc:
+                db.rollback()
+                _discard_orphaned_workspace(
+                    project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here
+                )
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
         # CR-V2-016: seed the AI Agent's per-project ``MEMORY.md`` (single source of
         # truth — replaces the retired STATUS.md/HISTORY.md DB-driven seeding). One-shot
         # scaffold in the just-bootstrapped workspace; the agent owns every later write
@@ -1136,6 +1173,7 @@ def create_project(
                 "Prepísala sa charta CLAUDE.md — pôvodná je vedľa nej ako CLAUDE.md.pre-nex-studio. "
                 "Vlastné pravidlá z nej treba do novej charty preniesť, inak pre tento projekt "
                 "prestanú platiť.",
+                *([ADOPTED_WITHOUT_TEMPLATE] if payload.template else []),
             ]
             if adopting
             else run_post_scaffold_steps(

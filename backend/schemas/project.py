@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Mirrors the CHECK constraint `type IN ('standard', 'web')` on the
 # ``projects`` table — the project archetype (preset surface composition).
@@ -98,6 +98,14 @@ NEW_PROJECT_PRESETS: dict[str, bool] = {
 }
 
 
+class TemplateOption(BaseModel):
+    """An app template the new-project form offers (DEV-253)."""
+
+    id: str
+    label: str
+    description: str
+
+
 class ProjectCreatePresets(BaseModel):
     """The new-project form's starting options (DEV-37), and whether branch protection can be offered at all."""
 
@@ -114,6 +122,9 @@ class ProjectCreatePresets(BaseModel):
     #: the form then greys „Web“ out and shows the note. The create route refuses ``type=web`` by the same rule.
     web_available: bool = False
     web_note: Optional[str] = None
+    #: DEV-253: the app templates a project can be founded on, the one offered first.
+    templates: list[TemplateOption] = Field(default_factory=list)
+    default_template: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
@@ -198,6 +209,14 @@ class ProjectCreate(BaseModel):
             "(firemné zásady §4). Set once at creation (like type / auth_mode). Default False."
         ),
     )
+    #: DEV-253: the app template to found the project on (``backend.services.app_template.TEMPLATES``), or ``None``
+    #: for a project without one. Set once at creation, like type and auth_mode.
+    template: Optional[str] = Field(
+        default=None,
+        description="App template (nex-app-kit) the project is founded on, e.g. 'nsv-standard'; None = no template.",
+    )
+    #: DEV-253: the app runs AI agents — the template's manifest gets an agent role and Nastavenia the tab Agenti.
+    ai: bool = Field(default=False, description="The app runs AI agents (only with a template).")
     private_network: bool = Field(
         default=False,
         description=(
@@ -238,6 +257,24 @@ class ProjectCreate(BaseModel):
             "no force push). Default False per spec O-3 + Dedo approval."
         ),
     )
+
+    @field_validator("template")
+    @classmethod
+    def _template_must_exist(cls, value: Optional[str]) -> Optional[str]:
+        from backend.services.app_template import TEMPLATES
+
+        if value is not None and value not in TEMPLATES:
+            known = ", ".join(f"„{k}“" for k in TEMPLATES)
+            raise ValueError(f"Šablóna aplikácie „{value}“ neexistuje — sú tieto: {known}.")
+        return value
+
+    @model_validator(mode="after")
+    def _template_fits_the_project(self) -> "ProjectCreate":
+        if self.template is not None and self.type != "standard":
+            raise ValueError("Šablóna aplikácie je zatiaľ len pre bežný projekt — Web projekt sa zakladá bez nej.")
+        if self.ai and self.template is None:
+            raise ValueError("AI agentov v šablóne si vyber spolu so šablónou aplikácie.")
+        return self
 
     @field_validator("slug")
     @classmethod
@@ -342,6 +379,8 @@ class ProjectRead(BaseModel):
     slug: str = Field(..., min_length=1, max_length=100)
     type: ProjectType
     auth_mode: ProjectAuthMode
+    #: DEV-253: the app template the project was founded on; ``None`` = none.
+    template: Optional[str] = None
     description: str
     status: ProjectStatus
     backend_port: Optional[int] = None
