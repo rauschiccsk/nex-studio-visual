@@ -106,6 +106,43 @@ class TemplateOption(BaseModel):
     description: str
 
 
+class ChangelogEntry(BaseModel):
+    """One ``## vX.Y.Z`` section of a kit's CHANGELOG — the prompt's „Čo prinesie“."""
+
+    version: str
+    body: str
+
+
+class AppKitPart(BaseModel):
+    """One side of nex-app-kit in a project — the frame (frontend lockfile) or the server (its pin)."""
+
+    name: str
+    label: str
+    current: Optional[str] = None
+
+
+class AppKitStatus(BaseModel):
+    """DEV-253: the nex-app-kit a project on an app template builds with vs the newest release."""
+
+    current: Optional[str] = None
+    latest: Optional[str] = None
+    behind: int = 0
+    up_to_date: bool = False
+    changelog: list[ChangelogEntry] = Field(default_factory=list)
+    parts: list[AppKitPart] = Field(default_factory=list)
+
+
+class AppKitUpgradeRequest(BaseModel):
+    target_version: str
+
+
+class AppKitUpgradeResult(BaseModel):
+    upgraded: bool
+    target_version: str
+    #: ``False`` when the files moved but the commit failed — the project then has unsaved changes.
+    committed: bool
+
+
 class ProjectCreatePresets(BaseModel):
     """The new-project form's starting options (DEV-37), and whether branch protection can be offered at all."""
 

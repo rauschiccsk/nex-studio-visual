@@ -32,8 +32,8 @@ NEX_SHARED_URL = "https://github.com/rauschiccsk/nex-shared.git"
 #: The raw CHANGELOG.md — feeds the prompt's "Čo prinesie" (the whole point of the changelog).
 CHANGELOG_RAW_URL = "https://raw.githubusercontent.com/rauschiccsk/nex-shared/main/CHANGELOG.md"
 
-#: The lockfile entry npm writes for the installed nex-shared tree — the built version.
-_LOCK_KEY = "node_modules/nex-shared"
+#: The package this module upgrades by default; DEV-253 upgrades nex-app-kit's frame with the same steps.
+PACKAGE = "nex-shared"
 
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 _PIN_RE = re.compile(r"#v?(\d+\.\d+\.\d+)")
@@ -41,8 +41,8 @@ _TAG_RE = re.compile(r"refs/tags/v(\d+\.\d+\.\d+)$")
 _SECTION_RE = re.compile(r"^## v(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
 
 
-def parse_lock_version(package_lock_text: str) -> Optional[str]:
-    """Extract the RESOLVED nex-shared version (``'0.11.0'``) from a package-lock.json, or None.
+def parse_lock_version(package_lock_text: str, package: str = PACKAGE) -> Optional[str]:
+    """Extract the RESOLVED version of *package* (``'0.11.0'``) from a package-lock.json, or None.
 
     ``packages["node_modules/nex-shared"].version`` is what ``npm ci`` installs. None when the
     lockfile is unparseable / has no nex-shared entry / the version is not a bare semver — an
@@ -54,7 +54,7 @@ def parse_lock_version(package_lock_text: str) -> Optional[str]:
         return None
     if not isinstance(data, dict):
         return None
-    entry = (data.get("packages") or {}).get(_LOCK_KEY)
+    entry = (data.get("packages") or {}).get(f"node_modules/{package}")
     if not isinstance(entry, dict):
         return None
     version = entry.get("version")
@@ -65,8 +65,8 @@ def parse_lock_version(package_lock_text: str) -> Optional[str]:
 DEFAULT_DIRECTORIES: tuple[str, ...] = ("frontend",)
 
 
-def effective_version(source_path: str, directory: str = "frontend") -> Optional[str]:
-    """The nex-shared version the app ACTUALLY builds with, from ``<directory>/package-lock.json``.
+def effective_version(source_path: str, directory: str = "frontend", package: str = PACKAGE) -> Optional[str]:
+    """The version of *package* the app ACTUALLY builds with, from ``<directory>/package-lock.json``.
 
     NOT the package.json pin (see the module note): the two disagree after any manual bump, and
     reporting the pin would show one version while building another. A missing / unreadable
@@ -77,7 +77,7 @@ def effective_version(source_path: str, directory: str = "frontend") -> Optional
         text = lock.read_text(encoding="utf-8")
     except OSError:
         return None
-    return parse_lock_version(text)
+    return parse_lock_version(text, package)
 
 
 def _key(v: str) -> tuple[int, int, int]:
@@ -192,28 +192,29 @@ def status_for_source(
     }
 
 
-def rewrite_pin(package_json_text: str, target_version: str) -> Optional[str]:
-    """Return package.json text with the nex-shared pin set to ``#v<target>``, or None.
+def rewrite_pin(package_json_text: str, target_version: str, package: str = PACKAGE) -> Optional[str]:
+    """Return package.json text with the *package* pin set to ``#v<target>``, or None.
 
-    None when there is no nex-shared dependency to rewrite (never invents one) or the
+    None when there is no such dependency to rewrite (never invents one) or the
     target is not a bare semver. Preserves the file otherwise byte-for-byte except the pin.
     """
     if not _SEMVER.match(target_version):
         return None
-    new_ref = f"{_GIT_DEP_PREFIX}{target_version}"
+    new_ref = git_dependency(package, target_version)
 
     def _sub(m: re.Match) -> str:
-        return f'{m.group(1)}"nex-shared": "{new_ref}"'
+        return f'{m.group(1)}"{package}": "{new_ref}"'
 
-    # Match the "nex-shared": "<anything>" entry, keep leading indentation/comma context.
-    pattern = re.compile(r'(^|\{|,|\s)"nex-shared"\s*:\s*"[^"]*"')
+    # Match the "<package>": "<anything>" entry, keep leading indentation/comma context.
+    pattern = re.compile(r'(^|\{|,|\s)"' + re.escape(package) + r'"\s*:\s*"[^"]*"')
     new_text, n = pattern.subn(_sub, package_json_text, count=1)
     return new_text if n == 1 else None
 
 
-#: The single spelling of the git dependency. The manifest rewrite and the lockfile spec MUST
-#: agree — a divergence would rewrite package.json to one ref and resolve the lockfile to another.
-_GIT_DEP_PREFIX = "github:rauschiccsk/nex-shared#v"
+def git_dependency(package: str, version: str) -> str:
+    """The single spelling of an ICC kit's git dependency. The manifest rewrite and the lockfile spec MUST agree —
+    a divergence would rewrite package.json to one ref and resolve the lockfile to another."""
+    return f"github:rauschiccsk/{package}#v{version}"
 
 
 def resolve_lockfile(frontend_dir: Path, spec: str, *, timeout: int = 300) -> bool:
@@ -304,7 +305,7 @@ def _upgrade_directory(
 
     pkg.write_text(rewritten, encoding="utf-8")
     touched: list[tuple[Path, Optional[str]]] = [(pkg, original_pkg), (lock, original_lock)]
-    spec = f"{_GIT_DEP_PREFIX}{target_version}"
+    spec = git_dependency(PACKAGE, target_version)
     if resolve_lockfile(frontend, spec) and effective_version(source_path, directory) == target_version:
         return touched
     _restore(touched)
@@ -316,13 +317,16 @@ def commit_pin_upgrade(
     target_version: str,
     *,
     directories: tuple[str, ...] = DEFAULT_DIRECTORIES,
+    package: str = PACKAGE,
+    also: tuple[str, ...] = (),
     timeout: int = 30,
 ) -> bool:
     """Stage + commit the pin bump so it is durable + lands in the new version's build.
 
     Stages the lockfile alongside the manifest — ``npm ci`` reads the LOCKFILE, so a commit
-    without it would ship the old version. Best-effort, never raises: no ``.git`` / nothing
-    staged → returns False. A redeploy bakes the result into the nginx bundle.
+    without it would ship the old version. *also* names further files of the same upgrade (DEV-253: nex-app-kit's
+    server pin in ``backend/pyproject.toml``) — one commit, so the two sides never part. Best-effort, never raises:
+    no ``.git`` / nothing staged → returns False. A redeploy bakes the result into the nginx bundle.
     """
     root = Path(source_path)
     if not (root / ".git").is_dir():
@@ -333,7 +337,7 @@ def commit_pin_upgrade(
         for d in directories
         for name in ("package.json", "package-lock.json")
         if (root / d / name).is_file()
-    ]
+    ] + [path for path in also if (root / path).is_file()]
     if not paths:
         return False
     try:
@@ -347,7 +351,7 @@ def commit_pin_upgrade(
         if add.returncode != 0:
             return False
         commit = subprocess.run(
-            ["git", "-C", str(root), "commit", "-m", f"chore(deps): bump nex-shared → v{target_version}"],
+            ["git", "-C", str(root), "commit", "-m", f"chore(deps): bump {package} → v{target_version}"],
             capture_output=True,
             text=True,
             timeout=timeout,

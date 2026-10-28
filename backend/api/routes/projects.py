@@ -53,6 +53,9 @@ from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.pipeline import PipelineStateRead
 from backend.schemas.project import (
     NEW_PROJECT_PRESETS,
+    AppKitStatus,
+    AppKitUpgradeRequest,
+    AppKitUpgradeResult,
     GitHubRepoNotFoundError,
     PortBlockSuggestResponse,
     PortConflictError,
@@ -65,6 +68,7 @@ from backend.schemas.project import (
     TemplateOption,
 )
 from backend.schemas.version import VersionCreate
+from backend.services import app_kit as app_kit_service
 from backend.services import app_template as app_template_service
 from backend.services import dedo_project_proposal as dedo_proposal_service
 from backend.services import deploy as deploy_service
@@ -752,6 +756,57 @@ def upgrade_nexshared(
         project.source_path, payload.target_version, directories=directories
     )
     return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
+
+
+@router.get("/{project_id}/app-kit-status", response_model=AppKitStatus)
+def get_app_kit_status(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AppKitStatus:
+    """DEV-253: the nex-app-kit of a project on an app template vs the newest release, with „Čo prinesie“ — the
+    opt-in prompt when the Manažér founds a new version, as for nex-shared. A project without a template (or without
+    a source) is offered nothing."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    if not project.template or not project.source_path:
+        return AppKitStatus()
+    return AppKitStatus(**app_kit_service.status_for_source(project.source_path))
+
+
+@router.post("/{project_id}/app-kit-upgrade", response_model=AppKitUpgradeResult)
+def upgrade_app_kit(
+    project_id: UUID,
+    payload: AppKitUpgradeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AppKitUpgradeResult:
+    """DEV-253: move the project's nex-app-kit to ``target_version`` — the frame and the server together, one commit
+    — so the new version's Vizuál preview and build run on it. Nothing happens without this call."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    if not project.template or not project.source_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Projekt nie je založený na šablóne aplikácie — nex-app-kit v ňom nie je čo povýšiť.",
+        )
+    if not app_kit_service.upgrade_source(project.source_path, payload.target_version):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Povýšenie šablóny sa nepodarilo dokončiť — verzia sa nezapísala do zámku závislostí, takže by sa "
+                "zostavovala pôvodná. Rám ani server sa nezmenili. Skús to znova; ak to potrvá, over dostupnosť "
+                "GitHubu."
+            ),
+        )
+    committed = app_kit_service.commit_upgrade(project.source_path, payload.target_version)
+    return AppKitUpgradeResult(upgraded=True, target_version=payload.target_version, committed=committed)
 
 
 @router.get("/{project_id}/git-status")

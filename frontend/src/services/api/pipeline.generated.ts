@@ -1732,6 +1732,49 @@ export interface paths {
         patch: operations["update_project_api_v1_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/app-kit-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get App Kit Status
+         * @description DEV-253: the nex-app-kit of a project on an app template vs the newest release, with „Čo prinesie“ — the
+         *     opt-in prompt when the Manažér founds a new version, as for nex-shared. A project without a template (or without
+         *     a source) is offered nothing.
+         */
+        get: operations["get_app_kit_status_api_v1_projects__project_id__app_kit_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/app-kit-upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upgrade App Kit
+         * @description DEV-253: move the project's nex-app-kit to ``target_version`` — the frame and the server together, one commit
+         *     — so the new version's Vizuál preview and build run on it. Nothing happens without this call.
+         */
+        post: operations["upgrade_app_kit_api_v1_projects__project_id__app_kit_upgrade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assignments": {
         parameters: {
             query?: never;
@@ -3340,6 +3383,56 @@ export interface components {
             role: "ai-agent";
         };
         /**
+         * AppKitPart
+         * @description One side of nex-app-kit in a project — the frame (frontend lockfile) or the server (its pin).
+         */
+        AppKitPart: {
+            /** Current */
+            current?: string | null;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * AppKitStatus
+         * @description DEV-253: the nex-app-kit a project on an app template builds with vs the newest release.
+         */
+        AppKitStatus: {
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Changelog */
+            changelog?: components["schemas"]["ChangelogEntry"][];
+            /** Current */
+            current?: string | null;
+            /** Latest */
+            latest?: string | null;
+            /** Parts */
+            parts?: components["schemas"]["AppKitPart"][];
+            /**
+             * Up To Date
+             * @default false
+             */
+            up_to_date: boolean;
+        };
+        /** AppKitUpgradeRequest */
+        AppKitUpgradeRequest: {
+            /** Target Version */
+            target_version: string;
+        };
+        /** AppKitUpgradeResult */
+        AppKitUpgradeResult: {
+            /** Committed */
+            committed: boolean;
+            /** Target Version */
+            target_version: string;
+            /** Upgraded */
+            upgraded: boolean;
+        };
+        /**
          * AuthUser
          * @description Safe user representation for auth responses (no password_hash).
          */
@@ -3695,6 +3788,16 @@ export interface components {
              * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
              */
             new_password: string;
+        };
+        /**
+         * ChangelogEntry
+         * @description One ``## vX.Y.Z`` section of a kit's CHANGELOG — the prompt's „Čo prinesie“.
+         */
+        ChangelogEntry: {
+            /** Body */
+            body: string;
+            /** Version */
+            version: string;
         };
         /**
          * CiJobElsewhereRead
@@ -11313,6 +11416,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_kit_status_api_v1_projects__project_id__app_kit_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppKitStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upgrade_app_kit_api_v1_projects__project_id__app_kit_upgrade_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppKitUpgradeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppKitUpgradeResult"];
                 };
             };
             /** @description Validation Error */

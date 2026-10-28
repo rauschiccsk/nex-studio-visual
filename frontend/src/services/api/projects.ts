@@ -92,6 +92,21 @@ export function upgradeNexsharedApi(
   });
 }
 
+/** DEV-253: the nex-app-kit a project on an app template builds with (frame and server) vs the newest release. */
+export type AppKitStatus = components["schemas"]["AppKitStatus"];
+
+export function getAppKitStatusApi(projectId: string): Promise<AppKitStatus> {
+  return api.get<AppKitStatus>(`/projects/${projectId}/app-kit-status`);
+}
+
+/** DEV-253: move the project's nex-app-kit — the frame and the server together — to `targetVersion`, one commit. */
+export function upgradeAppKitApi(
+  projectId: string,
+  targetVersion: string,
+): Promise<components["schemas"]["AppKitUpgradeResult"]> {
+  return api.post(`/projects/${projectId}/app-kit-upgrade`, { target_version: targetVersion });
+}
+
 /** One uncommitted entry in the project's working tree (git status --porcelain). */
 interface GitStatusFile {
   code: string;

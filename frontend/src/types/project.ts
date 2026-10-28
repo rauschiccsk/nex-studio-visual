@@ -122,6 +122,8 @@ export interface ProjectRead {
   custom_development_enabled: boolean;
   /** DEV-42: installations and the Vizuál preview named in *.int.isnex.eu — reachable only via Tailscale. */
   private_network: boolean;
+  /** DEV-253: the app template (nex-app-kit) the project was founded on; ``null`` = none. */
+  template?: string | null;
   created_by: string;
   /** Notification owner (CR-NS-012), nullable. */
   owner_id: string | null;

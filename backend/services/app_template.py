@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.services import nexshared
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +43,8 @@ TEMPLATES: dict[str, Template] = {
 #: What the new-project form offers first.
 DEFAULT_TEMPLATE = "nsv-standard"
 
-KIT_REPO = "rauschiccsk/nex-app-kit"
+KIT_PACKAGE = "nex-app-kit"
+KIT_REPO = f"rauschiccsk/{KIT_PACKAGE}"
 KIT_GIT_URL = f"https://github.com/{KIT_REPO}.git"
 TAG = re.compile(r"refs/tags/v(\d+)\.(\d+)\.(\d+)$")
 #: How long each outside step may take — the clone and the lockfile go over the network.
@@ -113,9 +116,14 @@ def scaffold_values(
         "backend_port": backend_port,
         "frontend_port": frontend_port,
         "db_port": db_port,
-        "kit_frontend": f"github:{KIT_REPO}#v{version}",
-        "kit_server": f"nex-app-kit @ https://github.com/{KIT_REPO}/archive/refs/tags/v{version}.tar.gz#subdirectory=server",
+        "kit_frontend": nexshared.git_dependency(KIT_PACKAGE, version),
+        "kit_server": kit_server_dependency(version),
     }
+
+
+def kit_server_dependency(version: str) -> str:
+    """The server's dependency on a nex-app-kit release (``backend/pyproject.toml``): the archive's ``server``."""
+    return f"{KIT_PACKAGE} @ https://github.com/{KIT_REPO}/archive/refs/tags/v{version}.tar.gz#subdirectory=server"
 
 
 def _fetch_kit(version: str, destination: Path, run: Runner) -> None:

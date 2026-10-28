@@ -14,7 +14,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 import { ApiError } from "@/services/api";
-import type { GitStatus, NexsharedStatus } from "@/services/api/projects";
+import type { AppKitStatus, GitStatus, NexsharedStatus } from "@/services/api/projects";
 import type { ProjectRead } from "@/types";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
@@ -24,6 +24,8 @@ const {
   listProjectsApiMock,
   getNexsharedStatusApiMock,
   upgradeNexsharedApiMock,
+  getAppKitStatusApiMock,
+  upgradeAppKitApiMock,
   getGitStatusApiMock,
   commitGitApiMock,
   discardGitApiMock,
@@ -39,6 +41,8 @@ const {
   listProjectsApiMock: vi.fn(),
   getNexsharedStatusApiMock: vi.fn(),
   upgradeNexsharedApiMock: vi.fn(),
+  getAppKitStatusApiMock: vi.fn(),
+  upgradeAppKitApiMock: vi.fn(),
   getGitStatusApiMock: vi.fn(),
   commitGitApiMock: vi.fn(),
   discardGitApiMock: vi.fn(),
@@ -60,6 +64,8 @@ vi.mock("@/services/api/projects", () => ({
   listProjectsApi: listProjectsApiMock,
   getNexsharedStatusApi: getNexsharedStatusApiMock,
   upgradeNexsharedApi: upgradeNexsharedApiMock,
+  getAppKitStatusApi: getAppKitStatusApiMock,
+  upgradeAppKitApi: upgradeAppKitApiMock,
   getGitStatusApi: getGitStatusApiMock,
   commitGitApi: commitGitApiMock,
   discardGitApi: discardGitApiMock,
@@ -263,6 +269,97 @@ describe("NewVersionPage — nex-shared upgrade tells the truth about committed"
     expect(await screen.findByText(/Povýšenie nex-shared na v0\.19\.0 zlyhalo/i)).toBeInTheDocument();
     // Still offered — the Manažér can retry or stay.
     expect(screen.getByRole("button", { name: /povýšiť na v0\.19\.0/i })).toBeEnabled();
+  });
+});
+
+describe("NewVersionPage — nex-app-kit of a project on an app template (DEV-253)", () => {
+  const behindKit: AppKitStatus = {
+    current: "0.3.0",
+    latest: "0.4.0",
+    behind: 1,
+    up_to_date: false,
+    changelog: [{ version: "0.4.0", body: "Nová záložka v Nastaveniach." }],
+    parts: [
+      { name: "frontend", label: "Rám (frontend)", current: "0.3.0" },
+      { name: "server", label: "Server", current: "0.3.0" },
+    ],
+  };
+  const onTemplate = { ...project, template: "nsv-standard" };
+
+  beforeEach(() => {
+    listProjectsApiMock.mockResolvedValue({ items: [onTemplate], total: 1, skip: 0, limit: 100 });
+    getAppKitStatusApiMock.mockResolvedValue(behindKit);
+  });
+
+  it("offers the newest kit with both sides and what it brings, and moves it on the click", async () => {
+    upgradeAppKitApiMock.mockResolvedValue({ upgraded: true, target_version: "0.4.0", committed: true });
+
+    await renderPage();
+
+    expect(await screen.findByText("K dispozícii je novšia šablóna aplikácie")).toBeInTheDocument();
+    expect(screen.getByText("Rám (frontend)")).toBeInTheDocument();
+    expect(screen.getByText("Server")).toBeInTheDocument();
+    expect(screen.getByText("Povýšenie zmení oba naraz.")).toBeInTheDocument();
+    expect(screen.getByText("Nová záložka v Nastaveniach.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /povýšiť na v0\.4\.0/i }));
+
+    expect(upgradeAppKitApiMock).toHaveBeenCalledWith("p1", "0.4.0");
+    await waitFor(() =>
+      expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(getGitStatusApiMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("says a failed kit upgrade in its own words and keeps the offer", async () => {
+    upgradeAppKitApiMock.mockRejectedValue(new ApiError(400, "Rám ani server sa nezmenili."));
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: /povýšiť na v0\.4\.0/i }));
+
+    expect(await screen.findByText(/Povýšenie šablóny aplikácie na v0\.4\.0 zlyhalo/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /povýšiť na v0\.4\.0/i })).toBeEnabled();
+  });
+
+  it("drops the note of a written-but-unsaved kit once the tree is committed", async () => {
+    upgradeAppKitApiMock.mockResolvedValue({ upgraded: true, target_version: "0.4.0", committed: false });
+    getGitStatusApiMock.mockResolvedValueOnce(cleanTree).mockResolvedValueOnce(dirtyTree).mockResolvedValue(cleanTree);
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: /povýšiť na v0\.4\.0/i }));
+    expect(await screen.findByText(/nepodarilo sa ho uložiť/i)).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole("button", { name: /uložiť ich/i }));
+
+    await waitFor(() => expect(screen.queryByText(/nepodarilo sa ho uložiť/i)).not.toBeInTheDocument());
+  });
+
+  it("„Ostať“ keeps the kit and hides the offer", async () => {
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Ostať na v0.3.0" }));
+
+    expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).not.toBeInTheDocument();
+    expect(upgradeAppKitApiMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the kit's offer before nex-shared's when both are behind", async () => {
+    getNexsharedStatusApiMock.mockResolvedValue(behindNexshared);
+
+    await renderPage();
+
+    const kitTitle = await screen.findByText("K dispozícii je novšia šablóna aplikácie");
+    const nexTitle = await screen.findByText("K dispozícii je novší nex-shared");
+    expect(kitTitle.compareDocumentPosition(nexTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("a project without a template is not asked about the kit at all", async () => {
+    listProjectsApiMock.mockResolvedValue({ items: [project], total: 1, skip: 0, limit: 100 });
+
+    await renderPage();
+    await waitFor(() => expect(getNexsharedStatusApiMock).toHaveBeenCalled());
+
+    expect(getAppKitStatusApiMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).not.toBeInTheDocument();
   });
 });
 
