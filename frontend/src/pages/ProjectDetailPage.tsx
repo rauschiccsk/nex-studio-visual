@@ -20,6 +20,8 @@ import { ORIGIN_DEAD_CODE, fastFixOriginLabel, forgetFastFixOrigin, markFastFixO
 import { appendInstruction } from "@/lib/poradcaHandoff";
 import DeadCodeCleanupPanel from "@/components/projects/DeadCodeCleanupPanel";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
+import { AppTemplateConversionPrompt } from "@/components/riadiace/AppTemplateConversionPrompt";
+import { templateConversionApplies } from "@/components/riadiace/templateConversion";
 import { startFastFixApi } from "@/services/api/pipeline";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { draftKey, useDraft } from "@/hooks/useDraft";
@@ -566,6 +568,16 @@ export default function ProjectDetailPage() {
           kartou stránky, pod červenou kartou „Zmazať natrvalo": 26.09.2026 sa Director prišiel pozrieť, či
           zadanie dorazilo, panel minul a začal formulár Nová verzia vypĺňať ručne. Keď Dedo niečo pripraví,
           má to Manažér vidieť skôr, než siahne po ručnej ceste. */}
+      {/* DEV-254: a new version from Dedo's brief is founded here, not on the „Nová verzia“ form — so the conversion
+          onto the app template is offered here too, above the brief, for a project built without a template. */}
+      {project && dedoProposal?.proposed_action === "new_version" && templateConversionApplies(project) && (
+        <div className="mb-4">
+          <AppTemplateConversionPrompt
+            projectId={project.id}
+            onConverted={(template) => setProject({ ...project, template })}
+          />
+        </div>
+      )}
       {project && dedoProposal && (
         <div id={DEDO_BRIEF_ANCHOR}>
           <DedoBriefBar

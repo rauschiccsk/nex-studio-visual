@@ -33,6 +33,8 @@ const {
   startFastFixApiMock,
   getDeadCodeApiMock,
   getProjectDedoProposalApiMock,
+  getAppTemplateConversionApiMock,
+  convertToAppTemplateApiMock,
   sendProjectDedoProposalApiMock,
   setSelectedProjectMock,
   setSelectedVersionMock,
@@ -52,6 +54,8 @@ const {
   startFastFixApiMock: vi.fn(),
   getDeadCodeApiMock: vi.fn(),
   getProjectDedoProposalApiMock: vi.fn(),
+  getAppTemplateConversionApiMock: vi.fn(),
+  convertToAppTemplateApiMock: vi.fn(),
   sendProjectDedoProposalApiMock: vi.fn(),
   setSelectedProjectMock: vi.fn(),
   setSelectedVersionMock: vi.fn(),
@@ -92,6 +96,9 @@ vi.mock("@/services/api/projects", () => ({
   // back, so a question that never answers keeps it out of what these tests measure.
   getWebSwitchApi: vi.fn(() => new Promise(() => {})),
   switchToWebApi: vi.fn(),
+  // DEV-254: the conversion onto the app template is offered above a new-version brief.
+  getAppTemplateConversionApi: getAppTemplateConversionApiMock,
+  convertToAppTemplateApi: convertToAppTemplateApiMock,
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({
@@ -167,6 +174,12 @@ beforeEach(() => {
   startFastFixApiMock.mockResolvedValue({ version_id: "v2", board: { state: null, recent_messages: [] } });
   // Bežný stav: Dedo nič nenavrhol. Stránka sa má vtedy tváriť presne tak, ako sa tvárila doteraz.
   getProjectDedoProposalApiMock.mockResolvedValue(null);
+  getAppTemplateConversionApiMock.mockResolvedValue({
+    available: true,
+    reason: null,
+    templates: [{ id: "nsv-standard", label: "NSV štandard", description: "Rám ako v NSV." }],
+    default_template: "nsv-standard",
+  });
   // The ACCOUNT named admin — the ri ROLE no longer confers anything over a project (permissions.ts).
   authStateMock.user = { role: "ri", username: "admin", id: "u-admin" };
   locationMock.search = "";
@@ -716,5 +729,52 @@ describe("ProjectDetailPage — the next version's number comes from the cockpit
       null,
       "1.1.0",
     );
+  });
+});
+
+describe("ProjectDetailPage — the conversion onto the app template above Dedo's brief (DEV-254)", () => {
+  const brief = (proposed_action: "new_version" | "fast_fix") => ({
+    id: "n-2",
+    project_id: "p1",
+    content: "NEX Knowledge 0.2.0 — prechod na šablónu aplikácie.",
+    proposed_action,
+    status: "proposed",
+    created_at: "2026-10-29T10:00:00Z",
+    proposed_version_number: "0.2.0",
+    version_number: "0.2.0",
+    unstarted_version_numbers: [],
+  });
+
+  it("a new version from the brief is offered the conversion first, and it goes once done", async () => {
+    getProjectDedoProposalApiMock.mockResolvedValue(brief("new_version"));
+    convertToAppTemplateApiMock.mockResolvedValue({ template: "nsv-standard", kit_version: "0.3.0" });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Previesť na NSV štandard" }));
+
+    await waitFor(() => expect(convertToAppTemplateApiMock).toHaveBeenCalledWith("p1", "nsv-standard", false));
+    await waitFor(() =>
+      expect(screen.queryByText("Previesť projekt na šablónu aplikácie")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Založiť novú verziu" })).toBeInTheDocument();
+  });
+
+  it("a fast fix from the brief is not offered the conversion", async () => {
+    getProjectDedoProposalApiMock.mockResolvedValue(brief("fast_fix"));
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByText("NEX Knowledge 0.2.0 — prechod na šablónu aplikácie.")).toBeInTheDocument();
+    expect(getAppTemplateConversionApiMock).not.toHaveBeenCalled();
+  });
+
+  it("without a brief the page does not ask about the conversion", async () => {
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect((await screen.findAllByText("Demo")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(getProjectDedoProposalApiMock).toHaveBeenCalled());
+    expect(getAppTemplateConversionApiMock).not.toHaveBeenCalled();
   });
 });

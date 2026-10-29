@@ -16,6 +16,7 @@ import {
 import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
 import { AppKitUpgradePrompt } from "@/components/riadiace/AppKitUpgradePrompt";
 import { AppTemplateConversionPrompt } from "@/components/riadiace/AppTemplateConversionPrompt";
+import { templateConversionApplies } from "@/components/riadiace/templateConversion";
 import { useLibraryUpgrade } from "@/hooks/useLibraryUpgrade";
 import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
 import {
@@ -491,7 +492,7 @@ export default function NewVersionPage() {
             </div>
           )}
           {/* DEV-254: a project built without a template may be put onto one — only once the tree is clean. */}
-          {!isDirty && !savedVersion && project && !project.template && project.type === "standard" && (
+          {!isDirty && !savedVersion && project && templateConversionApplies(project) && (
             <div className="mb-5">
               <AppTemplateConversionPrompt projectId={project.id} onConverted={handleConverted} />
             </div>
