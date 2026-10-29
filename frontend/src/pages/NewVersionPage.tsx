@@ -15,6 +15,7 @@ import {
 } from "@/services/api/projects";
 import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
 import { AppKitUpgradePrompt } from "@/components/riadiace/AppKitUpgradePrompt";
+import { AppTemplateConversionPrompt } from "@/components/riadiace/AppTemplateConversionPrompt";
 import { useLibraryUpgrade } from "@/hooks/useLibraryUpgrade";
 import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
 import {
@@ -114,6 +115,22 @@ export default function NewVersionPage() {
     (target) => upgradeAppKitApi(project!.id, target),
     () => refreshGitStatus(),
   );
+  // DEV-254: what the conversion onto the template did, said once it is done.
+  const [converted, setConverted] = useState<string | null>(null);
+
+  async function handleConverted(template: string, kitVersion: string) {
+    if (!project) return;
+    setProject({ ...project, template });
+    setConverted(
+      `Projekt je na šablóne aplikácie (nex-app-kit v${kitVersion}). Obrazovky do rámu šablóny presunie agent ` +
+        "v tejto verzii — Príprava to dostane ako riadnu položku rozsahu.",
+    );
+    // The conversion moved nex-shared and added the kit — re-read both, and the tree it committed to.
+    getNexsharedStatusApi(project.id).then(setNexStatus).catch(() => {});
+    getAppKitStatusApi(project.id).then(setKitStatus).catch(() => {});
+    await refreshGitStatus();
+  }
+
   // React keeps a state setter the same for the component's life — the load below may depend on it.
   const { setStatus: setNexStatus } = nex;
   const { setStatus: setKitStatus } = kit;
@@ -472,6 +489,17 @@ export default function NewVersionPage() {
                 </div>
               )}
             </div>
+          )}
+          {/* DEV-254: a project built without a template may be put onto one — only once the tree is clean. */}
+          {!isDirty && !savedVersion && project && !project.template && project.type === "standard" && (
+            <div className="mb-5">
+              <AppTemplateConversionPrompt projectId={project.id} onConverted={handleConverted} />
+            </div>
+          )}
+          {converted && (
+            <p className="mb-5 rounded-lg border border-[var(--color-border-default)] p-3 text-sm text-[var(--color-text-secondary)]">
+              {converted}
+            </p>
           )}
           {/* Upgrade prompts — only once the tree is clean (resolve pending work first). DEV-253: the app template's
               kit first; the design kit after it. */}

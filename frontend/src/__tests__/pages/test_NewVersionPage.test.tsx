@@ -26,6 +26,8 @@ const {
   upgradeNexsharedApiMock,
   getAppKitStatusApiMock,
   upgradeAppKitApiMock,
+  getAppTemplateConversionApiMock,
+  convertToAppTemplateApiMock,
   getGitStatusApiMock,
   commitGitApiMock,
   discardGitApiMock,
@@ -43,6 +45,8 @@ const {
   upgradeNexsharedApiMock: vi.fn(),
   getAppKitStatusApiMock: vi.fn(),
   upgradeAppKitApiMock: vi.fn(),
+  getAppTemplateConversionApiMock: vi.fn(),
+  convertToAppTemplateApiMock: vi.fn(),
   getGitStatusApiMock: vi.fn(),
   commitGitApiMock: vi.fn(),
   discardGitApiMock: vi.fn(),
@@ -66,6 +70,8 @@ vi.mock("@/services/api/projects", () => ({
   upgradeNexsharedApi: upgradeNexsharedApiMock,
   getAppKitStatusApi: getAppKitStatusApiMock,
   upgradeAppKitApi: upgradeAppKitApiMock,
+  getAppTemplateConversionApi: getAppTemplateConversionApiMock,
+  convertToAppTemplateApi: convertToAppTemplateApiMock,
   getGitStatusApi: getGitStatusApiMock,
   commitGitApi: commitGitApiMock,
   discardGitApi: discardGitApiMock,
@@ -152,6 +158,8 @@ beforeEach(() => {
   listVersionsMock.mockResolvedValue([]);
   getNexsharedStatusApiMock.mockResolvedValue({ ...behindNexshared, behind: 0, up_to_date: true, changelog: [] });
   getGitStatusApiMock.mockResolvedValue(cleanTree);
+  // DEV-254: no conversion offer unless a test asks for one — the card stays out of every other test.
+  getAppTemplateConversionApiMock.mockRejectedValue(new Error("bez ponuky"));
   commitGitApiMock.mockResolvedValue({ ok: true });
   discardGitApiMock.mockResolvedValue({ ok: true });
   // Nahliadnutie na disk je súčasťou zakladania — predvolene tam nič nie je (bežný prípad).
@@ -360,6 +368,101 @@ describe("NewVersionPage — nex-app-kit of a project on an app template (DEV-25
 
     expect(getAppKitStatusApiMock).not.toHaveBeenCalled();
     expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).not.toBeInTheDocument();
+  });
+});
+
+describe("NewVersionPage — a project built without a template is offered the conversion (DEV-254)", () => {
+  const template = {
+    id: "nsv-standard",
+    label: "NSV štandard",
+    description: "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky aplikácie.",
+  };
+  const offer = { available: true, reason: null, templates: [template], default_template: "nsv-standard" };
+  const card = () => screen.queryByText("Previesť projekt na šablónu aplikácie");
+
+  it("converts on the click, says what happened and re-reads the kit, nex-shared and the tree", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+    convertToAppTemplateApiMock.mockResolvedValue({ template: "nsv-standard", kit_version: "0.3.0" });
+    getAppKitStatusApiMock.mockResolvedValue({ current: "0.3.0", latest: "0.3.0", behind: 0, up_to_date: true });
+
+    await renderPage();
+    expect(await screen.findByText("Previesť projekt na šablónu aplikácie")).toBeInTheDocument();
+    expect(screen.getByText(/Ľavý panel, prihlásenie, Nastavenia a server ako v NSV/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Aplikácia používa AI agentov/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Previesť na NSV štandard" }));
+
+    expect(convertToAppTemplateApiMock).toHaveBeenCalledWith("p1", "nsv-standard", true);
+    expect(await screen.findByText(/Projekt je na šablóne aplikácie \(nex-app-kit v0\.3\.0\)/)).toBeInTheDocument();
+    expect(card()).not.toBeInTheDocument();
+    await waitFor(() => expect(getAppKitStatusApiMock).toHaveBeenCalledWith("p1"));
+    expect(getNexsharedStatusApiMock).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(getGitStatusApiMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("is greyed out with the reason when the cockpit cannot convert now", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue({
+      ...offer,
+      available: false,
+      reason: "Projekt má rozpracovanú verziu 0.1.0 — prevod počká, kým ju dokončíš.",
+    });
+
+    await renderPage();
+
+    expect(
+      await screen.findByText("Teraz sa nedá: Projekt má rozpracovanú verziu 0.1.0 — prevod počká, kým ju dokončíš."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previesť na NSV štandard" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /Aplikácia používa AI agentov/ })).toBeDisabled();
+  });
+
+  it("says a failed conversion and keeps the offer", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+    convertToAppTemplateApiMock.mockRejectedValue(new ApiError(500, "Prevod na šablónu sa nepodarilo zapísať do gitu."));
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Previesť na NSV štandard" }));
+
+    expect(await screen.findByText(/Prevod na šablónu aplikácie zlyhal/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previesť na NSV štandard" })).toBeEnabled();
+  });
+
+  it("waits behind the guard while the tree has unsaved changes", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+    getGitStatusApiMock.mockResolvedValue(dirtyTree);
+
+    await renderPage();
+    expect(await screen.findByRole("button", { name: /uložiť ich/i })).toBeInTheDocument();
+
+    // A card on screen asks for its offer at once — no question means no card, not a card still loading.
+    expect(getAppTemplateConversionApiMock).not.toHaveBeenCalled();
+    expect(card()).not.toBeInTheDocument();
+  });
+
+  it("„Teraz nie“ hides the offer and converts nothing", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Teraz nie" }));
+
+    expect(card()).not.toBeInTheDocument();
+    expect(convertToAppTemplateApiMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["on a template", { template: "nsv-standard" }],
+    ["a Web project", { type: "web" as const }],
+  ])("a project %s is not asked about the conversion", async (_what, changes) => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+    getAppKitStatusApiMock.mockResolvedValue({ current: "0.3.0", latest: "0.3.0", behind: 0, up_to_date: true });
+    listProjectsApiMock.mockResolvedValue({ items: [{ ...project, ...changes }], total: 1, skip: 0, limit: 100 });
+
+    await renderPage();
+    // The page stands with its project (its name in the header) — a card would have asked for its offer by now.
+    expect(await screen.findByText("Demo")).toBeInTheDocument();
+    expect(screen.queryByText("Nepodarilo sa načítať projekt.")).not.toBeInTheDocument();
+
+    expect(getAppTemplateConversionApiMock).not.toHaveBeenCalled();
+    expect(card()).not.toBeInTheDocument();
   });
 });
 

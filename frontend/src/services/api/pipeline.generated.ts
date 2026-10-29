@@ -1775,6 +1775,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/app-template-conversion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get App Template Conversion
+         * @description DEV-254: may this project be put onto an app template now — and if not, why (the form greys the offer out
+         *     with the sentence). A project already on a template is offered nothing.
+         */
+        get: operations["get_app_template_conversion_api_v1_projects__project_id__app_template_conversion_get"];
+        put?: never;
+        /**
+         * Convert To App Template
+         * @description DEV-254: put an existing project onto an app template — the cockpit adds the manifest and nex-app-kit in one
+         *     commit and remembers the template; the next version moves the screens into the frame. Director 29.10.2026:
+         *     „Začneme s projektom nex-knowledge“.
+         */
+        post: operations["convert_to_app_template_api_v1_projects__project_id__app_template_conversion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assignments": {
         parameters: {
             query?: never;
@@ -3431,6 +3458,37 @@ export interface components {
             target_version: string;
             /** Upgraded */
             upgraded: boolean;
+        };
+        /**
+         * AppTemplateConversionOffer
+         * @description DEV-254: whether a project without a template can be put onto one now, and on which.
+         */
+        AppTemplateConversionOffer: {
+            /** Available */
+            available: boolean;
+            /** Default Template */
+            default_template?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Templates */
+            templates?: components["schemas"]["TemplateOption"][];
+        };
+        /** AppTemplateConversionRequest */
+        AppTemplateConversionRequest: {
+            /**
+             * Ai
+             * @default false
+             */
+            ai: boolean;
+            /** Template */
+            template: string;
+        };
+        /** AppTemplateConversionResult */
+        AppTemplateConversionResult: {
+            /** Kit Version */
+            kit_version: string;
+            /** Template */
+            template: string;
         };
         /**
          * AuthUser
@@ -11482,6 +11540,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppKitUpgradeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_template_conversion_api_v1_projects__project_id__app_template_conversion_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppTemplateConversionOffer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    convert_to_app_template_api_v1_projects__project_id__app_template_conversion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppTemplateConversionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppTemplateConversionResult"];
                 };
             };
             /** @description Validation Error */

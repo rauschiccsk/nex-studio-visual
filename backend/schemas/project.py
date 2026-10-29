@@ -132,6 +132,26 @@ class AppKitStatus(BaseModel):
     parts: list[AppKitPart] = Field(default_factory=list)
 
 
+class AppTemplateConversionOffer(BaseModel):
+    """DEV-254: whether a project without a template can be put onto one now, and on which."""
+
+    available: bool
+    #: Why not, in a sentence for the Manažér — the form shows the offer greyed out with it.
+    reason: Optional[str] = None
+    templates: list[TemplateOption] = Field(default_factory=list)
+    default_template: Optional[str] = None
+
+
+class AppTemplateConversionRequest(BaseModel):
+    template: str
+    ai: bool = False
+
+
+class AppTemplateConversionResult(BaseModel):
+    template: str
+    kit_version: str
+
+
 class AppKitUpgradeRequest(BaseModel):
     target_version: str
 

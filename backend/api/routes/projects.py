@@ -56,6 +56,9 @@ from backend.schemas.project import (
     AppKitStatus,
     AppKitUpgradeRequest,
     AppKitUpgradeResult,
+    AppTemplateConversionOffer,
+    AppTemplateConversionRequest,
+    AppTemplateConversionResult,
     GitHubRepoNotFoundError,
     PortBlockSuggestResponse,
     PortConflictError,
@@ -559,10 +562,7 @@ def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
         branch_protection_note=None if available else BRANCH_PROTECTION_NOTE,
         web_available=project_surfaces_service.WEB_PROJECTS_AVAILABLE,
         web_note=None if project_surfaces_service.WEB_PROJECTS_AVAILABLE else project_surfaces_service.WEB_NOT_YET,
-        templates=[
-            TemplateOption(id=k, label=t.label, description=t.description)
-            for k, t in app_template_service.TEMPLATES.items()
-        ],
+        templates=_template_options(),
         default_template=app_template_service.DEFAULT_TEMPLATE,
     )
 
@@ -756,6 +756,73 @@ def upgrade_nexshared(
         project.source_path, payload.target_version, directories=directories
     )
     return {"upgraded": True, "target_version": payload.target_version, "committed": committed}
+
+
+def _template_options() -> list[TemplateOption]:
+    return [
+        TemplateOption(id=k, label=t.label, description=t.description)
+        for k, t in app_template_service.TEMPLATES.items()
+    ]
+
+
+@router.get("/{project_id}/app-template-conversion", response_model=AppTemplateConversionOffer)
+def get_app_template_conversion(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AppTemplateConversionOffer:
+    """DEV-254: may this project be put onto an app template now — and if not, why (the form greys the offer out
+    with the sentence). A project already on a template is offered nothing."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    reason = app_template_service.conversion_refusal(db, project)
+    return AppTemplateConversionOffer(
+        available=reason is None,
+        reason=reason,
+        templates=_template_options(),
+        default_template=app_template_service.DEFAULT_TEMPLATE,
+    )
+
+
+@router.post("/{project_id}/app-template-conversion", response_model=AppTemplateConversionResult)
+def convert_to_app_template(
+    project_id: UUID,
+    payload: AppTemplateConversionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AppTemplateConversionResult:
+    """DEV-254: put an existing project onto an app template — the cockpit adds the manifest and nex-app-kit in one
+    commit and remembers the template; the next version moves the screens into the frame. Director 29.10.2026:
+    „Začneme s projektom nex-knowledge“."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    reason = app_template_service.conversion_refusal(db, project)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
+    if payload.template not in app_template_service.TEMPLATES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Šablóna aplikácie „{payload.template}“ neexistuje."
+        )
+    try:
+        version = app_template_service.convert_project(
+            Path(project.source_path),
+            app_template_service.TemplateChoice(template=payload.template, ai=payload.ai),
+            name=project.name,
+            slug=project.slug,
+            auth_mode=project.auth_mode,
+            ports=(project.backend_port or 0, project.frontend_port or 0, project.db_port or 0),
+        )
+    except app_template_service.AppTemplateError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    project.template = payload.template
+    db.commit()
+    return AppTemplateConversionResult(template=payload.template, kit_version=version)
 
 
 @router.get("/{project_id}/app-kit-status", response_model=AppKitStatus)

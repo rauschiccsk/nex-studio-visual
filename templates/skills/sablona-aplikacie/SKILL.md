@@ -47,6 +47,24 @@ v Nastavenia → Agenti. Server ich číta `kit.agent_choice("assistant")`; mode
 (prihlásenie, Nastavenia, Aktualizácie, Ako začať) odpovedá sám. Doplníš len vlastné cesty, napr.
 `http.get("*/api/v1/areas", () => HttpResponse.json([{ id: 1, name: "Stavebné povolenia" }]))`.
 
+## Prevod existujúceho projektu (položka Prípravy „Prechod na šablónu aplikácie“)
+Kokpit pri prevode zapísal manifest a nex-app-kit na obe strany; obrazovky, cesty a tabuľky projektu ostali vo vlastnom
+ráme. Verzia ich presunie — kroky vyššie platia aj tu, navyše:
+1. Frontend: `frontend/src/app.ts` s `defineApp(data)` z manifestu; `App.tsx` vykreslí `<TemplateApp>` (`overview` =
+   úvodná obrazovka projektu) a obrazovky projektu ako `<Route>` vnútri; položky jeho menu prejdú do `nav`.
+   `src/index.css` importuje `nex-app-kit/frame.css` (vzor: `@import "tailwindcss"; @import "nex-shared/tokens.css";
+   @import "nex-app-kit/frame.css";`). Vlastný `AppShell`, `Sidebar`, `Header`, prihlásenie, stránky Aktualizácií
+   a Nastavení aj ich cesty zmaž; v `preview/handlers.ts` zmaž odpovede pre prihlásenie a rám.
+2. Server: `backend/app/kit.py` s `AppKit(...)` (manifest `load_manifest`, pri spustení z NEX Managera
+   `ManagerLink.from_env()`), v `main.py` `kit.install(app)`; vlastné cesty `/launch`, `/session`, `/auth/*`,
+   `/release-notes`, `/getting-started`, používateľov, relácií a nastavení zmaž, prihláseného dáva `kit.current_user`.
+3. Databáza: `alembic/env.py` volá najprv `upgrade_database(connection)` z `nex_app_kit`, potom migrácie aplikácie.
+   Novou migráciou zmaž vlastné tabuľky relácií, spúšťacích lístkov, správcov a nastavení; stĺpce, ktoré ukazujú na
+   človeka, prepni na `kit_users.id`. Projekt bez nasadenej inštalácie nemá ostré údaje — nič sa neprenáša.
+4. Obraz servera a compose dostanú manifest a `docs` ako v kostre (`APP_MANIFEST_PATH`, `APP_DOCS_DIR`); `.env.example`
+   nesie, čo šablóna číta (`# @public-url` `PUBLIC_URL`, `ADMIN_INITIAL_PASSWORD` alebo premenné `MANAGER_*`).
+Hotové je, keď kontrola rámu pred Overením nič nenájde.
+
 ## Čo nerobím
 Vlastný `Sidebar`/`AppShell`, prihlásenie, stránku Aktualizácií či Nastavení, cesty `/auth/*`, `/launch`, `/session`,
 `/users`, `/sessions`, tabuľku používateľov, kópiu súborov nex-app-kit ani úpravu v `node_modules`. Chýba niečo v ráme?

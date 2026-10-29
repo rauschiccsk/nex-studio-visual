@@ -92,6 +92,22 @@ export function upgradeNexsharedApi(
   });
 }
 
+/** DEV-254: may a project built without a template be put onto one now — and if not, why. */
+export type AppTemplateConversionOffer = components["schemas"]["AppTemplateConversionOffer"];
+
+export function getAppTemplateConversionApi(projectId: string): Promise<AppTemplateConversionOffer> {
+  return api.get<AppTemplateConversionOffer>(`/projects/${projectId}/app-template-conversion`);
+}
+
+/** DEV-254: put the project onto the template — the cockpit adds the manifest and nex-app-kit in one commit. */
+export function convertToAppTemplateApi(
+  projectId: string,
+  template: string,
+  ai: boolean,
+): Promise<components["schemas"]["AppTemplateConversionResult"]> {
+  return api.post(`/projects/${projectId}/app-template-conversion`, { template, ai });
+}
+
 /** DEV-253: the nex-app-kit a project on an app template builds with (frame and server) vs the newest release. */
 export type AppKitStatus = components["schemas"]["AppKitStatus"];
 

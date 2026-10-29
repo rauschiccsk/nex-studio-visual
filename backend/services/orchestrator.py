@@ -1527,6 +1527,21 @@ def _check_aktualizacie_standard(proj_root: Path) -> Optional[str]:
     return _check_aktualizacie_frontend(Path(proj_root))
 
 
+def _check_template_frame_standard(proj_root: Path) -> Optional[str]:
+    """DEV-254: projekt prevedený na šablónu aplikácie má obrazovky vo vlastnom ráme, kým ich verzia nepresunie do rámu
+    šablóny — tá verzia to musí mať v rozsahu. Platí len tam, kde manifest menuje šablónu (zapísal ho kokpit pri
+    prevode); projekt bez šablóny nemá čo presúvať."""
+    manifest = Path(proj_root) / "frontend" / "app.manifest.json"
+    try:
+        template = json.loads(manifest.read_text(encoding="utf-8")).get("template")
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        return "frontend/app.manifest.json nie je platný JSON"
+    problems = check_template_frame(Path(proj_root), template) if template else ["manifest nemenuje šablónu"]
+    return "; ".join(problems) or None
+
+
 #: Povinné celoICC štandardy, ktoré MUSIA byť v rozsahu verzie od Prípravy — nie objavené pri vydaní.
 #:
 #: ICCINT-125. Brána vydania zostáva ako POSLEDNÁ POISTKA a nezoslabuje sa: sonda funguje správne a
@@ -1545,6 +1560,19 @@ ICC_STANDARDS: tuple[IccStandard, ...] = (
             "obrazovka. Brána vydania ju na konci overí — ale to je posledná poistka, nie zadanie."
         ),
         check=_check_aktualizacie_standard,
+    ),
+    IccStandard(
+        key="ram_sablony",
+        name="Rám šablóny aplikácie",
+        scope_sentence=(
+            "Prechod na šablónu aplikácie — projekt je prevedený na šablónu (frontend/app.manifest.json, nex-app-kit), "
+            "ale jeho obrazovky ešte stoja vo vlastnom ráme. Je to RIADNA POLOŽKA tejto verzie, v Špecifikácii, Návrhu "
+            "aj Vizuáli: obrazovky presuň do rámu šablóny (cesty ako <Route> vnútri <TemplateApp>, položky ľavého "
+            "panela v manifeste), server postav na AppKit (kit.install), vlastný ľavý panel, hornú lištu, prihlásenie, "
+            "Aktualizácie a Nastavenia odstráň aj s ich cestami a tabuľkami (migráciou) a vlastné nastavenia zapíš ako "
+            "SettingDefinition — postup je v zručnosti sablona-aplikacie. Kokpit pred Overením overí, že rám je celý."
+        ),
+        check=_check_template_frame_standard,
     ),
 )
 
