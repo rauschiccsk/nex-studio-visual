@@ -8266,11 +8266,19 @@ async def _smoke_service_logs(
     return "".join(chunks)
 
 
+#: DEV-255: how the check's stack is taken down — every profile of the project's compose and its volumes. A service
+#: the release acceptance started under a profile (NEX Knowledge's stand-in NEX Manager, profile ``smoke``) is not
+#: taken down by a bare ``down``: 28.10.2026 its stopped container (exit 137) stayed in ``nex-knowledge-smoke`` and
+#: every later launch check judged it as its own failure.
+_SMOKE_DOWN = ["--profile", "*", "down", "-v", "--remove-orphans"]
+
+
 @contextlib.asynccontextmanager
 async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, Optional[str]]):
     """gate-g-hardening GAP 1 (A2): bring the project's compose UP ONCE under an isolated ``-p
     <slug>-smoke`` project, yield a :class:`_SmokeStack` for the boot + release-acceptance legs to SHARE,
-    then tear it down ONCE (``down -v`` + drop the temp override). Was two functions each with its own
+    then tear it down ONCE (``down -v`` of every profile + drop the temp override; the same clears what an earlier run
+    left before ``up`` — DEV-255). Was two functions each with its own
     ``up``/``down`` — a double build + a teardown race; this is the single cycle. Never raises; the
     ``finally`` always tears down (modelled on the old ``_run_app_starts_smoke`` try/finally)."""
     logger.info("smoke stack starting (slug=%s)", project_slug)
@@ -8310,13 +8318,16 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
         # Isolate — ephemeral override stripping container_name + host ports — then up (build + boot;
         # ``--wait`` blocks until healthchecks pass; Ollama reached via the app's own extra_hosts).
         override.write_text(_acceptance_smoke_override(compose, smoke_env if smoke_env_rendered else None))
+        # DEV-255: what an earlier run left in this project (a crash before its teardown, a container of a profile) is
+        # cleared first — the states this check judges are this run's only.
+        await _compose_smoke_step(base + _SMOKE_DOWN, 120, env=compose_env)
         stack.up_rc, stack.up_detail = await _compose_smoke_step(
             base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT, env=compose_env
         )
         yield stack
     finally:
         # Teardown — ALWAYS: tear the isolated stack (+ its volumes) down and drop the temp override.
-        await _compose_smoke_step(base + ["down", "-v"], 120, env=compose_env)
+        await _compose_smoke_step(base + _SMOKE_DOWN, 120, env=compose_env)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
