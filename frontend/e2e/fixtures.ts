@@ -900,6 +900,19 @@ export function registerFixtures(): void {
       { code: "??", path: "docs/specs/versions/v1.8.0/RELEASE_NOTES.md" },
     ],
   });
+  // DEV-254: the offer to put a project built without a template onto one — measured as the Manažér sees it.
+  answer("get", "/api/v1/projects/{project_id}/app-template-conversion", {
+    available: true,
+    reason: null,
+    templates: [
+      {
+        id: "nsv-standard",
+        label: "NSV štandard",
+        description: "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky aplikácie.",
+      },
+    ],
+    default_template: "nsv-standard",
+  });
   answerUntyped<NexsharedStatus>("get", "/api/v1/projects/{project_id}/nexshared-status", {
     current: "v0.19.0",
     latest: "v0.20.0",
