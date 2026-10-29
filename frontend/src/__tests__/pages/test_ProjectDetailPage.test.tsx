@@ -769,6 +769,47 @@ describe("ProjectDetailPage — the conversion onto the app template above Dedo'
     expect(getAppTemplateConversionApiMock).not.toHaveBeenCalled();
   });
 
+  it("a version founded from the brief before the conversion keeps the offer until it starts", async () => {
+    listVersionsMock.mockResolvedValue([{ ...baseVersion, id: "v-02", version_number: "0.2.0", status: "planned" }]);
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Previesť na NSV štandard" })).toBeEnabled();
+  });
+
+  it("without a brief an offer that cannot be done now is not shown at all", async () => {
+    listVersionsMock.mockResolvedValue([{ ...baseVersion, id: "v-02", version_number: "0.2.0", status: "planned" }]);
+    getAppTemplateConversionApiMock.mockResolvedValue({
+      available: false,
+      reason: "Projekt už má nasadenú inštaláciu — pri prevode treba jeho používateľov, relácie a nastavenia preniesť.",
+      templates: [{ id: "nsv-standard", label: "NSV štandard", description: "Rám ako v NSV." }],
+      default_template: "nsv-standard",
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await waitFor(() => expect(getAppTemplateConversionApiMock).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText("Previesť projekt na šablónu aplikácie")).not.toBeInTheDocument();
+  });
+
+  it("with the brief the same offer is shown greyed out with its reason", async () => {
+    getProjectDedoProposalApiMock.mockResolvedValue(brief("new_version"));
+    getAppTemplateConversionApiMock.mockResolvedValue({
+      available: false,
+      reason: "Projekt má rozpracovanú verziu 0.1.0 — prevod počká, kým ju dokončíš.",
+      templates: [{ id: "nsv-standard", label: "NSV štandard", description: "Rám ako v NSV." }],
+      default_template: "nsv-standard",
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    expect(
+      await screen.findByText("Teraz sa nedá: Projekt má rozpracovanú verziu 0.1.0 — prevod počká, kým ju dokončíš."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previesť na NSV štandard" })).toBeDisabled();
+  });
+
   it("without a brief the page does not ask about the conversion", async () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);

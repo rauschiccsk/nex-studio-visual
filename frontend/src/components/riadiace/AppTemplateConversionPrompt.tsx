@@ -16,9 +16,12 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 export function AppTemplateConversionPrompt({
   projectId,
   onConverted,
+  showWhenUnavailable = true,
 }: {
   projectId: string;
   onConverted: (template: string, kitVersion: string) => void;
+  /** False where a greyed-out offer would only be noise (the project page without a brief in front of it). */
+  showWhenUnavailable?: boolean;
 }) {
   const [offer, setOffer] = useState<AppTemplateConversionOffer | null>(null);
   const [ai, setAi] = useState(false);
@@ -35,7 +38,7 @@ export function AppTemplateConversionPrompt({
   }, [projectId]);
 
   const template = offer?.templates?.find((t) => t.id === offer.default_template);
-  if (!offer || !template || later) return null;
+  if (!offer || !template || later || (!offer.available && !showWhenUnavailable)) return null;
 
   async function convert() {
     setBusy(true);

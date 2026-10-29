@@ -569,15 +569,19 @@ export default function ProjectDetailPage() {
           zadanie dorazilo, panel minul a začal formulár Nová verzia vypĺňať ručne. Keď Dedo niečo pripraví,
           má to Manažér vidieť skôr, než siahne po ručnej ceste. */}
       {/* DEV-254: a new version from Dedo's brief is founded here, not on the „Nová verzia“ form — so the conversion
-          onto the app template is offered here too, above the brief, for a project built without a template. */}
-      {project && dedoProposal?.proposed_action === "new_version" && templateConversionApplies(project) && (
-        <div className="mb-4">
-          <AppTemplateConversionPrompt
-            projectId={project.id}
-            onConverted={(template) => setProject({ ...project, template })}
-          />
-        </div>
-      )}
+          onto the app template is offered here too: above the brief, and while a version founded but not started yet
+          is waiting (founded from the brief before the conversion). Without a brief only when it can be done now. */}
+      {project &&
+        templateConversionApplies(project) &&
+        (dedoProposal?.proposed_action === "new_version" || versions.some((v) => v.status === "planned")) && (
+          <div className="mb-4">
+            <AppTemplateConversionPrompt
+              projectId={project.id}
+              onConverted={(template) => setProject({ ...project, template })}
+              showWhenUnavailable={dedoProposal?.proposed_action === "new_version"}
+            />
+          </div>
+        )}
       {project && dedoProposal && (
         <div id={DEDO_BRIEF_ANCHOR}>
           <DedoBriefBar
