@@ -7,8 +7,9 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
+from backend.core.kilotokens import kilotokens
 from backend.schemas.price_estimate import PriceEstimateRead
 from backend.schemas.task import BillingCategory
 
@@ -26,10 +27,20 @@ class DeliveredFileRead(BaseModel):
     lines: int
     tokens: int
 
+    @computed_field  # DEV-263: what Fakturácia shows — kT, rounded up to a tenth
+    @property
+    def kilotokens(self) -> Decimal:
+        return kilotokens(self.tokens)
+
 
 class KindTotalRead(BaseModel):
     tokens: int
     lines: int
+
+    @computed_field
+    @property
+    def kilotokens(self) -> Decimal:
+        return kilotokens(self.tokens)
 
 
 class CalibrationRead(BaseModel):
@@ -49,6 +60,11 @@ class StatementLineTaskRead(BaseModel):
     title: str
     lines: int
     tokens: int
+
+    @computed_field
+    @property
+    def kilotokens(self) -> Decimal:
+        return kilotokens(self.tokens)
 
 
 class StatementLineRead(BaseModel):
@@ -70,6 +86,11 @@ class StatementLineRead(BaseModel):
     amount_eur: Decimal
     tasks: list[StatementLineTaskRead] = []
 
+    @computed_field  # DEV-263: the kT the line's money is counted from
+    @property
+    def kilotokens(self) -> Decimal:
+        return kilotokens(self.tokens)
+
 
 class StatementTaskRead(BaseModel):
     """DEV-75 — a task of the version's plan with its category and what it delivered."""
@@ -82,6 +103,11 @@ class StatementTaskRead(BaseModel):
     category: Optional[BillingCategory] = Field(default=None, description="As it counts; None while undecided.")
     lines: int
     tokens: int
+
+    @computed_field
+    @property
+    def kilotokens(self) -> Decimal:
+        return kilotokens(self.tokens)
 
 
 class StatementPreviewRead(BaseModel):
@@ -127,6 +153,11 @@ class StatementPreviewRead(BaseModel):
     tasks: list[StatementTaskRead] = []
     full_eur: Optional[Decimal] = Field(default=None, description="What the delivery was worth before the discounts.")
 
+    @computed_field  # DEV-263: code and tests together, as the statement of two lines bills them
+    @property
+    def code_and_tests_kilotokens(self) -> Decimal:
+        return kilotokens((self.code.tokens if self.code else 0) + (self.tests.tokens if self.tests else 0))
+
 
 class IssuedStatementRead(BaseModel):
     id: UUID
@@ -152,6 +183,13 @@ class IssuedStatementRead(BaseModel):
     lines: Optional[list[StatementLineRead]] = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # DEV-263: the kT the statement bills — the sum of its lines' kT
+    @property
+    def kilotokens(self) -> Decimal:
+        if self.lines:
+            return sum((ln.kilotokens for ln in self.lines), Decimal("0.0"))
+        return kilotokens(self.tokens_code + self.tokens_tests) + kilotokens(self.tokens_docs)
 
 
 class RateChangeRead(BaseModel):

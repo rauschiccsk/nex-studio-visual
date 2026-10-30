@@ -4933,6 +4933,8 @@ export interface components {
         DeliveredFileRead: {
             /** Excluded */
             excluded?: string | null;
+            /** Kilotokens */
+            readonly kilotokens: string;
             /** Kind */
             kind?: string | null;
             /** Lines */
@@ -5524,6 +5526,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Kilotokens */
+            readonly kilotokens: string;
             /** Lines */
             lines?: components["schemas"]["StatementLineRead"][] | null;
             /** Rate Code */
@@ -5600,6 +5604,8 @@ export interface components {
         };
         /** KindTotalRead */
         KindTotalRead: {
+            /** Kilotokens */
+            readonly kilotokens: string;
             /** Lines */
             lines: number;
             /** Tokens */
@@ -6579,6 +6585,8 @@ export interface components {
             amount_eur: string;
             /** Code Eur */
             code_eur: string;
+            /** Code Kilotokens */
+            readonly code_kilotokens: string;
             /** Code Tokens */
             code_tokens: number;
             /**
@@ -6588,6 +6596,8 @@ export interface components {
             created_at: string;
             /** Docs Eur */
             docs_eur: string;
+            /** Docs Kilotokens */
+            readonly docs_kilotokens: string;
             /** Docs Tokens */
             docs_tokens: number;
             /** Enough */
@@ -7284,6 +7294,8 @@ export interface components {
             discount_pct: string;
             /** Full Eur */
             full_eur: string;
+            /** Kilotokens */
+            readonly kilotokens: string;
             /**
              * Kind
              * @enum {string}
@@ -7313,6 +7325,8 @@ export interface components {
          * @description DEV-75 — a task whose work is on a line of the statement.
          */
         StatementLineTaskRead: {
+            /** Kilotokens */
+            readonly kilotokens: string;
             /**
              * Label
              * @description epic.feat.task — the number in the plan and in the agent's commits.
@@ -7344,6 +7358,8 @@ export interface components {
              */
             cannot_issue: string[];
             code?: components["schemas"]["KindTotalRead"] | null;
+            /** Code And Tests Kilotokens */
+            readonly code_and_tests_kilotokens: string;
             /** Delivered Sha */
             delivered_sha?: string | null;
             /** Delivered Source */
@@ -7443,6 +7459,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Kilotokens */
+            readonly kilotokens: string;
             /** Label */
             label: string;
             /** Lines */

@@ -35,9 +35,10 @@ function view(own: boolean, changes: RateChange[] = []): DeliveryStatementView {
       delivered_source: "verifikacia",
       delivered_source_label: "stav, na ktorom prešla Verifikácia",
       tokenizer: "o200k_base (tiktoken 0.14.0)",
-      code: { tokens: 23717, lines: 1828 },
-      tests: { tokens: 18912, lines: 1410 },
-      docs: { tokens: 38795, lines: 1537 },
+      code: { tokens: 23717, lines: 1828, kilotokens: "23.8" },
+      tests: { tokens: 18912, lines: 1410, kilotokens: "19.0" },
+      docs: { tokens: 38795, lines: 1537, kilotokens: "38.8" },
+      code_and_tests_kilotokens: "42.7",
       files: [],
       rate_code: own ? "1.5000" : "2.0000",
       rate_docs: "1.0000",
@@ -82,8 +83,8 @@ describe("A version's own rates (DEV-74)", () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(view(true, [CHANGE]));
     render(<DeliveryStatementPanel versionId="v160" />);
 
-    expect(await screen.findByText(/kód a skúšky 1,5 € \/ 1 000 tokenov \(vlastná, v Nastaveniach 2 € \/ 1 000 tokenov/)).toBeInTheDocument();
-    expect(screen.getByText(/dokumentácia 1 € \/ 1 000 tokenov \(z Nastavení\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/kód a skúšky 1,5 € \/ kT \(vlastná, v Nastaveniach 2 € \/ kT/)).toBeInTheDocument();
+    expect(screen.getByText(/dokumentácia 1 € \/ kT \(z Nastavení\)/)).toBeInTheDocument();
     expect(screen.getByText(/Naposledy zmenil Zoltán Rausch .*kód z Nastavení → 1,5 €/)).toBeInTheDocument();
   });
 
@@ -94,7 +95,7 @@ describe("A version's own rates (DEV-74)", () => {
     render(<DeliveryStatementPanel versionId="v160" onChange={onChange} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Zmeniť sadzby pre túto verziu" }));
-    await userEvent.type(screen.getByLabelText("Kód a skúšky (€ / 1 000 tokenov)"), "1,5");
+    await userEvent.type(screen.getByLabelText("Kód a skúšky (€ / kT)"), "1,5");
     await userEvent.click(screen.getByRole("button", { name: "Uložiť sadzby" }));
 
     await waitFor(() => expect(setBillingRates).toHaveBeenCalledWith("v160", { rate_code: "1.5", rate_docs: null }));
@@ -107,7 +108,7 @@ describe("A version's own rates (DEV-74)", () => {
     render(<DeliveryStatementPanel versionId="v160" />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Zmeniť sadzby pre túto verziu" }));
-    await userEvent.type(screen.getByLabelText("Kód a skúšky (€ / 1 000 tokenov)"), "0");
+    await userEvent.type(screen.getByLabelText("Kód a skúšky (€ / kT)"), "0");
     await userEvent.click(screen.getByRole("button", { name: "Uložiť sadzby" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Sadzba musí byť číslo väčšie ako 0");

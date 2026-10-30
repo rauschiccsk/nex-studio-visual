@@ -8,8 +8,9 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import CategoryPicker from "@/components/naklady/CategoryPicker";
 import { BILLING_CATEGORIES, CATEGORY_NAMES, commonCategory, type BillingCategory } from "@/lib/billingCategory";
 import type { StatementTask } from "@/services/api/deliveryStatements";
+import { formatKiloTokens } from "@/utils/format";
 
-const int = new Intl.NumberFormat("sk-SK");
+const kt = formatKiloTokens;
 
 function byEpic(tasks: StatementTask[]): { key: string; title: string; tasks: StatementTask[] }[] {
   const groups = new Map<string, { key: string; title: string; tasks: StatementTask[] }>();
@@ -78,7 +79,7 @@ export default function StatementTasks({
                     <span className="min-w-0 text-[var(--color-text-secondary)]">
                       <span className="font-mono">{t.label}</span> {t.title}
                       <span className="ml-1 text-[var(--color-text-muted)]">
-                        · {t.tokens > 0 ? `${int.format(t.tokens)} tokenov` : "v dodávke nič nenapísala"}
+                        · {t.tokens > 0 ? kt(t.kilotokens) : "v dodávke nič nenapísala"}
                       </span>
                     </span>
                     <CategoryPicker

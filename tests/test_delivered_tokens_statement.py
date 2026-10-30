@@ -15,11 +15,12 @@ import os
 import subprocess
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 from sqlalchemy import update
 
+from backend.core.kilotokens import kilotokens
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -302,8 +303,9 @@ def test_a_change_is_billed_by_tokens_and_the_issued_statement_keeps_its_rates(p
     _rates(db, owner, 4.0, 1.5)
 
     row = st.issue(db, v010, root, owner.id)
-    code = (Decimal(row.tokens_code + row.tokens_tests) / 1000 * Decimal("4.0")).quantize(Decimal("0.01"))
-    docs = (Decimal(row.tokens_docs) / 1000 * Decimal("1.5")).quantize(Decimal("0.01"))
+    # DEV-263: kT rounded up to a tenth × rate, the euros half up to a tenth.
+    code = (kilotokens(row.tokens_code + row.tokens_tests) * Decimal("4.0")).quantize(Decimal("0.1"), ROUND_HALF_UP)
+    docs = (kilotokens(row.tokens_docs) * Decimal("1.5")).quantize(Decimal("0.1"), ROUND_HALF_UP)
     assert row.work_kind == "change", "a new version is new work"
     assert (row.amount_code_eur, row.amount_docs_eur, row.amount_eur) == (code, docs, code + docs)
     assert (row.rate_code, row.rate_docs) == (Decimal("4.0"), Decimal("1.5"))
@@ -372,7 +374,7 @@ def test_the_csv_lists_every_file_and_why_some_do_not_count(project):
     text = st.csv_text(row, v010, db.get(Project, v010.project_id))
 
     assert "backend/app/invoices.py;kód;" in text
-    assert f"docs/specs/versions/v0.1.0/customer-requirements.md;;1;0;{dt.EXCLUDED_ZADANIE}" in text
+    assert f"docs/specs/versions/v0.1.0/customer-requirements.md;;0,0;{dt.EXCLUDED_ZADANIE}" in text
     assert "Tokenizér;o200k_base (tiktoken 0.14.0)" in text
 
 
@@ -427,16 +429,17 @@ def test_the_csv_reads_in_a_slovak_spreadsheet_line_by_line_as_on_the_screen(pro
         "Po stav kódu;48de08076e594d4b224281b1befd0a5ba0fa9ca3 (stav, na ktorom prešla Verifikácia)",
         "Tokenizér;o200k_base (tiktoken 0.14.0)",
     ]
+    # DEV-263: no count of source lines, tokens in kT rounded up to a tenth; an issued statement keeps its euros.
     assert lines[9:15] == [
-        "Druh;Riadkov;Tokenov;Sadzba (€ / 1 000 tokenov);Suma (€)",
-        "Kód a skúšky;15106;173890;2,00;347,78",
-        "z toho kód;9000;94321;;",
-        "z toho skúšky;6106;79569;;",
-        "Dokumentácia;2737;76087;1,00;76,09",
-        "Spolu;17843;249977;;423,87",
+        "Druh;kT;Sadzba (€ / kT);Suma (€)",
+        "Kód a skúšky;173,9;2,00;347,78",
+        "z toho kód;94,4;;",
+        "z toho skúšky;79,6;;",
+        "Dokumentácia;76,1;1,00;76,09",
+        "Spolu;250,0;;423,87",
     ]
-    assert lines[16] == "Súbor;Druh;Riadkov;Tokenov;Neráta sa — prečo"
-    assert f"package-lock.json;;0;0;{dt.EXCLUDED_LOCKFILE}" in lines
+    assert lines[16] == "Súbor;Druh;kT;Neráta sa — prečo"
+    assert f"package-lock.json;;0,0;{dt.EXCLUDED_LOCKFILE}" in lines
 
 
 def test_a_rate_keeps_its_places_beyond_two_and_an_unsplit_statement_still_shows_its_total(project):
@@ -453,18 +456,18 @@ def test_a_rate_keeps_its_places_beyond_two_and_an_unsplit_statement_still_shows
     lines = st.csv_text(row, v010, db.get(Project, v010.project_id)).splitlines()
 
     assert lines[10:15] == [
-        "Kód a skúšky;15106;173890;2,00;",
-        "z toho kód;9000;94321;;",
-        "z toho skúšky;6106;79569;;",
-        "Dokumentácia;2737;76087;0,0125;",
-        "Spolu;17843;249977;;348,73",
+        "Kód a skúšky;173,9;2,00;",
+        "z toho kód;94,4;;",
+        "z toho skúšky;79,6;;",
+        "Dokumentácia;76,1;0,0125;",
+        "Spolu;250,0;;348,73",
     ]
 
 
 # ── 5. every line carries its amount; the total is their sum ──────────────────
 
 
-def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
+def test_each_line_is_rounded_to_tenths_and_the_total_is_their_sum():
     from backend.services import billing_category as bc
 
     def line(category, kind, tokens, rate, discount):
@@ -472,24 +475,21 @@ def test_each_line_is_rounded_to_cents_and_the_total_is_their_sum():
             category=category, kind=kind, tasked=True, rate=Decimal(rate), discount_pct=Decimal(discount), tokens=tokens
         )
 
+    # DEV-263: the first issued statement (NEX Inbox 1.7.0) as it counts now — 173,9 kT × 2 € and 76,1 kT × 1 €.
     director = st.amounts([line("request", "code", 94321 + 79569, "2", "0"), line("request", "docs", 76087, "1", "0")])
-    assert (director.code, director.docs, director.total) == (
-        Decimal("347.78"),
-        Decimal("76.09"),
-        Decimal("423.87"),
-    ), "the first issued statement (NEX Inbox 1.7.0)"
+    assert (director.code, director.docs, director.total) == (Decimal("347.8"), Decimal("76.1"), Decimal("423.9"))
 
-    # Half a cent on each line: rounding the total alone would bill 0,01 € while the lines show 0,01 € + 0,01 €.
-    halves = st.amounts([line("request", "code", 5, "1", "0"), line("request", "docs", 5, "1", "0")])
-    assert (halves.code, halves.docs, halves.total) == (Decimal("0.01"), Decimal("0.01"), Decimal("0.02"))
+    # Half a tenth on each line: rounding the total alone would bill 0,10 € while the lines show 0,10 € + 0,10 €.
+    halves = st.amounts([line("request", "code", 1, "0.5", "0"), line("request", "docs", 1, "0.5", "0")])
+    assert (halves.code, halves.docs, halves.total) == (Decimal("0.1"), Decimal("0.1"), Decimal("0.2"))
 
     # DEV-75: a warranty fix is billed at nothing, and still shows what it was worth.
     fix = st.amounts([line("bug", "code", 94321 + 79569, "2", "100"), line("bug", "docs", 76087, "1", "100")])
     assert (fix.code, fix.docs, fix.total, fix.full) == (
-        Decimal("0.00"),
-        Decimal("0.00"),
-        Decimal("0.00"),
-        Decimal("423.87"),
+        Decimal("0.0"),
+        Decimal("0.0"),
+        Decimal("0.0"),
+        Decimal("423.9"),
     )
 
 

@@ -35,17 +35,19 @@ function view(over: Partial<DeliveryStatementView["preview"]> = {}, issued: Deli
       delivered_source: "verifikacia",
       delivered_source_label: "stav, na ktorom prešla Verifikácia",
       tokenizer: "o200k_base (tiktoken 0.14.0)",
-      code: { tokens: 23717, lines: 1828 },
-      tests: { tokens: 18912, lines: 1410 },
-      docs: { tokens: 38795, lines: 1537 },
+      code: { tokens: 23717, lines: 1828, kilotokens: "23.8" },
+      tests: { tokens: 18912, lines: 1410, kilotokens: "19.0" },
+      docs: { tokens: 38795, lines: 1537, kilotokens: "38.8" },
+      code_and_tests_kilotokens: "42.7",
       files: [
-        { path: "backend/app/inbox.py", kind: "kod", excluded: null, lines: 10, tokens: 120 },
+        { path: "backend/app/inbox.py", kind: "kod", excluded: null, lines: 10, tokens: 120, kilotokens: "0.2" },
         {
           path: "docs/specs/versions/v1.6.0/customer-requirements.md",
           kind: null,
           excluded: "Zadanie — napísal ho zákazník",
           lines: 43,
           tokens: 0,
+          kilotokens: "0.0",
         },
       ],
       rate_code: "4.0000",
@@ -84,10 +86,13 @@ describe("Statement of delivered tokens", () => {
     expect(screen.getByTestId("statement-amount-code")).toHaveTextContent("170,52 €");
     expect(screen.getByTestId("statement-amount-docs")).toHaveTextContent("58,19 €");
     expect(screen.getByText(/stav, na ktorom prešla Verifikácia/)).toBeInTheDocument();
-    expect(screen.getByText(/kód 23\s717, skúšky 18\s912/)).toBeInTheDocument();
-    expect(screen.getByText("38 795")).toBeInTheDocument();
+    // DEV-263: tokens in kT as the server rounds them, no count of source lines.
+    expect(screen.getByText(/kód 23,8 kT, skúšky 19,0 kT/)).toBeInTheDocument();
+    expect(screen.getByText("42,7 kT")).toBeInTheDocument();
+    expect(screen.getByText("38,8 kT")).toBeInTheDocument();
+    expect(screen.queryByText("Riadkov")).not.toBeInTheDocument();
     expect(screen.getByText(/meria o200k_base \(tiktoken 0\.14\.0\)/)).toBeInTheDocument();
-    expect(screen.getByTestId("statement-calibration")).toHaveTextContent("2,95 € na 1 000 tokenov");
+    expect(screen.getByTestId("statement-calibration")).toHaveTextContent("2,95 € na kT");
     expect(screen.getByRole("button", { name: "Vydať súpis" })).toBeEnabled();
   });
 
@@ -146,13 +151,14 @@ describe("Statement of delivered tokens", () => {
       label: "Oprava chyby — kód a skúšky",
       lines: 12,
       tokens: 47_435,
+      kilotokens: "47.5",
       rate: "2.0000",
       full_eur: "94.87",
       discount_pct: "100.00",
       discount_label: "záručná oprava",
       discount_eur: "94.87",
       amount_eur: "0.00",
-      tasks: [{ label: "21.1.1", title: "Zaokrúhlenie", lines: 12, tokens: 47_435 }],
+      tasks: [{ label: "21.1.1", title: "Zaokrúhlenie", lines: 12, tokens: 47_435, kilotokens: "47.5" }],
     };
     const fix = { work_kind: "fix" as const, version_category: "bug" as const, full_eur: "94.87", lines: [line] };
     vi.mocked(getDeliveryStatement).mockResolvedValue(
@@ -184,6 +190,7 @@ describe("Statement of delivered tokens", () => {
       replaces_id: null,
       replaced_at: null,
       lines: null,
+      kilotokens: "81.5",
     };
     vi.mocked(getDeliveryStatement).mockResolvedValueOnce(view()).mockResolvedValue(view({}, [issued]));
     vi.mocked(issueDeliveryStatement).mockResolvedValue(issued);
@@ -195,7 +202,7 @@ describe("Statement of delivered tokens", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Stiahnuť CSV/ }));
     expect(downloadStatementCsv).toHaveBeenCalledWith("s-1", "supis-1.6.0.csv");
     expect(screen.getByTestId("issued-statement")).toHaveTextContent("platný");
-    expect(screen.getByTestId("issued-statement")).toHaveTextContent("81 424 tokenov · 228,71 €");
+    expect(screen.getByTestId("issued-statement")).toHaveTextContent("81,5 kT · 228,71 €");
   });
 
   it("a version that is not finished yet only says why there is no statement", async () => {
@@ -228,6 +235,7 @@ describe("Statement of delivered tokens", () => {
       replaces_id: "s-1",
       replaced_at: null,
       lines: null,
+      kilotokens: "250.0",
     };
     const replaced = {
       ...valid,

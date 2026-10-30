@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from backend.core.kilotokens import kilotokens
 from backend.core.local_time import local_time
 from backend.db.models.delivered_authorship import DeliveredAuthorship
 from backend.db.models.delivery_statement import DeliveryStatement
@@ -613,9 +614,7 @@ def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
     """The issued statement as CSV for a Slovak spreadsheet (semicolons, decimal commas) — the basis for the invoice:
     who and what, then the lines as on the screen (DEV-75: category × kind with full value, discount and amount, and
     which task is on which line; a statement issued before keeps its two lines — the total is their sum), then every
-    file and why some do not count."""
-    lines = {kind: sum(f["lines"] for f in row.files if f["kind"] == kind) for kind in delivered_tokens.KINDS}
-    code_lines = lines[delivered_tokens.KIND_CODE] + lines[delivered_tokens.KIND_TESTS]
+    file and why some do not count. DEV-263: tokens in kT (rounded up to a tenth), no count of source lines."""
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\n")
     w.writerow(["Súpis dodaných tokenov"])
@@ -634,41 +633,25 @@ def csv_text(row: DeliveryStatement, version: Version, project: Project) -> str:
         _csv_category_lines(w, row)
         _csv_files(w, row)
         return out.getvalue()
-    w.writerow(["Druh", "Riadkov", "Tokenov", "Sadzba (€ / 1 000 tokenov)", "Suma (€)"])
+    w.writerow(["Druh", "kT", "Sadzba (€ / kT)", "Suma (€)"])
+    code_kt = kilotokens(row.tokens_code + row.tokens_tests)
 
     def line_amount(value: Optional[Decimal]) -> str:
         # A statement issued before the lines were kept, whose lines would not add up to its total, has none.
         return _number(value) if value is not None else ""
 
-    w.writerow(
-        [
-            "Kód a skúšky",
-            code_lines,
-            row.tokens_code + row.tokens_tests,
-            _number(row.rate_code),
-            line_amount(row.amount_code_eur),
-        ]
-    )
-    w.writerow(["z toho kód", lines[delivered_tokens.KIND_CODE], row.tokens_code, "", ""])
-    w.writerow(["z toho skúšky", lines[delivered_tokens.KIND_TESTS], row.tokens_tests, "", ""])
+    w.writerow(["Kód a skúšky", _number(code_kt, 1), _number(row.rate_code), line_amount(row.amount_code_eur)])
+    w.writerow(["z toho kód", _number(kilotokens(row.tokens_code), 1), "", ""])
+    w.writerow(["z toho skúšky", _number(kilotokens(row.tokens_tests), 1), "", ""])
     w.writerow(
         [
             "Dokumentácia",
-            lines[delivered_tokens.KIND_DOCS],
-            row.tokens_docs,
+            _number(kilotokens(row.tokens_docs), 1),
             _number(row.rate_docs),
             line_amount(row.amount_docs_eur),
         ]
     )
-    w.writerow(
-        [
-            "Spolu",
-            code_lines + lines[delivered_tokens.KIND_DOCS],
-            row.tokens_code + row.tokens_tests + row.tokens_docs,
-            "",
-            _number(row.amount_eur),
-        ]
-    )
+    w.writerow(["Spolu", _number(code_kt + kilotokens(row.tokens_docs), 1), "", _number(row.amount_eur)])
     _csv_files(w, row)
     return out.getvalue()
 
@@ -678,9 +661,8 @@ def _csv_category_lines(w, row: DeliveryStatement) -> None:
     w.writerow(
         [
             "Riadok súpisu",
-            "Riadkov",
-            "Tokenov",
-            "Sadzba (€ / 1 000 tokenov)",
+            "kT",
+            "Sadzba (€ / kT)",
             "Plná hodnota (€)",
             "Zľava (%)",
             "Zľava (€)",
@@ -692,8 +674,7 @@ def _csv_category_lines(w, row: DeliveryStatement) -> None:
         w.writerow(
             [
                 ln["label"],
-                ln["lines"],
-                ln["tokens"],
+                _number(kilotokens(ln["tokens"]), 1),
                 _number(Decimal(ln["rate"])),
                 _number(Decimal(ln["full_eur"])),
                 _number(Decimal(ln["discount_pct"])),
@@ -705,8 +686,7 @@ def _csv_category_lines(w, row: DeliveryStatement) -> None:
     w.writerow(
         [
             "Spolu",
-            sum(ln["lines"] for ln in row.lines),
-            sum(ln["tokens"] for ln in row.lines),
+            _number(sum((kilotokens(ln["tokens"]) for ln in row.lines), Decimal("0.0")), 1),
             "",
             _number(sum((Decimal(ln["full_eur"]) for ln in row.lines), Decimal("0"))),
             "",
@@ -716,15 +696,17 @@ def _csv_category_lines(w, row: DeliveryStatement) -> None:
         ]
     )
     w.writerow([])
-    w.writerow(["Úloha", "Názov", "Riadok súpisu", "Riadkov", "Tokenov"])
+    w.writerow(["Úloha", "Názov", "Riadok súpisu", "kT"])
     for ln in row.lines:
         for task in ln["tasks"]:
-            w.writerow([task["label"], task["title"], ln["label"], task["lines"], task["tokens"]])
+            w.writerow([task["label"], task["title"], ln["label"], _number(kilotokens(task["tokens"]), 1)])
     w.writerow([])
 
 
 def _csv_files(w, row: DeliveryStatement) -> None:
     w.writerow([])
-    w.writerow(["Súbor", "Druh", "Riadkov", "Tokenov", "Neráta sa — prečo"])
+    w.writerow(["Súbor", "Druh", "kT", "Neráta sa — prečo"])
     for f in row.files:
-        w.writerow([f["path"], KIND_LABELS.get(f["kind"] or "", ""), f["lines"], f["tokens"], f["excluded"] or ""])
+        w.writerow(
+            [f["path"], KIND_LABELS.get(f["kind"] or "", ""), _number(kilotokens(f["tokens"]), 1), f["excluded"] or ""]
+        )

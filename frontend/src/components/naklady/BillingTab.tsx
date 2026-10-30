@@ -23,12 +23,12 @@ import {
   type PriceEstimate,
 } from "@/services/api/deliveryStatements";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { formatDate, formatEur } from "@/utils/format";
+import { formatDate, formatEur, formatKiloTokens } from "@/utils/format";
 
 const eur = formatEur;
 const day = (iso: string) => formatDate(iso);
 const sha = (v: string | null) => (v ? v.slice(0, 7) : "?");
-const tokens = (n: number) => n.toLocaleString("sk-SK");
+const kt = formatKiloTokens;
 
 const STATE: Record<BillingRow["state"], { label: string; tone: string }> = {
   issued: { label: "vydaný", tone: "bg-[var(--color-state-success-bg)] text-[var(--color-state-success-fg)]" },
@@ -86,8 +86,8 @@ function Estimate({ estimate }: { estimate: PriceEstimate }) {
         </div>
       </div>
       <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-        Kód a skúšky ≈ {tokens(estimate.code_tokens)} tokenov = {eur(estimate.code_eur)} · dokumentácia ≈{" "}
-        {tokens(estimate.docs_tokens)} tokenov = {eur(estimate.docs_eur)}
+        Kód a skúšky ≈ {kt(estimate.code_kilotokens)} = {eur(estimate.code_eur)} · dokumentácia ≈{" "}
+        {kt(estimate.docs_kilotokens)} = {eur(estimate.docs_eur)}
       </div>
       {!estimate.enough && (
         <div className="mt-1 text-[11px] text-[var(--color-state-warning-fg)]">

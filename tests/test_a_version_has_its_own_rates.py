@@ -7,12 +7,13 @@ kept — who, when, from what to what.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
 
+from backend.core.kilotokens import kilotokens
 from backend.db.models.versions import Version
 from backend.services import delivery_statement as st
 from tests.test_delivered_tokens_statement import _as, _rates, project  # noqa: F401 — the fixture is used by name
@@ -41,7 +42,8 @@ def test_only_the_version_counts_with_its_own_rate(client, project):  # noqa: F8
     assert (own["rate_code_own"], own["rate_docs_own"]) == (True, False)
     assert (Decimal(own["settings_rate_code"]), Decimal(own["settings_rate_docs"])) == (Decimal("2"), Decimal("1"))
     code_tokens = own["code"]["tokens"] + own["tests"]["tokens"]
-    assert Decimal(own["amount_code_eur"]) == (Decimal(code_tokens) / 1000 * 4).quantize(Decimal("0.01"))
+    # DEV-263: kT rounded up to a tenth × rate, the euros half up to a tenth.
+    assert Decimal(own["amount_code_eur"]) == (kilotokens(code_tokens) * 4).quantize(Decimal("0.1"), ROUND_HALF_UP)
     assert own["amount_docs_eur"] == before["amount_docs_eur"]
 
     other = _view(client, v011)["preview"]

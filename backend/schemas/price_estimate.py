@@ -6,7 +6,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
+
+from backend.core.kilotokens import kilotokens
 
 
 class PriceEstimateRead(BaseModel):
@@ -26,4 +28,15 @@ class PriceEstimateRead(BaseModel):
     #: How many finished versions the estimate rests on, and whether that is enough to be firm.
     samples: int
     enough: bool
+
+    @computed_field  # DEV-263: Fakturácia shows tokens in kT
+    @property
+    def code_kilotokens(self) -> Decimal:
+        return kilotokens(self.code_tokens)
+
+    @computed_field
+    @property
+    def docs_kilotokens(self) -> Decimal:
+        return kilotokens(self.docs_tokens)
+
     created_at: datetime

@@ -35,13 +35,14 @@ function line(over: Partial<StatementLine>): StatementLine {
     label: "Požiadavka zákazníka — kód a skúšky",
     lines: 8_900,
     tokens: 170_000,
+    kilotokens: "170.0",
     rate: "2.0000",
     full_eur: "340.00",
     discount_pct: "0.00",
     discount_label: null,
     discount_eur: "0.00",
     amount_eur: "340.00",
-    tasks: [{ label: "20.1.1", title: "Export", lines: 8_900, tokens: 170_000 }],
+    tasks: [{ label: "20.1.1", title: "Export", lines: 8_900, tokens: 170_000, kilotokens: "170.0" }],
     ...over,
   };
 }
@@ -51,12 +52,13 @@ const GIFT = line({
   label: "Dar — pozornosť ICC — kód a skúšky",
   lines: 400,
   tokens: 7_000,
+  kilotokens: "7.0",
   full_eur: "14.00",
   discount_pct: "100.00",
   discount_label: "pozornosť ICC",
   discount_eur: "14.00",
   amount_eur: "0.00",
-  tasks: [{ label: "21.1.1", title: "Tmavý režim", lines: 400, tokens: 7_000 }],
+  tasks: [{ label: "21.1.1", title: "Tmavý režim", lines: 400, tokens: 7_000, kilotokens: "7.0" }],
 });
 const UNTASKED = line({
   kind: "docs",
@@ -64,6 +66,7 @@ const UNTASKED = line({
   label: "Práca bez úlohy — dokumentácia (Požiadavka zákazníka)",
   lines: 1_200,
   tokens: 41_000,
+  kilotokens: "41.0",
   rate: "1.0000",
   full_eur: "41.00",
   amount_eur: "41.00",
@@ -84,9 +87,10 @@ function view(
       delivered_source: "verifikacia",
       delivered_source_label: "stav, na ktorom prešla Verifikácia",
       tokenizer: "o200k_base (tiktoken 0.14.0)",
-      code: { tokens: 170_000, lines: 8_000 },
-      tests: { tokens: 7_000, lines: 1_300 },
-      docs: { tokens: 41_000, lines: 1_200 },
+      code: { tokens: 170_000, lines: 8_000, kilotokens: "170.0" },
+      tests: { tokens: 7_000, lines: 1_300, kilotokens: "7.0" },
+      docs: { tokens: 41_000, lines: 1_200, kilotokens: "41.0" },
+      code_and_tests_kilotokens: "177.0",
       files: [],
       rate_code: "2.0000",
       rate_docs: "1.0000",
@@ -114,6 +118,7 @@ function view(
           category: "request",
           lines: 8_900,
           tokens: 170_000,
+          kilotokens: "170.0",
         },
         {
           id: "t2",
@@ -124,6 +129,7 @@ function view(
           category: "request",
           lines: 0,
           tokens: 0,
+          kilotokens: "0.0",
         },
         {
           id: "t3",
@@ -134,6 +140,7 @@ function view(
           category: "gift",
           lines: 400,
           tokens: 7_000,
+          kilotokens: "7.0",
         },
       ],
       full_eur: "395.00",
@@ -157,10 +164,13 @@ describe("Statement lines by category (DEV-75)", () => {
     const rows = await screen.findAllByTestId("statement-line");
     // The thousands separator of sk-SK is a non-breaking space.
     expect(rows.map((r) => r.textContent?.replace(/\u00a0/g, " "))).toEqual([
-      "Požiadavka zákazníka — kód a skúškyúlohy 20.1.18 900170 0002 €340,00 €—340,00 €",
-      "Práca bez úlohy — dokumentácia (Požiadavka zákazníka)1 20041 0001 €41,00 €—41,00 €",
-      "Dar — pozornosť ICC — kód a skúškyúlohy 21.1.14007 0002 €14,00 €−14,00 €100 % · pozornosť ICC0,00 €",
+      // DEV-263: kT instead of tokens, no count of source lines.
+      "Požiadavka zákazníka — kód a skúškyúlohy 20.1.1170,0 kT2 €340,00 €—340,00 €",
+      "Práca bez úlohy — dokumentácia (Požiadavka zákazníka)41,0 kT1 €41,00 €—41,00 €",
+      "Dar — pozornosť ICC — kód a skúškyúlohy 21.1.17,0 kT2 €14,00 €−14,00 €100 % · pozornosť ICC0,00 €",
     ]);
+    expect(screen.getByTestId("statement-lines")).toHaveTextContent(/Spolu218,0\skT/);
+    expect(screen.getByTestId("statement-lines")).not.toHaveTextContent("Riadkov");
     expect(screen.getByTestId("statement-lines-total")).toHaveTextContent("381,00 €");
     expect(screen.getByTestId("statement-amount")).toHaveTextContent(
       "Suma: 381,00 €plná hodnota 395,00 €, zľava 14,00 €",
@@ -276,5 +286,19 @@ describe("The version's discounts (DEV-75)", () => {
     await waitFor(() =>
       expect(setBillingDiscounts).toHaveBeenCalledWith("v-170", { request: null, bug: null, gift: null }),
     );
+  });
+});
+
+describe("Tasks of the delivery in kT (DEV-263)", () => {
+  it("says how many kT each task wrote, and that a task wrote nothing", async () => {
+    render(<DeliveryStatementPanel versionId="v-170" />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Kategórie úloh: 3 úlohy/ }));
+
+    const tasks = screen.getByTestId("statement-tasks");
+    expect(tasks).toHaveTextContent(/20\.1\.1 Export\s*· 170,0\skT/);
+    expect(tasks).toHaveTextContent(/21\.1\.1 Tmavý režim\s*· 7,0\skT/);
+    expect(tasks).toHaveTextContent(/20\.2\.1 Tlač\s*· v dodávke nič nenapísala/);
+    expect(tasks).not.toHaveTextContent("tokenov");
   });
 });

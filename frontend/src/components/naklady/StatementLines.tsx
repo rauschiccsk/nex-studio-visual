@@ -1,13 +1,14 @@
 // StatementLines — the lines of a delivery statement (DEV-75): the billing category of the task that wrote the code ×
 // (code and tests, documentation), work without a task on lines of its own in the version's category. Each line shows
 // its full value, the discount and the amount, so a warranty fix or a gift is visible on the invoice with what it was
-// worth; the total is the sum of the amounts.
+// worth; the total is the sum of the amounts. DEV-263: tokens in kT (the server rounds them up to a tenth), no count of
+// source lines — the Director 30.10.2026: „stĺpec počet riadkov odstrániť, … je to irelevantný údaj“.
 
 import type { StatementLine } from "@/services/api/deliveryStatements";
-import { formatEur } from "@/utils/format";
+import { formatEur, formatKiloTokens } from "@/utils/format";
 
-const int = new Intl.NumberFormat("sk-SK");
 const eur = formatEur;
+const kt = formatKiloTokens;
 const pct = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 2 })} %`;
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} €`;
 
@@ -28,9 +29,8 @@ export default function StatementLines({
         <thead className="text-left text-[var(--color-text-muted)]">
           <tr>
             <th className="py-1 font-normal">Riadok súpisu</th>
-            <th className="py-1 text-right font-normal">Riadkov</th>
-            <th className="py-1 text-right font-normal">Tokenov</th>
-            <th className="py-1 text-right font-normal" title="€ za 1 000 tokenov">
+            <th className="py-1 text-right font-normal">kT</th>
+            <th className="py-1 text-right font-normal" title="€ za kT (1 000 tokenov)">
               Sadzba
             </th>
             <th className="py-1 text-right font-normal">Plná hodnota</th>
@@ -49,8 +49,7 @@ export default function StatementLines({
                   </span>
                 )}
               </td>
-              <td className="py-1 text-right">{int.format(ln.lines)}</td>
-              <td className="py-1 text-right">{int.format(ln.tokens)}</td>
+              <td className="py-1 text-right">{kt(ln.kilotokens)}</td>
               <td className="py-1 text-right">{rate(ln.rate)}</td>
               <td className="py-1 text-right">{eur(ln.full_eur)}</td>
               <td className="py-1 text-right">
@@ -71,8 +70,7 @@ export default function StatementLines({
           ))}
           <tr className="border-t border-[var(--color-border-default)] font-medium">
             <td className="py-1">Spolu</td>
-            <td className="py-1 text-right">{int.format(lines.reduce((s, ln) => s + ln.lines, 0))}</td>
-            <td className="py-1 text-right">{int.format(lines.reduce((s, ln) => s + ln.tokens, 0))}</td>
+            <td className="py-1 text-right">{kt(lines.reduce((s, ln) => s + Number(ln.kilotokens), 0))}</td>
             <td />
             <td className="py-1 text-right">{eur(full)}</td>
             <td className="py-1 text-right">{discount > 0 ? `−${eur(discount)}` : "—"}</td>

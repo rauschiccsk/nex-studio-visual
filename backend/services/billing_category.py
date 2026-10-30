@@ -25,6 +25,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.core.kilotokens import TENTH, kilotokens
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.version_discount_change import VersionDiscountChange
 from backend.db.models.versions import Version
@@ -186,7 +187,7 @@ def discount_changes(db: Session, version_id: uuid.UUID) -> list[VersionDiscount
 
 @dataclass(frozen=True)
 class Value:
-    """One line's money: its full value, the discount and what is billed — each rounded to cents."""
+    """One line's money: its full value, the discount and what is billed — each in tenths of a euro (DEV-263)."""
 
     full: Decimal
     discount: Decimal
@@ -197,10 +198,12 @@ class Value:
 
 
 def value(tokens: int, rate: Decimal, discount_pct: Decimal) -> Value:
-    """tokens / 1 000 × rate, rounded to cents; the discount is a share of that rounded value, rounded to cents —
-    so full value − discount = amount holds on every line of the invoice to the cent."""
-    full = (Decimal(tokens) / 1000 * rate).quantize(CENT, rounding=ROUND_HALF_UP)
-    return Value(full=full, discount=(full * discount_pct / HUNDRED).quantize(CENT, rounding=ROUND_HALF_UP))
+    """DEV-263: kilotokens (rounded up to a tenth) × rate, rounded half up to a tenth of a euro; the discount is a
+    share of that rounded value, rounded the same way — so full value − discount = amount holds on every line of the
+    invoice. The Director 30.10.2026: „1451.4 kT x 2 Eur = 2902.80 Eur“; „summy jednotlivých riadkov zaokrúhliť na
+    jednu desatinu (264.42 na 264.40)“."""
+    full = (kilotokens(tokens) * rate).quantize(TENTH, rounding=ROUND_HALF_UP)
+    return Value(full=full, discount=(full * discount_pct / HUNDRED).quantize(TENTH, rounding=ROUND_HALF_UP))
 
 
 @dataclass

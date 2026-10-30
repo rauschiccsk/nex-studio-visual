@@ -293,10 +293,14 @@ def test_an_issued_statement_keeps_its_lines_whatever_changes_later(billed):
     assert row.lines == issued
     assert [ln["category"] for ln in issued] == [bc.REQUEST] * 3
     assert Decimal(row.amount_eur) == sum(Decimal(ln["amount_eur"]) for ln in issued)
-    assert st.preview(db, v010, root).amounts.total != Decimal(row.amount_eur), "the preview counts anew"
+    # The preview counts anew — by its lines: DEV-263 rounds each line's kT up to a tenth, so on this tiny delivery the
+    # split-off gift line can leave the total where it was.
+    assert [ln.category for ln in st.preview(db, v010, root).lines] != [ln["category"] for ln in issued], (
+        "the preview counts anew"
+    )
 
     text = st.csv_text(row, v010, db.get(Project, v010.project_id)).splitlines()
-    assert text[9].startswith("Riadok súpisu;Riadkov;Tokenov;Sadzba")
+    assert text[9].startswith("Riadok súpisu;kT;Sadzba (€ / kT)")
     assert text[10].startswith("Požiadavka zákazníka — kód a skúšky;")
     assert any(line.startswith("1.1.1;Súčty;Požiadavka zákazníka — kód a skúšky;") for line in text)
 

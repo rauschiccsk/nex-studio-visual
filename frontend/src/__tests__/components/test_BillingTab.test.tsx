@@ -67,6 +67,7 @@ const issued = (amount: string) => ({
   replaces_id: null,
   replaced_at: null,
   lines: null,
+  kilotokens: "250.0",
 });
 
 const INBOX_1210: BillingOverview = {

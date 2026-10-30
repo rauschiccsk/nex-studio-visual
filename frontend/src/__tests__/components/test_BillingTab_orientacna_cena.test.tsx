@@ -25,6 +25,8 @@ const ESTIMATE: PriceEstimate = {
   first_version: false,
   code_tokens: 210_000,
   docs_tokens: 30_000,
+  code_kilotokens: "210.0",
+  docs_kilotokens: "30.0",
   rate_code: "2.0000",
   rate_docs: "1.0000",
   code_eur: "420.00",
@@ -86,7 +88,7 @@ describe("BillingTab — the orientačná cena (DEV-225)", () => {
       "Orientačná cena — odhad podľa 42 úloh v pláne verzie, z 3 hotových verzií — ďalších verzií projektov.",
     );
     expect(block).toHaveTextContent(
-      "Kód a skúšky ≈ 210 000 tokenov = 420,00 € · dokumentácia ≈ 30 000 tokenov = 30,00 €",
+      "Kód a skúšky ≈ 210,0 kT = 420,00 € · dokumentácia ≈ 30,0 kT = 30,00 €",
     );
     expect(block).toHaveTextContent(/Opiera sa len o 3 hotové verzie, preto je hrubý/);
     // under 1.7.0, not under 1.6.0 — the version it belongs to

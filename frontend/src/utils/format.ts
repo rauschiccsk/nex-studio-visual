@@ -50,6 +50,13 @@ export function formatTime(value: string | Date | null | undefined): string {
 }
 
 /** „1 234,50 €“ — two decimals, Slovak grouping; „—“ when there is no amount. The one shape of a euro amount. */
+/** DEV-263 — kilotokens as Fakturácia shows them: one decimal and „kT“ (1 451,4 kT). The server rounds them. */
+export function formatKiloTokens(value: string | number | null | undefined): string {
+  return value == null
+    ? "—"
+    : `${Number(value).toLocaleString("sk-SK", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kT`;
+}
+
 export function formatEur(value: string | number | null | undefined): string {
   return value == null
     ? "—"

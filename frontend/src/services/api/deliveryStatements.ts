@@ -26,11 +26,15 @@ interface DeliveredFile {
   excluded: string | null;
   lines: number;
   tokens: number;
+  /** DEV-263 — the tokens in kT, rounded up to a tenth, as the server counts the money from them. */
+  kilotokens: string;
 }
 
 interface KindTotal {
   tokens: number;
   lines: number;
+  /** DEV-263 — the tokens in kT, rounded up to a tenth, as the server counts the money from them. */
+  kilotokens: string;
 }
 
 interface StatementCalibration {
@@ -48,6 +52,8 @@ interface StatementLineTask {
   title: string;
   lines: number;
   tokens: number;
+  /** DEV-263 — the tokens in kT, rounded up to a tenth, as the server counts the money from them. */
+  kilotokens: string;
 }
 
 /** DEV-75 — one line of the statement: a category × kind, its full value, the discount and the amount. */
@@ -59,6 +65,8 @@ export interface StatementLine {
   label: string;
   lines: number;
   tokens: number;
+  /** DEV-263 — the tokens in kT, rounded up to a tenth, as the server counts the money from them. */
+  kilotokens: string;
   rate: string;
   full_eur: string;
   discount_pct: string;
@@ -82,6 +90,8 @@ export interface StatementTask {
   category: BillingCategory | null;
   lines: number;
   tokens: number;
+  /** DEV-263 — the tokens in kT, rounded up to a tenth, as the server counts the money from them. */
+  kilotokens: string;
 }
 
 export type CategoryValues<T> = Record<BillingCategory, T>;
@@ -123,6 +133,8 @@ export interface StatementPreview {
   tasks: StatementTask[];
   /** What the delivery was worth before the discounts. */
   full_eur: string | null;
+  /** DEV-263 — code and tests together in kT, as the statement of two lines bills them. */
+  code_and_tests_kilotokens: string;
 }
 
 export interface IssuedStatement {
@@ -147,6 +159,8 @@ export interface IssuedStatement {
   replaced_at: string | null;
   /** DEV-75 — the lines it was issued with; null on one issued before the categories. */
   lines: StatementLine[] | null;
+  /** DEV-263 — the kT the statement bills: the sum of its lines' kT. */
+  kilotokens: string;
 }
 
 export interface DeliveryStatementView {
@@ -194,6 +208,9 @@ export interface PriceEstimate {
   samples: number;
   enough: boolean;
   created_at: string;
+  /** DEV-263 — the estimate's tokens in kT. */
+  code_kilotokens: string;
+  docs_kilotokens: string;
 }
 
 /** DEV-73 — one version on the billing tab: where it stands for invoicing. */

@@ -28,12 +28,12 @@ import {
   type StatementPreview,
 } from "@/services/api/deliveryStatements";
 import { WORK_KIND_OPTIONS, type WorkKind } from "@/lib/workKind";
-import { formatDateTime, formatEur } from "@/utils/format";
+import { formatDateTime, formatEur, formatKiloTokens } from "@/utils/format";
 
-const int = new Intl.NumberFormat("sk-SK");
 const eur = formatEur;
 const when = (iso: string) => formatDateTime(iso);
-const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / 1 000 tokenov`;
+const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / kT`;
+const kt = formatKiloTokens;
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
 
@@ -115,7 +115,7 @@ function VersionRates({
         <div className="mt-2 space-y-2">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="block">
-              <span className="text-[var(--color-text-secondary)]">Kód a skúšky (€ / 1 000 tokenov)</span>
+              <span className="text-[var(--color-text-secondary)]">Kód a skúšky (€ / kT)</span>
               <input
                 inputMode="decimal"
                 spellCheck={false}
@@ -126,7 +126,7 @@ function VersionRates({
               />
             </label>
             <label className="block">
-              <span className="text-[var(--color-text-secondary)]">Dokumentácia (€ / 1 000 tokenov)</span>
+              <span className="text-[var(--color-text-secondary)]">Dokumentácia (€ / kT)</span>
               <input
                 inputMode="decimal"
                 spellCheck={false}
@@ -213,7 +213,6 @@ export default function DeliveryStatementPanel({
   const p = view?.preview;
   const counted = p?.files.filter((f) => f.kind) ?? [];
   const excluded = p?.files.filter((f) => !f.kind) ?? [];
-  const codeTokens = (p?.code?.tokens ?? 0) + (p?.tests?.tokens ?? 0);
   const kindLabel = (k: WorkKind | null) => WORK_KIND_OPTIONS.find((o) => o.value === k)?.label ?? "neurčený";
   const valid = view?.issued.find((s) => !s.replaced_at) ?? null;
 
@@ -279,8 +278,7 @@ export default function DeliveryStatementPanel({
               <thead className="text-left text-[var(--color-text-muted)]">
                 <tr>
                   <th className="py-1 font-normal">Druh</th>
-                  <th className="py-1 text-right font-normal">Riadkov</th>
-                  <th className="py-1 text-right font-normal">Tokenov</th>
+                  <th className="py-1 text-right font-normal">kT</th>
                   <th className="py-1 text-right font-normal">Sadzba</th>
                   <th className="py-1 text-right font-normal">Suma</th>
                 </tr>
@@ -290,11 +288,10 @@ export default function DeliveryStatementPanel({
                   <td className="py-1">
                     Kód a skúšky{" "}
                     <span className="text-[var(--color-text-muted)]">
-                      (kód {int.format(p.code?.tokens ?? 0)}, skúšky {int.format(p.tests?.tokens ?? 0)})
+                      (kód {kt(p.code?.kilotokens ?? 0)}, skúšky {kt(p.tests?.kilotokens ?? 0)})
                     </span>
                   </td>
-                  <td className="py-1 text-right">{int.format((p.code?.lines ?? 0) + (p.tests?.lines ?? 0))}</td>
-                  <td className="py-1 text-right">{int.format(codeTokens)}</td>
+                  <td className="py-1 text-right">{kt(p.code_and_tests_kilotokens)}</td>
                   <td className="py-1 text-right">{rate(p.rate_code)}</td>
                   <td className="py-1 text-right" data-testid="statement-amount-code">
                     {eur(p.amount_code_eur)}
@@ -302,8 +299,7 @@ export default function DeliveryStatementPanel({
                 </tr>
                 <tr>
                   <td className="py-1">Dokumentácia</td>
-                  <td className="py-1 text-right">{int.format(p.docs?.lines ?? 0)}</td>
-                  <td className="py-1 text-right">{int.format(p.docs?.tokens ?? 0)}</td>
+                  <td className="py-1 text-right">{kt(p.docs?.kilotokens ?? 0)}</td>
                   <td className="py-1 text-right">{rate(p.rate_docs)}</td>
                   <td className="py-1 text-right" data-testid="statement-amount-docs">
                     {eur(p.amount_docs_eur)}
@@ -346,9 +342,9 @@ export default function DeliveryStatementPanel({
           {p.calibration && (
             <p className="mb-2 text-[11px] text-[var(--color-text-muted)]" data-testid="statement-calibration">
               Práca agenta na verzii: kód a skúšky {eur(p.calibration.eur_code)}
-              {p.calibration.per_1k_code != null && ` (≈ ${eur(p.calibration.per_1k_code)} na 1 000 tokenov)`},
+              {p.calibration.per_1k_code != null && ` (≈ ${eur(p.calibration.per_1k_code)} na kT)`},
               dokumentácia {eur(p.calibration.eur_docs)}
-              {p.calibration.per_1k_docs != null && ` (≈ ${eur(p.calibration.per_1k_docs)} na 1 000 tokenov)`}
+              {p.calibration.per_1k_docs != null && ` (≈ ${eur(p.calibration.per_1k_docs)} na kT)`}
               {!p.calibration.complete && " — časť práce sa nedá oceniť, skutočná cena je vyššia"}.
             </p>
           )}
@@ -387,8 +383,7 @@ export default function DeliveryStatementPanel({
                   <tr key={f.path} className={f.kind ? "" : "text-[var(--color-text-muted)]"}>
                     <td className="py-0.5 pr-2 font-mono">{f.path}</td>
                     <td className="py-0.5 pr-2">{f.kind ? KIND_LABELS[f.kind] ?? f.kind : `neráta sa — ${f.excluded}`}</td>
-                    <td className="py-0.5 text-right">{f.kind ? int.format(f.lines) : ""}</td>
-                    <td className="py-0.5 text-right">{f.kind ? int.format(f.tokens) : ""}</td>
+                    <td className="py-0.5 text-right">{f.kind ? kt(f.kilotokens) : ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -418,7 +413,7 @@ export default function DeliveryStatementPanel({
                     </span>
                   )}
                   {when(s.created_at)} · {kindLabel(s.work_kind)} ·{" "}
-                  {int.format(s.tokens_code + s.tokens_tests + s.tokens_docs)} tokenov · {eur(s.amount_eur)}
+                  {kt(s.kilotokens)} · {eur(s.amount_eur)}
                 </span>
                 <button
                   type="button"
