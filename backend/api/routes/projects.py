@@ -863,7 +863,7 @@ def upgrade_app_kit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Projekt nie je založený na šablóne aplikácie — nex-app-kit v ňom nie je čo povýšiť.",
         )
-    if not app_kit_service.upgrade_source(project.source_path, payload.target_version):
+    if not app_kit_service.upgrade_source(project.source_path, payload.target_version, project.template):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(

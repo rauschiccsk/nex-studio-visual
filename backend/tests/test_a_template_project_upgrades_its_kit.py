@@ -27,11 +27,14 @@ dependencies = [
 CHANGELOG = "## v0.5.0\n- `[nové]` päť\n\n## v0.4.0\n- `[oprava]` štyri\n\n## v0.3.0\n- tri\n"
 
 
-def _lock(version: str) -> str:
-    return json.dumps({"packages": {"node_modules/nex-app-kit": {"version": version}}}, indent=2)
+def _lock(version: str, shared: str | None = "0.28.0") -> str:
+    packages = {"node_modules/nex-app-kit": {"version": version}}
+    if shared:
+        packages["node_modules/nex-shared"] = {"version": shared}
+    return json.dumps({"packages": packages}, indent=2)
 
 
-def seed(root: Path, frame: str = "0.3.0", server: str | None = "0.3.0") -> Path:
+def seed(root: Path, frame: str = "0.3.0", server: str | None = "0.3.0", shared: str = "0.28.0") -> Path:
     """A project on the template as the founding writes it — the kit pinned on both sides."""
     (root / "frontend").mkdir(parents=True, exist_ok=True)
     (root / "frontend" / "package.json").write_text(
@@ -39,26 +42,49 @@ def seed(root: Path, frame: str = "0.3.0", server: str | None = "0.3.0") -> Path
             {
                 "dependencies": {
                     "nex-app-kit": nexshared.git_dependency("nex-app-kit", frame),
-                    "nex-shared": nexshared.git_dependency("nex-shared", "0.28.0"),
+                    "nex-shared": nexshared.git_dependency("nex-shared", shared),
                 }
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    (root / "frontend" / "package-lock.json").write_text(_lock(frame), encoding="utf-8")
+    (root / "frontend" / "package-lock.json").write_text(_lock(frame, shared), encoding="utf-8")
     (root / "backend").mkdir(exist_ok=True)
     kit = app_template.kit_server_dependency(server) if server else "requests>=2"
     (root / "backend" / "pyproject.toml").write_text(PYPROJECT.format(kit=kit), encoding="utf-8")
     return root
 
 
-def npm_resolves_to(monkeypatch, version: str) -> list[str]:
-    asked: list[str] = []
+def release(version: str = "0.5.0", shared: str = "0.29.0"):
+    """The scaffold's frontend packages at a release (DEV-257): the kit, the nex-shared it is proven with, a package
+    the release newly needs."""
 
-    def resolve(frontend_dir: Path, spec: str, **_kwargs) -> bool:
-        asked.append(spec)
-        (frontend_dir / "package-lock.json").write_text(_lock(version), encoding="utf-8")
+    def scaffold_package(template: str, asked: str) -> dict:
+        assert (template, asked) == ("nsv-standard", version)
+        return {
+            "dependencies": {
+                "@tailwindcss/typography": "^0.5",
+                "nex-app-kit": nexshared.git_dependency("nex-app-kit", version),
+                "nex-shared": nexshared.git_dependency("nex-shared", shared),
+            }
+        }
+
+    return scaffold_package
+
+
+def upgrade(root: Path, target: str = "0.5.0", scaffold_package=None) -> bool:
+    return app_kit.upgrade_source(
+        str(root), target, "nsv-standard", scaffold_package=scaffold_package or release(target)
+    )
+
+
+def npm_resolves_to(monkeypatch, version: str, shared: str | None = "0.29.0") -> list[list[str]]:
+    asked: list[list[str]] = []
+
+    def resolve(frontend_dir: Path, *specs: str, **_kwargs) -> bool:
+        asked.append(list(specs))
+        (frontend_dir / "package-lock.json").write_text(_lock(version, shared), encoding="utf-8")
         return True
 
     monkeypatch.setattr(nexshared, "resolve_lockfile", resolve)
@@ -117,17 +143,18 @@ def test_an_up_to_date_project_is_said_so(tmp_path):
 # ── the upgrade ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_an_upgrade_moves_the_frame_and_the_server_together(tmp_path, monkeypatch):
+def test_an_upgrade_moves_the_frame_and_the_server_together_with_what_the_release_needs(tmp_path, monkeypatch):
     root = seed(tmp_path)
     asked = npm_resolves_to(monkeypatch, "0.5.0")
 
-    assert app_kit.upgrade_source(str(root), "0.5.0") is True
+    assert upgrade(root) is True
 
-    assert asked == ["github:rauschiccsk/nex-app-kit#v0.5.0"]
+    assert asked == [["github:rauschiccsk/nex-app-kit#v0.5.0", "github:rauschiccsk/nex-shared#v0.29.0"]]
     package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
     assert package["dependencies"] == {
         "nex-app-kit": "github:rauschiccsk/nex-app-kit#v0.5.0",
-        "nex-shared": "github:rauschiccsk/nex-shared#v0.28.0",
+        "nex-shared": "github:rauschiccsk/nex-shared#v0.29.0",
+        "@tailwindcss/typography": "^0.5",
     }
     assert (root / "backend" / "pyproject.toml").read_text(encoding="utf-8") == PYPROJECT.format(
         kit=app_template.kit_server_dependency("0.5.0")
@@ -135,12 +162,32 @@ def test_an_upgrade_moves_the_frame_and_the_server_together(tmp_path, monkeypatc
     assert app_kit.status_for_source(str(root), tags=["0.5.0"], changelog_text="")["current"] == "0.5.0"
 
 
+def test_a_newer_nex_shared_of_the_project_stays(tmp_path, monkeypatch):
+    root = seed(tmp_path, shared="0.30.0")
+    asked = npm_resolves_to(monkeypatch, "0.5.0", shared="0.30.0")
+
+    assert upgrade(root) is True
+
+    assert asked == [["github:rauschiccsk/nex-app-kit#v0.5.0"]]
+    deps = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+    assert deps["nex-shared"] == "github:rauschiccsk/nex-shared#v0.30.0"
+
+
 def test_a_lockfile_that_does_not_follow_puts_every_file_back(tmp_path, monkeypatch):
     root = seed(tmp_path)
     before = files(root)
     npm_resolves_to(monkeypatch, "0.3.0")
 
-    assert app_kit.upgrade_source(str(root), "0.5.0") is False
+    assert upgrade(root) is False
+    assert files(root) == before
+
+
+def test_a_lockfile_that_keeps_the_old_nex_shared_puts_every_file_back(tmp_path, monkeypatch):
+    root = seed(tmp_path)
+    before = files(root)
+    npm_resolves_to(monkeypatch, "0.5.0", shared="0.28.0")
+
+    assert upgrade(root) is False
     assert files(root) == before
 
 
@@ -149,7 +196,7 @@ def test_npm_failing_puts_every_file_back(tmp_path, monkeypatch):
     before = files(root)
     monkeypatch.setattr(nexshared, "resolve_lockfile", lambda *_a, **_k: False)
 
-    assert app_kit.upgrade_source(str(root), "0.5.0") is False
+    assert upgrade(root) is False
     assert files(root) == before
 
 
@@ -158,19 +205,77 @@ def test_a_lockfile_npm_wrote_where_there_was_none_is_removed_again(tmp_path, mo
     (root / "frontend" / "package-lock.json").unlink()
     npm_resolves_to(monkeypatch, "0.3.0")
 
-    assert app_kit.upgrade_source(str(root), "0.5.0") is False
+    assert upgrade(root) is False
     assert not (root / "frontend" / "package-lock.json").exists()
 
 
-def test_nothing_is_touched_without_a_pin_on_both_sides_or_a_real_version(tmp_path, monkeypatch):
+def test_nothing_is_touched_without_a_pin_on_both_sides_or_the_release_s_packages(tmp_path, monkeypatch):
     asked = npm_resolves_to(monkeypatch, "0.5.0")
     no_server = seed(tmp_path / "a", server=None)
-    before = files(no_server)
+    no_release = seed(tmp_path / "b")
+    before = files(no_server), files(no_release)
 
-    assert app_kit.upgrade_source(str(no_server), "0.5.0") is False
-    assert files(no_server) == before
-    assert app_kit.upgrade_source(str(seed(tmp_path / "b")), "najnovšia") is False
+    no_kit = seed(tmp_path / "c")
+    package = json.loads((no_kit / "frontend" / "package.json").read_text(encoding="utf-8"))
+    del package["dependencies"]["nex-app-kit"]
+    (no_kit / "frontend" / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    before = (*before, files(no_kit))
+
+    assert upgrade(no_server) is False
+    assert upgrade(no_release, scaffold_package=lambda _t, _v: None) is False
+    assert upgrade(no_kit) is False
+    assert (files(no_server), files(no_release), files(no_kit)) == before
     assert asked == []
+
+
+class _Raw:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def read(self) -> bytes:
+        return self.text.encode("utf-8")
+
+
+def test_the_release_s_packages_are_read_at_its_tag_with_the_kit_s_pin_filled_in(monkeypatch):
+    asked = []
+
+    def urlopen(url, timeout):
+        asked.append(url)
+        shared = "github:rauschiccsk/nex-shared#v0.29.0"
+        return _Raw('{"dependencies": {"nex-app-kit": "{{KIT_FRONTEND}}", "nex-shared": "%s"}}' % shared)
+
+    monkeypatch.setattr(app_kit.urllib.request, "urlopen", urlopen)
+
+    package = app_kit.fetch_scaffold_package("nsv-standard", "0.4.0")
+
+    assert asked == [
+        "https://raw.githubusercontent.com/rauschiccsk/nex-app-kit/v0.4.0/scaffold/nsv-standard/frontend/package.json"
+    ]
+    assert package == {
+        "dependencies": {
+            "nex-app-kit": "github:rauschiccsk/nex-app-kit#v0.4.0",
+            "nex-shared": "github:rauschiccsk/nex-shared#v0.29.0",
+        }
+    }
+
+
+def test_a_release_s_packages_that_cannot_be_read_or_are_not_filled_give_nothing(monkeypatch):
+    def unfilled(url, timeout):
+        return _Raw('{"dependencies": {"nex-app-kit": "{{KIT_FRONTEND}}", "x": "{{OTHER}}"}}')
+
+    def down(url, timeout):
+        raise OSError("GitHub neodpovedá")
+
+    monkeypatch.setattr(app_kit.urllib.request, "urlopen", unfilled)
+    assert app_kit.fetch_scaffold_package("nsv-standard", "0.4.0") is None
+    monkeypatch.setattr(app_kit.urllib.request, "urlopen", down)
+    assert app_kit.fetch_scaffold_package("nsv-standard", "0.4.0") is None
 
 
 def test_one_commit_carries_both_sides(tmp_path, monkeypatch):
@@ -184,7 +289,7 @@ def test_one_commit_carries_both_sides(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
     npm_resolves_to(monkeypatch, "0.5.0")
-    assert app_kit.upgrade_source(str(root), "0.5.0")
+    assert upgrade(root)
 
     assert app_kit.commit_upgrade(str(root), "0.5.0") is True
 
@@ -245,6 +350,7 @@ def test_a_project_without_a_template_is_offered_nothing(client, db_session, tmp
 
 def test_the_upgrade_route_moves_the_kit_or_says_why_not(client, db_session, tmp_path, monkeypatch):
     project = _project(db_session, seed(tmp_path), "nsv-standard")
+    monkeypatch.setattr(app_kit, "fetch_scaffold_package", release("0.4.0"))
     npm_resolves_to(monkeypatch, "0.3.0")
 
     failed = client.post(f"/api/v1/projects/{project.id}/app-kit-upgrade", json={"target_version": "0.4.0"})

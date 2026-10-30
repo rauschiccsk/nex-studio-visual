@@ -9,9 +9,11 @@ archive). The status names both; an upgrade moves both or neither, and one commi
 
 from __future__ import annotations
 
+import json
 import re
+import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from backend.services import app_template, nexshared
 
@@ -21,6 +23,7 @@ CHANGELOG_RAW_URL = f"https://raw.githubusercontent.com/{app_template.KIT_REPO}/
 _SERVER_PIN_RE = re.compile(
     re.escape(app_template.kit_server_dependency("0.0.0")).replace(r"0\.0\.0", r"(\d+\.\d+\.\d+)")
 )
+_PIN_VERSION_RE = re.compile(r"#v(\d+\.\d+\.\d+)$")
 FRONTEND = "frontend"
 SERVER_PIN_FILE = "backend/pyproject.toml"
 
@@ -69,12 +72,42 @@ def status_for_source(
     }
 
 
-def upgrade_source(source_path: str, target_version: str) -> bool:
-    """Move the project's nex-app-kit to ``target_version`` — the frame's pin and lockfile, then the server's pin.
+#: The placeholder of the kit's own pin in the scaffold's ``frontend/package.json`` (scaffold/render.py fills it).
+_KIT_PLACEHOLDER = "{{KIT_FRONTEND}}"
+
+
+def fetch_scaffold_package(template: str, version: str) -> Optional[dict]:
+    """The packages the template's frontend needs at a release — its scaffold's ``frontend/package.json`` at the tag,
+    the kit's own pin filled in. ``None`` when it cannot be read (then nothing is upgraded)."""
+    raw = f"https://raw.githubusercontent.com/{app_template.KIT_REPO}/v{version}"
+    url = f"{raw}/scaffold/{template}/frontend/package.json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:  # noqa: S310 — fixed https URL
+            text = resp.read().decode("utf-8")
+        package = json.loads(
+            text.replace(_KIT_PLACEHOLDER, nexshared.git_dependency(app_template.KIT_PACKAGE, version))
+        )
+    except Exception:  # noqa: BLE001 — GitHub unreachable or no such release: no upgrade, never a crash
+        return None
+    specs = [*(package.get("dependencies") or {}).values(), *(package.get("devDependencies") or {}).values()]
+    return None if any("{{" in str(spec) for spec in specs) else package
+
+
+def upgrade_source(
+    source_path: str,
+    target_version: str,
+    template: str,
+    *,
+    scaffold_package: Optional[Callable[[str, str], Optional[dict]]] = None,
+) -> bool:
+    """Move the project's nex-app-kit to ``target_version`` — the frame's pin, nex-shared raised to the release's own
+    pin when older, the packages the release's frontend newly needs, the lockfile; then the server's pin (DEV-257: as
+    the conversion does, DEV-254).
 
     The lockfile must really resolve to the target (``npm ci`` installs what it says), else every file touched is put
     back: a frame and a server on two releases would speak two versions of the standard interface. False when there
-    is nothing to rewrite (no pin on either side, a bad target) or the lockfile did not follow. Does NOT commit."""
+    is nothing to rewrite (no pin on either side), the release's packages cannot be read or the lockfile did not
+    follow. Does NOT commit."""
     root = Path(source_path)
     pkg, lock, server = root / FRONTEND / "package.json", root / FRONTEND / "package-lock.json", root / SERVER_PIN_FILE
     try:
@@ -83,16 +116,28 @@ def upgrade_source(source_path: str, target_version: str) -> bool:
         return False
     if originals[pkg] is None or originals[server] is None:
         return False
-    new_pkg = nexshared.rewrite_pin(originals[pkg], target_version, app_template.KIT_PACKAGE)
-    new_server, pins = _SERVER_PIN_RE.subn(app_template.kit_server_dependency(target_version), originals[server])
-    if new_pkg is None or pins != 1:
+    try:
+        project_package = json.loads(originals[pkg])
+    except ValueError:
         return False
-    pkg.write_text(new_pkg, encoding="utf-8")
+    on_kit = app_template.KIT_PACKAGE in (project_package.get("dependencies") or {})
+    new_server, pins = _SERVER_PIN_RE.subn(app_template.kit_server_dependency(target_version), originals[server])
+    if not on_kit or pins != 1:
+        return False
+    release = (scaffold_package or fetch_scaffold_package)(template, target_version)
+    if release is None:
+        return False
+    package, specs = app_template.with_template_packages(project_package, release)
+    pkg.write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     server.write_text(new_server, encoding="utf-8")
-    spec = nexshared.git_dependency(app_template.KIT_PACKAGE, target_version)
-    if (
-        nexshared.resolve_lockfile(root / FRONTEND, spec)
-        and nexshared.effective_version(source_path, FRONTEND, app_template.KIT_PACKAGE) == target_version
+    wanted = {
+        name: _PIN_VERSION_RE.search(spec).group(1)
+        for name in (app_template.KIT_PACKAGE, nexshared.PACKAGE)
+        for spec in specs
+        if spec.startswith(nexshared.git_dependency(name, ""))
+    }
+    if nexshared.resolve_lockfile(root / FRONTEND, *specs) and all(
+        nexshared.effective_version(source_path, FRONTEND, name) == version for name, version in wanted.items()
     ):
         return True
     for path, original in originals.items():

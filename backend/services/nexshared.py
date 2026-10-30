@@ -217,8 +217,9 @@ def git_dependency(package: str, version: str) -> str:
     return f"github:rauschiccsk/{package}#v{version}"
 
 
-def resolve_lockfile(frontend_dir: Path, spec: str, *, timeout: int = 300) -> bool:
-    """Re-resolve ``package-lock.json`` to ``spec`` (``npm install --package-lock-only <spec>``).
+def resolve_lockfile(frontend_dir: Path, *specs: str, timeout: int = 300) -> bool:
+    """Re-resolve ``package-lock.json`` to ``specs`` (``npm install --package-lock-only <spec>…``) — DEV-257: an
+    upgrade of nex-app-kit names nex-shared too when the new release stands on a newer one.
 
     Lockfile only — no ``node_modules`` churn. This is the step that makes an upgrade real:
     without it ``npm ci`` keeps installing the OLD version.
@@ -234,7 +235,7 @@ def resolve_lockfile(frontend_dir: Path, spec: str, *, timeout: int = 300) -> bo
     """
     try:
         proc = subprocess.run(
-            ["npm", "install", "--package-lock-only", spec],
+            ["npm", "install", "--package-lock-only", *specs],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
