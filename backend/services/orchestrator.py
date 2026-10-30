@@ -592,6 +592,9 @@ _ACTIONS = frozenset(
         # Verifikácia-originated fix-loop (board post-filter: programovanie ∧ blocked/paused ∧ a fix-scope on
         # record). Reuses the ``overit_znovu`` sha_drift mechanics WITHOUT the settled-state/drift guard.
         "overit_bez_opravy",
+        # DEV-261: „Vrátiť agentovi na opravu“ — the CI of the commit after Programovanie is red; the fix goes back to
+        # the AI Agent with what failed, instead of the step to Verifikácia.
+        "opravit_podla_ci",
         # Audit P0 (2026-07-28): "Nahlásiť znova" — the Manažér's ONE move on a ``framework_issue`` block (a
         # NEX-Studio-side bug only our technical team can clear, so no Uprav / answer / decide applies).
         # :func:`determine_available_actions` OFFERS it as the sole action on that block; it must therefore be
@@ -822,7 +825,9 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     elif stage in ("navrh", "vizual", "programovanie"):
         # The schvaľovacie body after Návrh / Vizuál (CR-1) / Programovanie — ``schvalit`` advances to the
         # next phase. (Whether the build HALTED here at all is the dial's call; once settled, it's offered.)
-        actions.add("schvalit")
+        # DEV-261: after Programovanie not while the CI of the pushed commit runs; a red one is the board's post-filter.
+        if not (stage == "programovanie" and state.ci_pending_since is not None):
+            actions.add("schvalit")
     elif stage == "verifikacia":
         # Verifikácia is the Auditor's phase: the Manažér ratifies the Auditor's verdict (``verdict``) and,
         # at the dial-governed end stop, signs off with ``schvalit`` → Hotovo.
@@ -7139,6 +7144,117 @@ CI_PENDING_REFUSAL = (
     "Hotovo zatiaľ nie: verzia čaká na kontrolu na GitHube — keď dobehne, kokpit ju pustí sám, alebo vráti na opravu."
 )
 
+# DEV-261 — the step from Programovanie to Verifikácia waits for the CI of the commit the cockpit pushed after the last
+# task. 30.10.2026 NEX Knowledge 0.2.0 offered „Prejsť na overenie“ the moment its fix ended, with CI still running; a
+# red CI would have cost a whole Auditor round to learn what the cockpit knew minutes later.
+PROGRAMOVANIE_NEXT_ACTION = "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
+PROGRAMOVANIE_CI_PENDING_NEXT_ACTION = (
+    "Programovanie je hotové — čaká sa na kontroly na GitHube; „Prejsť na overenie“ sa ponúkne, keď dobehnú. "
+    "Kokpit to dorieši sám."
+)
+PROGRAMOVANIE_CI_RED_NEXT_ACTION = (
+    "Kontroly na GitHube po Programovaní zlyhali — vráť prácu agentovi na opravu („Vrátiť agentovi na opravu“)."
+)
+PROGRAMOVANIE_CI_PENDING_REFUSAL = (
+    "Na overenie zatiaľ nie: čaká sa na kontroly na GitHube — keď dobehnú, kokpit ponúkne ďalší krok sám."
+)
+PROGRAMOVANIE_CI_RED_REFUSAL = (
+    "Na overenie nie: kontroly na GitHube po Programovaní zlyhali — najprv vráť prácu agentovi na opravu."
+)
+#: What the Manažér reads about a red CI after Programovanie — in its note and beside the held step.
+CI_RED_SENTENCE = "Kontroly na GitHube po Programovaní zlyhali: {detail}. Vráť prácu agentovi na opravu."
+CI_RED_FIX_NOT_OFFERED = (
+    "Vrátiť na opravu podľa kontrol sa dá len vtedy, keď kontroly na GitHube po Programovaní zlyhali."
+)
+#: The brief the agent gets from „Vrátiť agentovi na opravu“ — what failed, and what it can do about it.
+CI_RED_FIX_BRIEF = (
+    "Kontroly na GitHube (CI) na hlavnej vetve po Programovaní zlyhali: {detail}. Oprav príčinu tak, aby CI prešlo: "
+    "pozri, ktorý krok padol (`.github/workflows/`), zreprodukuj ho, ako sa v Programovaní dá, a oprav kód, skúšky "
+    "alebo obraz skúšok. Beh v Dockeri overí CI a Verifikácia."
+)
+
+
+def programovanie_ci_red(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-261 — what failed in the CI of the commit the version stands on after Programovanie, or ``None``.
+
+    The CI watcher records a red with the commit it judged (:func:`_settle_programovanie_ci_wait`); it holds the step to
+    Verifikácia only while the repo is still at that commit — a fix moves HEAD, and a red of an older commit says
+    nothing about the new one."""
+    note = db.execute(
+        select(PipelineMessage)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.stage == "programovanie",
+            PipelineMessage.payload["ci_gate"].astext.is_not(None),
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    payload = (note.payload or {}) if note is not None else {}
+    if payload.get("ci_gate") != "red":
+        return None
+    head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
+    if not head or head != payload.get("sha"):
+        return None
+    return str(payload.get("ci") or "")
+
+
+async def _settle_programovanie_ci_wait(
+    db: Session, state: PipelineState, *, on_message: Optional[MessageCallback] = None
+) -> bool:
+    """DEV-261 — settle one Programovanie wait for CI; ``True`` when the state changed.
+
+    Green offers „Prejsť na overenie“; red offers the fix back to the agent instead (:func:`programovanie_ci_red`); a
+    GitHub that cannot be asked holds the step only as long as a just-pushed commit's run takes to appear
+    (``CI_RUN_APPEAR_TIMEOUT``) — Verifikácia asks again anyway; a CI that never ends holds it until
+    ``ci_pending_cap_hours``. A wait left on a build that moved on (a turn, a pause) is dropped without a word: the
+    next end of Programovanie waits anew."""
+    if state.status != "awaiting_manazer":
+        state.ci_pending_since = None
+        return True
+    root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, state.version_id)
+    ci_state, ci_detail = await _ci_status_for_head(root, patient=False)
+    waited = datetime.now(timezone.utc) - state.ci_pending_since
+    if ci_state == "pending" and waited <= timedelta(hours=settings.ci_pending_cap_hours):
+        return False
+    if ci_state == "unknown" and waited <= timedelta(seconds=CI_RUN_APPEAR_TIMEOUT):
+        return False
+    state.ci_pending_since = None
+    if ci_state == "red":
+        gate, content = "red", CI_RED_SENTENCE.format(detail=ci_detail)
+        state.next_action = PROGRAMOVANIE_CI_RED_NEXT_ACTION
+    elif ci_state == "green":
+        gate, content = "green", f"Kontroly na GitHube po Programovaní prešli: {ci_detail}. Môžeš prejsť na overenie."
+        state.next_action = PROGRAMOVANIE_NEXT_ACTION
+    elif ci_state == "unknown":
+        gate = "unknown"
+        content = (
+            f"Kontroly na GitHube sa nedali zistiť ({ci_detail}) — „Prejsť na overenie“ je k dispozícii; "
+            "Verifikácia ich skontroluje znova."
+        )
+        state.next_action = PROGRAMOVANIE_NEXT_ACTION
+    else:
+        gate = "overdue"
+        content = (
+            f"Kontroly na GitHube nedobehli ani po {settings.ci_pending_cap_hours} h ({ci_detail}) — "
+            "„Prejsť na overenie“ je k dispozícii; Verifikácia na ne počká."
+        )
+        state.next_action = PROGRAMOVANIE_NEXT_ACTION
+    note = _record_message(
+        db,
+        version_id=state.version_id,
+        stage="programovanie",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=content,
+        payload={"phase": "programovanie", "ci_gate": gate, "ci": ci_detail, "sha": _repo_head(root)},
+    )
+    if on_message is not None:
+        await on_message(note)
+    return True
+
+
 #: How many runs to read for ONE commit (ICCINT-129). A commit triggers one run per workflow — nex-inbox
 #: has two, most repos have one to three. The cap is not a judgement about how many matter; it only keeps
 #: the output of a machine we do not control bounded. Reading exactly one was the bug.
@@ -7531,6 +7647,12 @@ async def settle_ci_waits(db: Session, *, on_message: Optional[MessageCallback] 
     cap = timedelta(hours=settings.ci_pending_cap_hours)
     waiting = db.execute(select(PipelineState).where(PipelineState.ci_pending_since.is_not(None))).scalars().all()
     for state in waiting:
+        # DEV-261: a wait at the end of Programovanie is the step to Verifikácia, not a verdict.
+        if state.current_stage == "programovanie":
+            if await _settle_programovanie_ci_wait(db, state, on_message=on_message):
+                db.flush()
+                settled.append(state)
+            continue
         version_id = state.version_id
         root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
         version_number = db.get(Version, version_id).version_number
@@ -14925,7 +15047,11 @@ async def _run_build_round(
                     if await _settle_fix_boot_recheck(db, state, on_message=on_message):
                         return state
                 state.status = "awaiting_manazer"
-                state.next_action = "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
+                state.next_action = PROGRAMOVANIE_NEXT_ACTION
+                # DEV-261: the cockpit pushed the last task's commit — the step to Verifikácia waits for its CI.
+                if _project_has_ci(project_root):
+                    state.ci_pending_since = datetime.now(timezone.utc)
+                    state.next_action = PROGRAMOVANIE_CI_PENDING_NEXT_ACTION
                 db.flush()
             return state
 
@@ -15718,6 +15844,13 @@ async def apply_action(
             raise OrchestratorError(
                 "Schváliť je platné len na schvaľovacom bode (Návrh / Vizuál / Programovanie / Verifikácia)"
             )
+        # DEV-261: the step to Verifikácia waits for the CI of the commit pushed after the last task; a red one goes
+        # back to the agent first.
+        if state.current_stage == "programovanie":
+            if state.ci_pending_since is not None:
+                raise OrchestratorError(PROGRAMOVANIE_CI_PENDING_REFUSAL)
+            if programovanie_ci_red(db, version_id) is not None:
+                raise OrchestratorError(PROGRAMOVANIE_CI_RED_REFUSAL)
         # DEV-127: a vizuál is approved by looking at it. NEX Manager 1.3.0 offered „Schváliť vizuál" for seventeen
         # days at a preview that had died seven minutes after „Vizuál je pripravený" (28.09.2026).
         if state.current_stage == "vizual":
@@ -15802,6 +15935,18 @@ async def apply_action(
         else:
             _begin_dispatch(db, state)
         return state
+
+    if action == "opravit_podla_ci":
+        # DEV-261: „Vrátiť agentovi na opravu“ — the CI after Programovanie is red. It is the Manažér's „Uprav“ with the
+        # brief the cockpit writes from what failed, so the fix runs exactly as his own correction would.
+        detail = (
+            programovanie_ci_red(db, version_id)
+            if state.current_stage == "programovanie" and state.status == "awaiting_manazer"
+            else None
+        )
+        if detail is None:
+            raise OrchestratorError(CI_RED_FIX_NOT_OFFERED)
+        action, payload = "uprav", {"comment": CI_RED_FIX_BRIEF.format(detail=detail)}
 
     if action == "uprav":
         # "Uprav" — the Manažér's correction back to the AI Agent at a schvaľovací bod (re-work the current

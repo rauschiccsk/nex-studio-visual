@@ -35,6 +35,7 @@ from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
 from backend.schemas.pipeline import (
     AgentSession,
+    BoardCiGate,
     BoardTask,
     CiStatusRead,
     DedoProposalRead,
@@ -250,6 +251,17 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # zostav_plan post-filter and cleans a pre-existing latent re-offer on the conversation register.
     if state is not None and "approve_spec" in available_actions and state.mode == "conversation" and spec_approved:
         available_actions = [a for a in available_actions if a != "approve_spec"]
+    # DEV-261: after Programovanie the step to Verifikácia is held by the CI of the pushed commit — while it runs the
+    # state-only set already lacks ``schvalit``; a red one swaps it for „Vrátiť agentovi na opravu“ (opravit_podla_ci).
+    ci_gate: Optional[BoardCiGate] = None
+    if state is not None and state.current_stage == "programovanie" and state.status == "awaiting_manazer":
+        if state.ci_pending_since is not None:
+            ci_gate = BoardCiGate(state="pending", message=orchestrator.PROGRAMOVANIE_CI_PENDING_NEXT_ACTION)
+        else:
+            red = orchestrator.programovanie_ci_red(db, version_id)
+            if red is not None:
+                available_actions = sorted({*available_actions, "opravit_podla_ci"} - {"schvalit"})
+                ci_gate = BoardCiGate(state="red", message=orchestrator.CI_RED_SENTENCE.format(detail=red))
     # CR-V2-056 (reality-anchoring): compute "verified" LIVE from the repo (PASS-bound SHA vs current HEAD) so
     # the board never shows a frozen PASS — a version whose HEAD drifted past its verified commit reads
     # 'sha_drift' and the FE flags it. One HEAD read for this single-version view.
@@ -330,6 +342,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         state=PipelineStateRead.model_validate(state) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
         available_actions=available_actions,
+        ci_gate=ci_gate,
         all_tasks_done=all_tasks_done,
         build_open_findings=build_open_findings,
         current_task=BoardTask(number=ct.number, title=ct.title) if ct is not None else None,

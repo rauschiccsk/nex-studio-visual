@@ -3789,6 +3789,20 @@ export interface components {
             work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
+         * BoardCiGate
+         * @description DEV-261 — the step from Programovanie to Verifikácia held by the CI of the commit the cockpit pushed: still
+         *     running (``pending``) or red (``red`` — „Vrátiť agentovi na opravu“ is offered instead of the step).
+         */
+        BoardCiGate: {
+            /** Message */
+            message: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "red";
+        };
+        /**
          * BoardTask
          * @description The Programovanie task currently in focus, for the who's-up status (WS-C2, CR-NS-035; v2 §4.4.2).
          */
@@ -5807,6 +5821,7 @@ export interface components {
              * @default 0
              */
             build_open_findings: number;
+            ci_gate?: components["schemas"]["BoardCiGate"] | null;
             consultation_direction?: components["schemas"]["ConsultationDirectionRead"] | null;
             current_task?: components["schemas"]["BoardTask"] | null;
             database_schema?: components["schemas"]["DatabaseSchemaRead"] | null;

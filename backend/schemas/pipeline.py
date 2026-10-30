@@ -251,6 +251,15 @@ class VizualPreviewRead(BaseModel):
     frontends: list[VizualFrontendPreviewRead] = Field(default_factory=list)
 
 
+class BoardCiGate(BaseModel):
+    """DEV-261 — the step from Programovanie to Verifikácia held by the CI of the commit the cockpit pushed: still
+    running (``pending``) or red (``red`` — „Vrátiť agentovi na opravu“ is offered instead of the step)."""
+
+    state: Literal["pending", "red"]
+    #: The sentence the Manažér reads beside the held step.
+    message: str
+
+
 class PipelineBoardRead(BaseModel):
     """Vývoj board snapshot: current 5-phase state + the most recent messages (CR-V2-021).
 
@@ -274,6 +283,8 @@ class PipelineBoardRead(BaseModel):
     #: ``pokracovat`` / ``ask`` / ``answer`` / ``verdict`` / ``pause``). The FE renders only these; empty when
     #: the pipeline hasn't started.
     available_actions: list[str] = Field(default_factory=list)
+    #: DEV-261 — why „Prejsť na overenie“ is held after Programovanie; ``None`` when nothing holds it.
+    ci_gate: Optional[BoardCiGate] = None
     #: Build-readiness facts (WS-C1, CR-NS-030) the FE uses to DISABLE the Programovanie sign-off button when
     #: not satisfiable. ``all_tasks_done`` is TRUE only when the plan exists and EVERY task reached ``done`` —
     #: a ``todo``, a ``failed`` or a stuck ``in_progress`` task all read as work remaining (the last of those

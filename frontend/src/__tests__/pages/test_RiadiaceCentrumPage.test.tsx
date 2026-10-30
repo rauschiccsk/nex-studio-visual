@@ -114,3 +114,19 @@ describe("RiadiaceCentrumPage — conversation cold-start send handler (STEP 1)"
     expect(postPipelineActionApi).not.toHaveBeenCalled();
   });
 });
+
+describe("RiadiaceCentrumPage — the step to Verifikácia waits for CI (DEV-261)", () => {
+  it("shows why „Prejsť na overenie“ is held while the CI of the pushed commit runs", async () => {
+    wsMock.board = {
+      state: { current_stage: "programovanie", status: "awaiting_manazer", mode: null },
+      recent_messages: [],
+      available_actions: ["ask", "uprav"],
+      ci_gate: { state: "pending", message: "Programovanie je hotové — čaká sa na kontroly na GitHube." },
+    } as unknown as PipelineBoard;
+
+    render(<RiadiaceCentrumPage />);
+
+    expect(await screen.findByText("Čakám na kontroly na GitHube")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prejsť na overenie" })).toBeDisabled();
+  });
+});

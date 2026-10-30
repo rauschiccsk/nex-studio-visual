@@ -47,6 +47,7 @@ import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
 import ReverifyBar from "@/components/riadiace/ReverifyBar";
 import PrenosDoRiadnejVerzieBar from "@/components/riadiace/PrenosDoRiadnejVerzieBar";
 import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
+import CiGateBar from "@/components/riadiace/CiGateBar";
 import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
 import PhaseBar from "@/components/riadiace/PhaseBar";
 import ZivyNahladBar from "@/components/riadiace/ZivyNahladBar";
@@ -367,6 +368,9 @@ export default function RiadiaceCentrumPage() {
             (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
           }
         />
+        {/* DEV-261: after Programovanie the step to Verifikácia waits for the CI of the pushed commit — the reason, or the
+            fix of a red one, stands where „Prejsť na overenie" would. */}
+        <CiGateBar board={board} versionId={versionId} onBoard={setBoard} />
         <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* ICCINT-139: rýchla oprava, ktorá tam nepatrí, sa dá preniesť do riadnej verzie. */}
         <PrenosDoRiadnejVerzieBar board={board} versionId={versionId} onBoard={setBoard} />

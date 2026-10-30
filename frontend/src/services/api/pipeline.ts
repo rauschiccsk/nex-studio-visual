@@ -185,6 +185,13 @@ export interface ConsultationDirection {
   last_round: RoundGain | null;
 }
 
+/** DEV-261: why „Prejsť na overenie" is held after Programovanie — the CI of the pushed commit still runs, or it is red. */
+interface CiGate {
+  state: "pending" | "red";
+  /** The sentence the Manažér reads beside the held step. */
+  message: string;
+}
+
 export interface PipelineBoard {
   state: PipelineState | null;
   recent_messages: PipelineMessage[];
@@ -233,6 +240,8 @@ export interface PipelineBoard {
   consultation_direction?: ConsultationDirection | null;
   // DEV-7: the version's database schema — absent/null when the version has no schema document.
   database_schema?: DatabaseSchema | null;
+  // DEV-261: what holds the step from Programovanie to Verifikácia (the CI of the pushed commit) — null when nothing.
+  ci_gate?: CiGate | null;
 }
 
 // ── action requests ──────────────────────────────────────────────────────────
@@ -257,6 +266,7 @@ export type PipelineActionName =
   | "pause" // cooperative pause of the Programovanie loop
   | "decide" // CR-V2-041: pick one consultation Decision Card option (decision_needed)
   | "overit_znovu" // CR-V2-057: "Over znova" — re-verify a drifted version (re-run Verifikácia vs current HEAD)
+  | "opravit_podla_ci" // DEV-261: „Vrátiť agentovi na opravu" — the CI after Programovanie is red; the fix goes back to the AI Agent with what failed
   | "overit_bez_opravy" // v4.0.10: "Znova overiť bez opravy" — exit a Verifikácia fix-loop (external/no-project fix) → re-run the Verifikácia gate directly
   | "skontrolovat" // STEP 5 (Kontrola): the partner honestly re-checks its own FINISHED build against the approved Špecifikácia (stays priprava, never a verdict/deploy)
   | "hotovo" // STEP 6 (Hotovo): the Manažér's TERMINAL sign-off — makes the conversation version deployable (SHA-bound signature, stays priprava; never a verdict/deploy)
