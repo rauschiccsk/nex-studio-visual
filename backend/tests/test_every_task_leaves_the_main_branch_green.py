@@ -27,7 +27,17 @@ def test_every_task_brief_of_both_lanes_carries_the_rule(db_session):
 def test_the_rule_says_what_stays_and_who_removes_the_old_part():
     rule = orchestrator.GREEN_MAIN_RULE
     assert rule.startswith("HLAVNÁ VETVA PO ÚLOHE OSTÁVA ZELENÁ.")
-    assert "aplikácia štartuje a skúšky, lint aj stavba prejdú tak, ako ich spúšťa CI" in rule
+    assert "po úlohe musí aplikácia v CI štartovať a skúšky, lint aj stavba prejsť" in rule
+    # What the agent can run itself: Programovanie has no Docker (skill backend-tests) — the test image and the app's
+    # start in Docker are CI's and Verifikácia's. A rule asking the agent to run them pushes it to stall or to report
+    # a check it never made (the Auditor's fix critique on NEX Knowledge 0.2.0, 30.10.2026).
+    assert (
+        "spusti skúšky a lint, ktoré sa v Programovaní dajú (backend podľa zručnosti `backend-tests`, bez Dockera)"
+        in rule
+    )
+    assert "štart aplikácie v Dockeri overí CI a Verifikácia, nie ty" in rule
+    assert "musí byť aj v obraze, nielen v repozitári" in rule
+    assert "tak, ako ich spúšťa CI" not in rule
     assert "odstráni ju až úloha, ktorá ju nahrádza" in rule
     assert "`kind=question`" in rule
 

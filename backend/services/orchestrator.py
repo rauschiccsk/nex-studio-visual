@@ -13616,11 +13616,14 @@ SOURCE_IN_ENGLISH_RULE = (
 
 #: DEV-260 — a task never leaves the main branch red for the next one to mend (NEX Knowledge 0.2.0, task #10.1.1).
 GREEN_MAIN_RULE = (
-    "HLAVNÁ VETVA PO ÚLOHE OSTÁVA ZELENÁ. Kokpit ju po tejto úlohe odošle a CI na nej beží — po úlohe aplikácia "
-    "štartuje a skúšky, lint aj stavba prejdú tak, ako ich spúšťa CI (`.github/workflows/`); spusti ich pred koncom "
-    "úlohy. Časť, ktorú ešte niečo používa (model, tabuľka, cesta, komponent), neodstraňuj — odstráni ju až úloha, "
-    "ktorá ju nahrádza. Keď je hlavná vetva červená už z predošlej úlohy, najprv ju vráť na zelenú. Keď sa úloha "
-    "nedá urobiť bez červeného medzistavu, zastav sa a opýtaj sa Manažéra (`kind=question`), ako úlohy rozdeliť."
+    "HLAVNÁ VETVA PO ÚLOHE OSTÁVA ZELENÁ. Kokpit ju po tejto úlohe odošle a CI na nej beží — po úlohe musí aplikácia "
+    "v CI štartovať a skúšky, lint aj stavba prejsť. Pred koncom úlohy spusti skúšky a lint, ktoré sa v Programovaní "
+    "dajú (backend podľa zručnosti `backend-tests`, bez Dockera); obraz skúšok (`Dockerfile.test`) a štart aplikácie "
+    "v Dockeri overí CI a Verifikácia, nie ty — súbor, ktorý skúšky či aplikácia potrebujú, preto musí byť aj "
+    "v obraze, nielen v repozitári. Časť, ktorú ešte niečo používa (model, tabuľka, cesta, komponent), neodstraňuj — "
+    "odstráni ju až úloha, ktorá ju nahrádza. Keď predošlá úloha nechala hlavnú vetvu červenú, najprv ju vráť na "
+    "zelenú. Keď sa úloha nedá urobiť bez červeného medzistavu, zastav sa a opýtaj sa Manažéra (`kind=question`), "
+    "ako úlohy rozdeliť."
 )
 
 QUALITY_RULES = (
