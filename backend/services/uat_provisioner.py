@@ -1819,12 +1819,17 @@ def test_runners_parked(before: dict[str, Any], after: dict[str, Any]) -> list[s
 
 
 def one_shot_checks_switched_off(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    """DEV-123: the steps that run once whose inherited health check this deploy switched off — said, not silent."""
+    """DEV-123: the steps that run once whose inherited health check this deploy switched off — said, not silent.
+
+    A test runner this deploy took out of the stack is not one of them: it no longer runs with the app, and
+    :func:`test_runners_parked` already says so (DEV-270 — NEX Knowledge's deploy of 30.10.2026 said both)."""
     was = (before or {}).get("services") or {}
+    parked = set(test_runners_parked(before, after))
     return sorted(
         name
         for name, svc in ((after or {}).get("services") or {}).items()
         if isinstance(svc, dict)
+        and name not in parked
         and svc.get("healthcheck") == {"disable": True}
         and isinstance(was.get(name), dict)
         and "healthcheck" not in was[name]

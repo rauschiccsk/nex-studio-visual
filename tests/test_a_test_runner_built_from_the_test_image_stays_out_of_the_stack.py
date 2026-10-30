@@ -97,6 +97,7 @@ def _as_written_on_30_10(compose_path) -> None:
     header = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
     data = yaml.safe_load(text)
     data["services"]["test"].pop("profiles")
+    data["services"]["test"].pop("healthcheck", None)  # a service that kept running got no switch-off
     data["services"]["test"]["restart"] = "unless-stopped"
     compose_path.write_text(header + yaml.safe_dump(data, sort_keys=False))
 
@@ -112,6 +113,8 @@ def test_an_existing_installation_gets_the_runner_parked_at_its_next_deploy_and_
     assert services["test"]["profiles"] == [P.TEST_RUNNER_PROFILE] and services["test"]["restart"] == "no"
     assert {n for n, s in services.items() if s.get("profiles")} == {"test"}, "a piece of the app was taken out"
     assert SAID in result.warnings
+    # the runner no longer runs with the app — telling about its health check would be noise (30.10.2026 it was told)
+    assert not [w for w in result.warnings if w.startswith("Jednorazové kroky") and " test " in w]
 
     again = _deploy(tmp_path, version="0.2.2")
 
