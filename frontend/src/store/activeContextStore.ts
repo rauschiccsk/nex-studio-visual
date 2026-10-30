@@ -75,6 +75,13 @@ export interface ActiveContextState {
   /** ``true`` iff both ``selectedProject`` and ``selectedVersion``
    *  are populated — required for pipeline-step navigation. */
   hasFullContext: () => boolean;
+
+  /** DEV-262: the name of a pinned project the person no longer has (moved to another user), shown once in the
+   *  sidebar; never persisted — the sentence belongs to this visit, the unpinning stays. */
+  unpinnedName: string | null;
+  /** Unpin a project the server no longer gives this person, and say so. */
+  dropLostProject: (name: string) => void;
+  dismissUnpinned: () => void;
 }
 
 export const useActiveContextStore = create<ActiveContextState>()(
@@ -95,6 +102,9 @@ export const useActiveContextStore = create<ActiveContextState>()(
         const s = get();
         return s.selectedProject !== null && s.selectedVersion !== null;
       },
+      unpinnedName: null,
+      dropLostProject: (name) => set({ selectedProject: null, selectedVersion: null, unpinnedName: name }),
+      dismissUnpinned: () => set({ unpinnedName: null }),
     }),
     {
       name: activeContextKey(undefined),

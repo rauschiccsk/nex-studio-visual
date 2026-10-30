@@ -11240,6 +11240,8 @@ export interface operations {
                 type?: ("standard" | "web") | null;
                 /** @description Filter by the creating user's id. */
                 created_by?: string | null;
+                /** @description Filter to the one project of this slug — DEV-262: is a pinned project still mine? */
+                slug?: string | null;
                 /** @description Number of rows to skip. */
                 skip?: number;
                 /** @description Maximum rows to return. */

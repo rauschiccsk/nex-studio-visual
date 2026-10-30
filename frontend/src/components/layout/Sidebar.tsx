@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Sidebar as ShellSidebar, NavItem, SectionDivider, Brand, UserCard, NavIcon, useShell } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useActiveContextStore } from "@/store/activeContextStore";
+import { usePinnedProjectCheck } from "@/hooks/usePinnedProjectCheck";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
@@ -92,6 +93,10 @@ export default function Sidebar() {
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+  // DEV-262: a pinned project the person no longer has (moved to another user) is unpinned, and this says why.
+  const unpinnedName = useActiveContextStore((s) => s.unpinnedName);
+  const dismissUnpinned = useActiveContextStore((s) => s.dismissUnpinned);
+  usePinnedProjectCheck();
 
   // Sidebar-level pipeline WS on the pinned version (F-007 §7). Doubles as the
   // §9 Manažér-presence signal; drives the cockpit "awaiting" attention dot.
@@ -230,6 +235,20 @@ export default function Sidebar() {
             title="Zrušiť výber projektu"
             className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] shrink-0"
           >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {unpinnedName && !collapsed && (
+        <div
+          role="status"
+          className="mx-3 mb-1 flex items-start gap-1.5 rounded bg-[var(--color-state-warning-bg)] px-2 py-1 text-[10px] text-[var(--color-state-warning-fg)]"
+        >
+          <span className="flex-1">„{unpinnedName}“ už nemáš k dispozícii — výber projektu som zrušil.</span>
+          <button onClick={dismissUnpinned} title="Zavrieť" className="shrink-0">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

@@ -436,6 +436,10 @@ def list_projects(
         default=None,
         description="Filter by the creating user's id.",
     ),
+    slug: Optional[str] = Query(
+        default=None,
+        description="Filter to the one project of this slug — DEV-262: is a pinned project still mine?",
+    ),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip."),
     limit: int = Query(default=50, ge=1, le=100, description="Maximum rows to return."),
     current_user: User = Depends(get_current_user),
@@ -454,6 +458,7 @@ def list_projects(
             status=status_filter,
             type=type,
             created_by=created_by,
+            slug=slug,
             limit=limit,
             offset=skip,
         )
@@ -462,6 +467,7 @@ def list_projects(
             status=status_filter,
             type=type,
             created_by=created_by,
+            slug=slug,
         )
     except ValueError as exc:
         raise _map_value_error(exc) from exc

@@ -71,6 +71,7 @@ def list_projects(
     status: Optional[ProjectStatus] = None,
     type: Optional[ProjectType] = None,
     created_by: Optional[UUID] = None,
+    slug: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[Project]:
@@ -86,6 +87,8 @@ def list_projects(
         type: Optional archetype filter (``standard`` | ``web``).
         created_by: Optional filter restricting results to projects
             created by a specific user.
+        slug: Optional filter to the one project of that slug (DEV-262 — the
+            cockpit asks whether a pinned project is still the person's).
         limit: Maximum number of rows to return.
         offset: Number of rows to skip.
 
@@ -99,6 +102,8 @@ def list_projects(
         stmt = stmt.where(Project.type == type)
     if created_by is not None:
         stmt = stmt.where(Project.created_by == created_by)
+    if slug is not None:
+        stmt = stmt.where(Project.slug == slug)
     stmt = stmt.order_by(Project.created_at.desc()).limit(limit).offset(offset)
     return list(db.execute(stmt).scalars().all())
 
@@ -109,6 +114,7 @@ def count_projects(
     status: Optional[ProjectStatus] = None,
     type: Optional[ProjectType] = None,
     created_by: Optional[UUID] = None,
+    slug: Optional[str] = None,
 ) -> int:
     """Return the total number of projects matching the given filters.
 
@@ -134,6 +140,8 @@ def count_projects(
         stmt = stmt.where(Project.type == type)
     if created_by is not None:
         stmt = stmt.where(Project.created_by == created_by)
+    if slug is not None:
+        stmt = stmt.where(Project.slug == slug)
     return int(db.execute(stmt).scalar_one())
 
 
