@@ -320,6 +320,9 @@ TEST_RUNNER_PROFILE = "ci"
 #: rule :func:`has_alembic_migrate_service` follows, and for the same reason: names are the app author's
 #: business, behaviour is ours.
 TEST_DATABASE_ENV_KEY = "TEST_DATABASE_URL"
+#: DEV-270 — the recipe of the test image CI runs (the template's convention, step 4 of its conversion). A service
+#: built from it is the test runner whatever its variables are called.
+TEST_IMAGE_DOCKERFILE = "Dockerfile.test"
 
 
 def _env_keys(svc: dict[str, Any]) -> set[str]:
@@ -344,8 +347,11 @@ def is_test_runner_service(name: str, svc: dict[str, Any], roles: dict[str, Opti
     reads, plus the suite re-run on every deploy, proving nothing that CI did not already prove on that very
     commit. A customer's stack should hold the app, not the toolchain that built it.
 
-    The signal is that the service ASKS FOR a test database — it says what it is. Guarded three ways so an
-    over-eager rule can never ship a customer a stack with a piece missing:
+    The signal is that the service ASKS FOR a test database — it says what it is — or that it is BUILT FROM the
+    test image's recipe (DEV-270). NEX Knowledge's and NEX Websites' runners ask for ``DATABASE_URL``; NEX Websites'
+    went into ICC's stacks, and at the deploy of 15.10.2026 its suite (``TRUNCATE … RESTART IDENTITY``) ran against
+    the UAT application's own database. Guarded three ways so an over-eager rule can never ship a customer a stack
+    with a piece missing:
 
       * a service recognised as frontend / backend / db is never excluded, whatever it declares;
       * neither is the migrate service (its command runs ``alembic upgrade``, and the stack waits on it);
@@ -357,7 +363,32 @@ def is_test_runner_service(name: str, svc: dict[str, Any], roles: dict[str, Opti
     text = " ".join(str(c) for c in command) if isinstance(command, list) else str(command or "")
     if "alembic" in text and "upgrade" in text:
         return False
-    return TEST_DATABASE_ENV_KEY in _env_keys(svc)
+    return TEST_DATABASE_ENV_KEY in _env_keys(svc) or _built_from_test_image(svc)
+
+
+def _built_from_test_image(svc: dict[str, Any]) -> bool:
+    build = svc.get("build")
+    return isinstance(build, dict) and Path(str(build.get("dockerfile") or "")).name == TEST_IMAGE_DOCKERFILE
+
+
+def park_test_runners(services: dict[str, Any]) -> list[str]:
+    """Put every test runner of *services* behind :data:`TEST_RUNNER_PROFILE`, run once — the names it parked.
+
+    One rule for a new installation and for one that exists (DEV-270): an installation written before its runner was
+    recognised keeps it in the stack, and every deploy starts it again — ICC's NEX Websites UAT and PROD."""
+    roles = identify_service_roles(services)
+    parked = []
+    for name, svc in services.items():
+        if (
+            isinstance(svc, dict)
+            and not svc.get("profiles")
+            and is_test_runner_service(name, svc, roles)
+            and not _depended_on_by_others(name, services)
+        ):
+            svc["profiles"] = [TEST_RUNNER_PROFILE]
+            svc["restart"] = "no"
+            parked.append(name)
+    return sorted(parked)
 
 
 def _depended_on_by_others(name: str, src_services: dict[str, Any]) -> bool:
@@ -1774,6 +1805,19 @@ def _precitaj_ak_je(cesta: Path) -> Optional[str]:
         return None
 
 
+def test_runners_parked(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """DEV-270: the test runners this deploy took out of the running stack — said, not silent."""
+    was = (before or {}).get("services") or {}
+    return sorted(
+        name
+        for name, svc in ((after or {}).get("services") or {}).items()
+        if isinstance(svc, dict)
+        and svc.get("profiles") == [TEST_RUNNER_PROFILE]
+        and isinstance(was.get(name), dict)
+        and not was[name].get("profiles")
+    )
+
+
 def one_shot_checks_switched_off(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """DEV-123: the steps that run once whose inherited health check this deploy switched off — said, not silent."""
     was = (before or {}).get("services") or {}
@@ -1809,6 +1853,8 @@ def version_bump_from_text(
     for svc in sluzby.values():
         if isinstance(svc, dict) and isinstance(svc.get("image"), str):
             svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
+    # DEV-270 — a test runner the installation still starts with the app is parked here, at its next deploy.
+    park_test_runners(sluzby)
     # DEV-123: a step that runs once (``restart: "no"`` — YAML reads a bare ``no`` as ``False``) inherits the image's
     # HEALTHCHECK and ends "unhealthy" after exiting 0. A new installation gets the check off when it is rendered; one
     # made before gets it here, at its next deploy (19.10.2026: seven such containers on ANDROS, two on MAGER) —
@@ -3285,6 +3331,12 @@ def provision_uat(
         # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
         # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
         povodne = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+        odstavene = test_runners_parked(povodne, povysene)
+        if odstavene:
+            warnings.append(
+                f"Skúšobná služba {', '.join(odstavene)} sa odteraz s aplikáciou nespúšťa — jej skúšky patria do CI, "
+                "nie do inštalácie zákazníka."
+            )
         vypnute = one_shot_checks_switched_off(povodne, povysene)
         if vypnute:
             warnings.append(
