@@ -2966,6 +2966,14 @@ _BILLING_CATEGORY_RULE = (
     "potvrdí alebo zmení v Pláne úloh. "
 )
 
+#: DEV-260 — the plan is split so the main branch stays green after every task (the brief's half: GREEN_MAIN_RULE).
+GREEN_MAIN_PLAN_RULE = (
+    "PORADIE A ROZDELENIE ÚLOH: kokpit po každej úlohe odošle hlavnú vetvu a CI na nej beží — po každej úlohe musí "
+    "aplikácia štartovať a CI prejsť. Prechod, ktorý nahrádza staré časti novými, rozdeľ tak, že staré časti "
+    "odstráni až úloha, ktorá ich nahrádza (alebo nahradenie aj odstránenie daj do jednej úlohy). Úloha, po ktorej "
+    "je CI červené, kým nepríde ďalšia, je zlý rozklad."
+)
+
 
 def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
     """Pass 1 prompt (v0.7.3, CR-1; v2 CR-V2-011 — folds into Návrh): the AI Agent emits the EPIC + FEAT
@@ -3017,6 +3025,8 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         f"funkcie, nedeľ koherentný modul na drobné, a drž CELKOVÝ počet funkcií VÝRAZNE POD {MAX_PLAN_FEATS} "
         "(tvrdý strop — jemnejší rozklad engine ODMIETNE a budeš musieť kostru prerobiť)."
         + "\n\n"
+        + GREEN_MAIN_PLAN_RULE
+        + "\n\n"
         + _TASK_PLAN_FENCE_RULE
         + "\n\n"
         + _SKELETON_EXAMPLE
@@ -3051,6 +3061,8 @@ def _task_plan_feat_directive(feat_title: str, review_notes: Sequence[tuple[int,
         "ľudské vysvetlenie úlohy BEZ žargónu (čo robí pre Manažéra — nie technický `description`). Granularita "
         "HRUBOZRNNÁ — modul ≈ úloha (F-007 §4); nedeľ koherentný modul. "
         + _BILLING_CATEGORY_RULE
+        + "\n\n"
+        + GREEN_MAIN_PLAN_RULE
         + notes_block
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
@@ -13602,6 +13614,15 @@ SOURCE_IN_ENGLISH_RULE = (
     "vráti na opravu."
 )
 
+#: DEV-260 — a task never leaves the main branch red for the next one to mend (NEX Knowledge 0.2.0, task #10.1.1).
+GREEN_MAIN_RULE = (
+    "HLAVNÁ VETVA PO ÚLOHE OSTÁVA ZELENÁ. Kokpit ju po tejto úlohe odošle a CI na nej beží — po úlohe aplikácia "
+    "štartuje a skúšky, lint aj stavba prejdú tak, ako ich spúšťa CI (`.github/workflows/`); spusti ich pred koncom "
+    "úlohy. Časť, ktorú ešte niečo používa (model, tabuľka, cesta, komponent), neodstraňuj — odstráni ju až úloha, "
+    "ktorá ju nahrádza. Keď je hlavná vetva červená už z predošlej úlohy, najprv ju vráť na zelenú. Keď sa úloha "
+    "nedá urobiť bez červeného medzistavu, zastav sa a opýtaj sa Manažéra (`kind=question`), ako úlohy rozdeliť."
+)
+
 QUALITY_RULES = (
     "AKO SA U NÁS PRACUJE (platí vždy, aj keď to v zadaní nie je napísané):\n"
     "1. SKÚŠKY SA PREPISUJÚ, NEPRISPÔSOBUJÚ. Keď existujúca skúška vynucuje staré správanie, ktoré "
@@ -13613,7 +13634,8 @@ QUALITY_RULES = (
     "3. DOKUMENTÁCIA, KTORÁ PO OPRAVE PRESTANE PLATIŤ, SA OPRAVÍ V TEJ ISTEJ ZMENE. Veta v Návrhu, "
     "v Špecifikácii alebo v hlavičke súboru, ktorá tvrdí opak toho, čo kód odteraz robí, nie je "
     "drobnosť — je to návod, podľa ktorého niekto opravu časom vráti späť.\n"
-    "4. " + SOURCE_IN_ENGLISH_RULE
+    "4. " + SOURCE_IN_ENGLISH_RULE + "\n"
+    "5. " + GREEN_MAIN_RULE
 )
 
 
