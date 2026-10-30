@@ -39,3 +39,17 @@ def test_the_plan_is_split_so_the_branch_stays_green():
     assert orchestrator.GREEN_MAIN_PLAN_RULE in feat
     assert orchestrator.GREEN_MAIN_PLAN_RULE in orchestrator._task_plan_skeleton_directive("Pozn. Manažéra")
     assert "staré časti odstráni až úloha, ktorá ich nahrádza" in orchestrator.GREEN_MAIN_PLAN_RULE
+
+
+def test_the_conversion_gives_the_manifest_to_the_test_image_ci_runs():
+    """30.10.2026 NEX Knowledge 0.2.0 after the conversion: the root Dockerfile.test had no app.manifest.json, so 361
+    tests failed in CI with ManifestError while they passed in the repository, where frontend/ is at hand. The skill
+    named the server image and compose only."""
+    from backend.services import create_project_postscaffold as cps
+
+    skill = (cps.NEX_STUDIO_TEMPLATES / "skills" / "sablona-aplikacie" / cps.SKILL_FILE).read_text(encoding="utf-8")
+    conversion = skill.split("## Prevod existujúceho projektu", 1)[1].split("\n## ", 1)[0]
+    step = conversion.split("\n4. ", 1)[1].split("\nHotové je", 1)[0]
+    assert "obraz skúšok, ktorý púšťa CI (`Dockerfile.test`, služba `test` v compose)" in step
+    assert "`COPY --from=frontend app.manifest.json`" in step
+    assert "skúšky v CI padnú, hoci v repozitári prejdú" in step

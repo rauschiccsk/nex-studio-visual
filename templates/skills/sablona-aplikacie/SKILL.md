@@ -67,8 +67,10 @@ ráme. Verzia ich presunie — kroky vyššie platia aj tu, navyše:
 3. Databáza: `alembic/env.py` volá najprv `upgrade_database(connection)` z `nex_app_kit`, potom migrácie aplikácie.
    Novou migráciou zmaž vlastné tabuľky relácií, spúšťacích lístkov, správcov a nastavení; stĺpce, ktoré ukazujú na
    človeka, prepni na `kit_users.id`. Projekt bez nasadenej inštalácie nemá ostré údaje — nič sa neprenáša.
-4. Obraz servera a compose dostanú manifest a `docs` ako v kostre (`APP_MANIFEST_PATH`, `APP_DOCS_DIR`); `.env.example`
-   nesie, čo šablóna číta (`# @public-url` `PUBLIC_URL`, `ADMIN_INITIAL_PASSWORD` alebo premenné `MANAGER_*`).
+4. Obraz servera, obraz skúšok, ktorý púšťa CI (`Dockerfile.test`, služba `test` v compose), a compose dostanú manifest
+   a `docs` ako v kostre (`COPY --from=frontend app.manifest.json`, `APP_MANIFEST_PATH`, `APP_DOCS_DIR`) — bez manifestu
+   šablóna nenaštartuje a skúšky v CI padnú, hoci v repozitári prejdú. `.env.example` nesie, čo šablóna číta
+   (`# @public-url` `PUBLIC_URL`, `ADMIN_INITIAL_PASSWORD` alebo premenné `MANAGER_*`).
 Hotové je, keď kontrola rámu pred Overením nič nenájde (nižšie).
 
 ## Kontrola rámu (pred Overením)
