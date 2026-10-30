@@ -212,21 +212,24 @@ def _is_ours(existing: str, freshly_rendered: str) -> bool:
 RELEASE_DATES = "release-dates.json"
 
 
-def record_release_date(proj_root: Path, version_number: str, day: date) -> Path | None:
-    """DEV-258 — the day a version of a project on the app template was signed off, in
+def record_release_dates(proj_root: Path, days: dict[str, date]) -> Path | None:
+    """DEV-258 — the day each version of a project on the app template came out, in
     ``docs/specs/versions/release-dates.json``: nex-app-kit's Aktualizácie read it, and without it every version stood
-    there without a date. The day given replaces one already written for the version — the cockpit knows it
-    (``orchestrator._release_day``), a day written ahead while building does not; the other versions keep theirs, and a
-    file the cockpit cannot read is left as it is. Returns the file when it changed, else ``None``."""
-    key = version_notes_dir(proj_root, version_number).name
+    there without a date. *days* (version number → day) is the cockpit's record (``orchestrator._release_days``) and
+    replaces what is written for those versions — a day written ahead or guessed while building does not stand; a
+    version the record does not know keeps its day, and a file the cockpit cannot read is left as it is. Returns the
+    file when it changed, else ``None``."""
     file = Path(proj_root) / "docs" / "specs" / "versions" / RELEASE_DATES
     try:
         dates = json.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
     except (OSError, ValueError):
         return None
-    if not isinstance(dates, dict) or dates.get(key) == day.isoformat():
+    if not isinstance(dates, dict):
         return None
-    dates[key] = day.isoformat()
+    recorded = {version_notes_dir(proj_root, number).name: day.isoformat() for number, day in days.items()}
+    if all(dates.get(key) == day for key, day in recorded.items()):
+        return None
+    dates.update(recorded)
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(dates, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     return file

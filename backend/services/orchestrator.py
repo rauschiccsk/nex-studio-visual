@@ -1036,32 +1036,41 @@ def ever_signed_off(db: Session, version_id: uuid.UUID) -> bool:
     )
 
 
-def _finished_record(version_id: uuid.UUID):
+def _finishing():
     """The records that declare a version finished — a Hotovo signature or an Auditor PASS, staleness ignored."""
-    return and_(
-        PipelineMessage.version_id == version_id,
-        or_(
-            and_(
-                PipelineMessage.stage == "priprava",
-                PipelineMessage.kind == "notification",
-                PipelineMessage.payload["hotovo"].astext == "true",
-            ),
-            and_(
-                PipelineMessage.stage == "verifikacia",
-                PipelineMessage.kind == "verdict",
-                PipelineMessage.payload["verdict"].astext == "PASS",
-            ),
+    return or_(
+        and_(
+            PipelineMessage.stage == "priprava",
+            PipelineMessage.kind == "notification",
+            PipelineMessage.payload["hotovo"].astext == "true",
+        ),
+        and_(
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+            PipelineMessage.payload["verdict"].astext == "PASS",
         ),
     )
 
 
-def _release_day(db: Session, version_id: uuid.UUID) -> date:
-    """DEV-258 — the day a version came out, as Aktualizácie of an app on the template show it: the day it was first
-    declared finished (:func:`_finished_record`), today while it has not been yet. A later re-verification or re-sign
-    does not move it, and a day written into ``release-dates.json`` ahead of it — by the agent, while building — does
-    not stand."""
-    first = db.execute(select(func.min(PipelineMessage.created_at)).where(_finished_record(version_id))).scalar_one()
-    return local_time(first or datetime.now(timezone.utc)).date()
+def _finished_record(version_id: uuid.UUID):
+    """The records that declare *version_id* finished (:func:`_finishing`)."""
+    return and_(PipelineMessage.version_id == version_id, _finishing())
+
+
+def _release_days(db: Session, version: Version) -> dict[str, date]:
+    """DEV-258 — the day every version of *version*'s project came out, as Aktualizácie of an app on the template show
+    them: the day each was first declared finished (:func:`_finishing`); *version* itself today while it has not been
+    yet. A later re-verification or re-sign moves no day, and a day the agent wrote or guessed while building does not
+    stand — NEX Knowledge 0.2.0 carried 29.10. for 0.1.0, whose first PASS is 30.10.2026."""
+    rows = db.execute(
+        select(Version.version_number, func.min(PipelineMessage.created_at))
+        .join(PipelineMessage, PipelineMessage.version_id == Version.id)
+        .where(Version.project_id == version.project_id, _finishing())
+        .group_by(Version.version_number)
+    ).all()
+    days = {number: local_time(first).date() for number, first in rows}
+    days.setdefault(version.version_number, local_time(datetime.now(timezone.utc)).date())
+    return days
 
 
 def reverify_in_flight(db: Session, version_id: uuid.UUID, *, current_stage: str, is_regate: bool) -> bool:
@@ -5857,7 +5866,7 @@ async def _commit_release_note(
     version = db.get(Version, version_id)
     try:
         dated = (
-            release_note_writer.record_release_date(project_root, version_number, _release_day(db, version_id))
+            release_note_writer.record_release_dates(project_root, _release_days(db, version))
             if version is not None and version.status != "released" and _project_template_for_version(db, version_id)
             else None
         )

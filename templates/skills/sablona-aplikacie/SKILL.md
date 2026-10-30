@@ -49,9 +49,9 @@ v Nastavenia → Agenti. Server ich číta `kit.agent_choice("assistant")`; mode
 
 ## Aktualizácie
 Poznámky verzie píšeš do `docs/specs/versions/v<číslo>/RELEASE_NOTES.md` a stránka Aktualizácie ich ukáže sama.
-**Dátum vydania v `docs/specs/versions/release-dates.json` zapisuje kokpit** — deň, keď je verzia prvý raz overená
-alebo podpísaná ako hotová. Dátum verzie, ktorú staviaš, nepíš; kokpit ho prepíše. Staršej verzii bez dátumu (po
-prevode) daj deň commitu jej značky: `git log -1 --format=%cs v<číslo>`.
+**Dátum vydania v `docs/specs/versions/release-dates.json` zapisuje kokpit** — deň každej verzie projektu, ktorú má
+zaznamenanú ako overenú alebo hotovú (deň, keď to bola prvý raz), aj starších a aj po prevode. Súbor nepíš ani
+neopravuj; čo v ňom kokpit nájde inak, prepíše.
 
 ## Prevod existujúceho projektu (položka Prípravy „Prechod na šablónu aplikácie“)
 Kokpit pri prevode zapísal manifest a nex-app-kit na obe strany; obrazovky, cesty a tabuľky projektu ostali vo vlastnom
