@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
 from backend.core.agent_env import project_env
+from backend.core.local_time import local_time
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User, UserAgentSettings
@@ -5823,6 +5824,13 @@ async def _commit_release_note(
     if why:
         _tell_manager_the_note_is_not_committed(db, version_id, version_number, why)
         return
+    # DEV-258: an app on the template shows the day of each version in Aktualizácie — written beside its note.
+    today = local_time(datetime.now(timezone.utc)).date()
+    dated = (
+        release_note_writer.record_release_date(project_root, version_number, today)
+        if _project_template_for_version(db, version_id)
+        else None
+    )
     # Pathspec-scoped commit → only the note (and what is derived from it) lands, even if the worktree carries other
     # changes. A note unchanged since the last commit is no commit — the artifact is in place.
     await _commit_off_the_loop(
@@ -5831,7 +5839,7 @@ async def _commit_release_note(
         f"Poznámky k vydaniu v{version_number}",
         cockpit_commit.commit,
         project_root,
-        [rel, *derived],
+        [rel, *derived, *([str(dated.relative_to(project_root))] if dated else [])],
         f"docs(release-notes): v{version_number} — user-facing changelog",
         on_message=on_message,
     )

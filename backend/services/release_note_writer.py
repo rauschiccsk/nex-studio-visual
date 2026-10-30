@@ -26,8 +26,10 @@ truth for every NOT-yet-released version and overwrites any stale placeholder.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import select
@@ -204,6 +206,29 @@ def _is_ours(existing: str, freshly_rendered: str) -> bool:
     # zhoduje s tým, čo by generátor napísal teraz. Bezpečné v oboch smeroch: nedotknutú starú
     # poznámku obnoví, do upravenej nesiahne.
     return _strip_marker(existing).strip() == _strip_marker(freshly_rendered).strip()
+
+
+#: DEV-258: where an app on the template (nex-app-kit) reads the day each version came out (``{"v1.4.2": "…"}``).
+RELEASE_DATES = "release-dates.json"
+
+
+def record_release_date(proj_root: Path, version_number: str, day: date) -> Path | None:
+    """DEV-258 — the day a version of a project on the app template was signed off, in
+    ``docs/specs/versions/release-dates.json``: nex-app-kit's Aktualizácie read it, and without it every version stood
+    there without a date. A version that has its day keeps it (a re-verification does not move it); a file the cockpit
+    cannot read is left as it is. Returns the file when written, else ``None``."""
+    key = version_notes_dir(proj_root, version_number).name
+    file = Path(proj_root) / "docs" / "specs" / "versions" / RELEASE_DATES
+    try:
+        dates = json.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
+    except (OSError, ValueError):
+        return None
+    if not isinstance(dates, dict) or key in dates:
+        return None
+    dates[key] = day.isoformat()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(json.dumps(dates, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return file
 
 
 def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
