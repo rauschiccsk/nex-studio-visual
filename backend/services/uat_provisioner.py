@@ -1882,12 +1882,7 @@ def version_bump_from_text(
             build = stavia_podla_roly.get(rola) if rola else None
         if build is None:
             continue  # cudzí obraz (postgres) sa zo zdrojákov neberie
-        if isinstance(build, str):
-            svc["build"] = {"context": _abs_build_context(build, Path(project_path))}
-        else:
-            novy_build = copy.deepcopy(build)
-            novy_build["context"] = _abs_build_context(str(build.get("context", ".")), Path(project_path))
-            svc["build"] = novy_build
+        svc["build"] = _abs_build(build, Path(project_path))
     # DEV-267: a step that runs another service's image is built the way that service is. The hand-written NEX Manager
     # of ICC runs ``migrate`` on ``nexmanager-backend`` — as the project does, both from one Dockerfile — but the
     # cockpit knows no role ``migrate``, so the step kept a bare image nothing would build and the adoption's deploy
@@ -1902,6 +1897,15 @@ def version_bump_from_text(
             build = postavene.get(svc["image"].split(":", 1)[0])
             if build is not None:
                 svc["build"] = copy.deepcopy(build)
+    # DEV-269: a service that keeps its own build gets its relative ``additional_contexts`` under the project too.
+    # NEX Knowledge's first deploy to ICC (30.10.2026) wrote the installation and failed on the build, so its next
+    # deploy comes here with ``./frontend`` and ``./docs`` the old render copied from the project. A relative folder
+    # in an installation never builds under the cockpit — compose resolves it against the installation's folder,
+    # outside the folder the build runs from, and the build refuses it — and the only writer of one was that render.
+    for svc in sluzby.values():
+        build = svc.get("build") if isinstance(svc, dict) else None
+        if isinstance(build, dict) and "additional_contexts" in build:
+            build["additional_contexts"] = _abs_additional_contexts(build["additional_contexts"], Path(project_path))
     return novy
 
 
@@ -2228,8 +2232,49 @@ def _abs_build_context(context: str, project_path: Path) -> str:
     """Resolve a source build ``context`` to an absolute path under the source project."""
     if os.path.isabs(context):
         return context
-    relative = context.lstrip("./") if context.startswith(".") else context
-    return os.path.normpath(str(project_path / relative))
+    # ``os.path.join`` + ``normpath``, not ``lstrip("./")``: that stripped EVERY leading dot and slash, so
+    # ``../shared`` became ``<project>/shared`` and ``.docker`` became ``docker``.
+    return os.path.normpath(os.path.join(str(project_path), context))
+
+
+def _is_local_context(value: str) -> bool:
+    """Is this build context a folder on the disk — not an image, a URL, a git remote or another service?"""
+    return "://" not in value and not value.startswith(("service:", "target:", "git@"))
+
+
+def _abs_additional_contexts(extra: Any, project_path: Path) -> Any:
+    """``additional_contexts`` with every folder on the disk absolute under the source project (DEV-269).
+
+    Both forms compose knows — a mapping and a ``name=path`` list — keep their form; anything that is not a folder
+    stays as it is."""
+    if isinstance(extra, dict):
+        return {
+            k: _abs_build_context(str(v), project_path) if _is_local_context(str(v)) else v for k, v in extra.items()
+        }
+    if isinstance(extra, list):
+        out = []
+        for item in extra:
+            name, sep, path = str(item).partition("=")
+            out.append(f"{name}={_abs_build_context(path, project_path)}" if sep and _is_local_context(path) else item)
+        return out
+    return extra
+
+
+def _abs_build(build: Any, project_path: Path) -> dict[str, Any]:
+    """A source ``build`` with every folder it reads made absolute under the source project (DEV-269).
+
+    The rendered compose lives in the installation's folder, and compose resolves a relative path against the folder
+    of the file it reads. ``context`` was made absolute and ``additional_contexts`` were copied as they were, so
+    NEX Knowledge's backend asked for ``./frontend`` and ``./docs`` of ``/opt/uat/icc/nex-knowledge`` — folders that
+    do not exist — and the build refused: „additional privileges requested: pass --allow=fs.read=…“ (30.10.2026).
+    """
+    if isinstance(build, str):
+        return {"context": _abs_build_context(build, project_path)}
+    novy = copy.deepcopy(build)
+    novy["context"] = _abs_build_context(str(build.get("context", ".")), project_path)
+    if "additional_contexts" in novy:
+        novy["additional_contexts"] = _abs_additional_contexts(novy["additional_contexts"], project_path)
+    return novy
 
 
 def _labels_as_list(raw: Any) -> list[str]:
@@ -2501,11 +2546,8 @@ def build_uat_compose(
             # potom prinesie presne to, čo sa nasadilo. Bez čísla verzie (staršie volania) sa správanie
             # nemení — vtedy je to naďalej ``latest``.
             svc["image"] = f"{name_base}-{name}:{_image_tag(version)}"
-            if isinstance(build, str):
-                svc["build"] = {"context": _abs_build_context(build, project_path)}
-            elif isinstance(build, dict):
-                ctx = build.get("context", ".")
-                build["context"] = _abs_build_context(str(ctx), project_path)
+            if isinstance(build, (str, dict)):
+                svc["build"] = _abs_build(build, project_path)
 
         # Drop source host-port bindings (Traefik routes by network, not host ports).
         svc.pop("ports", None)

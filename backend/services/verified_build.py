@@ -70,6 +70,8 @@ class _Builder:
     context: Path
     image: Optional[str]
     spec: str  # the build definition without its context — two equal specs build the same image
+    #: DEV-269 — the further folders the build reads (``additional_contexts`` on the disk), resolved like ``context``.
+    extra: tuple[tuple[str, Path], ...] = ()
 
 
 def _size(n: int) -> str:
@@ -109,12 +111,31 @@ def _builders(compose: Path) -> Optional[list[_Builder]]:
         builders.append(
             _Builder(
                 service=str(name),
-                context=(context if context.is_absolute() else compose.parent / context).resolve(),
+                context=_resolved(context, compose),
                 image=str(svc["image"]) if svc.get("image") else None,
                 spec=json.dumps(rest, sort_keys=True, default=str),
+                extra=tuple(
+                    (k, _resolved(Path(v), compose)) for k, v in _local_extra(build.get("additional_contexts"))
+                ),
             )
         )
     return builders
+
+
+def _resolved(path: Path, compose: Path) -> Path:
+    """A build folder the way compose resolves it — relative to the compose file's folder."""
+    return (path if path.is_absolute() else compose.parent / path).resolve()
+
+
+def _local_extra(extra: object) -> list[tuple[str, str]]:
+    """The ``additional_contexts`` that are folders on the disk — not an image, a URL, a git remote or a service."""
+    if isinstance(extra, dict):
+        pairs = [(str(k), str(v)) for k, v in extra.items()]
+    elif isinstance(extra, list):
+        pairs = [(name, path) for name, sep, path in (str(i).partition("=") for i in extra) if sep]
+    else:
+        return []
+    return [(k, v) for k, v in pairs if "://" not in v and not v.startswith(("service:", "target:", "git@"))]
 
 
 def _export(repo: Path, commit: str, dest: Path) -> int:
@@ -137,15 +158,19 @@ def _export(repo: Path, commit: str, dest: Path) -> int:
     return size
 
 
-def _override_text(entries: list[tuple[str, Optional[Path]]]) -> str:
-    """``services:`` with a new context per building service, ``!reset null`` for a service whose image is reused."""
+def _override_text(entries: list[tuple[str, Optional[Path], dict[str, Path]]]) -> str:
+    """``services:`` with a new context — and further folders — per building service, ``!reset null`` for a service
+    whose image is reused."""
     lines = ["services:"]
-    for service, context in entries:
+    for service, context, extra in entries:
         lines.append(f"  {json.dumps(service)}:")
         if context is None:
             lines.append("    build: !reset null")
         else:
             lines += ["    build:", f"      context: {json.dumps(str(context))}"]
+            if extra:
+                lines.append("      additional_contexts:")
+                lines += [f"        {json.dumps(k)}: {json.dumps(str(v))}" for k, v in extra.items()]
     return "\n".join(lines) + "\n"
 
 
@@ -158,7 +183,9 @@ def prepare(compose: Path) -> Preparation:
         return Preparation(None, "Stavba z pracovného priečinka — predpis inštalácie sa nedal prečítať.")
     if not builders:
         return Preparation(None)
-    toplevels = {_git(b.context, "rev-parse", "--show-toplevel") for b in builders}
+    # DEV-269 — the further folders a build reads come from the same commit as its context, or the build would mix
+    # the verified tree with the working folder.
+    toplevels = {_git(folder, "rev-parse", "--show-toplevel") for b in builders for folder in _folders(b)}
     if None in toplevels or len(toplevels) != 1:
         return Preparation(None, "Stavba z pracovného priečinka — kontexty stavby neležia v jednom repozitári gitu.")
     repo = Path(str(toplevels.pop()))
@@ -168,17 +195,18 @@ def prepare(compose: Path) -> Preparation:
     root = Path(tempfile.mkdtemp(prefix="nsv-verified-build-"))
     try:
         size = _export(repo, commit, root / _SOURCE_DIR)
-        entries: list[tuple[str, Optional[Path]]] = []
+        entries: list[tuple[str, Optional[Path], dict[str, Path]]] = []
         built: set[tuple[str, str, str]] = set()
         reused: list[str] = []
         for b in builders:
             key = (b.image or "", str(b.context), b.spec)
             if b.image and key in built:
-                entries.append((b.service, None))
+                entries.append((b.service, None, {}))
                 reused.append(b.service)
                 continue
             built.add(key)
-            entries.append((b.service, root / _SOURCE_DIR / b.context.relative_to(repo)))
+            exported = {name: root / _SOURCE_DIR / folder.relative_to(repo) for name, folder in b.extra}
+            entries.append((b.service, root / _SOURCE_DIR / b.context.relative_to(repo), exported))
         override = root / _OVERRIDE
         override.write_text(_override_text(entries), encoding="utf-8")
     except (OSError, RuntimeError, ValueError, tarfile.TarError, subprocess.SubprocessError) as exc:
@@ -188,6 +216,10 @@ def prepare(compose: Path) -> Preparation:
     return Preparation(
         VerifiedBuild(root, override, commit, size, images=len(builders) - len(reused), reused=tuple(reused))
     )
+
+
+def _folders(b: _Builder) -> list[Path]:
+    return [b.context, *(folder for _name, folder in b.extra)]
 
 
 def cleanup(build: Optional[VerifiedBuild]) -> None:
