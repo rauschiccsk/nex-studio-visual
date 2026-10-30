@@ -104,7 +104,7 @@ class _InboxDoor:
             accepted = False
         return _Reply(303 if accepted else 401, {"session": "x"} if accepted else {})
 
-    def get(self, url, cookies=None):
+    def get(self, url, cookies=None, **_kwargs):
         return _Reply(200)
 
 

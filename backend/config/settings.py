@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # DEV-201: how long a version passed by the Auditor waits for the CI of its last commit before the wait is given up
     # (said out loud). Measured 23.10.2026: NEX Inbox's CI took up to 100 minutes, its jobs waiting for the only runner.
     ci_pending_cap_hours: int = 6
+    # DEV-271: the shared ICC Traefik on ``nex-proxy-net`` (its web entrypoint) — what the internet reaches every
+    # installation on ANDROS through, minus the edge. The checks after a deploy ask it with the installation's name in
+    # ``Host``: the edge refuses a container (Cloudflare's WAF, the private zone's nginx lets in Tailscale only).
+    uat_traefik_host: str = "nex-uat-traefik"
+    uat_traefik_port: int = 80
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
     # asks for it at every new message of a build, and the history moves only when a build does.
     build_forecast_history_ttl_seconds: int = 600

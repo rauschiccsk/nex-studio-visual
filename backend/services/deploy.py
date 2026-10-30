@@ -675,6 +675,13 @@ def _launch_pairing_warning(
     return launch_pairing.customer_warning(manager_env, module_envs)
 
 
+#: DEV-271 — the deploy's sentence when the door was not tried because the Manager would not let the operator in.
+DOOR_UNVERIFIED = (
+    "Vstup do aplikácie kokpit neoveril: {reason}, takže vstupenka na jeho meno by neprešla. Vyskúšaj vstup "
+    "z NEX Managera účtom, ktorý má aplikáciu pridelenú."
+)
+
+
 def _uat_door_warning(db: Session, customer: Customer, project: Project, actor_id: Optional[UUID]) -> Optional[str]:
     """The plain-Slovak warning when a freshly deployed app cannot actually be entered — or ``None``.
 
@@ -689,6 +696,10 @@ def _uat_door_warning(db: Session, customer: Customer, project: Project, actor_i
     operator = db.execute(select(User.username).where(User.id == actor_id)).scalar_one_or_none()
     if not operator:
         return None
+    # DEV-271 — a person the customer's Manager would not let in is not a broken door: say who, not „pokazený vstup“.
+    reason = uat_launch.operator_cannot_enter(_customer_dir_slug(customer), project.slug, operator)
+    if reason:
+        return DOOR_UNVERIFIED.format(reason=reason)
     opens, detail = uat_launch.uat_door_opens(
         _customer_dir_slug(customer),
         project.slug,

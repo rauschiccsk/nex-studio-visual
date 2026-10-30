@@ -26,11 +26,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from jose import jwt  # python-jose — the backend's declared JWT lib (matches auth.py / core.security)
 
+from backend.config.settings import settings
 from backend.services import launch_pairing, uat_provisioner
 
 #: Token lifetime — under the app's hard ``exp - iat <= 60 s`` cap.
@@ -53,6 +54,20 @@ def manager_knows_operator(customer_slug: str, project_slug: str, login: str) ->
     that the operator is unknown, and a check that stops on ignorance is one people learn to route around.
     Only a Manager that answers "no such person" stops the launch.
     """
+    answer = _ask_manager_about(customer_slug, project_slug, login)
+    if answer is None:
+        return None
+    if answer.status_code == httpx.codes.NOT_FOUND:
+        return False
+    if answer.status_code == httpx.codes.OK:
+        return True
+    # 401/403 means the app's own module key is wrong — a deploy fault, not a verdict about the operator.
+    logger.warning("spárovaný NEX Manager odpovedal na otázku o totožnosti stavom %s", answer.status_code)
+    return None
+
+
+def _ask_manager_about(customer_slug: str, project_slug: str, login: str) -> Optional[httpx.Response]:
+    """The paired Manager's answer about *login*, asked as the app asks it — ``None`` when it cannot be asked."""
     env = uat_provisioner._parse_env_file(_uat_env_path(customer_slug, project_slug))
     base_url = env.get(uat_provisioner.MANAGER_BASE_URL_ENV)
     module_slug = env.get("MANAGER_MODULE_SLUG")
@@ -60,7 +75,7 @@ def manager_knows_operator(customer_slug: str, project_slug: str, login: str) ->
     if not (base_url and module_slug and api_key):
         return None
     try:
-        answer = httpx.get(
+        return httpx.get(
             f"{base_url.rstrip('/')}/api/v1/identity/{quote(login, safe='')}",
             # The shape the Manager requires — BOTH headers. One of them alone is what broke
             # nex-productcatalogs for two versions.
@@ -70,12 +85,33 @@ def manager_knows_operator(customer_slug: str, project_slug: str, login: str) ->
     except httpx.HTTPError as unreachable:
         logger.warning("spárovaný NEX Manager sa nedá osloviť (%s)", type(unreachable).__name__)
         return None
+
+
+#: NEX Manager's code for a person who exists but is switched off (its ``UserInactive``, answered 403).
+MANAGER_USER_INACTIVE = "NXM-USER-INACTIVE"
+
+
+def operator_cannot_enter(customer_slug: str, project_slug: str, login: str) -> Optional[str]:
+    """Why the paired Manager would not let *login* into the app — or ``None`` when it would, or cannot be asked.
+
+    DEV-271: the door check after a deploy enters as the person who deployed. 30.10.2026 that was „rausch“ at ICC,
+    whose NEX Manager knows only „admin“ — a check that tries the door anyway and then reports „pokazený je vstup“
+    blames the app for a person the Manager does not have. Asked first, the deploy says what is really missing."""
+    answer = _ask_manager_about(customer_slug, project_slug, login)
+    if answer is None:
+        return None
     if answer.status_code == httpx.codes.NOT_FOUND:
-        return False
-    if answer.status_code == httpx.codes.OK:
-        return True
-    # 401/403 means the app's own module key is wrong — a deploy fault, not a verdict about the operator.
-    logger.warning("spárovaný NEX Manager odpovedal na otázku o totožnosti stavom %s", answer.status_code)
+        return f"NEX Manager zákazníka nepozná používateľa „{login}“"
+    try:
+        body = answer.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return None
+    if answer.status_code == httpx.codes.FORBIDDEN and MANAGER_USER_INACTIVE in str(body.get("code") or body):
+        return f"používateľ „{login}“ je v NEX Manageri zákazníka deaktivovaný"
+    if answer.status_code == httpx.codes.OK and body.get("has_module_access") is False:
+        return f"používateľ „{login}“ nemá v NEX Manageri zákazníka pridelenú aplikáciu"
     return None
 
 
@@ -183,7 +219,13 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
     token = _mint_as_paired_manager(customer_slug, project_slug, subject=subject)
     if not token:
         return None, "vstupenka sa nedá vyraziť (zákazník nemá NEX Manager s podpisovým kľúčom)"
-    launch_endpoint = f"{uat_url.rstrip('/')}/api/v1/launch"
+    # DEV-271 — the door is asked where the internet's request ends up: the shared Traefik, with the installation's
+    # name in ``Host``. Through the public address the request from the cockpit's container met the edge first —
+    # 30.10.2026 the private zone's nginx (Tailscale only) answered 403 for NEX Knowledge, and the deploy reported
+    # that the APP refused the ticket, though the app never saw it.
+    host = urlsplit(uat_url).hostname or ""
+    base = f"http://{settings.uat_traefik_host}:{settings.uat_traefik_port}"
+    launch_endpoint = f"{base}/api/v1/launch"
 
     # ICCINT-92: skús NAJPRV ten tvar, ktorý NEX Manager reálne používa — vstupenku v tele požiadavky.
     #
@@ -193,7 +235,7 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
     # skúša len ako NÁHRADA, keď aplikácia o novom nevie, a odpoveď potom povie, ktorým tvarom sa otvorilo.
     used_legacy = False
     try:
-        with httpx.Client(follow_redirects=False, timeout=_DOOR_TIMEOUT_SECONDS) as client:
+        with httpx.Client(follow_redirects=False, timeout=_DOOR_TIMEOUT_SECONDS, headers={"Host": host}) as client:
             opened = client.post(launch_endpoint, data={"lt": token})
             # 404/405 = „o tomto tvare neviem“, nie „vstupenku odmietam“. Čokoľvek iné je skutočné
             # odmietnutie a náhrada by ho len zakryla.
@@ -205,7 +247,10 @@ def uat_door_opens(customer_slug: str, project_slug: str, uat_url: str, *, subje
                 return False, f"aplikácia vstupenku odmietla {shape} (stav {opened.status_code})"
             if not opened.cookies:
                 return None, "aplikácia po vstupe nevrátila sedenie, takže sa nedá pokračovať"
-            session = client.get(f"{uat_url.rstrip('/')}{_SESSION_PATH}", cookies=opened.cookies)
+            # The session cookie goes back as the browser sends it. Asked over plain HTTP inside the network, a cookie
+            # the app marks ``Secure`` would not leave the client's jar — the session would look dead when it is not.
+            cookie = "; ".join(f"{name}={value}" for name, value in opened.cookies.items())
+            session = client.get(f"{base}{_SESSION_PATH}", headers={"Cookie": cookie})
     except httpx.HTTPError as unreachable:
         return None, f"nasadená aplikácia sa nedá osloviť ({type(unreachable).__name__})"
 

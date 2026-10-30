@@ -210,7 +210,7 @@ def _door(monkeypatch, tmp_path, *, launch: _Reply, session: _Reply | None = Non
             seen.append(url)
             return launch
 
-        def get(self, url, cookies=None):
+        def get(self, url, cookies=None, **kwargs):
             seen.append(url)
             if "/api/v1/launch" in url:
                 return launch
@@ -286,7 +286,7 @@ def test_an_unreachable_app_is_not_accused(tmp_path, monkeypatch) -> None:
         def post(self, url, data=None, **kwargs):
             raise uat_launch.httpx.ConnectError("nedostupná")
 
-        def get(self, url, cookies=None):
+        def get(self, url, cookies=None, **kwargs):
             raise uat_launch.httpx.ConnectError("nedostupná")
 
     monkeypatch.setattr(uat_launch.httpx, "Client", _Boom)

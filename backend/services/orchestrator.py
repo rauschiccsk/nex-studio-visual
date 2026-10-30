@@ -8034,8 +8034,8 @@ async def _await_acceptance_app_ready(base: list[str], port: int) -> tuple[bool,
 # public-route probe below hits THIS with a ``Host`` header — the same routing the internet exercises, minus the
 # edge WAF (which 403s a container's direct public request, so probing the public URL from a container is
 # useless). If the name ever changes the probe degrades to a SKIP (never a false FAIL — see _verify_public_route).
-_PUBLIC_ROUTE_TRAEFIK_HOST = "nex-uat-traefik"
-_PUBLIC_ROUTE_TRAEFIK_PORT = 80
+_PUBLIC_ROUTE_TRAEFIK_HOST = settings.uat_traefik_host
+_PUBLIC_ROUTE_TRAEFIK_PORT = settings.uat_traefik_port
 
 
 def _traefik_public_route_probe_src(public_host: str) -> str:
