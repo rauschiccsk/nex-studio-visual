@@ -34,6 +34,8 @@ const eur = formatEur;
 const when = (iso: string) => formatDateTime(iso);
 const rate = (v: string) => `${Number(v).toLocaleString("sk-SK", { maximumFractionDigits: 4 })} € / kT`;
 const kt = formatKiloTokens;
+/** DEV-265 — a figure with its unit inside a sentence stays on one line. */
+const fig = (text: string) => <span className="whitespace-nowrap">{text}</span>;
 
 const KIND_LABELS: Record<string, string> = { kod: "kód", skusky: "skúšky", dokumentacia: "dokumentácia" };
 
@@ -90,16 +92,16 @@ function VersionRates({
   return (
     <div className="mb-3 rounded border border-[var(--color-border-default)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
       <div>
-        Sadzby tejto verzie: kód a skúšky {rate(preview.rate_code)} ({source(preview.rate_code_own, preview.settings_rate_code)}
-        ), dokumentácia {rate(preview.rate_docs)} ({source(preview.rate_docs_own, preview.settings_rate_docs)}).
+        Sadzby tejto verzie: kód a skúšky {fig(rate(preview.rate_code))} ({source(preview.rate_code_own, preview.settings_rate_code)}
+        ), dokumentácia {fig(rate(preview.rate_docs))} ({source(preview.rate_docs_own, preview.settings_rate_docs)}).
       </div>
       {last && (
         <div>
           Naposledy zmenil{last.changed_by ? ` ${last.changed_by}` : "i"} {when(last.created_at)}: kód{" "}
-          {last.previous_rate_code ? rate(last.previous_rate_code) : "z Nastavení"} →{" "}
-          {last.rate_code ? rate(last.rate_code) : "z Nastavení"}, dokumentácia{" "}
-          {last.previous_rate_docs ? rate(last.previous_rate_docs) : "z Nastavení"} →{" "}
-          {last.rate_docs ? rate(last.rate_docs) : "z Nastavení"}.
+          {last.previous_rate_code ? fig(rate(last.previous_rate_code)) : "z Nastavení"} →{" "}
+          {last.rate_code ? fig(rate(last.rate_code)) : "z Nastavení"}, dokumentácia{" "}
+          {last.previous_rate_docs ? fig(rate(last.previous_rate_docs)) : "z Nastavení"} →{" "}
+          {last.rate_docs ? fig(rate(last.rate_docs)) : "z Nastavení"}.
         </div>
       )}
       <button
@@ -334,7 +336,7 @@ export default function DeliveryStatementPanel({
             Suma: {eur(p.amount_eur)}
             {p.full_eur != null && p.amount_eur != null && Number(p.full_eur) !== Number(p.amount_eur) && (
               <span className="ml-2 text-xs font-normal text-[var(--color-text-muted)]">
-                plná hodnota {eur(p.full_eur)}, zľava {eur(Number(p.full_eur) - Number(p.amount_eur))}
+                plná hodnota {fig(eur(p.full_eur))}, zľava {fig(eur(Number(p.full_eur) - Number(p.amount_eur)))}
               </span>
             )}
           </p>

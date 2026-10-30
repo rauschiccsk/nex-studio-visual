@@ -1571,7 +1571,17 @@ export function registerFixtures(): void {
           discount_label: null,
           discount_eur: "0.00",
           amount_eur: "2040.00",
-          tasks: [{ label: "28.1.1", title: "Doručovanie do NEX Genesis", lines: 8_900, tokens: 170_000, kilotokens: "170.0" }],
+          // DEV-265: a line naming as many tasks as NEX Knowledge 0.1.0 did (31) — the table must not break.
+          tasks: [
+            { label: "28.1.1", title: "Doručovanie do NEX Genesis", lines: 8_900, tokens: 170_000, kilotokens: "170.0" },
+            ...Array.from({ length: 30 }, (_, i) => ({
+              label: `${1 + Math.floor(i / 6)}.${(i % 6) + 1}.1`,
+              title: `Úloha ${i + 1}`,
+              lines: 10,
+              tokens: 100,
+              kilotokens: "0.1",
+            })),
+          ],
         },
         {
           category: "request",

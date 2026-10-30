@@ -328,7 +328,7 @@ function PriceListView({ list }: { list: PriceList[] }) {
   const cell = (usd: number, eur: number | null) => (
     <>
       {fmtPrice(usd)} $
-      <div className="text-[10px] text-[var(--color-text-muted)]">{eur === null ? "—" : `${fmtPrice(eur)} €`}</div>
+      <div className="whitespace-nowrap text-[10px] text-[var(--color-text-muted)]">{eur === null ? "—" : `${fmtPrice(eur)} €`}</div>
     </>
   );
   return (

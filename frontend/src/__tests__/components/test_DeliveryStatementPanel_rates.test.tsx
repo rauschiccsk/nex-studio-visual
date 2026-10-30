@@ -83,9 +83,11 @@ describe("A version's own rates (DEV-74)", () => {
     vi.mocked(getDeliveryStatement).mockResolvedValue(view(true, [CHANGE]));
     render(<DeliveryStatementPanel versionId="v160" />);
 
-    expect(await screen.findByText(/kód a skúšky 1,5 € \/ kT \(vlastná, v Nastaveniach 2 € \/ kT/)).toBeInTheDocument();
-    expect(screen.getByText(/dokumentácia 1 € \/ kT \(z Nastavení\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Naposledy zmenil Zoltán Rausch .*kód z Nastavení → 1,5 €/)).toBeInTheDocument();
+    // DEV-265: each rate is a figure kept on one line (its own span) — the sentence is read whole.
+    const rates = await screen.findByText(/^Sadzby tejto verzie/);
+    expect(rates).toHaveTextContent(/kód a skúšky 1,5 € \/ kT \(vlastná, v Nastaveniach 2 € \/ kT/);
+    expect(rates).toHaveTextContent(/dokumentácia 1 € \/ kT \(z Nastavení\)/);
+    expect(screen.getByText(/^Naposledy zmenil/)).toHaveTextContent(/Naposledy zmenil Zoltán Rausch .*kód z Nastavení → 1,5 €/);
   });
 
   it("saves a rate typed with a decimal comma for this version only and reloads", async () => {

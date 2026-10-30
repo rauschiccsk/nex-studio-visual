@@ -14,6 +14,8 @@
  *    control itself, not something lying over it. On a touch screen it is at least {@link TOUCH_PX} px in both
  *    directions — except a link inside running text, which is as tall as its line. While a modal dialog is open,
  *    the controls inside it.
+ * 5. A figure with its unit („280,6 kT“, „561,20 €“, „100 %“) is never split over two lines. DEV-265: a statement line
+ *    naming 31 tasks squeezed the number columns of Fakturácia until every amount broke after its digits.
  */
 
 /** What opens something more on a page: a dialog, or content folded away. Each is opened and measured too. */
@@ -25,7 +27,7 @@ import type { Page } from "@playwright/test";
 export const TOUCH_PX = 44;
 
 export interface Problem {
-  rule: "page-scrolls-sideways" | "sticks-out" | "squeezed" | "covered" | "too-small-to-touch";
+  rule: "page-scrolls-sideways" | "sticks-out" | "squeezed" | "covered" | "too-small-to-touch" | "number-split";
   what: string;
   detail: string;
 }
@@ -139,6 +141,21 @@ function measure(touchPx: number): Problem[] {
         report(`text „${node.textContent.trim().slice(0, 40)}“ in ${describe(parent)}`, line.left, line.right, room);
         break;
       }
+    }
+  }
+
+  // Rule 5 — a figure with its unit on one line.
+  const figure = /^[−–—-]?\s*\d[\d\s\u00a0\u202f.,]*\s*(kT|€|%)(\s*\/\s*kT)?$/;
+  const figures = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = figures.nextNode(); node; node = figures.nextNode()) {
+    const parent = node.parentElement;
+    const text = (node.textContent ?? "").trim();
+    if (!parent || !figure.test(text) || !shown(parent) || insideOwnWidget(node)) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const lines = new Set(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    if (lines > 1) {
+      problems.push({ rule: "number-split", what: `„${text}“ in ${describe(parent)}`, detail: `on ${lines} lines` });
     }
   }
 
