@@ -55,6 +55,7 @@ ACTION_LABELS: dict[str, str] = {
     "decide": "výber na karte rozhodnutia",
     "overit_znovu": "Over znova",
     "overit_bez_opravy": "Znova overiť bez opravy",
+    "opravit_podla_ci": "Vrátiť agentovi na opravu",
     "skontrolovat": "Skontrolovať",
     "hotovo": "Hotovo",
     "na_riadnu_verziu": "Preniesť do riadnej verzie",
