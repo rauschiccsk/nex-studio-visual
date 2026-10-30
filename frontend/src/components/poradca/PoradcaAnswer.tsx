@@ -63,8 +63,10 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
     }
   }
 
+  // DEV-264: an answer that asks the person offers nothing it prepared — that waits for the answer.
+  const held = !!message.held_for_answer;
   // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
-  const instruction = message.instruction ?? longAnswer(message.content ?? "");
+  const instruction = held ? null : (message.instruction ?? longAnswer(message.content ?? ""));
 
   function insert() {
     if (instruction) handOff(instruction);
@@ -182,6 +184,11 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       )}
       {message.status === "stopped" && <p className="text-xs text-[var(--color-text-muted)]">Zastavené.</p>}
 
+      {!running && held && (
+        <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">
+          Poradca čaká na tvoju odpoveď — čo pripravil, ponúkne až po nej.
+        </p>
+      )}
       {!running && hasActions && (
         <div className="mt-2 flex flex-wrap gap-2">
           {agentTickets.length > 0 && (

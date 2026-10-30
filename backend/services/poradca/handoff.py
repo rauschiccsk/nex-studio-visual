@@ -86,6 +86,31 @@ class TicketProposal:
     way: Optional[str]
 
 
+#: DEV-264 — every block Poradca prepares for someone else to act on.
+_HANDOFF_BLOCK = re.compile(
+    rf"<({BLOCK_INSTRUCTION}|{BLOCK_BACKLOG}|{BLOCK_BACKLOG_LEGACY}|{BLOCK_TICKET_NSV}|{BLOCK_TICKET_PROJECT}"
+    rf"|{BLOCK_AGENT_TICKETS})\b[^>]*>(.*?)</\1>",
+    re.S,
+)
+#: What may trail the last sentence of an answer without making it anything but a question.
+_TRAILING = " \t\r\n*_`\"'“”„»)]"
+#: DEV-264 — why the cockpit offers nothing under an answer that asks the person.
+HELD_FOR_ANSWER = "Poradca sa v tejto odpovedi pýta — pripraví to až po tvojej odpovedi."
+
+
+def asks_the_person(text: str) -> bool:
+    """DEV-264 — whether the answer ends with a question to the person: its last sentence outside the blocks ends with
+    a question mark (whatever markup or closing quotes trail it)."""
+    return _HANDOFF_BLOCK.sub("", text or "").rstrip(_TRAILING).endswith("?")
+
+
+def held_for_answer(text: str) -> bool:
+    """DEV-264 — an answer that asks the person and prepares something anyway: its blocks wait for the answer.
+
+    The Director 30.10.2026: „V prípade otázok, najprv treba počkať na moju odpoveď až potom pokračovať.“"""
+    return asks_the_person(text) and any(body.strip() for _name, body in _HANDOFF_BLOCK.findall(text or ""))
+
+
 def extract_block(text: str, name: str) -> Optional[str]:
     """Content of the first ``<name>…</name>`` block without edge whitespace; ``None`` if absent or empty."""
     match = re.search(rf"<{name}>\s*(.*?)\s*</{name}>", text or "", re.S)
@@ -139,6 +164,8 @@ def backlog_item_from_message(db: Session, message: PoradcaMessage) -> SavedRequ
     """
     if message.author != AUTHOR_PORADCA or message.status != DONE:
         raise HandoffRefused("Požiadavku sa dá uložiť len z hotovej odpovede Poradcu.")
+    if held_for_answer(message.content):
+        raise HandoffRefused(HELD_FOR_ANSWER)
     summary = backlog_request(message.content)
     if summary is None or len(summary) < _MIN_REQUEST_CHARS:
         raise HandoffRefused("V tejto odpovedi nie je požiadavka do Zásobníka.")

@@ -28,7 +28,7 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import plane_tickets, project_files
 from backend.services.plane_gateway import PlaneError, PlaneGateway, ticket_identifier
-from backend.services.poradca.handoff import HandoffRefused, agent_tickets
+from backend.services.poradca.handoff import HELD_FOR_ANSWER, HandoffRefused, agent_tickets, held_for_answer
 from backend.services.poradca.secrets_filter import SecretFilter
 
 
@@ -56,6 +56,8 @@ def target(db: Session, message: PoradcaMessage) -> Target:
     """The build and the tickets a finished Poradca answer attaches — else :class:`HandoffRefused` with the sentence."""
     if message.author != AUTHOR_PORADCA or message.status != DONE:
         raise HandoffRefused("Tiket sa dá priložiť len z hotovej odpovede Poradcu.")
+    if held_for_answer(message.content):
+        raise HandoffRefused(HELD_FOR_ANSWER)
     identifiers = agent_tickets(message.content)
     if not identifiers:
         raise HandoffRefused("V tejto odpovedi nie je tiket pre agenta.")

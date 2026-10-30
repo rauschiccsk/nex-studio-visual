@@ -95,6 +95,8 @@ class PoradcaMessageRead(BaseModel):
     plane_url: Optional[str] = None
     #: DEV-218 — the tickets the answer attaches for the agent (``<tiket-pre-agenta>``), as Plane writes them.
     agent_tickets: list[str] = Field(default_factory=list)
+    #: DEV-264 — the answer asks the person and prepared something anyway: nothing is offered until the answer.
+    held_for_answer: bool = False
 
 
 class PoradcaAgentTicketsAttached(BaseModel):

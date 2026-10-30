@@ -33,7 +33,13 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import backlog_tickets, plane_tickets
 from backend.services.plane_gateway import PlaneGateway
-from backend.services.poradca.handoff import HandoffRefused, TicketProposal, ticket_proposal
+from backend.services.poradca.handoff import (
+    HELD_FOR_ANSWER,
+    HandoffRefused,
+    TicketProposal,
+    held_for_answer,
+    ticket_proposal,
+)
 
 #: The DEV module of the cockpit itself and who solves its problems.
 COCKPIT_MODULE = "NEX Studio Visual"
@@ -73,6 +79,8 @@ def proposal_of(message: PoradcaMessage) -> TicketProposal:
     """The ticket the answer proposes — else the sentence why there is none."""
     if message.author != AUTHOR_PORADCA or message.status != DONE:
         raise HandoffRefused("Tiket sa dá založiť len z hotovej odpovede Poradcu.")
+    if held_for_answer(message.content):
+        raise HandoffRefused(HELD_FOR_ANSWER)
     proposal = ticket_proposal(message.content)
     if proposal is None:
         raise HandoffRefused("V tejto odpovedi nie je návrh tiketu.")

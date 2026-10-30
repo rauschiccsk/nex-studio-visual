@@ -120,6 +120,9 @@ def _ticket_proposal(content: str) -> Optional[PoradcaTicketProposalRead]:
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     usage = msg.usage or {}
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
+    # DEV-264: an answer that asks the person offers nothing it prepared — that waits for the answer.
+    held = done_answer and handoff.held_for_answer(msg.content)
+    offers = done_answer and not held
     # ICCINT-168: by the same price list as Costs (tokens of all kinds × Claude Code price list × ECB rate).
     cost = metrics.usage_cost(db, usage, msg.created_at) if msg.author == AUTHOR_PORADCA and usage else None
     return PoradcaMessageRead(
@@ -137,13 +140,14 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         error=msg.error,
         created_at=msg.created_at,
         finished_at=msg.finished_at,
-        instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if done_answer else None,
-        backlog_request=handoff.backlog_request(msg.content) if done_answer else None,
+        instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if offers else None,
+        backlog_request=handoff.backlog_request(msg.content) if offers else None,
         captured_backlog_number=_captured_backlog_number(db, msg),
-        ticket_proposal=_ticket_proposal(msg.content) if done_answer else None,
+        ticket_proposal=_ticket_proposal(msg.content) if offers else None,
         plane_identifier=msg.plane_identifier,
         plane_url=msg.plane_url,
-        agent_tickets=handoff.agent_tickets(msg.content) if done_answer else [],
+        agent_tickets=handoff.agent_tickets(msg.content) if offers else [],
+        held_for_answer=held,
         choices=[
             PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
             for c in choices.choices(db, msg.content, msg.version_id)

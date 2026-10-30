@@ -6282,6 +6282,11 @@ export interface components {
             /** Finished At */
             finished_at?: string | null;
             /**
+             * Held For Answer
+             * @default false
+             */
+            held_for_answer: boolean;
+            /**
              * Id
              * Format: uuid
              */

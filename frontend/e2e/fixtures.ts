@@ -750,6 +750,7 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
     content: "Ktorú možnosť mám vybrať na kartách?",
     status: "done",
     created_at: T1,
+    held_for_answer: false,
   },
   {
     id: "99999999-9999-4999-8999-999999999993",
@@ -768,6 +769,7 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
       { card: 1, label: "posielať po kúskoch", status: "not_on_card", question: "Čo s veľkou faktúrou?" },
       { card: null, label: "Áno, súhlasím", status: "answer", question: null },
     ],
+    held_for_answer: false,
   },
   // DEV-119: an answer proposing a ticket of the cockpit — the layout check opens its preview.
   {
@@ -780,6 +782,7 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
     created_at: T2,
     finished_at: T2,
     ticket_proposal: { kind: "nsv", title: "Tlačidlo Nasadiť pri UAT nič nerobí" },
+    held_for_answer: false,
   },
 ];
 
