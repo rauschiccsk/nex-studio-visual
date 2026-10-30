@@ -1888,7 +1888,25 @@ def version_bump_from_text(
             novy_build = copy.deepcopy(build)
             novy_build["context"] = _abs_build_context(str(build.get("context", ".")), Path(project_path))
             svc["build"] = novy_build
+    # DEV-267: a step that runs another service's image is built the way that service is. The hand-written NEX Manager
+    # of ICC runs ``migrate`` on ``nexmanager-backend`` — as the project does, both from one Dockerfile — but the
+    # cockpit knows no role ``migrate``, so the step kept a bare image nothing would build and the adoption's deploy
+    # stopped.
+    postavene = {
+        svc["image"].split(":", 1)[0]: svc["build"]
+        for svc in sluzby.values()
+        if isinstance(svc, dict) and svc.get("build") is not None and isinstance(svc.get("image"), str)
+    }
+    for svc in sluzby.values():
+        if isinstance(svc, dict) and svc.get("build") is None and isinstance(svc.get("image"), str):
+            build = postavene.get(svc["image"].split(":", 1)[0])
+            if build is not None:
+                svc["build"] = copy.deepcopy(build)
     return novy
+
+
+#: DEV-267 — what the deploy says, and the adoption's preview before it, about images nothing would build or find.
+UNBUILDABLE = "Nasadenie by zapísalo obrazy, ktoré sa nemajú odkiaľ vziať — ani postaviť, ani nájsť: {images}."
 
 
 def unbuildable_images(
@@ -3234,9 +3252,7 @@ def provision_uat(
         nepostavitelne = unbuildable_images(povodne, povysene, image_exists=_docker_image_exists)
         if nepostavitelne:
             raise UndeployableImageError(
-                "Nasadenie by zapísalo obrazy, ktoré sa nemajú odkiaľ vziať — ani postaviť, ani nájsť: "
-                + ", ".join(nepostavitelne)
-                + ". Inštalácia zostala nedotknutá."
+                UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."
             )
         compose_text = render_uat_compose(povysene)
         mala = set(_parse_env_file(env_path))

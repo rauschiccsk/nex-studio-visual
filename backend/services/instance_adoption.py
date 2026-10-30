@@ -446,6 +446,15 @@ def preview(instance_dir: Path, *, render: RenderRequest, deploy_host: Optional[
             blokujuce.append(chyba)
         else:
             blokujuce.extend(_co_by_zmizlo(stav.compose_text, vykreslene))
+            # DEV-267: and what the deploy asks before it writes — an image nothing would build or find stops it. The
+            # preview of ICC's NEX Manager said „prevziať sa dá“ and the deploy then stopped on exactly this.
+            neziskatelne = uat_provisioner.unbuildable_images(
+                yaml.safe_load(stav.compose_text) or {},
+                yaml.safe_load(vykreslene) or {},
+                image_exists=uat_provisioner._docker_image_exists,
+            )
+            if neziskatelne:
+                blokujuce.append(uat_provisioner.UNBUILDABLE.format(images=", ".join(neziskatelne)))
 
     return AdoptionPreview(
         instance_dir=str(instance_dir),
