@@ -8887,9 +8887,13 @@ _TEMPLATE_FRAME_COMPONENTS = frozenset(
         "UsersPanel",
     }
 )
-#: The frame's own pages (nex-app-kit ``TEMPLATE_PATHS`` and the sign-in) — an app's own ``<Route>`` never takes one.
+#: The frame's own pages (nex-app-kit ``TEMPLATE_PATHS`` and the sign-in) — an app's own ``<Route>`` never takes one,
+#: nor a page below ``/settings`` (its tabs). The skill ``sablona-aplikacie`` names them to the agent (DEV-259).
+_TEMPLATE_FRAME_PAGES = ("/", "/login", "/getting-started", "/updates", "/settings")
 _TEMPLATE_FRAME_ROUTE_RE = re.compile(
-    r"""<Route\b[^>]*\bpath\s*=\s*\{?\s*["'](/|/login|/getting-started|/updates|/settings(?:/[^"']*)?)["']"""
+    r"""<Route\b[^>]*\bpath\s*=\s*\{?\s*["']("""
+    + "|".join(re.escape(page) + (r"""(?:/[^"']*)?""" if page == "/settings" else "") for page in _TEMPLATE_FRAME_PAGES)
+    + r""")["']"""
 )
 #: The first segments of the server's standard interface under /api/v1 (nex-app-kit KONTRAKT.md) — sign-in, the launch
 #: from NEX Manager, people, sessions, settings, agents, layout, Aktualizácie, Ako začať.

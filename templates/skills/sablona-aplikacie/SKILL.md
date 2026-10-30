@@ -69,7 +69,22 @@ ráme. Verzia ich presunie — kroky vyššie platia aj tu, navyše:
    človeka, prepni na `kit_users.id`. Projekt bez nasadenej inštalácie nemá ostré údaje — nič sa neprenáša.
 4. Obraz servera a compose dostanú manifest a `docs` ako v kostre (`APP_MANIFEST_PATH`, `APP_DOCS_DIR`); `.env.example`
    nesie, čo šablóna číta (`# @public-url` `PUBLIC_URL`, `ADMIN_INITIAL_PASSWORD` alebo premenné `MANAGER_*`).
-Hotové je, keď kontrola rámu pred Overením nič nenájde.
+Hotové je, keď kontrola rámu pred Overením nič nenájde (nižšie).
+
+## Kontrola rámu (pred Overením)
+Kokpit ju spustí pred Overením a každý problém povie jednou vetou — oprav všetky naraz. Pýta sa len na toto:
+1. `frontend/app.manifest.json` je platný JSON a jeho `template` je šablóna projektu.
+2. Niektorý súbor vo `frontend/src` importuje `TemplateApp` z `nex-app-kit` a vykreslí `<TemplateApp`.
+3. Komponenty rámu z nex-shared: `AgentsPanel`, `AppShell`, `Header`, `LoginForm`, `MyAccountPanel`, `NavItem`,
+   `ReleaseNotes`, `SessionsPanel`, `SettingsShell`, `Sidebar`, `SystemSettingsPanel`, `UsersPanel` — nijaký súbor vo
+   `frontend/src` ich neimportuje (`import type` neprekáža).
+4. Stránky rámu: `/`, `/login`, `/getting-started`, `/updates`, `/settings` — nemajú vlastnú `<Route path>`, pri
+   `/settings` ani stránka pod ňou. Iné cesty (`/admin`, `/admin/settings`) sú tvoje.
+5. Niektorý súbor v `backend/app` volá `AppKit(…)` menom (`from nex_app_kit import AppKit`) a niektorý `….install(app)`.
+   Kde — na úrovni modulu alebo vo funkcii, napríklad `build_kit` — je jedno.
+6. Úseky ciest servera šablóny: `agent-settings`, `auth`, `getting-started`, `launch`, `release-notes`, `session`,
+   `sessions`, `system-settings`, `user-layout`, `users` — žiadny vlastný dekorátor cesty ani `prefix` v `APIRouter`
+   či `include_router` nezačína pod `/api/v1` takým úsekom.
 
 ## Čo nerobím
 Vlastný `Sidebar`/`AppShell`, prihlásenie, stránku Aktualizácií či Nastavení, cesty `/auth/*`, `/launch`, `/session`,
