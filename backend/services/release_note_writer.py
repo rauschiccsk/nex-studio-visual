@@ -215,15 +215,16 @@ RELEASE_DATES = "release-dates.json"
 def record_release_date(proj_root: Path, version_number: str, day: date) -> Path | None:
     """DEV-258 — the day a version of a project on the app template was signed off, in
     ``docs/specs/versions/release-dates.json``: nex-app-kit's Aktualizácie read it, and without it every version stood
-    there without a date. A version that has its day keeps it (a re-verification does not move it); a file the cockpit
-    cannot read is left as it is. Returns the file when written, else ``None``."""
+    there without a date. The day given replaces one already written for the version — the cockpit knows it
+    (``orchestrator._release_day``), a day written ahead while building does not; the other versions keep theirs, and a
+    file the cockpit cannot read is left as it is. Returns the file when it changed, else ``None``."""
     key = version_notes_dir(proj_root, version_number).name
     file = Path(proj_root) / "docs" / "specs" / "versions" / RELEASE_DATES
     try:
         dates = json.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
     except (OSError, ValueError):
         return None
-    if not isinstance(dates, dict) or key in dates:
+    if not isinstance(dates, dict) or dates.get(key) == day.isoformat():
         return None
     dates[key] = day.isoformat()
     file.parent.mkdir(parents=True, exist_ok=True)

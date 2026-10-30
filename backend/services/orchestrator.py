@@ -34,7 +34,7 @@ import unicodedata
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any, NamedTuple, Optional, Sequence
@@ -1026,27 +1026,37 @@ def ever_signed_off(db: Session, version_id: uuid.UUID) -> bool:
     sign-off went stale (explainable, with a real next step). :func:`deploy.deployability` needs exactly that
     split to tell the manager WHY Nasadiť is closed instead of showing an unexplained grey button."""
     return (
-        db.execute(
-            select(PipelineMessage.id)
-            .where(
-                PipelineMessage.version_id == version_id,
-                or_(
-                    and_(
-                        PipelineMessage.stage == "priprava",
-                        PipelineMessage.kind == "notification",
-                        PipelineMessage.payload["hotovo"].astext == "true",
-                    ),
-                    and_(
-                        PipelineMessage.stage == "verifikacia",
-                        PipelineMessage.kind == "verdict",
-                        PipelineMessage.payload["verdict"].astext == "PASS",
-                    ),
-                ),
-            )
-            .limit(1)
-        ).scalar_one_or_none()
+        db.execute(select(PipelineMessage.id).where(_finished_record(version_id)).limit(1)).scalar_one_or_none()
         is not None
     )
+
+
+def _finished_record(version_id: uuid.UUID):
+    """The records that declare a version finished — a Hotovo signature or an Auditor PASS, staleness ignored."""
+    return and_(
+        PipelineMessage.version_id == version_id,
+        or_(
+            and_(
+                PipelineMessage.stage == "priprava",
+                PipelineMessage.kind == "notification",
+                PipelineMessage.payload["hotovo"].astext == "true",
+            ),
+            and_(
+                PipelineMessage.stage == "verifikacia",
+                PipelineMessage.kind == "verdict",
+                PipelineMessage.payload["verdict"].astext == "PASS",
+            ),
+        ),
+    )
+
+
+def _release_day(db: Session, version_id: uuid.UUID) -> date:
+    """DEV-258 — the day a version came out, as Aktualizácie of an app on the template show it: the day it was first
+    declared finished (:func:`_finished_record`), today while it has not been yet. A later re-verification or re-sign
+    does not move it, and a day written into ``release-dates.json`` ahead of it — by the agent, while building — does
+    not stand."""
+    first = db.execute(select(func.min(PipelineMessage.created_at)).where(_finished_record(version_id))).scalar_one()
+    return local_time(first or datetime.now(timezone.utc)).date()
 
 
 def reverify_in_flight(db: Session, version_id: uuid.UUID, *, current_stage: str, is_regate: bool) -> bool:
@@ -5813,34 +5823,44 @@ async def _commit_release_note(
         path = release_note_writer.write_release_note(db, version_id, project_root)
     except Exception:  # noqa: BLE001 — best-effort artifact; a generator failure must not sink the sign-off
         return
-    if path is None:
-        return
+    files: list[str] = []
+    if path is not None:
+        try:
+            files.append(str(path.relative_to(project_root)))
+        except ValueError:
+            return
+        # DEV-104: what the project derives from its notes goes into the same commit — or the note does not go in.
+        derived, why = _regenerate_release_note_derivatives(project_root)
+        if why:
+            _tell_manager_the_note_is_not_committed(db, version_id, version_number, why)
+            return
+        files.extend(derived)
+    # DEV-258: an app on the template shows the day of each version in Aktualizácie — written beside its note, also
+    # when the project wrote the note itself (the generator then stands back and ``path`` is None).
+    version = db.get(Version, version_id)
     try:
-        rel = str(path.relative_to(project_root))
-    except ValueError:
+        dated = (
+            release_note_writer.record_release_date(project_root, version_number, _release_day(db, version_id))
+            if version is not None and version.status != "released" and _project_template_for_version(db, version_id)
+            else None
+        )
+    except Exception:  # noqa: BLE001 — best-effort artifact, like the note; it must not sink the sign-off
+        dated = None
+    if dated is not None:
+        files.append(str(dated.relative_to(project_root)))
+    if not files:
         return
-    # DEV-104: what the project derives from its notes goes into the same commit — or the note does not go in at all.
-    derived, why = _regenerate_release_note_derivatives(project_root)
-    if why:
-        _tell_manager_the_note_is_not_committed(db, version_id, version_number, why)
-        return
-    # DEV-258: an app on the template shows the day of each version in Aktualizácie — written beside its note.
-    today = local_time(datetime.now(timezone.utc)).date()
-    dated = (
-        release_note_writer.record_release_date(project_root, version_number, today)
-        if _project_template_for_version(db, version_id)
-        else None
-    )
     # Pathspec-scoped commit → only the note (and what is derived from it) lands, even if the worktree carries other
     # changes. A note unchanged since the last commit is no commit — the artifact is in place.
     await _commit_off_the_loop(
         db,
         version_id,
-        f"Poznámky k vydaniu v{version_number}",
+        f"Poznámky k vydaniu v{version_number}" if path is not None else "Dátumy vydaní",
         cockpit_commit.commit,
         project_root,
-        [rel, *derived, *([str(dated.relative_to(project_root))] if dated else [])],
-        f"docs(release-notes): v{version_number} — user-facing changelog",
+        files,
+        f"docs(release-notes): v{version_number} — "
+        + ("user-facing changelog" if path is not None else "the day of the release"),
         on_message=on_message,
     )
 

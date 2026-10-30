@@ -47,6 +47,12 @@ v Nastavenia → Agenti. Server ich číta `kit.agent_choice("assistant")`; mode
 (prihlásenie, Nastavenia, Aktualizácie, Ako začať) odpovedá sám. Doplníš len vlastné cesty, napr.
 `http.get("*/api/v1/areas", () => HttpResponse.json([{ id: 1, name: "Stavebné povolenia" }]))`.
 
+## Aktualizácie
+Poznámky verzie píšeš do `docs/specs/versions/v<číslo>/RELEASE_NOTES.md` a stránka Aktualizácie ich ukáže sama.
+**Dátum vydania v `docs/specs/versions/release-dates.json` zapisuje kokpit** — deň, keď je verzia prvý raz overená
+alebo podpísaná ako hotová. Dátum verzie, ktorú staviaš, nepíš; kokpit ho prepíše. Staršej verzii bez dátumu (po
+prevode) daj deň commitu jej značky: `git log -1 --format=%cs v<číslo>`.
+
 ## Prevod existujúceho projektu (položka Prípravy „Prechod na šablónu aplikácie“)
 Kokpit pri prevode zapísal manifest a nex-app-kit na obe strany; obrazovky, cesty a tabuľky projektu ostali vo vlastnom
 ráme. Verzia ich presunie — kroky vyššie platia aj tu, navyše:
