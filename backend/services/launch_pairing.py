@@ -59,8 +59,8 @@ def customer_warning(
 ) -> str | None:
     """One sentence for the manager about every module of one customer's environment the Manager could not open.
 
-    *redeploy_repairs*: the deploy of a module renews its pairing where it runs (DEV-272 — an installation on this
-    machine); then the sentence names the click that puts it right instead of „urobí to technický tím“."""
+    *redeploy_repairs*: the deploy of a module renews its pairing where it runs (DEV-272; DEV-278 — on another
+    machine too); then the sentence names the click that puts it right instead of „urobí to technický tím“."""
     broken = {
         slug: found
         for slug, env in sorted(module_envs.items())

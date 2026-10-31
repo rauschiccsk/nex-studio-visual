@@ -67,8 +67,8 @@ class _Registry:
         self.modules: set[str] = set()
         self.issued = 0
 
-    def register(self, manager_env_path, base_url, *, slug, display_name, app_url):
-        assert base_url == "http://uat-mager-manager-backend:8000"
+    def register(self, manager, *, slug, display_name, app_url):
+        assert manager.api_url == "http://uat-mager-manager-backend:8000"
         if slug in self.modules:
             return None, None
         self.modules.add(slug)
@@ -174,13 +174,13 @@ def test_the_warning_names_the_redeploy_where_it_repairs():
 
 
 def test_the_warning_leaves_it_to_the_team_where_a_redeploy_would_not_repair_it():
-    on_another_machine = L.customer_warning(MANAGER, {"nex-inbox": STALE}, redeploy_repairs=False)
+    not_repairing = L.customer_warning(MANAGER, {"nex-inbox": STALE}, redeploy_repairs=False)
     other_slug = L.customer_warning(
         MANAGER, {"nex-inbox": {**STALE, "MANAGER_MODULE_SLUG": "inbox"}}, redeploy_repairs=True
     )
     no_manager_key = L.customer_warning({"DEPLOY_SLUG": "uat-mager"}, {"nex-inbox": STALE}, redeploy_repairs=True)
 
-    for said in (on_another_machine, other_slug, no_manager_key):
+    for said in (not_repairing, other_slug, no_manager_key):
         assert said is not None and said.endswith("nastavenia treba zladiť (urobí to technický tím).")
 
 
@@ -191,8 +191,9 @@ def test_an_app_that_does_not_open_from_the_manager_gets_no_pairing():
     assert env == {"DATABASE_URL": "postgresql://db/app"}
 
 
-def test_the_deploy_offers_the_click_only_where_it_repairs(tmp_path, monkeypatch):
-    """An installation on another machine (PROD of MÁGERSTAV on MAGER) is not re-paired by this cockpit."""
+def test_the_deploy_offers_the_click_here_and_on_another_machine(tmp_path, monkeypatch):
+    """DEV-278: a redeploy re-pairs an installation on another machine too (PROD of MÁGERSTAV on MAGER) — its Manager
+    is read there. Until then the cockpit read the Manager only here and left the other machine to the team."""
     from backend.services import deploy as D
     from backend.services import remote_instance
 
@@ -212,4 +213,4 @@ def test_the_deploy_offers_the_click_only_where_it_repairs(tmp_path, monkeypatch
     there = D._launch_pairing_warning("mager", "prod", "mager", ["nex-inbox"])
 
     assert here is not None and here.endswith("oprav ho tlačidlom „Nasadiť znova“ pri nex-inbox.")
-    assert there is not None and there.endswith("(urobí to technický tím).")
+    assert there is not None and there.endswith("oprav ho tlačidlom „Nasadiť znova“ pri nex-inbox.")

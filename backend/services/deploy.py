@@ -673,7 +673,8 @@ def _launch_pairing_warning(
     if not manager_env:
         return None
     module_envs = {slug: env for slug in modules if (env := _env(slug))}
-    return launch_pairing.customer_warning(manager_env, module_envs, redeploy_repairs=not deploy_host)
+    # DEV-278: a redeploy pairs an app with its Manager on another machine too.
+    return launch_pairing.customer_warning(manager_env, module_envs, redeploy_repairs=True)
 
 
 #: DEV-271 — the deploy's sentence when the door was not tried because the Manager would not let the operator in.

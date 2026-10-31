@@ -55,7 +55,7 @@ import re
 import secrets
 import subprocess
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 from urllib.parse import urlsplit
@@ -812,19 +812,81 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
-def read_paired_manager_launch(manager_env_path: Path) -> tuple[Optional[str], Optional[str]]:
-    """Read the paired NEX Manager Deploy's ``LAUNCH_SIGNING_KEY`` + ``DEPLOY_SLUG``.
+@dataclass(frozen=True)
+class PairedManager:
+    """The customer's NEX Manager a token-launch app pairs with — read where the Manager runs (DEV-278).
 
-    A NEX-Manager token-launch module must verify launch tokens with the SAME key the
-    Manager signs them with. The Manager Deploy lives as a sibling under the same
-    customer root (``<root>/<customer>/nex-manager/.env``), so a token-launch app's
-    ``MANAGER_LAUNCH_SIGNING_KEY`` is wired from there — not synthesised (a random key
-    would never match the Manager → every launch 401s). Returns ``(None, None)`` when
-    no Manager is deployed there (the app then falls back to preserved/empty — i.e.
-    token-launch stays off until a Manager is paired). The key is a secret — never logged.
-    """
-    mgr = _parse_env_file(manager_env_path)  # {} when the file is absent
-    return (mgr.get("LAUNCH_SIGNING_KEY") or None, mgr.get("DEPLOY_SLUG") or None)
+    ``env`` is its ``.env``, ``compose_text`` its compose; ``api_url`` is where the cockpit asks it to register an app.
+    On this machine that is its backend on the shared network; on another machine the cockpit cannot reach a
+    container there, so it asks the Manager at the address its own router gives it (``https://icc-manager.icc.sk``).
+    The cockpit used to read the Manager's files on ANDROS for an installation on MAGER as well — on 31.10.2026 those
+    were the files of ICC's old hand-authored NEX Manager still running on ANDROS."""
+
+    env: dict[str, str]
+    compose_text: Optional[str] = None
+    api_url: Optional[str] = None
+
+    @classmethod
+    def here(cls, manager_dir: Path) -> "PairedManager":
+        """The Manager in ``manager_dir`` on this machine — empty when none is installed there."""
+        compose = manager_dir / "docker-compose.yml"
+        manager = cls(
+            _parse_env_file(manager_dir / ".env"), compose.read_text(encoding="utf-8") if compose.is_file() else None
+        )
+        return replace(manager, api_url=manager.internal_url())
+
+    def launch(self) -> tuple[Optional[str], Optional[str]]:
+        """Its ``LAUNCH_SIGNING_KEY`` + ``DEPLOY_SLUG``.
+
+        A NEX-Manager token-launch module must verify launch tokens with the SAME key the Manager signs them with, so
+        a token-launch app's ``MANAGER_LAUNCH_SIGNING_KEY`` is wired from the Manager's ``.env`` — not synthesised (a
+        random key would never match the Manager → every launch 401s). ``(None, None)`` when no Manager is deployed
+        (the app then falls back to preserved/empty — token-launch stays off until a Manager is paired). The key is
+        a secret — never logged."""
+        return (self.env.get("LAUNCH_SIGNING_KEY") or None, self.env.get("DEPLOY_SLUG") or None)
+
+    def internal_url(self) -> Optional[str]:
+        """Its address on the network of its machine, from its own compose (ICCINT-59).
+
+        A token-launch app must ask the Manager who is signed in; with no address it refuses sign-in outright
+        ("an unreachable Manager is a fault, never a quiet pass"). The address is read from the Manager's compose —
+        its backend ``container_name`` and that SAME service's Traefik port — rather than assembled from the naming
+        convention, so a Manager deployed under a different name still resolves. Both stacks sit on the shared
+        proxy network of their machine, so the container name IS reachable from the app.
+
+        Parsed as YAML, per service. A line scan looked simpler and was wrong: it took the LAST port label in the
+        file, which belongs to the frontend, and produced ``http://…-backend:80``. ``None`` when no Manager compose
+        is there (the app then keeps whatever it had; token-launch stays off)."""
+        return _manager_internal_url(self.compose_text)
+
+
+def load_paired_manager(manager_dir: Path, deploy_host: Optional[str]) -> PairedManager:
+    """The customer's NEX Manager as it is on the machine the installation runs on (DEV-278).
+
+    Raises ``ValueError`` when the other machine cannot be read — like every other read of an installation there."""
+    if not deploy_host:
+        return PairedManager.here(manager_dir)
+    env_text, error = remote_instance.read_text(manager_dir, ".env", deploy_host=deploy_host)
+    if error:
+        raise ValueError(error)
+    compose_text, error = remote_instance.read_text(manager_dir, "docker-compose.yml", deploy_host=deploy_host)
+    if error:
+        raise ValueError(error)
+    addresses = _own_https_addresses(compose_text)
+    return PairedManager(_parse_env_text(env_text), compose_text, addresses[0] if addresses else None)
+
+
+def _own_https_addresses(compose_text: Optional[str]) -> list[str]:
+    """``https://<host>`` of every router an installation's compose gives its web frontend (DEV-278) — where it is
+    opened on its machine, as its own Traefik routes it."""
+    from backend.services import public_route  # it imports this module through private_access
+
+    try:
+        data = yaml.safe_load(compose_text or "") or {}
+    except yaml.YAMLError:
+        return []
+    urls = public_route.route_urls(data if isinstance(data, dict) else {})
+    return [url.rstrip("/") for url in urls if url.startswith("https://")]
 
 
 #: DEV-272 — what a deploy into an existing installation says when it paired the app with its Manager anew.
@@ -839,14 +901,14 @@ PAIRING_LABELS = {
 
 
 def paired_manager_values(
-    manager_env_path: Optional[Path], *, manager_base_url: Optional[str], manager_api_key: Optional[str]
+    manager: Optional[PairedManager], *, manager_base_url: Optional[str], manager_api_key: Optional[str]
 ) -> dict[str, str]:
     """The values that pair a token-launch app with its customer's NEX Manager as that Manager has them NOW — only
     those it has (DEV-272). The module's key is there only when the Manager has just registered the app: it hands
     the key out once."""
-    if manager_env_path is None:
+    if manager is None:
         return {}
-    key, deploy_slug = read_paired_manager_launch(manager_env_path)
+    key, deploy_slug = manager.launch()
     values = {
         LAUNCH_KEY_ENV: key,
         "MANAGER_DEPLOY_SLUG": deploy_slug,
@@ -883,27 +945,12 @@ def _module_display_name(project_slug: str) -> str:
     return " ".join(p.upper() if p == "nex" else p.capitalize() for p in parts) or project_slug
 
 
-def read_paired_manager_base_url(manager_env_path: Path) -> Optional[str]:
-    """The paired Manager's address on the PRIVATE network, from its own compose (ICCINT-59).
-
-    A token-launch app must ask the Manager who is signed in; with no address it refuses sign-in outright
-    ("an unreachable Manager is a fault, never a quiet pass"). The address is read from the Manager Deploy's
-    compose beside the ``.env`` we already read the launch key from — its backend ``container_name`` and that
-    SAME service's Traefik port — rather than assembled from the naming convention, so a Manager deployed under
-    a different name still resolves.
-
-    Both stacks sit on the shared proxy network, so the container name IS reachable; this deliberately does NOT
-    use the public URL — the call is internal and has no business leaving the host.
-
-    Parsed as YAML, per service. A line scan looked simpler and was wrong: it took the LAST port label in the
-    file, which belongs to the frontend, and produced ``http://…-backend:80``.
-
-    ``None`` when no Manager compose is there (the app then keeps whatever it had; token-launch stays off).
-    """
-    compose = manager_env_path.parent / "docker-compose.yml"
+def _manager_internal_url(compose_text: Optional[str]) -> Optional[str]:
+    """The Manager backend's ``http://<container_name>:<port>`` from its compose — see
+    :meth:`PairedManager.internal_url`."""
     try:
-        data = yaml.safe_load(compose.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        data = yaml.safe_load(compose_text or "")
+    except yaml.YAMLError:
         return None
     if not isinstance(data, dict):
         return None
@@ -927,8 +974,7 @@ def read_paired_manager_base_url(manager_env_path: Path) -> Optional[str]:
 
 
 def ensure_module_registered(
-    manager_env_path: Path,
-    manager_base_url: str,
+    manager: PairedManager,
     *,
     slug: str,
     display_name: str,
@@ -950,16 +996,22 @@ def ensure_module_registered(
     never given a provisioning token, must not sink a deploy that is otherwise fine — the app is still
     installed and the Manager can be told later. The warning names what to do rather than only what broke.
 
-    The provisioning token is read from the Manager's own ``.env`` and never logged, never returned.
+    The provisioning token is read from the Manager's own ``.env`` and never logged, never returned. The Manager is
+    asked at its ``api_url`` — on another machine its own address there (DEV-278).
     """
-    token = _parse_env_file(manager_env_path).get(PROVISIONING_TOKEN_ENV) or ""
+    token = manager.env.get(PROVISIONING_TOKEN_ENV) or ""
+    if not manager.api_url:
+        return None, (
+            f"Modul '{slug}' sa v párovom NEX Manageri nezaregistroval: kokpit nenašiel adresu, na ktorej Manager "
+            "odpovedá. Aplikácia je nasadená, ale nedá sa z Managera otvoriť, kým sa modul nezaregistruje."
+        )
     if not token:
         return None, (
             f"Modul '{slug}' sa v párovom NEX Manageri nezaregistroval: Manager nemá nastavený "
             "PROVISIONING_TOKEN. Aplikácia je nasadená, ale nedá sa z Managera otvoriť, kým sa modul nezaregistruje."
         )
     headers = {"X-Provisioning-Token": token}
-    api = f"{manager_base_url.rstrip('/')}/api/v1/modules"
+    api = f"{manager.api_url.rstrip('/')}/api/v1/modules"
     try:
         with httpx.Client(timeout=10.0) as client:
             existing = client.get(api, headers=headers)
@@ -1094,7 +1146,7 @@ def generate_uat_env(
     shared_db_password: str,
     preserved_secrets: Optional[dict[str, str]] = None,
     admin_password: Optional[str] = None,
-    manager_env_path: Optional[Path] = None,
+    paired_manager: Optional[PairedManager] = None,
     manager_base_url: Optional[str] = None,
     manager_api_key: Optional[str] = None,
     synthesised_secrets: Optional[list[str]] = None,
@@ -1118,7 +1170,7 @@ def generate_uat_env(
 
     Token-launch modules (those declaring ``MANAGER_LAUNCH_SIGNING_KEY``) are the ONE exception
     to synthesis: that key + ``MANAGER_DEPLOY_SLUG`` are wired from the paired NEX Manager Deploy
-    (``manager_env_path``) so the module verifies launch tokens with the same key the Manager
+    (``paired_manager``) so the module verifies launch tokens with the same key the Manager
     signs them with. Everything else (incl. the module-private ``MANAGER_SESSION_SIGNING_KEY``)
     stays synthetic/preserved as usual.
     """
@@ -1185,8 +1237,8 @@ def generate_uat_env(
     # lazily so non-token apps never touch it.
     mgr_launch_key: Optional[str] = None
     mgr_deploy_slug: Optional[str] = None
-    if manager_env_path is not None and LAUNCH_KEY_ENV in raw_env:
-        mgr_launch_key, mgr_deploy_slug = read_paired_manager_launch(manager_env_path)
+    if paired_manager is not None and LAUNCH_KEY_ENV in raw_env:
+        mgr_launch_key, mgr_deploy_slug = paired_manager.launch()
 
     rendered: dict[str, str] = {}
     for key, value in raw_env.items():
@@ -3376,10 +3428,13 @@ def provision_uat(
     # Paired NEX Manager Deploy — a sibling under the same customer root
     # (``<root>/<customer>/nex-manager/.env``). Only per-customer instances (cockpit
     # deploy) can be Manager-launched; the flat project-level UAT path has no customer,
-    # so no pairing (token-launch stays off there).
-    manager_env_path: Optional[Path] = None
+    # so no pairing (token-launch stays off there). DEV-278: read on the machine the installation runs on — the
+    # Manager of an installation on MAGER is the one on MAGER.
+    paired_manager: Optional[PairedManager] = None
     if per_customer and customer_slug:
-        manager_env_path = (prod_root if environment == "prod" else uat_root) / customer_slug / "nex-manager" / ".env"
+        paired_manager = load_paired_manager(
+            (prod_root if environment == "prod" else uat_root) / customer_slug / "nex-manager", deploy_host
+        )
 
     env_example = _parse_env_file(project_path / ".env.example")
     # DEV-72: who provides which setting — the app's markers in the same file — and the address the browser opens,
@@ -3403,18 +3458,22 @@ def provision_uat(
     manager_base_url: Optional[str] = None
     manager_api_key: Optional[str] = None
     registration_warning: Optional[str] = None
-    if manager_env_path is not None and LAUNCH_KEY_ENV in env_example:
-        manager_base_url = read_paired_manager_base_url(manager_env_path)
+    if paired_manager is not None and LAUNCH_KEY_ENV in env_example:
+        # The app asks the Manager at its address on the network of their machine; the cockpit registers the app
+        # where it can reach the Manager (DEV-278).
+        manager_base_url = paired_manager.internal_url()
         if manager_base_url:
             _nb, app_host = _instance_naming(
                 environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
             )
+            # On another machine an installation that stands keeps the address its own routers give it: MÁGERSTAV's
+            # NEX Inbox is opened at magerstav-inbox.icc.sk, not at the name the cockpit would give it (DEV-278).
+            own = _own_https_addresses(existing_compose_text) if deploy_host else []
             manager_api_key, registration_warning = ensure_module_registered(
-                manager_env_path,
-                manager_base_url,
+                paired_manager,
                 slug=project_slug,
                 display_name=_module_display_name(project_slug),
-                app_url=f"https://{app_host}",
+                app_url=own[0] if own else f"https://{app_host}",
             )
 
     synthesised_secrets: list[str] = []
@@ -3435,7 +3494,7 @@ def provision_uat(
         shared_db_password=shared_db_password,
         preserved_secrets=preserved_secrets,
         admin_password=admin_password,
-        manager_env_path=manager_env_path,
+        paired_manager=paired_manager,
         manager_base_url=manager_base_url,
         manager_api_key=manager_api_key,
         synthesised_secrets=synthesised_secrets,
@@ -3645,17 +3704,14 @@ def provision_uat(
         warnings.extend(
             fill_empty_database_connection(env_riadky, _parse_env_text(env_content), (povysene.get("services") or {}))
         )
-        # DEV-272 — the pairing comes from the Manager, also into an existing installation. Not for an installation on
-        # another machine: its Manager lives there, and what this cockpit could read would be a copy at best.
-        if not deploy_host:
-            prepojene = renew_pairing(
-                env_riadky,
-                paired_manager_values(
-                    manager_env_path, manager_base_url=manager_base_url, manager_api_key=manager_api_key
-                ),
-            )
-            if prepojene:
-                warnings.append(PAIRING_RENEWED.format(what=", ".join(prepojene)))
+        # DEV-272 — the pairing comes from the Manager, also into an existing installation. DEV-278: on another machine
+        # too — its Manager is read there.
+        prepojene = renew_pairing(
+            env_riadky,
+            paired_manager_values(paired_manager, manager_base_url=manager_base_url, manager_api_key=manager_api_key),
+        )
+        if prepojene:
+            warnings.append(PAIRING_RENEWED.format(what=", ".join(prepojene)))
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
         instalacia = povysene
     else:

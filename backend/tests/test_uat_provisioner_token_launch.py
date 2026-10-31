@@ -15,10 +15,10 @@ import textwrap
 from pathlib import Path
 
 from backend.services.uat_provisioner import (
+    PairedManager,
     generate_uat_env,
     launch_pairing_warning,
     provision_uat,
-    read_paired_manager_launch,
     validate_rendered_launch_wiring,
 )
 
@@ -53,22 +53,22 @@ def _render(source_env, *, manager_env_path=None, preserved=None, **kw):
         db_name="app",
         shared_db_password="pw",
         preserved_secrets=preserved,
-        manager_env_path=manager_env_path,
+        paired_manager=PairedManager.here(manager_env_path.parent) if manager_env_path else None,
         **kw,
     )
 
 
-# ── read_paired_manager_launch ───────────────────────────────────────────────
+# ── PairedManager.launch ───────────────────────────────────────────────
 
 
-def test_read_paired_manager_launch_reads_key_and_slug(tmp_path: Path) -> None:
-    key, slug = read_paired_manager_launch(_write_manager_env(tmp_path))
+def test_the_paired_manager_gives_its_launch_key_and_slug(tmp_path: Path) -> None:
+    key, slug = PairedManager.here(_write_manager_env(tmp_path).parent).launch()
     assert key == "manager-shared-launch-key-FAKE"
     assert slug == "andros-uat"
 
 
-def test_read_paired_manager_launch_missing_file_is_none(tmp_path: Path) -> None:
-    assert read_paired_manager_launch(tmp_path / "nope" / ".env") == (None, None)
+def test_no_manager_gives_no_launch_key(tmp_path: Path) -> None:
+    assert PairedManager.here(tmp_path / "nope").launch() == (None, None)
 
 
 # ── generate_uat_env wiring ──────────────────────────────────────────────────
@@ -276,9 +276,7 @@ def test_the_manager_address_comes_from_the_backend_service_not_the_last_port_in
     )
     (tmp_path / ".env").write_text("LAUNCH_SIGNING_KEY=k\n", encoding="utf-8")
 
-    from backend.services.uat_provisioner import read_paired_manager_base_url
-
-    assert read_paired_manager_base_url(tmp_path / ".env") == "http://uat-andros-manager-backend:8000"
+    assert PairedManager.here(tmp_path).internal_url() == "http://uat-andros-manager-backend:8000"
 
 
 def test_a_manager_with_no_provisioning_token_warns_instead_of_sinking_the_deploy(tmp_path):
@@ -289,8 +287,7 @@ def test_a_manager_with_no_provisioning_token_warns_instead_of_sinking_the_deplo
     from backend.services.uat_provisioner import ensure_module_registered
 
     key, warning = ensure_module_registered(
-        tmp_path / ".env",
-        "http://manager:8000",
+        PairedManager({"LAUNCH_SIGNING_KEY": "k"}, api_url="http://manager:8000"),
         slug="nex-productcatalogs",
         display_name="NEX Productcatalogs",
         app_url="https://uat-andros-productcatalogs.isnex.eu",
