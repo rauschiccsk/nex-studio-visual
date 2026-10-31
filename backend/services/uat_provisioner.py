@@ -64,7 +64,7 @@ import httpx
 import jinja2
 import yaml
 
-from backend.services import env_contract, project_surfaces, remote_instance
+from backend.services import env_contract, launch_pairing, project_surfaces, remote_instance
 
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +129,16 @@ LAUNCH_KEY_ENV = "MANAGER_LAUNCH_SIGNING_KEY"
 #: key. Both were left blank by the template, so a deployed token-launch app came up refusing every sign-in.
 MANAGER_BASE_URL_ENV = "NEX_MANAGER_BASE_URL"
 MANAGER_API_KEY_ENV = "NEX_MANAGER_API_KEY"
+#: The NEX Manager's key for the deployer's own module registration (ICCINT-59) — read from its ``.env``.
+PROVISIONING_TOKEN_ENV = "PROVISIONING_TOKEN"
+#: DEV-268 — secrets of an installation that the cockpit itself reads back from it: the NEX Manager's registration key
+#: (:func:`ensure_module_registered`) and its launch key, which the cockpit pairs every module with. A random value is
+#: exactly right for them; naming them in „Tieto tajomstvá nikto nedodal…“ asked the Manažér to act where nothing is
+#: wrong (the adoption of ICC's NEX Manager, 30.10.2026). Keyed by project: another app's key of the same name is not
+#: read by the cockpit.
+SECRETS_THE_COCKPIT_READS = {
+    launch_pairing.MANAGER_PROJECT: frozenset({PROVISIONING_TOKEN_ENV, launch_pairing.MANAGER_KEY}),
+}
 
 # The ONE env var that is a HUMAN's login (the initial admin password), not a machine secret. The manager must
 # KNOW it to use the deployed app, so a per-customer deploy sets it to the customer secret (which the manager
@@ -870,7 +880,7 @@ def ensure_module_registered(
 
     The provisioning token is read from the Manager's own ``.env`` and never logged, never returned.
     """
-    token = _parse_env_file(manager_env_path).get("PROVISIONING_TOKEN") or ""
+    token = _parse_env_file(manager_env_path).get(PROVISIONING_TOKEN_ENV) or ""
     if not token:
         return None, (
             f"Modul '{slug}' sa v párovom NEX Manageri nezaregistroval: Manager nemá nastavený "
@@ -2084,6 +2094,11 @@ def services_missing_against_source(instance_dir: Path, source: dict[str, Any]) 
     for meno, definicia in zdrojove.items():
         if meno in mena_nase:
             continue
+        # DEV-268: a service behind a compose profile (NEX Manager's ``test``, ``test-db`` under ``test``) is not
+        # started by a plain ``up`` — CI asks for it, an installation never has it. Reporting it warned at every
+        # adoption of such a project (ICC's NEX Manager, 30.10.2026) about something nobody should add.
+        if isinstance(definicia, dict) and definicia.get("profiles"):
+            continue
         uloha = zdroj_meno_na_ulohu.get(meno)
         if uloha and uloha in nase_ulohy:
             continue
@@ -3241,6 +3256,10 @@ def provision_uat(
         )
     if registration_warning:
         warnings.append(registration_warning)
+    # DEV-268: the ones the cockpit reads back itself are no one's to supply.
+    synthesised_secrets = [
+        k for k in synthesised_secrets if k not in SECRETS_THE_COCKPIT_READS.get(full_project_slug or project_slug, ())
+    ]
     if synthesised_secrets:
         # ICCINT-67: say WHICH secrets nobody supplied. They hold real random values, so nothing is open —
         # but a secret that must match an external system (webhook, paired service) will fail until it is
