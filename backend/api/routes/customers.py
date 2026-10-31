@@ -34,8 +34,10 @@ from backend.schemas.customer import (
     CustomerSettingRead,
     CustomerSettingsContractRead,
     CustomerUpdate,
+    ProdMachineRead,
 )
 from backend.services import customer as customer_service
+from backend.services import prod_machines
 
 router = APIRouter(tags=["Customers"])
 
@@ -61,6 +63,8 @@ def _to_read(customer: Customer, db: Session) -> CustomerRead:
         subdomain=customer.subdomain,
         integrations=customer.integrations,
         notes=customer.notes,
+        prod_host=customer.prod_host or "",
+        prod_machine=prod_machines.label(customer.prod_host),
         has_secret=customer.credential_id is not None,
         settings=dict(customer.settings or {}),
         secret_settings_set=customer_service.secret_setting_keys(db, customer),
@@ -72,6 +76,12 @@ def _to_read(customer: Customer, db: Session) -> CustomerRead:
 # ---------------------------------------------------------------------------
 # Project-scoped endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/prod-machines", response_model=list[ProdMachineRead])
+def list_prod_machines(current_user: User = Depends(get_current_user)) -> list[ProdMachineRead]:
+    """DEV-274 — the machines a customer's PROD may run on, for the choice on the customer form."""
+    return [ProdMachineRead(value=value, label=label) for value, label in prod_machines.choices()]
 
 
 @router.get("/projects/{slug}/customers", response_model=list[CustomerRead])

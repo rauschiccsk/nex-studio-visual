@@ -35,6 +35,8 @@ vi.mock("@/services/api/customers", () => ({
   createCustomer: createCustomerMock,
   updateCustomer: updateCustomerMock,
   deleteCustomer: vi.fn(),
+  // DEV-274: no other machine known — the form offers no choice of the PROD machine.
+  listProdMachines: () => Promise.resolve([]),
   getCustomerSettingsContract: contractMock,
 }));
 
@@ -60,6 +62,8 @@ const ICC: CustomerRead = {
   has_secret: true,
   settings: { BOOTSTRAP_ADMIN_EMAIL: "spravca@icc.sk" },
   secret_settings_set: [],
+  prod_host: "",
+  prod_machine: "ANDROS",
   created_at: "2026-10-12T08:00:00Z",
   updated_at: "2026-10-12T08:00:00Z",
 };

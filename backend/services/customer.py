@@ -35,7 +35,7 @@ from backend.db.models.projects import Project
 from backend.schemas.credentials import CredentialCreate
 from backend.schemas.customer import CustomerCreate, CustomerUpdate
 from backend.services import credentials as credentials_service
-from backend.services import env_contract
+from backend.services import env_contract, prod_machines
 
 
 def _credential_filename(project_id: UUID, slug: str) -> str:
@@ -255,6 +255,7 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
     if secret_values:
         settings_credential_id = _write_secret_settings(db, project_id, data.slug, None, secret_values)
 
+    prod_host = prod_machines.check(data.prod_host)  # DEV-274 — before anything is written
     customer = Customer(
         project_id=project_id,
         name=data.name,
@@ -262,6 +263,7 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
         subdomain=data.subdomain,
         integrations=data.integrations,
         notes=data.notes,
+        prod_host=prod_host or None,
         credential_id=credential_id,
         settings=_plain_settings(data.settings),
         settings_credential_id=settings_credential_id,
@@ -287,6 +289,8 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
     """
     customer = get_by_id(db, customer_id)
     _check_settings(db, customer.project_id, data.settings, data.secret_settings)
+    # DEV-274 — the machine is checked with every other conflict, before any mutation.
+    new_prod_host = prod_machines.check(data.prod_host) if data.prod_host is not None else None
 
     # Every conflict check runs BEFORE any mutation — a rejected edit must leave the
     # in-session row untouched, not half-applied waiting on the router's rollback.
@@ -328,6 +332,8 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
         customer.integrations = data.integrations
     if data.notes is not None:
         customer.notes = data.notes
+    if new_prod_host is not None:
+        customer.prod_host = new_prod_host or None
 
     if data.secret is not None:
         if customer.credential_id is not None:

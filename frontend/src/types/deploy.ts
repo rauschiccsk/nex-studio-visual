@@ -68,6 +68,8 @@ export interface DeployMatrixRow {
   uat_version: string | null;
   /** Currently deployed PROD version (null = never deployed there). */
   prod_version: string | null;
+  /** DEV-274: the machine PROD is deployed to, as the screen names it (ANDROS, MAGER). */
+  prod_machine?: string;
   /** True when the customer's NEWEST UAT deploy attempt failed — the cell shows the last-good version but the
    *  upgrade didn't land; surfaced so a failed deploy never reads as a green cell (audit #5). */
   uat_last_attempt_failed: boolean;

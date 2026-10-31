@@ -95,6 +95,11 @@ class CustomerCreate(BaseModel):
         description="Per-customer external systems config (non-secret). Secrets go to the secret field.",
     )
     notes: Optional[str] = Field(default=None, description="Optional free-text note.")
+    prod_host: Optional[str] = Field(
+        default=None,
+        description="DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of "
+        "machines (settings.prod_machines); empty = this machine. Omitted = unchanged.",
+    )
     secret: Optional[str] = Field(
         default=None,
         description=(
@@ -146,6 +151,11 @@ class CustomerUpdate(BaseModel):
     subdomain: Optional[str] = Field(default=None, max_length=255)
     integrations: Optional[dict[str, Any]] = Field(default=None)
     notes: Optional[str] = Field(default=None)
+    prod_host: Optional[str] = Field(
+        default=None,
+        description="DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of "
+        "machines (settings.prod_machines); empty = this machine. Omitted = unchanged.",
+    )
     secret: Optional[str] = Field(
         default=None,
         description="Write-only — rotates the stored per-customer secret. Never persisted on the row / echoed.",
@@ -209,6 +219,10 @@ class CustomerRead(BaseModel):
     subdomain: Optional[str] = None
     integrations: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
+    prod_host: str = Field(
+        default="", description="DEV-274: the machine the customer's PROD runs on; empty = this one."
+    )
+    prod_machine: str = Field(default="", description="DEV-274: that machine as the screen names it (ANDROS, MAGER).")
     has_secret: bool = Field(default=False, description="True iff a per-customer secret is recorded in the store.")
     settings: dict[str, str] = Field(default_factory=dict, description="DEV-72: the @customer values.")
     secret_settings_set: list[str] = Field(
@@ -234,3 +248,10 @@ class CustomerSettingsContractRead(BaseModel):
     settings: list[CustomerSettingRead]
     problems: list[str] = Field(default_factory=list, description="Markers that mean nothing (misspelt, misplaced).")
     legacy_admin: bool = Field(description="The app takes its admin password from ADMIN_INITIAL_PASSWORD (Tajný kľúč).")
+
+
+class ProdMachineRead(BaseModel):
+    """DEV-274: one machine a customer's PROD may run on — ``value`` is what ``prod_host`` stores ("" = this one)."""
+
+    value: str
+    label: str

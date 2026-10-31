@@ -18,6 +18,10 @@ export interface CustomerRead {
   subdomain: string | null;
   integrations: Record<string, unknown> | null;
   notes: string | null;
+  /** DEV-274: the machine the customer's PROD runs on — "" = this machine. */
+  prod_host: string;
+  /** DEV-274: that machine as the screen names it (ANDROS, MAGER). */
+  prod_machine: string;
   has_secret: boolean;
   /** DEV-72: values of the settings the app marks `@customer`. */
   settings: Record<string, string>;
@@ -52,6 +56,8 @@ export interface CustomerCreate {
   subdomain?: string | null;
   integrations?: Record<string, unknown> | null;
   notes?: string | null;
+  /** DEV-274: the machine PROD runs on — "" = this machine. */
+  prod_host?: string | null;
   /** Write-only — handed to the credentials store; never returned. */
   secret?: string | null;
   settings?: Record<string, string> | null;
@@ -65,10 +71,18 @@ export interface CustomerUpdate {
   subdomain?: string | null;
   integrations?: Record<string, unknown> | null;
   notes?: string | null;
+  /** DEV-274: the machine PROD runs on — "" = this machine; omitted = unchanged. */
+  prod_host?: string | null;
   /** Write-only — rotates the stored secret; never returned. */
   secret?: string | null;
   /** Replaces the stored settings; an empty value removes one. */
   settings?: Record<string, string> | null;
   /** Write-only — only the given non-empty values change; the others stay. */
   secret_settings?: Record<string, string> | null;
+}
+
+/** DEV-274: a machine a customer's PROD may run on — `value` is what `prod_host` stores ("" = this machine). */
+export interface ProdMachine {
+  value: string;
+  label: string;
 }

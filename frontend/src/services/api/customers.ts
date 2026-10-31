@@ -4,7 +4,13 @@ import type {
   CustomerRead,
   CustomerSettingsContract,
   CustomerUpdate,
+  ProdMachine,
 } from "../../types/customer";
+
+/** DEV-274: the machines a customer's PROD may run on, for the choice on the customer form. */
+export function listProdMachines(): Promise<ProdMachine[]> {
+  return api.get<ProdMachine[]>("/prod-machines");
+}
 
 /** DEV-72: what the project asks of each customer — the settings its `.env.example` marks. */
 export function getCustomerSettingsContract(slug: string): Promise<CustomerSettingsContract> {

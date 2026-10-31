@@ -1461,6 +1461,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/prod-machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Prod Machines
+         * @description DEV-274 — the machines a customer's PROD may run on, for the choice on the customer form.
+         */
+        get: operations["list_prod_machines_api_v1_prod_machines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/project-specs/content": {
         parameters: {
             query?: never;
@@ -4438,6 +4458,11 @@ export interface components {
              */
             notes?: string | null;
             /**
+             * Prod Host
+             * @description DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of machines (settings.prod_machines); empty = this machine. Omitted = unchanged.
+             */
+            prod_host?: string | null;
+            /**
              * Secret
              * @description Write-only per-customer secret material. Handed to the credentials store; NEVER stored on the customer row and NEVER returned in any response.
              */
@@ -4502,6 +4527,18 @@ export interface components {
             name: string;
             /** Notes */
             notes?: string | null;
+            /**
+             * Prod Host
+             * @description DEV-274: the machine the customer's PROD runs on; empty = this one.
+             * @default
+             */
+            prod_host: string;
+            /**
+             * Prod Machine
+             * @description DEV-274: that machine as the screen names it (ANDROS, MAGER).
+             * @default
+             */
+            prod_machine: string;
             /**
              * Project Id
              * Format: uuid
@@ -4581,6 +4618,11 @@ export interface components {
             name?: string | null;
             /** Notes */
             notes?: string | null;
+            /**
+             * Prod Host
+             * @description DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of machines (settings.prod_machines); empty = this machine. Omitted = unchanged.
+             */
+            prod_host?: string | null;
             /**
              * Secret
              * @description Write-only — rotates the stored per-customer secret. Never persisted on the row / echoed.
@@ -5169,6 +5211,12 @@ export interface components {
              * @description Same, for PROD.
              */
             prod_last_deploy_warnings?: string[];
+            /**
+             * Prod Machine
+             * @description DEV-274: the machine PROD is deployed to, as the screen names it.
+             * @default
+             */
+            prod_machine: string;
             /**
              * Prod Url
              * @description Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.
@@ -6707,6 +6755,16 @@ export interface components {
             max_bytes: number;
             /** Max Label */
             max_label: string;
+        };
+        /**
+         * ProdMachineRead
+         * @description DEV-274: one machine a customer's PROD may run on — ``value`` is what ``prod_host`` stores ("" = this one).
+         */
+        ProdMachineRead: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
         };
         /** ProjectCostsRead */
         ProjectCostsRead: {
@@ -11196,6 +11254,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaStatus"];
+                };
+            };
+        };
+    };
+    list_prod_machines_api_v1_prod_machines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProdMachineRead"][];
                 };
             };
         };

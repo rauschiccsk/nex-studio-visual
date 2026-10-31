@@ -143,6 +143,9 @@ class DeployMatrixRow(BaseModel):
     subdomain: Optional[str] = None
     uat_version: Optional[str] = Field(default=None, description="Currently deployed UAT version (None = never).")
     prod_version: Optional[str] = Field(default=None, description="Currently deployed PROD version (None = never).")
+    prod_machine: str = Field(
+        default="", description="DEV-274: the machine PROD is deployed to, as the screen names it."
+    )
     uat_last_attempt_failed: bool = Field(
         default=False,
         description="True when the customer's newest UAT deploy attempt FAILED (the cell shows the last-good "

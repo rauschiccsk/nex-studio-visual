@@ -558,6 +558,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                     <td className="px-3 py-3 max-md:block max-md:py-1.5">
                       <div className="font-medium text-[var(--color-text-primary)]">{row.customer_name}</div>
                       <div className="font-mono text-[11px] text-[var(--color-text-muted)]">{row.customer_slug}</div>
+                      {environment === "prod" && row.prod_machine && (
+                        <div className="text-[11px] text-[var(--color-text-muted)]">na stroji {row.prod_machine}</div>
+                      )}
                     </td>
 
                     {/* Currently deployed version in this environment */}

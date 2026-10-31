@@ -460,6 +460,8 @@ const CUSTOMER: S["CustomerRead"] = {
   notes: "Faktúry doručuje do NEX Genesis na srv-mager-w2012 v Tonkovciach.",
   settings: { BOOTSTRAP_ADMIN_EMAIL: "spravca.faktur@magerstav.example.sk" },
   secret_settings_set: ["BOOTSTRAP_ADMIN_PASSWORD"],
+  prod_host: "mager",
+  prod_machine: "MAGER",
   created_at: T0,
   updated_at: T1,
 };
@@ -513,6 +515,7 @@ const DEPLOY_MATRIX: S["DeployMatrix"] = {
         "Aplikácia je nasadená a beží, ale spustenie jedným kliknutím (tlačidlo „Spustiť“) zatiaľ nefunguje: nie je nasadený NEX Manager tohto zákazníka.",
       ],
       prod_last_attempt_failed: false,
+      prod_machine: "ANDROS",
     },
     {
       customer_id: NEW_CUSTOMER.id,
@@ -532,6 +535,7 @@ const DEPLOY_MATRIX: S["DeployMatrix"] = {
       prod_last_deploy_detail: null,
       prod_last_deploy_warnings: [],
       prod_last_attempt_failed: false,
+      prod_machine: "ANDROS",
     },
   ],
 };
@@ -1100,6 +1104,10 @@ export function registerFixtures(): void {
     ],
   });
   answer("get", "/api/v1/projects/{slug}/customers", [CUSTOMER, NEW_CUSTOMER]);
+  answer("get", "/api/v1/prod-machines", [
+    { value: "", label: "ANDROS" },
+    { value: "mager", label: "MAGER" },
+  ]);
   answer("get", "/api/v1/projects/{slug}/customer-settings", {
     settings: [
       { key: "APP_PUBLIC_URL", kind: "public_url", required: false, label: "APP_PUBLIC_URL" },

@@ -94,6 +94,7 @@ from backend.services import (
     deploy_progress,
     launch_pairing,
     private_access,
+    prod_machines,
     project_surfaces,
     uat_provisioner,
 )
@@ -815,6 +816,8 @@ def build_matrix(
                 "subdomain": customer.subdomain,
                 "uat_version": uat_version,
                 "prod_version": prod_version,
+                # DEV-274: the machine PROD goes to — the PROD page says it at the customer's row.
+                "prod_machine": prod_machines.label(customer.prod_host),
                 # Honest-by-construction (audit #5): a failed newest attempt must not read as a green cell —
                 # surface it alongside the last-good version so the manager sees the upgrade didn't land.
                 "uat_last_attempt_failed": last_deploy_attempt_failed(db, customer.id, "uat"),

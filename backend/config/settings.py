@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # installation on ANDROS through, minus the edge. The checks after a deploy ask it with the installation's name in
     # ``Host``: the edge refuses a container (Cloudflare's WAF, the private zone's nginx lets in Tailscale only).
     uat_traefik_host: str = "nex-uat-traefik"
+    # DEV-274: the machines a customer's PROD may run on besides this one — {ssh name: label on screen}. The cockpit
+    # reaches them with DOCKER_HOST=ssh://<name> and its own Docker-only key; this machine is the empty value.
+    prod_machines: dict[str, str] = {"mager": "MAGER"}
+    this_machine_label: str = "ANDROS"
     uat_traefik_port: int = 80
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
     # asks for it at every new message of a build, and the history moves only when a build does.

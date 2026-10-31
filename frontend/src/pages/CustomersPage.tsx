@@ -8,6 +8,7 @@ import {
   updateCustomer,
   deleteCustomer,
   getCustomerSettingsContract,
+  listProdMachines,
 } from "@/services/api/customers";
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
@@ -15,7 +16,7 @@ import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import CustomerSettingsFields from "@/components/customers/CustomerSettingsFields";
 import { customerSettings, missingRequired } from "@/lib/customerSettings";
-import type { CustomerRead, CustomerSettingsContract } from "@/types/customer";
+import type { CustomerRead, CustomerSettingsContract, ProdMachine } from "@/types/customer";
 
 /**
  * The shape the deploy path can actually use. `deploy._customer_dir_slug` derives a customer's instance
@@ -74,6 +75,9 @@ export default function CustomersPage() {
   const [subdomain, setSubdomain] = useState("");
   const [integrations, setIntegrations] = useState("");
   const [notes, setNotes] = useState("");
+  // DEV-274: where the customer's PROD runs — "" = this machine; the choices come from the cockpit's list.
+  const [prodHost, setProdHost] = useState("");
+  const [machines, setMachines] = useState<ProdMachine[]>([]);
   const [secret, setSecret] = useState("");
   // DEV-72: what the app asks of each customer (its `.env.example` markers) and what the form holds for them.
   // `null` = not known yet. DEV-164: a request that failed is said (`contractError`) — 22.10.2026 a 500 here showed a
@@ -115,6 +119,16 @@ export default function CustomersPage() {
   }, [load]);
 
   useEffect(() => {
+    let alive = true;
+    listProdMachines()
+      .then((m) => alive && setMachines(m))
+      .catch(() => alive && setMachines([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!slug) return;
     let alive = true;
     setContractError(null);
@@ -141,6 +155,7 @@ export default function CustomersPage() {
     setSubdomain("");
     setIntegrations("");
     setNotes("");
+    setProdHost("");
     setSecret("");
     setSettingValues({});
     setSecretValues({});
@@ -160,6 +175,7 @@ export default function CustomersPage() {
     setSubdomain((c.subdomain ?? "").toLowerCase());
     setIntegrations(c.integrations ? JSON.stringify(c.integrations, null, 2) : "");
     setNotes(c.notes ?? "");
+    setProdHost(c.prod_host ?? "");
     setSecret("");
     setSettingValues({ ...(c.settings ?? {}) });
     setSecretValues({});
@@ -201,6 +217,7 @@ export default function CustomersPage() {
       subdomain: subdomain.trim() || null,
       integrations: integrationsParsed,
       notes: notes.trim() || null,
+      prod_host: prodHost,
       // Write-only: a blank secret sends null, which the PATCH treats as "leave the stored secret unchanged"
       // (the backend skips null fields) — so editing never wipes an existing secret; a typed value rotates it.
       secret: secret ? secret : null,
@@ -364,6 +381,26 @@ export default function CustomersPage() {
                 </span>
               )}
             </label>
+            {machines.length > 0 && (
+              <label className="block text-xs">
+                <span className="text-[var(--color-text-secondary)]">Ostrý stroj (PROD)</span>
+                <select
+                  value={prodHost}
+                  onChange={(e) => setProdHost(e.target.value)}
+                  className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                >
+                  {machines.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  Kam kokpit nasadí PROD tohto zákazníka. Zmena nič nepresunie — inštalácia na pôvodnom stroji ostáva,
+                  kým ju niekto neodstráni.
+                </span>
+              </label>
+            )}
             {offersLegacySecret && (
               <label className="block text-xs">
                 <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
@@ -490,6 +527,7 @@ export default function CustomersPage() {
                 {c.subdomain && (
                   <div className="mt-0.5 font-mono text-[11px] text-[var(--color-text-muted)]">{c.subdomain}</div>
                 )}
+                <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">PROD na stroji {c.prod_machine}</div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
                 <button
