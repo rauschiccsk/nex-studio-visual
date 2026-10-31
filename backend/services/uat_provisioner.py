@@ -64,7 +64,7 @@ import httpx
 import jinja2
 import yaml
 
-from backend.services import env_contract, launch_pairing, project_surfaces, remote_instance
+from backend.services import env_contract, launch_pairing, prod_machines, project_surfaces, remote_instance
 
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
@@ -102,8 +102,43 @@ PRIVATE_DOMAIN_SUFFIX = "int.isnex.eu"
 
 
 def domain_suffix(private: bool) -> str:
-    """The zone an installation's and a Vizuál preview's names live in — the ONE place that decides (DEV-42)."""
+    """The zone an installation's and a Vizuál preview's names live in on this machine (DEV-42)."""
     return PRIVATE_DOMAIN_SUFFIX if private else UAT_DOMAIN_SUFFIX
+
+
+#: This machine's Traefik entrypoint: plain http, TLS ends before it (Cloudflare, nginx).
+THIS_MACHINES_ENTRYPOINT = "web"
+
+
+@dataclass(frozen=True)
+class Routing:
+    """How the Traefik of the machine an installation runs on names and reaches it (DEV-275).
+
+    The zone of its names, the network, the entrypoint, the certificate resolver (empty = none) and what follows the
+    name base in the routers' names. A new installation on another machine was named and routed like one on this
+    machine — ``icc-manager.isnex.eu`` on ``nex-proxy-net``, which on MAGER leads nowhere."""
+
+    zone: str
+    network: str
+    entrypoint: str = THIS_MACHINES_ENTRYPOINT
+    certresolver: str = ""
+    router_suffix: str = ""
+
+
+def routing_for(deploy_host: Optional[str] = None, *, private: bool = False) -> Routing:
+    """The routing of the machine ``deploy_host`` (``None`` = this one) — the ONE place that decides an installation's
+    zone and Traefik routing. On another machine the zone is that machine's, private project or not: MAGER is reached
+    over Tailscale only."""
+    machine = prod_machines.machine(deploy_host)
+    if machine is None:
+        return Routing(zone=domain_suffix(private), network=PROXY_NETWORK)
+    return Routing(
+        zone=machine.zone,
+        network=machine.network,
+        entrypoint=machine.entrypoint,
+        certresolver=machine.certresolver,
+        router_suffix=machine.router_suffix,
+    )
 
 
 # Traefik router priorities — the BE ``/api`` split wins over the FE catch-all.
@@ -2306,7 +2341,13 @@ def assert_writable_instance_dir(instance_dir: Path, *, allow_overwrite: bool = 
 
 
 def _instance_naming(
-    environment: str, uat_slug: str, customer_slug: Optional[str], app: Optional[str], *, private: bool = False
+    environment: str,
+    uat_slug: str,
+    customer_slug: Optional[str],
+    app: Optional[str],
+    *,
+    private: bool = False,
+    deploy_host: Optional[str] = None,
 ) -> tuple[str, str]:
     """The ``(name_base, host)`` for an instance's compose/container/image/router ids + public vhost.
 
@@ -2314,7 +2355,7 @@ def _instance_naming(
     (audit fix 2026-07-11 — the per-customer UAT is per-PROJECT, not the old flat ``uat-<customer>-uat``).
     Project-level UAT (no customer_slug, the uat-deploy.py path) → ``uat-<uat_slug>`` (unchanged). The host is
     always ``<name_base>.<suffix>``, so both route via Traefik on the clean host — the suffix is the private zone
-    for a ``private`` project (DEV-42), else the public one.
+    for a ``private`` project (DEV-42), else the public one; on another machine (``deploy_host``) its own (DEV-275).
     """
     if customer_slug and app:
         base = f"{customer_slug}-{app}"
@@ -2323,24 +2364,41 @@ def _instance_naming(
         raise ValueError("prod instance naming requires customer_slug + app")
     else:
         name_base = f"uat-{uat_slug}"
-    return name_base, f"{name_base}.{domain_suffix(private)}"
+    return name_base, f"{name_base}.{routing_for(deploy_host, private=private).zone}"
 
 
-def frontend_traefik_labels(name_base: str, fe_internal_port: int, host: str) -> list[str]:
+def _route_labels(router: str, service: str, rule: str, priority: int, port: int, routing: Routing) -> list[str]:
+    """One router with its service, on ``routing``'s machine (DEV-275). The router names its service only when the
+    names differ, and asks for a certificate only where the machine's Traefik issues one — on this machine the labels
+    stay exactly what they were."""
+    labels = [
+        "traefik.enable=true",
+        f"traefik.docker.network={routing.network}",
+        f"traefik.http.routers.{router}.rule={rule}",
+        f"traefik.http.routers.{router}.entrypoints={routing.entrypoint}",
+        f"traefik.http.routers.{router}.priority={priority}",
+    ]
+    if router != service:
+        labels.append(f"traefik.http.routers.{router}.service={service}")
+    if routing.certresolver:
+        labels.append(f"traefik.http.routers.{router}.tls.certresolver={routing.certresolver}")
+    labels.append(f"traefik.http.services.{service}.loadbalancer.server.port={port}")
+    return labels
+
+
+def frontend_traefik_labels(
+    name_base: str, fe_internal_port: int, host: str, routing: Optional[Routing] = None
+) -> list[str]:
     """The FE service's Traefik labels — the catch-all ``Host(<host>)`` route.
 
     ``name_base`` is the router/service id base (``uat-<slug>`` for UAT, ``<customer>-<app>`` for
     PROD); ``host`` the matching public vhost. Traefik stays ENABLED for both environments — PROD
-    keeps its labels, just with the clean host + prefix-free router ids.
+    keeps its labels, just with the clean host + prefix-free router ids. ``routing`` is the machine's (DEV-275),
+    this one when not given.
     """
-    return [
-        "traefik.enable=true",
-        f"traefik.docker.network={PROXY_NETWORK}",
-        f"traefik.http.routers.{name_base}.rule=Host(`{host}`)",
-        f"traefik.http.routers.{name_base}.entrypoints=web",
-        f"traefik.http.routers.{name_base}.priority={FE_ROUTER_PRIORITY}",
-        f"traefik.http.services.{name_base}.loadbalancer.server.port={fe_internal_port}",
-    ]
+    routing = routing or routing_for()
+    router = f"{name_base}{routing.router_suffix}"
+    return _route_labels(router, name_base, f"Host(`{host}`)", FE_ROUTER_PRIORITY, fe_internal_port, routing)
 
 
 def frontend_routes(
@@ -2355,24 +2413,22 @@ def frontend_routes(
     return [(s, f"{name_base}{s.address_suffix}", f"{name_base}{s.address_suffix}.{zone}") for s in surfaces]
 
 
-def backend_traefik_labels(name_base: str, be_internal_port: int, host: str | list[str]) -> list[str]:
+def backend_traefik_labels(
+    name_base: str, be_internal_port: int, host: str | list[str], routing: Optional[Routing] = None
+) -> list[str]:
     """The BE service's Traefik labels — the higher-priority ``/api`` PathPrefix split.
 
-    ``name_base``/``host`` are per-env (see :func:`frontend_traefik_labels`); the router/service id
-    is ``<name_base>-api``. DEV-164: a Web project's backend answers ``/api`` on the host of every frontend.
+    ``name_base``/``host`` are per-env (see :func:`frontend_traefik_labels`); the service id is ``<name_base>-api``,
+    the router's the same with the machine's suffix before ``-api`` (DEV-275: ``icc-manager-sec-api`` on MAGER).
+    DEV-164: a Web project's backend answers ``/api`` on the host of every frontend.
     """
+    routing = routing or routing_for()
     hosts = [host] if isinstance(host, str) else list(host)
     rule = (
         f"Host(`{hosts[0]}`)" if len(hosts) == 1 else "(" + " || ".join(f"Host(`{h}`)" for h in hosts) + ")"
     ) + " && PathPrefix(`/api`)"
-    return [
-        "traefik.enable=true",
-        f"traefik.docker.network={PROXY_NETWORK}",
-        f"traefik.http.routers.{name_base}-api.rule={rule}",
-        f"traefik.http.routers.{name_base}-api.entrypoints=web",
-        f"traefik.http.routers.{name_base}-api.priority={BE_ROUTER_PRIORITY}",
-        f"traefik.http.services.{name_base}-api.loadbalancer.server.port={be_internal_port}",
-    ]
+    router = f"{name_base}{routing.router_suffix}-api"
+    return _route_labels(router, f"{name_base}-api", rule, BE_ROUTER_PRIORITY, be_internal_port, routing)
 
 
 # ---------------------------------------------------------------------------
@@ -2448,16 +2504,17 @@ def _networks_as_list(raw: Any) -> list[str]:
 
 
 def cockpit_routing(
-    src_services: dict[str, Any], roles: dict[str, Optional[str]], name_base: str, host: str
+    src_services: dict[str, Any], roles: dict[str, Optional[str]], name_base: str, host: str, routing: Routing
 ) -> dict[str, list[str]]:
     """The Traefik labels the cockpit writes into an installation with one frontend — on its frontend and its backend
-    (DEV-164). An installation routed exactly so was routed by the cockpit; any other routing is its own."""
+    (DEV-164), on ``routing``'s machine (DEV-275). An installation routed exactly so was routed by the cockpit; any
+    other routing is its own."""
     routes: dict[str, list[str]] = {}
     fe, be = roles.get("frontend"), roles.get("backend")
     if fe and fe in src_services:
-        routes[fe] = frontend_traefik_labels(name_base, detect_internal_port(src_services[fe], 80), host)
+        routes[fe] = frontend_traefik_labels(name_base, detect_internal_port(src_services[fe], 80), host, routing)
     if be and be in src_services:
-        routes[be] = backend_traefik_labels(name_base, detect_internal_port(src_services[be], 8000), host)
+        routes[be] = backend_traefik_labels(name_base, detect_internal_port(src_services[be], 8000), host, routing)
     return routes
 
 
@@ -2484,6 +2541,7 @@ def web_frontends_into_installation(
     cockpits_routing: dict[str, list[str]],
     project_slug: str,
     version: str,
+    network: str,
 ) -> tuple[list[str], list[str]]:
     """DEV-164 — an installation made before its project became a Web project gets the frontends it lacks.
 
@@ -2495,6 +2553,7 @@ def web_frontends_into_installation(
     routing — the web the main address, the administration ``-admin``. Nothing else of the installation changes:
     names, volumes, networks, secrets and the other services stay. Only a routing the cockpit wrote itself
     (``cockpits_routing``, one frontend) is replaced; an installation with its own routing keeps it and gets nothing.
+    ``network`` is the Traefik network of the machine the installation runs on (DEV-275).
 
     Returns ``(added, left_out)`` — the frontends added, and those left out for the installation's own routing."""
     services = bumped.get("services") or {}
@@ -2514,7 +2573,7 @@ def web_frontends_into_installation(
         if name in services and name in rendered:
             own = [label for label in _labels_as_list(services[name].get("labels")) if not label.startswith("traefik.")]
             services[name]["labels"] = own + _traefik_labels(rendered[name])
-            _add_proxy_network(services[name])
+            _add_proxy_network(services[name], network)
     bumped["services"] = services
     return missing, []
 
@@ -2594,8 +2653,9 @@ def _merge_labels(existing: Any, traefik: list[str]) -> list[str]:
     return out
 
 
-def _add_proxy_network(svc: dict[str, Any]) -> None:
-    """Attach the external ``nex-proxy-net`` to a service (list or mapping ``networks`` form).
+def _add_proxy_network(svc: dict[str, Any], network: str) -> None:
+    """Attach the external Traefik ``network`` of the machine — ``nex-proxy-net`` here, DEV-275 — to a service (list or
+    mapping ``networks`` form).
 
     Networking fix (spec §3): a service with NO explicit ``networks`` is implicitly on the compose
     ``default`` network (where ``db``/``migrate`` live). Giving it an explicit list of ONLY
@@ -2606,12 +2666,12 @@ def _add_proxy_network(svc: dict[str, Any]) -> None:
     """
     nets = svc.get("networks")
     if isinstance(nets, dict):
-        nets.setdefault(PROXY_NETWORK, None)
+        nets.setdefault(network, None)
     elif isinstance(nets, list):
-        if PROXY_NETWORK not in nets:
-            nets.append(PROXY_NETWORK)
+        if network not in nets:
+            nets.append(network)
     else:
-        svc["networks"] = ["default", PROXY_NETWORK]
+        svc["networks"] = ["default", network]
 
 
 def _image_tag(version: Optional[str]) -> str:
@@ -2645,6 +2705,7 @@ def build_uat_compose(
     preserved_facts: Optional["InstanceFacts"] = None,
     private: bool = False,
     surfaces: tuple[project_surfaces.Surface, ...] = (),
+    deploy_host: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build the final compose **dict** from the parsed source compose (CR-1), environment-aware.
 
@@ -2657,12 +2718,14 @@ def build_uat_compose(
     unnamed networks/volumes; ``nex-proxy-net`` is added as the (only) external network. A source
     external network other than ``nex-proxy-net`` raises ``ValueError`` (§5.3). Host ports are dropped
     for routing — only if ``loopback_base_port`` is given are FE/BE/DB bound to loopback debug ports
-    (FE base, BE base+100, DB base+200).
+    (FE base, BE base+100, DB base+200). DEV-275: on another machine (``deploy_host``) the names, the network and
+    the routers are that machine's (:func:`routing_for`).
     """
     fe_name, be_name, db_name_svc = roles["frontend"], roles["backend"], roles["db"]
     src_services: dict[str, Any] = source["services"]
 
-    name_base, host = _instance_naming(environment, slug, customer_slug, app, private=private)
+    routing = routing_for(deploy_host, private=private)
+    name_base, host = _instance_naming(environment, slug, customer_slug, app, private=private, deploy_host=deploy_host)
 
     services: dict[str, Any] = {}
     for name, src_svc in src_services.items():
@@ -2767,29 +2830,29 @@ def build_uat_compose(
         for surface, router, fe_host in frontend_routes(name_base, host, surfaces):
             if surface.service in services:
                 fe_port = detect_internal_port(src_services[surface.service], 80)
-                _add_proxy_network(services[surface.service])
+                _add_proxy_network(services[surface.service], routing.network)
                 services[surface.service]["labels"] = _merge_labels(
-                    services[surface.service].get("labels"), frontend_traefik_labels(router, fe_port, fe_host)
+                    services[surface.service].get("labels"), frontend_traefik_labels(router, fe_port, fe_host, routing)
                 )
             api_hosts.append(fe_host)
         if be_name and be_name in services:
             be_port = detect_internal_port(src_services[be_name], 8000)
-            _add_proxy_network(services[be_name])
+            _add_proxy_network(services[be_name], routing.network)
             services[be_name]["labels"] = _merge_labels(
-                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, api_hosts)
+                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, api_hosts, routing)
             )
     else:
         if fe_name and fe_name in services:
             fe_port = detect_internal_port(src_services[fe_name], 80)
-            _add_proxy_network(services[fe_name])
+            _add_proxy_network(services[fe_name], routing.network)
             services[fe_name]["labels"] = _merge_labels(
-                services[fe_name].get("labels"), frontend_traefik_labels(name_base, fe_port, host)
+                services[fe_name].get("labels"), frontend_traefik_labels(name_base, fe_port, host, routing)
             )
         if be_name and be_name in services:
             be_port = detect_internal_port(src_services[be_name], 8000)
-            _add_proxy_network(services[be_name])
+            _add_proxy_network(services[be_name], routing.network)
             services[be_name]["labels"] = _merge_labels(
-                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host)
+                services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host, routing)
             )
 
     # Optional loopback debug ports (FE base / BE base+100 / DB base+200).
@@ -2829,10 +2892,10 @@ def build_uat_compose(
                         f"(only {PROXY_NETWORK!r} may be external) — declare it as an internal "
                         f"network or remove it before provisioning"
                     )
-                continue  # the canonical nex-proxy-net is added below; never duplicate the source's
+                continue  # the machine's Traefik network is added below; never duplicate the source's
             net.pop("name", None)
             networks[net_name] = net or None
-        networks[PROXY_NETWORK] = {"external": True}
+        networks[routing.network] = {"external": True}
 
     # ICCINT-130 — a subnet somebody pinned by hand stays pinned. On ANDROS the Docker default
     # address pool is exhausted (32 networks), so ``192.168.48.0/24`` in MÁGERSTAV's UAT is not a
@@ -2846,7 +2909,7 @@ def build_uat_compose(
         # pritom nie je vlastnosťou mena — je to vlastnosť HOSTITEĽA (na ANDROSe je zásoba
         # automatických sietí vyčerpaná). Preto: zhoda mena vyhráva; inak, keď je jedna podsieť a
         # jedna vnútorná sieť, priradí sa — to je jednoznačné. Čokoľvek nejednoznačné sa NEHÁDA.
-        vnutorne = [n for n in networks if n != PROXY_NETWORK]
+        vnutorne = [n for n in networks if n != routing.network]
         zostavajuce = dict(preserved_facts.network_subnets)
         priradenie: dict[str, str] = {}
         for net_name in list(zostavajuce):
@@ -2918,13 +2981,15 @@ def _yaml_block(data: Any) -> str:
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, width=4096)
 
 
-def render_uat_compose(compose: dict[str, Any]) -> str:
+def render_uat_compose(compose: dict[str, Any], routing: Optional[Routing] = None) -> str:
     """Render the UAT compose dict to YAML text via ``templates/uat/docker-compose.yml.j2``.
 
     The template owns the header + ``name:`` line; the dynamic networks/services/volumes are
     emitted via a registered ``to_yaml`` filter (robust block-style dump of an arbitrary
-    N-service structure — far safer than hand-written Jinja over nested compose).
+    N-service structure — far safer than hand-written Jinja over nested compose). ``routing`` is the routing of the
+    machine the installation runs on (DEV-275), this one when not given.
     """
+    routing = routing or routing_for()
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
         keep_trailing_newline=True,
@@ -2938,23 +3003,45 @@ def render_uat_compose(compose: dict[str, Any]) -> str:
     return template.render(
         COMPOSE_NAME=compose["name"],
         COMPOSE_BODY=body,
-        VLASTNE_SMEROVANIE=_predpis_nesie_vlastne_smerovanie(compose),
+        VLASTNE_SMEROVANIE=_predpis_nesie_vlastne_smerovanie(compose, routing),
+        PROXY_NETWORK=routing.network,
     )
 
 
-def _predpis_nesie_vlastne_smerovanie(compose: dict[str, Any]) -> bool:
+_ROUTER_KEY = re.compile(r"traefik\.http\.routers\.[^.]+\.(rule|priority|service|entrypoints|tls\.certresolver)")
+_SERVICE_PORT_KEY = re.compile(r"traefik\.http\.services\.[^.]+\.loadbalancer\.server\.port")
+
+
+def _cockpits_label(label: str, routing: Routing) -> bool:
+    """Is ``label`` one the cockpit writes on ``routing``'s machine (:func:`_route_labels`)? (DEV-275)"""
+    key, _sep, value = label.partition("=")
+    if key == "traefik.enable":
+        return value == "true"
+    if key == "traefik.docker.network":
+        return value == routing.network
+    if _SERVICE_PORT_KEY.fullmatch(key):
+        return True
+    router = _ROUTER_KEY.fullmatch(key)
+    if router is None:
+        return False
+    if router.group(1) == "entrypoints":
+        return value == routing.entrypoint
+    if router.group(1) == "tls.certresolver":
+        return bool(routing.certresolver) and value == routing.certresolver
+    return True
+
+
+def _predpis_nesie_vlastne_smerovanie(compose: dict[str, Any], routing: Routing) -> bool:
     """Má tento hotový predpis smerovanie, ktoré generátor nepísal? (ICCINT-151)
 
-    Číta sa z toho, čo sa naozaj ide zapísať — nie z toho, čo sme zamýšľali. Rozhoduje prítomnosť
-    Traefik labelu spolu s tým, že sa NEODVOLÁVA na náš ``nex-proxy-net``.
+    Číta sa z toho, čo sa naozaj ide zapísať — nie z toho, čo sme zamýšľali. Vlastné je smerovanie služby, ktorej
+    niektorý Traefik label kokpit na stroji inštalácie nepíše (DEV-275): na MAGERi visí na tej istej sieti aj
+    prevzatý MÁGERSTAV, no s druhým smerovačom cez vlastný vstupný bod a certifikátom Tailscale.
     """
     for svc in (compose.get("services") or {}).values():
         if not isinstance(svc, dict):
             continue
-        labely = _labels_as_list(svc.get("labels"))
-        if any(label.startswith("traefik.") for label in labely) and not any(
-            PROXY_NETWORK in label for label in labely
-        ):
+        if not all(_cockpits_label(label, routing) for label in _traefik_labels(svc)):
             return True
     return False
 
@@ -2972,6 +3059,7 @@ def build_compose_for_instance(
     preserve_extra_hosts: bool = True,
     loopback_base_port: Optional[int] = None,
     private: bool = False,
+    deploy_host: Optional[str] = None,
 ) -> dict[str, Any]:
     """Predpis, ktorý by kokpit do tejto inštalácie zapísal — **bez toho, aby čokoľvek zapísal**.
 
@@ -3012,6 +3100,7 @@ def build_compose_for_instance(
         private=private,
         # DEV-164: the frontends of the project the installation is built from (its directory is the project slug).
         surfaces=project_surfaces.surfaces_of_slug(project_path.name),
+        deploy_host=deploy_host,
     )
 
 
@@ -3023,13 +3112,16 @@ def _further_public_urls(
     app: Optional[str],
     private: bool,
     project_slug: str,
+    deploy_host: Optional[str] = None,
 ) -> dict[str, str]:
     """DEV-164: ``{variable: address}`` for a Web project's ``@public-url-admin`` — the administration's address.
     Empty for a project with one frontend: there is no further address to give."""
     surfaces = project_surfaces.surfaces_of_slug(project_slug)
     if len(surfaces) < 2 or not contract.public_url_admin_keys:
         return {}
-    name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+    name_base, host = _instance_naming(
+        environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
+    )
     admin = next(
         fe_host for surface, _router, fe_host in frontend_routes(name_base, host, surfaces) if surface.name == "admin"
     )
@@ -3215,6 +3307,7 @@ def provision_uat(
         preserve_extra_hosts=is_redeploy,
         loopback_base_port=loopback_base_port,
         private=private,
+        deploy_host=deploy_host,
     )
 
     # Paired NEX Manager Deploy — a sibling under the same customer root
@@ -3229,9 +3322,13 @@ def provision_uat(
     # DEV-72: who provides which setting — the app's markers in the same file — and the address the browser opens,
     # from the one place that also names the Traefik route.
     contract = env_contract.for_project(project_path)
-    _nb_public, public_host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+    # DEV-275: the machine the installation runs on names it and routes it.
+    routing = routing_for(deploy_host, private=private)
+    _nb_public, public_host = _instance_naming(
+        environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
+    )
     further_public_urls = _further_public_urls(
-        contract, environment, uat_slug, customer_slug, app, private, project_slug
+        contract, environment, uat_slug, customer_slug, app, private, project_slug, deploy_host
     )
 
     # ICCINT-59: finish the pairing. Wiring the launch key alone left the app able to VERIFY a token but unable
@@ -3246,7 +3343,9 @@ def provision_uat(
     if manager_env_path is not None and LAUNCH_KEY_ENV in env_example:
         manager_base_url = read_paired_manager_base_url(manager_env_path)
         if manager_base_url:
-            _nb, app_host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+            _nb, app_host = _instance_naming(
+                environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
+            )
             manager_api_key, registration_warning = ensure_module_registered(
                 manager_env_path,
                 manager_base_url,
@@ -3399,21 +3498,25 @@ def provision_uat(
             preserve_extra_hosts=False,
             loopback_base_port=loopback_base_port,
             private=private,
+            deploy_host=deploy_host,
         )
         # DEV-164: a project switched to Web after this installation was made gets its frontends now — the one
         # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
         surfaces = project_surfaces.surfaces_of_slug(project_path.name)
         pridane: list[str] = []
         if len(surfaces) > 1:
-            name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+            name_base, host = _instance_naming(
+                environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
+            )
             pridane, vynechane = web_frontends_into_installation(
                 povysene,
                 cockpits_render,
                 surfaces=surfaces,
                 backend=roles["backend"],
-                cockpits_routing=cockpit_routing(src_services, roles, name_base, host),
+                cockpits_routing=cockpit_routing(src_services, roles, name_base, host, routing),
                 project_slug=project_slug,
                 version=version,
+                network=routing.network,
             )
             if pridane:
                 adresy = {s.service: h for s, _router, h in frontend_routes(name_base, host, surfaces)}
@@ -3461,7 +3564,7 @@ def provision_uat(
             raise UndeployableImageError(
                 UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."
             )
-        compose_text = render_uat_compose(povysene)
+        compose_text = render_uat_compose(povysene, routing)
         mala = set(_parse_env_file(env_path))
         env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
         warnings.extend(
@@ -3493,7 +3596,7 @@ def provision_uat(
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
         instalacia = povysene
     else:
-        compose_text = render_uat_compose(compose)
+        compose_text = render_uat_compose(compose, routing)
         instalacia = compose
 
     # DEV-235: before anything is written, what the installation will RUN with — on a redeploy its own ``.env``, not
@@ -3540,7 +3643,9 @@ def provision_uat(
         if chyba:
             raise ValueError(chyba)
 
-    _name_base, host = _instance_naming(environment, uat_slug, customer_slug, app, private=private)
+    _name_base, host = _instance_naming(
+        environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
+    )
     if roles["frontend"] is None:
         warnings.append(
             f"no frontend service detected in {project_slug}'s compose — Traefik has no default "

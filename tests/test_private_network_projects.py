@@ -90,6 +90,7 @@ def test_the_links_on_the_deploy_screen_follow_the_project():
     class _Customer:
         subdomain = None
         slug = "icc"
+        prod_host = None  # PROD on this machine (DEV-274)
 
     class _Project:
         slug = "career-asistent"

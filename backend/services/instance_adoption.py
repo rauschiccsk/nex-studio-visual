@@ -338,8 +338,11 @@ def _co_by_zmizlo(existing_text: Optional[str], rendered_text: str) -> list[str]
     return straty
 
 
-def _vykresli(render: RenderRequest, existing_compose_text: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+def _vykresli(
+    render: RenderRequest, existing_compose_text: Optional[str], deploy_host: Optional[str] = None
+) -> tuple[Optional[str], Optional[str]]:
     """Predpis, ktorý by prevzatie zapísalo → ``(text, dôvod prečo nie)``. Práve jedno je ``None``.
+    ``deploy_host`` je stroj inštalácie — jeho mená a smerovanie (DEV-275).
 
     Akékoľvek zlyhanie vykreslenia je dôvod prevzatie ODMIETNUŤ: keď nevieme, čo by sme zapísali,
     nevieme ani, čo by sme prepísali.
@@ -366,8 +369,9 @@ def _vykresli(render: RenderRequest, existing_compose_text: Optional[str]) -> tu
                 customer_slug=render.customer_slug,
                 app=render.app,
                 existing_compose_text=existing_compose_text,
+                deploy_host=deploy_host,
             )
-        return uat_provisioner.render_uat_compose(compose), None
+        return uat_provisioner.render_uat_compose(compose, uat_provisioner.routing_for(deploy_host)), None
     except Exception as exc:  # noqa: BLE001 — pozri docstring: nevykreslené = neprevzaté
         return None, f"predpis, ktorý by sme zapísali, sa nedá vykresliť ({exc.__class__.__name__}: {exc})"
 
@@ -441,7 +445,7 @@ def preview(instance_dir: Path, *, render: RenderRequest, deploy_host: Optional[
         # Nevieme, čo na cieli je — a práve vtedy sa prepisovať nesmie.
         blokujuce.append(stav.unreadable)
     elif not already_ours:
-        vykreslene, chyba = _vykresli(render, stav.compose_text)
+        vykreslene, chyba = _vykresli(render, stav.compose_text, deploy_host)
         if chyba:
             blokujuce.append(chyba)
         else:

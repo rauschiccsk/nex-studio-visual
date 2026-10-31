@@ -1,6 +1,6 @@
 import os
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 #: Environment variable carrying Dedo's PLAINTEXT machine secret (ICCINT-14). Read ONCE, at import, and
@@ -24,6 +24,29 @@ def _take_dedo_plaintext_token() -> str:
     development, where the agent and the attacker are the same person and it does not matter.
     """
     return os.environ.pop(DEDO_TOKEN_ENV, "").strip()
+
+
+class ProdMachine(BaseModel):
+    """A machine a customer's PROD may run on besides this one, and how its Traefik routes an installation (DEV-275).
+
+    31.10.2026 the Director moved ICC's production to MAGER, and the cockpit could name and route a new installation
+    only the way ANDROS does: ``<customer>-<app>.isnex.eu``, the network ``nex-proxy-net`` and the plain entrypoint
+    ``web`` behind ANDROS's nginx. MAGER (Máger Dedo, 31.10.2026) reaches its installations by names in ``icc.sk``
+    over Tailscale, on the network ``nex-ts-net``, through the TLS entrypoint ``websecure`` with certificates of the
+    resolver ``cf``, and its routers carry the suffix ``-sec``."""
+
+    #: How the machine is named on screen.
+    label: str
+    #: The zone of the installations' names: ``<customer>-<app>.<zone>``.
+    zone: str
+    #: The external Docker network the machine's Traefik reaches the installations on.
+    network: str
+    #: The Traefik entrypoint the installations' routers listen on.
+    entrypoint: str
+    #: The certificate resolver of the routers; empty = TLS ends before Traefik (ANDROS: nginx and Cloudflare).
+    certresolver: str = ""
+    #: What follows ``<customer>-<app>`` in the routers' names; the services keep the plain name.
+    router_suffix: str = ""
 
 
 class Settings(BaseSettings):
@@ -68,9 +91,19 @@ class Settings(BaseSettings):
     # installation on ANDROS through, minus the edge. The checks after a deploy ask it with the installation's name in
     # ``Host``: the edge refuses a container (Cloudflare's WAF, the private zone's nginx lets in Tailscale only).
     uat_traefik_host: str = "nex-uat-traefik"
-    # DEV-274: the machines a customer's PROD may run on besides this one — {ssh name: label on screen}. The cockpit
+    # DEV-274: the machines a customer's PROD may run on besides this one — {ssh name: the machine}. The cockpit
     # reaches them with DOCKER_HOST=ssh://<name> and its own Docker-only key; this machine is the empty value.
-    prod_machines: dict[str, str] = {"mager": "MAGER"}
+    # DEV-275: each with the naming and routing of its own Traefik (MAGER: Máger Dedo, 31.10.2026).
+    prod_machines: dict[str, ProdMachine] = {
+        "mager": ProdMachine(
+            label="MAGER",
+            zone="icc.sk",
+            network="nex-ts-net",
+            entrypoint="websecure",
+            certresolver="cf",
+            router_suffix="-sec",
+        )
+    }
     this_machine_label: str = "ANDROS"
     uat_traefik_port: int = 80
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan

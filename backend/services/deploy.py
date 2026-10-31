@@ -1548,7 +1548,8 @@ def _instance_url(customer: Customer, environment: str, project: Project) -> str
     app = uat_provisioner.derive_uat_slug(project.slug)
     private = bool(project.private_network)  # DEV-42: the link shows the name the installation really has
     if environment == "prod":
-        return _prod_url(base, app, private=private)
+        # DEV-275: PROD on another machine is named in that machine's zone.
+        return _prod_url(base, app, private=private, prod_host=customer.prod_host)
     return _url_for_instance_slug(f"{base}-{app}", private=private)
 
 
@@ -1581,7 +1582,7 @@ def installation_addresses(db: Session, project: Project) -> list[str]:
     return lines
 
 
-def _prod_url(customer_slug: str, app: str, *, private: bool = False) -> str:
+def _prod_url(customer_slug: str, app: str, *, private: bool = False, prod_host: Optional[str] = None) -> str:
     """The public URL for a PROD instance — the clean ``https://<customer>-<app>.isnex.eu`` host (§2).
 
     ``customer_slug`` = ``(subdomain or slug).lower()`` (the base :func:`_instance_slug` uses); ``app``
@@ -1589,8 +1590,9 @@ def _prod_url(customer_slug: str, app: str, *, private: bool = False) -> str:
     PROD ``(customer_slug, app, full_project_slug)`` triple is derived at the deploy-runner seam (from
     ``uat_slug``/``project_slug``) rather than passed as objects — the runner's public interface stays
     ``(project_slug, uat_slug, version_number, force_fresh)`` so an injected/faked runner is untouched.
+    ``prod_host`` is the machine PROD runs on (DEV-275) — its zone, the name the installation gets there.
     """
-    return f"https://{customer_slug}-{app}.{uat_provisioner.domain_suffix(private)}"
+    return f"https://{customer_slug}-{app}.{uat_provisioner.routing_for(prod_host, private=private).zone}"
 
 
 def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> None:

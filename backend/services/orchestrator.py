@@ -7012,7 +7012,7 @@ async def _verify_uat_serves(
         # DEV-102: names and the address come from the one naming rule — a private project (DEV-42) lives in the
         # private zone; the check once built the public address itself and failed Career Asistent's good deploy.
         name_base, public_host = uat_provisioner._instance_naming(
-            environment, uat_slug, customer_slug, app, private=private
+            environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
         )
         # DEV-164: every frontend of the project with its own address — a Web project's web on the main one, its
         # administration on ``…-admin``; one frontend is the installation's frontend on its address, as before.

@@ -10,19 +10,20 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.config.settings import settings
+from backend.config.settings import ProdMachine, settings
 
 
 def choices() -> list[tuple[str, str]]:
     """``(value, label)`` for every machine PROD may run on — this machine first, as the empty value."""
-    return [("", settings.this_machine_label), *settings.prod_machines.items()]
+    return [("", settings.this_machine_label), *((value, m.label) for value, m in settings.prod_machines.items())]
 
 
 def label(prod_host: Optional[str]) -> str:
     """How the machine of ``prod_host`` is named on screen; an unknown one is shown by its name, never hidden."""
     if not prod_host:
         return settings.this_machine_label
-    return settings.prod_machines.get(prod_host, prod_host)
+    known = settings.prod_machines.get(prod_host)
+    return known.label if known else prod_host
 
 
 def check(prod_host: Optional[str]) -> str:
@@ -32,3 +33,10 @@ def check(prod_host: Optional[str]) -> str:
         known = ", ".join(lbl for _v, lbl in choices())
         raise ValueError(f"Ostrý stroj „{value}“ kokpit nepozná — na výber je: {known}.")
     return value
+
+
+def machine(prod_host: Optional[str]) -> Optional[ProdMachine]:
+    """The machine of ``prod_host`` with its routing (DEV-275); ``None`` for this machine. Raises ``ValueError`` for a
+    machine the cockpit does not know — an installation there could be neither named nor routed."""
+    value = check(prod_host)
+    return settings.prod_machines[value] if value else None

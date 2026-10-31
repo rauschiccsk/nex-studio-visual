@@ -11,7 +11,7 @@
 # and ours would point at a network this server may not have.
 {% else -%}
 # Routing is via Traefik (Phase-1 infra), NOT host ports: the frontend + backend services join the
-# external `nex-proxy-net` and carry the exact Traefik labels from the live ledger migration
+# external `{{ PROXY_NETWORK }}` and carry the exact Traefik labels from the live ledger migration
 # (frontend = Host catch-all @ priority 10; backend = Host && PathPrefix(/api) @ priority 20).
 {% endif -%}
 #
