@@ -381,6 +381,43 @@ def _built_from_test_image(svc: dict[str, Any]) -> bool:
     return isinstance(build, dict) and Path(str(build.get("dockerfile") or "")).name == TEST_IMAGE_DOCKERFILE
 
 
+def _dependents(name: str, services: dict[str, Any]) -> list[str]:
+    """The services that wait for *name* (``depends_on`` as a list or a mapping)."""
+    found = []
+    for other, svc in services.items():
+        if other == name or not isinstance(svc, dict):
+            continue
+        deps = svc.get("depends_on")
+        if name in (deps if isinstance(deps, (list, dict)) else []):
+            found.append(other)
+    return found
+
+
+def park_what_only_parked_services_need(services: dict[str, Any]) -> list[str]:
+    """Put a service behind its dependents' profile when only services behind a profile wait for it — the names.
+
+    DEV-273: Author Asistent's ``test-db`` exists for its ``test`` alone. The runner was parked (ICCINT-60, DEV-270),
+    its database kept running in the customer's UAT stack, ``unless-stopped``, and came back after every restart of the
+    server. Nothing that runs with the app waits for it, so a plain ``up`` must not start it either. The application's
+    own frontend, backend and database are never parked; a service nobody waits for (a worker) is left as it is."""
+    roles = identify_service_roles(services)
+    app = {roles.get("frontend"), roles.get("backend"), roles.get("db")}
+    parked: list[str] = []
+    changed = True
+    while changed:  # a chain (a runner → its database → that database's helper) is parked link by link
+        changed = False
+        for name, svc in services.items():
+            if not isinstance(svc, dict) or svc.get("profiles") or name in app:
+                continue
+            waiting = _dependents(name, services)
+            if waiting and all((services[w] or {}).get("profiles") for w in waiting):
+                svc["profiles"] = list(services[waiting[0]]["profiles"])
+                svc["restart"] = "no"
+                parked.append(name)
+                changed = True
+    return sorted(parked)
+
+
 def park_test_runners(services: dict[str, Any]) -> list[str]:
     """Put every test runner of *services* behind :data:`TEST_RUNNER_PROFILE`, run once — the names it parked.
 
@@ -1862,13 +1899,14 @@ def _precitaj_ak_je(cesta: Path) -> Optional[str]:
 
 
 def test_runners_parked(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    """DEV-270: the test runners this deploy took out of the running stack — said, not silent."""
+    """DEV-270: the test runners this deploy took out of the running stack — said, not silent. DEV-273: and what only
+    they need, under whichever profile they are."""
     was = (before or {}).get("services") or {}
     return sorted(
         name
         for name, svc in ((after or {}).get("services") or {}).items()
         if isinstance(svc, dict)
-        and svc.get("profiles") == [TEST_RUNNER_PROFILE]
+        and svc.get("profiles")
         and isinstance(was.get(name), dict)
         and not was[name].get("profiles")
     )
@@ -1914,8 +1952,10 @@ def version_bump_from_text(
     for svc in sluzby.values():
         if isinstance(svc, dict) and isinstance(svc.get("image"), str):
             svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
-    # DEV-270 — a test runner the installation still starts with the app is parked here, at its next deploy.
+    # DEV-270 — a test runner the installation still starts with the app is parked here, at its next deploy;
+    # DEV-273 — and so is what only it needs.
     park_test_runners(sluzby)
+    park_what_only_parked_services_need(sluzby)
     # DEV-123: a step that runs once (``restart: "no"`` — YAML reads a bare ``no`` as ``False``) inherits the image's
     # HEALTHCHECK and ends "unhealthy" after exiting 0. A new installation gets the check off when it is rendered; one
     # made before gets it here, at its next deploy (19.10.2026: seven such containers on ANDROS, two on MAGER) —
@@ -2710,6 +2750,9 @@ def build_uat_compose(
             svc["volumes"] = zvazky
 
         services[name] = svc
+
+    # DEV-273 — what only the parked runner needs (its own database) does not start with the app either.
+    park_what_only_parked_services_need(services)
 
     # Traefik routing on FE + BE (join nex-proxy-net + exact labels) — POKIAĽ si inštalácia
     # nenesie vlastné (ICCINT-151). MÁGERSTAV je dostupný pod dvomi menami, cez dva vstupné body a
