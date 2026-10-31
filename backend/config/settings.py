@@ -47,6 +47,9 @@ class ProdMachine(BaseModel):
     certresolver: str = ""
     #: What follows ``<customer>-<app>`` in the routers' names; the services keep the plain name.
     router_suffix: str = ""
+    #: DEV-279: the machine's backup reads only the installations' folders — an app's data outside its database
+    #: belongs in its installation's folder, not in a Docker volume (MAGER: the backup runs as icc, without root).
+    data_in_installation: bool = False
 
 
 class Settings(BaseSettings):
@@ -102,6 +105,7 @@ class Settings(BaseSettings):
             entrypoint="websecure",
             certresolver="cf",
             router_suffix="-sec",
+            data_in_installation=True,
         )
     }
     this_machine_label: str = "ANDROS"

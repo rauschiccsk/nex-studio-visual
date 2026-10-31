@@ -56,7 +56,7 @@ import secrets
 import subprocess
 import tomllib
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, NamedTuple, Optional
 from urllib.parse import urlsplit
 
@@ -123,6 +123,8 @@ class Routing:
     entrypoint: str = THIS_MACHINES_ENTRYPOINT
     certresolver: str = ""
     router_suffix: str = ""
+    #: DEV-279 — an app's data outside its database goes into the installation's folder (:func:`keep_data_in_folder`).
+    data_in_installation: bool = False
 
 
 def routing_for(deploy_host: Optional[str] = None, *, private: bool = False) -> Routing:
@@ -138,6 +140,7 @@ def routing_for(deploy_host: Optional[str] = None, *, private: bool = False) -> 
         entrypoint=machine.entrypoint,
         certresolver=machine.certresolver,
         router_suffix=machine.router_suffix,
+        data_in_installation=machine.data_in_installation,
     )
 
 
@@ -3076,10 +3079,68 @@ def build_uat_compose(
         vol.pop("name", None)
         volumes[vol_name] = vol or None
 
+    # DEV-279 — on a machine whose backup reads only the installations' folders, the app's own data lives in its folder.
+    if routing.data_in_installation:
+        keep_data_in_folder(services, volumes)
+
     compose: dict[str, Any] = {"name": name_base, "services": services, "networks": networks}
     if volumes:
         compose["volumes"] = volumes
     return compose
+
+
+#: DEV-279 — where PostgreSQL keeps its data in its container. That stays in a volume: the backup dumps the database,
+#: and the live files of a running database are no backup (Máger Dedo, 31.10.2026).
+DATABASE_DATA_DIR = PurePosixPath("/var/lib/postgresql")
+
+
+def _named_mount(volume: Any, named: set[str]) -> Optional[tuple[str, str]]:
+    """``(volume name, target)`` when *volume* mounts one of the compose's *named* volumes; ``None`` otherwise."""
+    if isinstance(volume, str):
+        parts = volume.split(":")
+        if len(parts) >= 2 and parts[0] in named:
+            return parts[0], parts[1]
+    elif isinstance(volume, dict) and volume.get("type", "volume") == "volume" and volume.get("source") in named:
+        return str(volume["source"]), str(volume.get("target", ""))
+    return None
+
+
+def _is_database_data(target: str) -> bool:
+    path = PurePosixPath(target)
+    return path == DATABASE_DATA_DIR or DATABASE_DATA_DIR in path.parents
+
+
+def keep_data_in_folder(services: dict[str, Any], volumes: dict[str, Any]) -> list[str]:
+    """Mount every named volume that is not a database's data as the installation's folder ``./<name>`` (DEV-279).
+
+    Career Asistent's received e-mails, NEX Knowledge's uploaded files and Author Asistent's Claude sign-in were in
+    Docker volumes; MAGER's backup runs without root and reads only ``/opt/customers`` — it would not have seen them.
+    A volume a database keeps its data in stays a volume everywhere it is mounted, so nothing is split in two. The
+    folders are made for the application's user before the first start (:mod:`instance_data_dirs`). Returns the
+    volumes moved; those no service mounts any more leave the compose's ``volumes``."""
+    named = set(volumes)
+    mounts = [
+        (svc, i, found)
+        for svc in services.values()
+        if isinstance(svc, dict)
+        for i, volume in enumerate(svc.get("volumes") or [])
+        if (found := _named_mount(volume, named))
+    ]
+    database = {name for _svc, _i, (name, target) in mounts if _is_database_data(target)}
+    moved: set[str] = set()
+    for svc, i, (name, _target) in mounts:
+        if name in database:
+            continue
+        volume = svc["volumes"][i]
+        if isinstance(volume, str):
+            svc["volumes"][i] = "./" + volume
+        else:
+            svc["volumes"][i] = {**volume, "type": "bind", "source": f"./{name}"}
+            svc["volumes"][i].pop("volume", None)
+        moved.add(name)
+    for name in moved:
+        volumes.pop(name, None)
+    return sorted(moved)
 
 
 # ---------------------------------------------------------------------------
