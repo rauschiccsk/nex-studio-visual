@@ -7,8 +7,10 @@ export function acceptanceTesting(progress: UatProgress): string {
   const parts = [`Otestované ${progress.tested} z ${progress.total}.`];
   const untested = progress.untested ?? [];
   const broken = progress.broken ?? [];
-  if (untested.length) parts.push(`Neotestované: ${untested.join("; ")}.`);
-  if (broken.length) parts.push(`Nefunguje: ${broken.join("; ")}.`);
+  // DEV-276: a release note's change ends with its own period; the sentence adds one.
+  const listed = (changes: string[]) => changes.map((c) => c.replace(/\.+$/, "")).join("; ");
+  if (untested.length) parts.push(`Neotestované: ${listed(untested)}.`);
+  if (broken.length) parts.push(`Nefunguje: ${listed(broken)}.`);
   return parts.join(" ") + " ";
 }
 

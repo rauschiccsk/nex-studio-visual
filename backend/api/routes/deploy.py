@@ -542,6 +542,21 @@ def _uat_scope(db: Session, customer_id: UUID, version_number: str, *, required:
     return customer, version, changes
 
 
+def _acceptance_detail(db: Session, customer_id: UUID, version_number: str) -> Optional[str]:
+    """What the acceptance of *version_number* keeps about testing — across the versions the guide asked to try
+    (:func:`deploy_service.uat_versions_to_test`) when it ends with this one, else this version alone (DEV-276)."""
+    customer = db.get(Customer, customer_id)
+    project = db.get(Project, customer.project_id) if customer is not None else None
+    to_try = deploy_service.uat_versions_to_test(db, project, customer_id) if project is not None else []
+    numbers = to_try if to_try and to_try[-1] == version_number else [version_number]
+    found = []
+    for number in numbers:
+        scope = _uat_scope(db, customer_id, number, required=False)
+        if scope is not None:
+            found.append((number, uat_checks.progress(db, customer_id, scope[1], scope[2])))
+    return uat_checks.acceptance_detail(uat_checks.combine(found)) if found else None
+
+
 def _progress_read(version: Version, found: uat_checks.Progress) -> UatProgressRead:
     return UatProgressRead(
         version_number=version.version_number,
@@ -607,13 +622,9 @@ def accept_customer_uat(
     step that OPENS PROD, so it gets the same explicit check as the deploy above.
     """
     authz.assert_customer_access(db, current_user, customer_id)
-    # DEV-91: the acceptance keeps what was tested — the same count the manager saw before confirming.
-    scope = _uat_scope(db, customer_id, payload.version_number, required=False)
-    detail = (
-        uat_checks.acceptance_detail(uat_checks.progress(db, customer_id, scope[1], scope[2]))
-        if scope is not None
-        else None
-    )
+    # DEV-91: the acceptance keeps what was tested — the same count the manager saw before confirming. DEV-276: of
+    # every version the UAT carries that the customer has not accepted, as the guide and the question count them.
+    detail = _acceptance_detail(db, customer_id, payload.version_number)
     try:
         event = deploy_service.accept(db, customer_id, payload.version_number, current_user.id, detail=detail)
         db.commit()

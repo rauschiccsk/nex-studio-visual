@@ -9,7 +9,7 @@ UAT panel, the acceptance prompt and the acceptance record alike (:func:`progres
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -130,13 +130,35 @@ def record(
     db.flush()
 
 
+def combine(per_version: list[tuple[str, Progress]]) -> Progress:
+    """DEV-276 — what was tried across several versions as one :class:`Progress`, each change named with its version
+    („1.4.0: Založenie skupiny…“); a single version stays exactly as it is. The same rule as the acceptance question
+    on screen (``combineProgress`` in ``frontend/src/lib/uatTesting.ts``), so the record says what the Manažér saw."""
+    if len(per_version) == 1:
+        return per_version[0][1]
+    items: list[str] = []
+    checks: dict[str, Check] = {}
+    for number, found in per_version:
+        for item in found.items:
+            named = f"{number}: {item}"
+            items.append(named)
+            if item in found.checks:
+                checks[named] = replace(found.checks[item], item=named)
+    return Progress(items=items, checks=checks)
+
+
 def acceptance_detail(found: Progress) -> str:
     """The sentence the acceptance event keeps about what was tested — readable in the deploy history."""
     if not found.items:
         return "UAT akceptované — PROD otvorené. Verzia nemá zoznam zmien na skúšku."
     parts = [f"UAT akceptované — PROD otvorené. Otestované {found.tested} z {len(found.items)}."]
     if found.untested:
-        parts.append("Neotestované: " + "; ".join(found.untested) + ".")
+        parts.append("Neotestované: " + _listed(found.untested) + ".")
     if found.broken:
-        parts.append("Nefunguje: " + "; ".join(found.broken) + ".")
+        parts.append("Nefunguje: " + _listed(found.broken) + ".")
     return " ".join(parts)
+
+
+def _listed(changes: list[str]) -> str:
+    """Changes in one sentence — a release note's change ends with its own period, the sentence adds one (DEV-276)."""
+    return "; ".join(change.rstrip(".") for change in changes)

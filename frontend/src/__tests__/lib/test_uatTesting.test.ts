@@ -18,16 +18,34 @@ const progress = (over: Partial<UatProgress>): UatProgress => ({
 
 describe("acceptanceTesting", () => {
   it("says how much was tested and what is left or does not work", () => {
-    expect(acceptanceTesting(progress({ tested: 1, untested: ["B"], broken: ["C"] }))).toBe(
-      "Otestované 1 z 3. Neotestované: B. Nefunguje: C. ",
-    );
+    expect(
+      acceptanceTesting(
+        progress({ tested: 1, untested: ["B"], broken: ["C"] }),
+      ),
+    ).toBe("Otestované 1 z 3. Neotestované: B. Nefunguje: C. ");
   });
 
   it("says only the count when everything was tried", () => {
-    expect(acceptanceTesting(progress({ tested: 3 }))).toBe("Otestované 3 z 3. ");
+    expect(acceptanceTesting(progress({ tested: 3 }))).toBe(
+      "Otestované 3 z 3. ",
+    );
   });
 
   it("says nothing for a version with no changes to try", () => {
     expect(acceptanceTesting(progress({ items: [], total: 0 }))).toBe("");
+  });
+
+  it("does not double the period of a release note's change (DEV-276)", () => {
+    expect(
+      acceptanceTesting(
+        progress({
+          tested: 1,
+          untested: ["0.3.0: Rýchlejšie hľadanie."],
+          broken: ["Export do CSV."],
+        }),
+      ),
+    ).toBe(
+      "Otestované 1 z 3. Neotestované: 0.3.0: Rýchlejšie hľadanie. Nefunguje: Export do CSV. ",
+    );
   });
 });
