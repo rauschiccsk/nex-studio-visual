@@ -285,3 +285,17 @@ def _isolate_create_project_kb(tmp_path, monkeypatch):
         f"Create-Project test polluted the real KB {real_kb_projects}: {sorted(new_dirs)} — "
         "KB isolation broke (docs/specs/kb-ghost-root-cause.md Fix 1 / kb-ghost-followup.md Fix A)."
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_installation_of_this_machine_in_the_way(monkeypatch):
+    """A deploy to another machine finds no installation of this machine in its working folder (DEV-277).
+
+    Live, the deploy asks this machine's Docker which containers come from that folder; the suite runs with
+    ``DOCKER_HOST=unix:///nonexistent``, so the question fails and every deploy to another machine would be refused.
+    The guard's own tests answer it explicitly — an installation running here, a stopped one, a Docker that cannot be
+    asked.
+    """
+    from backend.services import uat_provisioner
+
+    monkeypatch.setattr(uat_provisioner, "_containers_here_of", lambda instance_dir: ([], None))

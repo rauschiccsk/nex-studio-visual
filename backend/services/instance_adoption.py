@@ -570,6 +570,12 @@ async def adopting_deploy_runner(
     instance_dir = instance_dir_for(
         environment=environment, customer_slug=customer_slug, full_project_slug=project_slug
     )
+    if is_prod and (deploy_host or "").strip():
+        # DEV-277 — before anything is set aside on the target: the working copy here must not be an installation here.
+        try:
+            await asyncio.to_thread(uat_provisioner.assert_no_installation_here, instance_dir, deploy_host.strip())
+        except ValueError as exc:
+            return RunnerResult(False, f"provision failed: {exc}", None)
     odlozene = await asyncio.to_thread(
         set_aside_hand_authored, instance_dir, deploy_host=deploy_host if is_prod else None
     )

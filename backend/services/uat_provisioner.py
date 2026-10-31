@@ -2205,6 +2205,65 @@ class UndeployableImageError(ValueError):
     """
 
 
+#: DEV-277 — the label docker compose puts on every container of an installation: the folder its compose is in.
+COMPOSE_WORKING_DIR_LABEL = "com.docker.compose.project.working_dir"
+
+
+class LocalInstallationInTheWayError(ValueError):
+    """DEV-277 — a deploy to another machine would write over an installation of THIS machine.
+
+    The cockpit keeps the files of an installation on another machine here too, at the very path they have there —
+    docker compose resolves the installation's mounted folders against it. On 31.10.2026 the old PROD installations of
+    ICC ran on ANDROS in exactly the folders the move to MAGER needed: the first deploy there would have written MAGER's
+    compose and settings (new passwords too) over two live installations here, and refused the third as hand-authored.
+    Raised BEFORE anything is read or written, like :class:`HandAuthoredDeploymentError`."""
+
+
+def _containers_here_of(instance_dir: Path) -> tuple[list[str], Optional[str]]:
+    """``(names, error)`` — this machine's containers, running or stopped, of the installation in ``instance_dir``."""
+    try:
+        done = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--all",
+                "--filter",
+                f"label={COMPOSE_WORKING_DIR_LABEL}={instance_dir}",
+                "--format",
+                "{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], f"{exc.__class__.__name__}: {exc}"
+    if done.returncode != 0:
+        return [], (done.stderr.strip() or f"docker ps skončil kódom {done.returncode}")[:300]
+    return sorted(name for name in done.stdout.split() if name), None
+
+
+def assert_no_installation_here(instance_dir: Path, deploy_host: str) -> None:
+    """Refuse a deploy to ``deploy_host`` while an installation of this machine stands in ``instance_dir`` (DEV-277).
+
+    Running or stopped — a stopped one comes back with its files. When this machine's Docker cannot be asked, the
+    deploy is refused too: not knowing is no reason to write over somebody's installation."""
+    here, there = prod_machines.label(None), prod_machines.label(deploy_host)
+    names, error = _containers_here_of(instance_dir)
+    if error:
+        raise LocalInstallationInTheWayError(
+            f"Kokpit nevie zistiť, či na stroji {here} v priečinku {instance_dir} nestojí inštalácia ({error}). "
+            f"Nasadenie na stroj {there} preto nič nezapísalo — mohlo by prepísať tunajšiu inštaláciu."
+        )
+    if names:
+        raise LocalInstallationInTheWayError(
+            f"Na stroji {here} stojí v priečinku {instance_dir} inštalácia (kontajnery {', '.join(names)}). Ten istý "
+            f"priečinok kokpit potrebuje ako pracovnú kópiu inštalácie na stroji {there} — nasadenie by tunajšej "
+            f"inštalácii prepísalo predpis aj nastavenia vrátane hesiel. Najprv ju na stroji {here} zastav a odlož; "
+            "nič sa nezapísalo."
+        )
+
+
 class HandAuthoredDeploymentError(ValueError):
     """The target instance directory holds a deployment this provisioner did not generate.
 
@@ -3239,6 +3298,10 @@ def provision_uat(
 
     # Refuse a foreign deployment BEFORE reading or writing a single byte at that path: these roots also
     # hold hand-authored, live customer stacks whose compose IS their public routing (module docstring).
+    # DEV-277 — first: on another machine the folder here is the working copy of the installation there, and it must not
+    # be an installation of this machine (a hand-authored one would be refused below for the wrong reason).
+    if deploy_host:
+        assert_no_installation_here(uat_dir, deploy_host)
     assert_writable_instance_dir(uat_dir, allow_overwrite=allow_overwrite)
 
     # Redeploy preservation (per the live-instance contract).
