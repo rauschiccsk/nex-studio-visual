@@ -745,6 +745,52 @@ def read_paired_manager_launch(manager_env_path: Path) -> tuple[Optional[str], O
     return (mgr.get("LAUNCH_SIGNING_KEY") or None, mgr.get("DEPLOY_SLUG") or None)
 
 
+#: DEV-272 — what a deploy into an existing installation says when it paired the app with its Manager anew.
+PAIRING_RENEWED = "Aplikácia sa znova prepojila s NEX Managerom zákazníka ({what}) — otvorenie z neho vyskúšaj."
+#: The pairing values in words, in the order the sentence names them — never a value.
+PAIRING_LABELS = {
+    LAUNCH_KEY_ENV: "kľúč spustenia",
+    "MANAGER_DEPLOY_SLUG": "meno inštalácie NEX Managera",
+    MANAGER_BASE_URL_ENV: "adresa NEX Managera",
+    MANAGER_API_KEY_ENV: "nová registrácia v NEX Manageri",
+}
+
+
+def paired_manager_values(
+    manager_env_path: Optional[Path], *, manager_base_url: Optional[str], manager_api_key: Optional[str]
+) -> dict[str, str]:
+    """The values that pair a token-launch app with its customer's NEX Manager as that Manager has them NOW — only
+    those it has (DEV-272). The module's key is there only when the Manager has just registered the app: it hands
+    the key out once."""
+    if manager_env_path is None:
+        return {}
+    key, deploy_slug = read_paired_manager_launch(manager_env_path)
+    values = {
+        LAUNCH_KEY_ENV: key,
+        "MANAGER_DEPLOY_SLUG": deploy_slug,
+        MANAGER_BASE_URL_ENV: manager_base_url,
+        MANAGER_API_KEY_ENV: manager_api_key,
+    }
+    return {k: v for k, v in values.items() if v}
+
+
+def renew_pairing(env: dict[str, str], values: dict[str, str]) -> list[str]:
+    """Write the Manager's pairing *values* into an installation's *env* where they differ — the names of what changed.
+
+    DEV-272: a deploy into an existing installation keeps every value it finds (ICCINT-104), and so it kept the pairing
+    too. 28.10.2026 the UAT NEX Manager of MÁGERSTAV was rebuilt with new keys and an empty database; its NEX Inbox kept
+    the old launch key, was no longer registered, and a redeploy changed neither — while the registration it did make
+    threw away the module key the Manager hands out once. The pairing is not the installation's own setting: it is the
+    Manager's, and the Manager wins, as in a render from scratch. Only keys the installation has are written — an app
+    that does not open from the Manager has none of them."""
+    renewed = []
+    for key, value in values.items():
+        if key in env and env[key] != value:
+            env[key] = value
+            renewed.append(PAIRING_LABELS[key])
+    return renewed
+
+
 def _module_display_name(project_slug: str) -> str:
     """A readable tile name from the project slug (``nex-productcatalogs`` → ``NEX Productcatalogs``).
 
@@ -3371,6 +3417,17 @@ def provision_uat(
         warnings.extend(
             fill_empty_database_connection(env_riadky, _parse_env_text(env_content), (povysene.get("services") or {}))
         )
+        # DEV-272 — the pairing comes from the Manager, also into an existing installation. Not for an installation on
+        # another machine: its Manager lives there, and what this cockpit could read would be a copy at best.
+        if not deploy_host:
+            prepojene = renew_pairing(
+                env_riadky,
+                paired_manager_values(
+                    manager_env_path, manager_base_url=manager_base_url, manager_api_key=manager_api_key
+                ),
+            )
+            if prepojene:
+                warnings.append(PAIRING_RENEWED.format(what=", ".join(prepojene)))
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
         instalacia = povysene
     else:

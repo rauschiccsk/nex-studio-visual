@@ -48,16 +48,35 @@ def mismatches(manager_env: Mapping[str, str], module_env: Mapping[str, str], re
     return found
 
 
-def customer_warning(manager_env: Mapping[str, str], module_envs: Mapping[str, Mapping[str, str]]) -> str | None:
-    """One sentence for the manager about every module of one customer's environment the Manager could not open."""
-    broken = [
-        f"{slug}: {'; '.join(found)}"
+def _a_redeploy_repairs(manager_env: Mapping[str, str], module_env: Mapping[str, str], registered_slug: str) -> bool:
+    """Would „Nasadiť znova“ of the module put it right? It takes the Manager's key and installation name (DEV-272) —
+    not a slug the module itself expects differently, and not a key the Manager does not have."""
+    return bool(manager_env.get(MANAGER_KEY)) and (module_env.get(MODULE_SLUG) or registered_slug) == registered_slug
+
+
+def customer_warning(
+    manager_env: Mapping[str, str], module_envs: Mapping[str, Mapping[str, str]], *, redeploy_repairs: bool = False
+) -> str | None:
+    """One sentence for the manager about every module of one customer's environment the Manager could not open.
+
+    *redeploy_repairs*: the deploy of a module renews its pairing where it runs (DEV-272 — an installation on this
+    machine); then the sentence names the click that puts it right instead of „urobí to technický tím“."""
+    broken = {
+        slug: found
         for slug, env in sorted(module_envs.items())
         if is_launched_from_manager(env) and (found := mismatches(manager_env, env, slug))
-    ]
+    }
     if not broken:
         return None
+    said = "Z NEX Managera sa nedá otvoriť: " + " | ".join(f"{s}: {'; '.join(f)}" for s, f in broken.items())
+    if redeploy_repairs and all(_a_redeploy_repairs(manager_env, module_envs[slug], slug) for slug in broken):
+        return (
+            said
+            + ". Aplikácie bežia — pokazené je otvorenie z NEX Managera; oprav ho tlačidlom „Nasadiť znova“ pri "
+            + ", ".join(broken)
+            + "."
+        )
     return (
-        "Z NEX Managera sa nedá otvoriť: " + " | ".join(broken) + ". Aplikácie bežia — pokazené je otvorenie z NEX "
-        "Managera; nastavenia treba zladiť (urobí to technický tím)."
+        said + ". Aplikácie bežia — pokazené je otvorenie z NEX Managera; nastavenia treba zladiť (urobí to technický "
+        "tím)."
     )
