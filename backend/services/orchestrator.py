@@ -6696,6 +6696,19 @@ async def _run_uat_deploy(
         folders_failed = f"priečinky pre dáta sa nepodarilo pripraviť do {DATA_DIRS_CAP} s"
     if folders_failed:
         return InstanceDeployResult(False, folders_failed + backup_note)
+    # DEV-280 — and they belong to the user the new version runs as: an application that changed its user (NEX
+    # Knowledge, Author Asistent: 10001 → 1000) could not write into what its earlier version made.
+    try:
+        owners_changed, owners_failed = await run_blocking(
+            instance_data_dirs.align_owners, compose, deploy_host=deploy_host, cap=DATA_DIRS_CAP
+        )
+    except BlockingWorkTimedOut:
+        owners_changed, owners_failed = [], f"dáta aplikácie sa nepodarilo dať jej používateľovi do {DATA_DIRS_CAP} s"
+    if owners_failed:
+        return InstanceDeployResult(False, owners_failed + backup_note)
+    owners_note = (
+        f" Dáta aplikácie dostal používateľ, pod ktorým beží: {', '.join(owners_changed)}." if owners_changed else ""
+    )
     deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
     # From here the new version is on the machine: whatever fails later, the containers it replaced are gone and a
     # migration may have run — the compose on the target must stay the new one (DEV-68). Every report from here on
@@ -6742,7 +6755,7 @@ async def _run_uat_deploy(
 
         role_ok, role_detail = await uat_db.ensure_role(compose.parent, customer_slug or uat_slug)
         (logger.info if role_ok else logger.warning)("poradca: %s", role_detail)
-    detail = await _uprac_na_cieli(ok, detail + build_note + backup_note, deploy_host, compose.parent)
+    detail = await _uprac_na_cieli(ok, detail + build_note + backup_note + owners_note, deploy_host, compose.parent)
     # DEV-124: older versions of this installation's images go too — on whichever machine it runs.
     return InstanceDeployResult(
         ok, await _uprac_stare_verzie(ok, detail, deploy_host, compose), new_version_started=True

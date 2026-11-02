@@ -299,3 +299,23 @@ def _no_installation_of_this_machine_in_the_way(monkeypatch):
     from backend.services import uat_provisioner
 
     monkeypatch.setattr(uat_provisioner, "_containers_here_of", lambda instance_dir: ([], None))
+
+
+@pytest.fixture(autouse=True)
+def _no_docker_for_the_data_owners(monkeypatch):
+    """A deploy's step that gives the data to the application's user asks no Docker (DEV-280).
+
+    Live it asks the Docker of the machine the installation runs on — for an installation on MAGER over
+    ``ssh://mager``. Here every image answers that it runs as root and no volume exists, so the step changes nothing
+    and reaches no machine. Its own tests answer for themselves.
+    """
+    import subprocess
+
+    from backend.services import instance_data_dirs
+
+    def _docker(cmd, deploy_host, timeout):
+        if "--entrypoint" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "uid=0(root) gid=0(root) groups=0(root)\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(instance_data_dirs, "_docker", _docker)
