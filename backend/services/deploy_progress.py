@@ -38,6 +38,8 @@ KROK_SPUSTENIE = "spúšťam novú verziu — aplikácia je teraz chvíľu nedos
 KROK_MIGRACIA = "migrujem databázu"
 KROK_OVERENIE = "overujem, že aplikácia odpovedá"
 KROK_UPRATOVANIE = "upratujem po sebe"
+#: DEV-291 — len po zlyhanom ostrom nasadení, keď databáza ostala v pôvodnom stave.
+KROK_NAVRAT = "nová verzia zlyhala — vraciam predošlú verziu"
 
 
 @dataclass(frozen=True)

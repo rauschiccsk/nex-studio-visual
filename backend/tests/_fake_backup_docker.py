@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from backend.services import deploy_return as R
 from backend.services import predeploy_backup as B
 
 DB_BYTES = 5 * 1024**2
@@ -17,6 +18,8 @@ DUMP_BYTES = 123_456
 SHA = "ab" * 32
 #: The image the installation's database container runs from (``docker compose images -q <service>``).
 DB_IMAGE = "sha256:0db1ma6e"
+#: The migration revision of the installation's database (DEV-291).
+REVISION = "026_v190"
 #: ``pg_restore -l`` of a small dump: comment lines start with ``;``, every other line is one entry.
 TOC = (
     ";\n; Archive created at 2026-10-14 12:50:00 UTC\n;\n"
@@ -37,6 +40,7 @@ def reply(
     containers: str = "c0ffee",
     running: str = "c0ffee",
     image: str = DB_IMAGE,
+    revision: str = REVISION,
 ) -> Optional[str]:
     """The output a backup command gets, or ``None`` when the command is not one of the backup's.
 
@@ -56,6 +60,8 @@ def reply(
         return str(DB_BYTES)
     if script == "df -Pk /target":
         return df_line(free_kb)
+    if script == R.REVISION_SH:
+        return revision
     if script == B._DUMP_SH:
         return ""
     if script.startswith("set -e; mv "):

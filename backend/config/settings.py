@@ -269,6 +269,12 @@ class Settings(BaseSettings):
     predeploy_backup_keep: int = 5
     predeploy_backup_min_free_bytes: int = 1024**3
 
+    # DEV-291: a PROD deploy that fails after its containers were replaced returns to the previous version when the
+    # database kept its migration revision. How long reading that revision may take, and the whole return (files back,
+    # the previous version started from its images, the check that it answers).
+    database_revision_timeout: int = 60
+    deploy_return_timeout: int = 900
+
     # DEV-117: Plane, the ICC ticket register. The cockpit writes there under its OWN account and key, never a
     # Dedo's or a person's. An empty address or key makes the cockpit say plainly that it has no access to Plane.
     plane_url: str = ""

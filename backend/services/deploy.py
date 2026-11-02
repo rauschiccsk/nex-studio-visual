@@ -92,6 +92,7 @@ from backend.services import (
     ci_status,
     dedo_project_proposal,
     deploy_progress,
+    deploy_return,
     launch_pairing,
     private_access,
     prod_machines,
@@ -915,7 +916,7 @@ def _vrat_predpis_po_zlyhani(
             "inštaláciu rozladil (kontajnery novej verzie, predpis starej). Skontroluj aplikáciu skôr, než "
             "nasadíš znovu."
         )
-    predchadzajuce = getattr(result, "previous_remote_files", None)
+    predchadzajuce = getattr(result, "previous_files", None)
     if not predchadzajuce:
         return detail
     from backend.services import remote_instance
@@ -1014,6 +1015,8 @@ async def _default_deploy_runner(
     health_before = await orchestrator.instance_health(
         result.compose_path, project_slug, deploy_host if is_prod else None
     )
+    # DEV-291 — True once a failed PROD deploy put the previous version back: the new one no longer stands there.
+    returned = False
     if is_prod:
         outcome = await orchestrator._run_prod_deploy(
             project_slug,
@@ -1025,7 +1028,21 @@ async def _default_deploy_runner(
             private=private_network,
         )
         ok, detail = outcome
-        detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host, new_version_started=_started(outcome))
+        if not ok and _started(outcome):
+            # DEV-291 — the new version replaced the old one and failed: back to the previous version when the
+            # database kept its revision; otherwise the sentence says why not and the files stay the new ones (DEV-68).
+            returned, sentence = await deploy_return.return_to_previous(
+                result,
+                getattr(outcome, "revision_before", None),
+                project_slug=project_slug,
+                customer_slug=customer_slug,
+                app=app,
+                deploy_host=deploy_host,
+                private=private_network,
+            )
+            detail = f"{detail} {sentence}"
+        if not returned:
+            detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host, new_version_started=_started(outcome))
         # DEV-283 — the address on the machine it was deployed to.
         url = (
             _prod_url(customer_slug, app, private=private_network, prod_host=deploy_host) if result.fe_service else None
@@ -1066,7 +1083,7 @@ async def _default_deploy_runner(
                 + "; ".join(worse)
                 + ". Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
             )
-    return RunnerResult(ok, detail, url, warnings, new_version_started=_started(outcome))
+    return RunnerResult(ok, detail, url, warnings, new_version_started=_started(outcome) and not returned)
 
 
 # ---------------------------------------------------------------------------

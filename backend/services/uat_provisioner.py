@@ -3338,11 +3338,12 @@ class ProvisionResult:
     loopback_base_port: Optional[int]
     is_redeploy: bool
     warnings: list[str] = field(default_factory=list)
-    #: ICCINT-151 — čo bolo na CIELI pred zápisom, aby sa to dalo vrátiť, keď nasadenie zlyhá.
-    #: ``{meno: (obsah, práva)}``, prázdne pri inštalácii na tomto stroji.
+    #: ICCINT-151 — čo bolo v priečinku inštalácie pred zápisom, prečítané tam, kde inštalácia beží, aby sa to dalo
+    #: vrátiť, keď nasadenie zlyhá. ``{meno: (obsah, práva)}``, prázdne pri prvom nasadení. DEV-291 — aj pri inštalácii
+    #: na tomto stroji: návrat na predošlú verziu po zlyhanom ostrom nasadení ju spúšťa z týchto súborov.
     #: ⚠️ Obsahuje aj `.env`, teda tajomstvá. Zostáva v procese: do hlásení, do evidencie ani do
     #: odpovede sa nedostane — na to sú ``warnings``, ktoré tajomstvá nikdy nenesú.
-    previous_remote_files: dict[str, tuple[str, int]] = field(default_factory=dict)
+    previous_files: dict[str, tuple[str, int]] = field(default_factory=dict)
 
 
 def provision_uat(
@@ -3470,6 +3471,12 @@ def provision_uat(
     else:
         existing_compose = uat_dir / "docker-compose.yml"
         existing_compose_text = existing_compose.read_text(encoding="utf-8") if existing_compose.is_file() else None
+        # DEV-291 — the same memory as on another machine, read here: a failed PROD deploy starts the previous version
+        # from these files again.
+        if existing_compose_text is not None:
+            predchadzajuce["docker-compose.yml"] = (existing_compose_text, 0o664)
+        if (uat_dir / ".env").is_file():
+            predchadzajuce[".env"] = ((uat_dir / ".env").read_text(encoding="utf-8"), 0o600)
 
     db_creds = detect_db_credentials(src_services, roles["db"], project_slug)
     db_user, db_name = db_creds["POSTGRES_USER"], db_creds["POSTGRES_DB"]
@@ -3844,7 +3851,7 @@ def provision_uat(
         warnings.append(f"no backend service detected in {project_slug}'s compose — no /api Traefik route")
 
     return ProvisionResult(
-        previous_remote_files=predchadzajuce,
+        previous_files=predchadzajuce,
         uat_slug=uat_slug,
         uat_dir=uat_dir,
         compose_path=compose_path,

@@ -77,6 +77,7 @@ from backend.services import (
     dedo_message,
     delivery_statement,
     deploy_progress,
+    deploy_return,
     env_contract,
     failure_framing,
     fast_fix,
@@ -6571,13 +6572,21 @@ class InstanceDeployResult(tuple):
     11.10.2026, NEX Inbox 1.7.1 on the customer's PROD (MAGER): the new containers ran and the database was migrated
     when the last check failed — and the deploy put the previous compose back on the machine: containers 1.7.1, files
     1.5.6. Whether the files may go back depends on whether the new version was started, so the deploy says it.
-    It unpacks exactly like the plain pair it replaces (``ok, detail = …``)."""
+    It unpacks exactly like the plain pair it replaces (``ok, detail = …``).
+
+    DEV-291 — ``revision_before`` is the migration revision of the PROD database right before the containers were
+    replaced (:func:`deploy_return.database_revision`); a failed deploy may go back to the previous version only when
+    the database still has it."""
 
     new_version_started: bool
+    revision_before: Optional[str]
 
-    def __new__(cls, ok: bool, detail: str, *, new_version_started: bool = False) -> "InstanceDeployResult":
+    def __new__(
+        cls, ok: bool, detail: str, *, new_version_started: bool = False, revision_before: Optional[str] = None
+    ) -> "InstanceDeployResult":
         result = super().__new__(cls, (ok, detail))
         result.new_version_started = new_version_started
+        result.revision_before = revision_before
         return result
 
 
@@ -6732,13 +6741,20 @@ async def _run_uat_deploy(
     owners_note = (
         f" Dáta aplikácie dostal používateľ, pod ktorým beží: {', '.join(owners_changed)}." if owners_changed else ""
     )
+    # DEV-291 — the state of the database the previous version runs with, read just before it is replaced: a failure
+    # from here on may start the previous version again only over this very revision.
+    revision_before = (
+        await deploy_return.database_revision(compose, deploy_host=deploy_host) if environment == "prod" else None
+    )
     deploy_progress.krok(compose.parent, deploy_progress.KROK_SPUSTENIE)
     # From here the new version is on the machine: whatever fails later, the containers it replaced are gone and a
     # migration may have run — the compose on the target must stay the new one (DEV-68). Every report from here on
     # carries where the backup lies: a failure after this point is exactly when someone needs it.
     started, failure = await _deploy_compose_step(base + ["up", "-d", "--force-recreate"], env, deadline, limit)
     if not started:
-        return InstanceDeployResult(False, failure + backup_note, new_version_started=True)
+        return InstanceDeployResult(
+            False, failure + backup_note, new_version_started=True, revision_before=revision_before
+        )
     # v4.0.21: migrate the DB before serve-verify — an alembic app with no migrate service of its
     # own boots against an un-migrated schema otherwise (crash-test 2026-07-21). No-op for apps that
     # already migrate on ``up``; a migration failure is a hard deploy failure (broken schema).
@@ -6752,7 +6768,9 @@ async def _run_uat_deploy(
         deploy_host=deploy_host,
     )
     if not mig_ok:
-        return InstanceDeployResult(False, mig_detail + backup_note, new_version_started=True)
+        return InstanceDeployResult(
+            False, mig_detail + backup_note, new_version_started=True, revision_before=revision_before
+        )
     deploy_progress.krok(compose.parent, deploy_progress.KROK_OVERENIE)
     # ``up`` exit 0 only means the containers were created — NOT that the app serves (the nex-asistent
     # false-success bug). Verify the app actually responds before reporting success. UAT keeps the exact
@@ -6781,7 +6799,10 @@ async def _run_uat_deploy(
     detail = await _uprac_na_cieli(ok, detail + build_note + backup_note + owners_note, deploy_host, compose.parent)
     # DEV-124: older versions of this installation's images go too — on whichever machine it runs.
     return InstanceDeployResult(
-        ok, await _uprac_stare_verzie(ok, detail, deploy_host, compose), new_version_started=True
+        ok,
+        await _uprac_stare_verzie(ok, detail, deploy_host, compose),
+        new_version_started=True,
+        revision_before=revision_before,
     )
 
 

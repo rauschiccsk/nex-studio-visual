@@ -294,7 +294,7 @@ class _Provisioned:
     fe_service = "frontend"
     uat_dir = Path("/opt/customers/mager/nex-inbox")
     compose_path = Path("/nonexistent/docker-compose.yml")
-    previous_remote_files = {"docker-compose.yml": ("image: nex-inbox-backend:v1.5.6\n", 0o644)}
+    previous_files = {"docker-compose.yml": ("image: nex-inbox-backend:v1.5.6\n", 0o644)}
 
 
 def _runner(monkeypatch, outcome):
@@ -327,8 +327,11 @@ def test_files_stay_new_when_the_new_version_already_runs(monkeypatch):
     assert ok is False
     assert result.new_version_started is True, "the deploy record must learn that the new version runs"
     assert written == [], "the old compose was put back under containers of the new version"
+    # DEV-291: the database state before the start is unknown here, so the previous version is not started either.
     assert detail == (
-        "smerovanie zlyhalo Nová verzia na cieli už beží, preto predpis ostal na nej — návrat na predchádzajúci by "
+        "smerovanie zlyhalo Stav databázy pred nasadením alebo po ňom sa nedal zmerať, preto kokpit predošlú verziu "
+        "nespustil — mohla by bežať nad schémou, ktorú nepozná. Návrat znamená obnovu zálohy. "
+        "Nová verzia na cieli už beží, preto predpis ostal na nej — návrat na predchádzajúci by "
         "inštaláciu rozladil (kontajnery novej verzie, predpis starej). Skontroluj aplikáciu skôr, než nasadíš znovu."
     )
 
@@ -341,7 +344,7 @@ def test_files_go_back_when_the_new_version_never_started(monkeypatch):
 
     assert ok is False
     assert result.new_version_started is False
-    assert written == [_Provisioned.previous_remote_files]
+    assert written == [_Provisioned.previous_files]
     assert detail == "exit 1: build failed Predpis na cieli vrátený do stavu pred nasadením."
 
 

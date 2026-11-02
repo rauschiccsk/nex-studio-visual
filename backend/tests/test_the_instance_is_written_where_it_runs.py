@@ -539,7 +539,7 @@ class _VysledokProvisioningu:
     fe_service = "frontend"
     warnings: list[str] = []
     uat_dir = Path("/opt/customers/mager/nex-inbox")
-    previous_remote_files = {"docker-compose.yml": ("name: povodny\n", 0o664), ".env": ("TAJNE=1\n", 0o600)}
+    previous_files = {"docker-compose.yml": ("name: povodny\n", 0o664), ".env": ("TAJNE=1\n", 0o600)}
 
 
 def test_a_failed_deploy_puts_the_previous_description_back(monkeypatch) -> None:
@@ -613,16 +613,36 @@ def test_provisioning_remembers_what_it_overwrote_on_the_target(tmp_path, monkey
 
     vysledok = _provision(tmp_path, deploy_host="mager", allow_overwrite=True)
 
-    assert set(vysledok.previous_remote_files) == {"docker-compose.yml", ".env"}
-    assert vysledok.previous_remote_files["docker-compose.yml"][0] == "name: povodny\n"
-    assert vysledok.previous_remote_files[".env"][1] == 0o600, "záloha nastavení musí zostať zavretá"
+    assert set(vysledok.previous_files) == {"docker-compose.yml", ".env"}
+    assert vysledok.previous_files["docker-compose.yml"][0] == "name: povodny\n"
+    assert vysledok.previous_files[".env"][1] == 0o600, "záloha nastavení musí zostať zavretá"
 
 
-def test_a_local_instance_remembers_nothing_to_put_back(tmp_path, monkeypatch) -> None:
-    """Inštalácia na tomto stroji sa nikam nezapisuje, takže niet čo vracať."""
+def test_a_local_instance_remembers_what_it_overwrote_here(tmp_path, monkeypatch) -> None:
+    """DEV-291 — a failed PROD deploy starts the previous version again from these files, on this machine too. The
+    first deploy has nothing to remember; a redeploy remembers what lay here, its settings closed."""
     ciel = _Ciel()
     monkeypatch.setattr(P, "remote_instance", ciel)
+    monkeypatch.setattr(P, "_docker_image_exists", lambda _o: True)
 
-    vysledok = _provision(tmp_path)
+    prve = _provision(tmp_path)
+    assert prve.previous_files == {}
+    povodny = prve.compose_path.read_text(encoding="utf-8")
+    povodne_nastavenia = prve.env_path.read_text(encoding="utf-8")
 
-    assert vysledok.previous_remote_files == {}
+    vysledok = P.provision_uat(
+        "nex-manager",
+        "mager-prod",
+        projects_root=tmp_path / "projects",
+        uat_root=tmp_path / "uat",
+        prod_root=tmp_path / "customers",
+        environment="prod",
+        customer_slug="mager",
+        app="manager",
+        full_project_slug="nex-manager",
+        version="1.1.0",
+    )
+
+    assert vysledok.previous_files["docker-compose.yml"] == (povodny, 0o664)
+    assert vysledok.previous_files[".env"] == (povodne_nastavenia, 0o600)
+    assert ciel.zapisane == {}, "inštalácia na tomto stroji sa nikam inam nezapisuje"

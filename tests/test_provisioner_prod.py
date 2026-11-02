@@ -367,6 +367,9 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
     async def _serves_ok(*_a, **_k):
         return True, "OK"
 
+    async def _no_revision(*_a, **_k):
+        return None
+
     async def _backed_up(*_a, **_k):
         # DEV-116 backs the database up before ``up``; this test is about WHICH compose is deployed, and the
         # backup has its own tests (test_a_prod_deploy_backs_the_database_up_first.py).
@@ -377,6 +380,9 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
     monkeypatch.setattr(orchestrator.asyncio, "create_subprocess_exec", _fake_exec)
     monkeypatch.setattr(orchestrator, "_verify_uat_serves", _serves_ok)
     monkeypatch.setattr(orchestrator.predeploy_backup, "back_up", _backed_up)
+    # DEV-291 reads the database's migration revision before ``up`` — the same reason, own tests:
+    # backend/tests/test_a_failed_prod_deploy_goes_back_to_the_previous_version.py.
+    monkeypatch.setattr(orchestrator.deploy_return, "database_revision", _no_revision)
     # DEV-139 builds from the verified commit; this test is about WHICH compose is deployed — without the stub it
     # would export the real repository behind the real /opt/customers path. Own tests:
     # backend/tests/test_a_deploy_builds_from_the_verified_commit.py.
