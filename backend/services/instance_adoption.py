@@ -616,7 +616,10 @@ async def adopting_deploy_runner(
         # ICCINT-151 — pri zlyhaní vráť na cieľ predpis, ktorý tam bol. Prevzatie je tá cesta, kde na
         # tom záleží najviac: prepisuje sa ním ručne písaná inštalácia zákazníka.
         detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host)
-        url = _prod_url(customer_slug, app, private=private_network) if result.fe_service else None
+        # DEV-283 — the address on the machine the installation runs on.
+        url = (
+            _prod_url(customer_slug, app, private=private_network, prod_host=deploy_host) if result.fe_service else None
+        )
     else:
         ok, detail = await orchestrator._run_uat_deploy(
             project_slug,
