@@ -27,10 +27,18 @@ from backend.services import deploy_progress, predeploy_backup, remote_instance
 
 #: The installation has no database — nothing a newer version could have changed.
 NO_DATABASE = "bez databázy"
-#: Every revision alembic has written (one per branch head), in one line.
+_PSQL = f"psql {predeploy_backup._DB} -Atc"
+_REVISIONS_IN = "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM"
+#: Every revision alembic has written (one per branch head), in one line — the application's, and on the app template
+#: also the template's own record (``kit_alembic_version``, nex_app_kit/migrate.py): a template migration that ran
+#: before the application's failed one changed the database just as well. A database without ``alembic_version``
+#: fails the script, so its state is unknown.
 REVISION_SH = (
-    f"exec psql {predeploy_backup._DB} -Atc \"SELECT string_agg(version_num, ',' ORDER BY version_num) "
-    'FROM alembic_version"'
+    "set -e; "
+    f'app=$({_PSQL} "{_REVISIONS_IN} alembic_version"); '
+    f"kit=$({_PSQL} \"SELECT to_regclass('kit_alembic_version') IS NOT NULL\"); "
+    f'if [ "$kit" = t ]; then kit=$({_PSQL} "{_REVISIONS_IN} kit_alembic_version"); echo "$app kit:$kit"; '
+    'else echo "$app"; fi'
 )
 #: A database container that is being recreated cannot be asked yet — so many tries, this far apart.
 REVISION_ATTEMPTS = 6

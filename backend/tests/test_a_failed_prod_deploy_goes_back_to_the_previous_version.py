@@ -256,6 +256,46 @@ def test_the_revision_is_read_in_the_installations_database(tmp_path, monkeypatc
     assert "alembic_version" in deploy_return.REVISION_SH and "$POSTGRES_USER" in deploy_return.REVISION_SH
 
 
+def _run_revision_script(tmp_path, *, kit: str | None, app_fails: bool = False) -> tuple[int, str]:
+    """The script as the database container runs it — with a ``psql`` that answers like that database would."""
+    import os
+    import stat
+    import subprocess
+
+    fake = tmp_path / "bin" / "psql"
+    fake.parent.mkdir()
+    fake.write_text(
+        "#!/bin/sh\n"
+        'for arg; do query="$arg"; done\n'  # the query is psql's last argument
+        'case "$query" in\n'
+        f'  *"FROM alembic_version"*) {"exit 1" if app_fails else "echo 026_v190"} ;;\n'
+        f"  *to_regclass*) echo {'t' if kit is not None else 'f'} ;;\n"
+        f'  *"FROM kit_alembic_version"*) echo {kit or "-"} ;;\n'
+        '  *) echo "unexpected: $query" >&2; exit 2 ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    env = {"PATH": f"{fake.parent}:{os.environ['PATH']}", "POSTGRES_USER": "app", "POSTGRES_DB": "app"}
+    done = subprocess.run(["sh", "-c", deploy_return.REVISION_SH], env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout.strip()
+
+
+def test_the_script_reads_the_application_s_record(tmp_path):
+    assert _run_revision_script(tmp_path, kit=None) == (0, "026_v190")
+
+
+def test_on_the_app_template_it_reads_the_template_s_record_too(tmp_path):
+    """A template migration that ran before the application's failed one changed the database as well (DEV-291)."""
+    assert _run_revision_script(tmp_path, kit="kit_0001") == (0, "026_v190 kit:kit_0001")
+
+
+def test_a_database_without_the_application_s_record_fails_the_script(tmp_path):
+    code, _out = _run_revision_script(tmp_path, kit="kit_0001", app_fails=True)
+
+    assert code != 0
+
+
 def test_a_database_container_that_is_starting_is_asked_again(tmp_path, monkeypatch):
     revision, asked = _read_revision(
         tmp_path, monkeypatch, [(1, "service postgres is not running"), (1, "container is restarting"), (0, "026")]
