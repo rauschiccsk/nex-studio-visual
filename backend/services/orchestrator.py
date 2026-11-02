@@ -1619,12 +1619,28 @@ def missing_icc_standards(proj_root: Path) -> list[IccStandard]:
     return chybajuce
 
 
-def _icc_standards_scope_block(project_slug: str) -> str:
-    """Odsek do zadania Prípravy, keď projektu chýba povinný štandard. Prázdny reťazec, keď netreba."""
+#: DEV-287 — veta, ktorú dostane prechod na šablónu projektu, ktorý už beží u zákazníka.
+DATA_TRANSFER_SENTENCE = (
+    "Prenos dát do rámu šablóny — projekt už beží u zákazníka (nasadená inštalácia), takže migrácia, ktorá ruší jeho "
+    "vlastné tabuľky rámu (používatelia, relácie, nastavenia, stav používateľa, použité lístky spustenia), je RIADNA "
+    "POLOŽKA tejto verzie a patrí do Špecifikácie: pri každej takej tabuľke napíš, čo sa prenesie do tabuliek rámu "
+    "(kit_users — používatelia s rolou a heslom; kit_system_settings — nastavenia, ktoré sa stanú SettingDefinition) "
+    "a čo sa vedome zruší (relácie a použité lístky — ľudia sa prihlásia znova otvorením z NEX Managera). Údaje "
+    "samotnej aplikácie (jej vlastné tabuľky mimo rámu) migrácia nemení a zostanú priradené tým istým ľuďom; skúška "
+    "migrácie na databáze s dátami overí, že po nej ostanú všetky. Pred nasadením na PROD kokpit databázu zálohuje."
+)
+
+
+def _icc_standards_scope_block(project_slug: str, *, installed: bool = False) -> str:
+    """Odsek do zadania Prípravy, keď projektu chýba povinný štandard. Prázdny reťazec, keď netreba.
+
+    ``installed`` — projekt už beží u zákazníka: prechod na šablónu nesie aj prenos jeho dát (DEV-287)."""
     chybajuce = missing_icc_standards(claude_agent.PROJECTS_ROOT / project_slug)
     if not chybajuce:
         return ""
     vety = "\n".join(f"  - {s.scope_sentence}" for s in chybajuce)
+    if installed and any(s.key == "ram_sablony" for s in chybajuce):
+        vety += f"\n  - {DATA_TRANSFER_SENTENCE}"
     return (
         "\n\nPOVINNÉ CELOICC ŠTANDARDY, KTORÉ TOMUTO PROJEKTU CHÝBAJÚ — zahrň ich do rozsahu tejto "
         "verzie a napíš ich do Špecifikácie ako riadne položky (nie ako poznámku):\n" + vety + "\n"
@@ -1722,7 +1738,12 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
         # tohto odseku ich Príprava nezahrnie, Vizuál nemá odkiaľ vziať obrazovku, Návrh napíše opak
         # a brána vydania ich vymáha vo fáze, kde sa už nestavia — presne ako 14.09.2026 na NEX
         # Inbox v1.5.0, kde to stálo tri kolá brány, dostavbu vo Verifikácii a nález Audítora.
-        + _icc_standards_scope_block(project_slug)
+        + _icc_standards_scope_block(
+            project_slug,
+            installed=app_template.has_installation(
+                db, db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
+            ),
+        )
     )
 
 

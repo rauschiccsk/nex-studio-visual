@@ -220,7 +220,6 @@ def conversion_refusal(db, project) -> str | None:
     The form offers the conversion greyed out with this sentence; the route refuses it with the same one."""
     from sqlalchemy import select
 
-    from backend.db.models.deploy import DeployEvent
     from backend.db.models.versions import Version
 
     if project.template:
@@ -236,17 +235,23 @@ def conversion_refusal(db, project) -> str | None:
     )
     if active:
         return f"Projekt má rozpracovanú verziu {active} — prevod počká, kým ju dokončíš."
+    # DEV-287 — a project that runs at a customer is converted too: the version it goes onto the frame with carries
+    # the carry-over of its data as an item of its scope (orchestrator: the transfer of data into the frame).
+    return None
+
+
+def has_installation(db, project_id) -> bool:
+    """Does the project run anywhere — a deploy that went through, at any customer, UAT or PROD (DEV-287)?"""
+    from sqlalchemy import select
+
+    from backend.db.models.deploy import DeployEvent
+
     deployed = db.execute(
         select(DeployEvent.id).where(
-            DeployEvent.project_id == project.id, DeployEvent.event_type == "deploy", DeployEvent.status == "ok"
+            DeployEvent.project_id == project_id, DeployEvent.event_type == "deploy", DeployEvent.status == "ok"
         )
     ).first()
-    if deployed:
-        return (
-            "Projekt už má nasadenú inštaláciu — pri prevode treba jeho používateľov, relácie a nastavenia preniesť "
-            "do tabuliek šablóny a to kokpit zatiaľ nevie."
-        )
-    return None
+    return deployed is not None
 
 
 def with_server_dependency(pyproject_text: str, dependency: str) -> str | None:

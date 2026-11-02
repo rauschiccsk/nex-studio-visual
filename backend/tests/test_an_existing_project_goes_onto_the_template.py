@@ -283,7 +283,9 @@ def test_a_version_in_progress_waits(db_session):
 
 
 @pytest.mark.parametrize("environment", ["uat", "prod"])
-def test_an_installation_waits_for_the_carry_over_of_its_people(db_session, environment):
+def test_a_project_that_runs_at_a_customer_is_converted_too(db_session, environment):
+    """DEV-287 (Director 02.11.2026: „Súhlasím“): an installation no longer stops the conversion — the version that goes
+    onto the frame carries the transfer of its data in its scope."""
     project = _project(db_session)
     customer = Customer(project_id=project.id, name="ICC", slug=f"icc{uuid.uuid4().hex[:6]}")
     db_session.add(customer)
@@ -299,6 +301,7 @@ def test_an_installation_waits_for_the_carry_over_of_its_people(db_session, envi
     db_session.add(failed)
     db_session.flush()
     assert app_template.conversion_refusal(db_session, project) is None  # a failed deploy left nothing behind
+    assert app_template.has_installation(db_session, project.id) is False
 
     db_session.add(
         DeployEvent(
@@ -312,10 +315,8 @@ def test_an_installation_waits_for_the_carry_over_of_its_people(db_session, envi
     )
     db_session.flush()
 
-    assert app_template.conversion_refusal(db_session, project) == (
-        "Projekt už má nasadenú inštaláciu — pri prevode treba jeho používateľov, relácie a nastavenia preniesť do "
-        "tabuliek šablóny a to kokpit zatiaľ nevie."
-    )
+    assert app_template.conversion_refusal(db_session, project) is None
+    assert app_template.has_installation(db_session, project.id) is True
 
 
 # ── the routes ──────────────────────────────────────────────────────────────────────────────────────────────────
