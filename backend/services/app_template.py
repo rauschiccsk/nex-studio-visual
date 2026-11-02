@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.services import nexshared
+from backend.services import launch_pairing, nexshared
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,14 @@ _PROJECT_DEPENDENCIES_RE = re.compile(
 _PIN_VERSION_RE = re.compile(r"#v(\d+\.\d+\.\d+)$")
 
 
+#: DEV-287 — NEX Manager is the one the frame signs people in through; it goes onto the template only by a design of its
+#: own, which says how it keeps that role (Director 02.11.2026: „Súhlasím“).
+MANAGER_REFUSAL = (
+    "NEX Manager sa na šablónu zatiaľ neprevádza — šablóna prihlasuje ľudí cez neho, takže najprv potrebuje vlastný "
+    "návrh, ako prevezme dizajn šablóny a ostane tým, kto prihlasuje."
+)
+
+
 def conversion_refusal(db, project) -> str | None:
     """Why *project* cannot be put onto an app template now, in a sentence for the Manažér — ``None`` when it can.
     The form offers the conversion greyed out with this sentence; the route refuses it with the same one."""
@@ -224,6 +232,8 @@ def conversion_refusal(db, project) -> str | None:
 
     if project.template:
         return "Projekt už je na šablóne aplikácie."
+    if project.slug == launch_pairing.MANAGER_PROJECT:
+        return MANAGER_REFUSAL
     if project.type != "standard":
         return "Na šablónu sa zatiaľ prevádza len bežný projekt — Web projekt nie."
     if not project.source_path:
