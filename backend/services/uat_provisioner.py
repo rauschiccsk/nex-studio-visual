@@ -2180,16 +2180,25 @@ def unbuildable_images(
 
 
 def env_version_bump(instance_dir: Path, *, version: str, example: Optional[dict[str, str]] = None) -> dict[str, str]:
-    """Prostredie inštalácie s novou verziou. Existujúce hodnoty sa NIKDY neprepisujú.
+    """Prostredie inštalácie s novou verziou. Existujúce hodnoty sa NIKDY neprepisujú — okrem verzie aplikácie.
 
     V prostredí žije totožnosť inštalácie — názov databázy, zákazník, tajomstvá. Práve tie sa
     15.09.2026 prepísali vývojovými hodnotami (``nex_inbox_dev``, ``dev``). Nová premenná, ktorú
     verzia priniesla, sa doplniť MÔŽE; prepísať existujúcu nesmie.
+
+    DEV-288 — verzia samotnej aplikácie nie je totožnosť inštalácie: každá premenná verzie, ktorú inštalácia má
+    (:data:`APP_VERSION_ENV_KEYS`), dostane nasadzovanú verziu. Prepisoval sa len ``PROJECT_VERSION``; NEX Manager
+    MÁGERSTAV mal po nasadení 1.4.2 v ``.env`` starú ``VITE_APP_VERSION`` a správnu verziu dostal len z prostredia,
+    ktoré kokpit odovzdá pri ``up`` — ručné ``up`` na stroji by vrátilo starú (zmeral Máger Dedo 02.11.2026).
     """
     env = _parse_env_file(Path(instance_dir) / ".env")
     for kluc, hodnota in (example or {}).items():
         env.setdefault(kluc, hodnota)
-    env["PROJECT_VERSION"] = version.lstrip("v")
+    verzia = version.lstrip("v")
+    for kluc in APP_VERSION_ENV_KEYS:
+        if kluc in env:
+            env[kluc] = verzia
+    env["PROJECT_VERSION"] = verzia
     return env
 
 
