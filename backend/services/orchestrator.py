@@ -1593,7 +1593,9 @@ ICC_STANDARDS: tuple[IccStandard, ...] = (
             "Prechod na šablónu aplikácie — projekt je prevedený na šablónu (frontend/app.manifest.json, nex-app-kit), "
             "ale jeho obrazovky ešte stoja vo vlastnom ráme. Je to RIADNA POLOŽKA tejto verzie, v Špecifikácii, Návrhu "
             "aj Vizuáli: obrazovky presuň do rámu šablóny (cesty ako <Route> vnútri <TemplateApp>, položky ľavého "
-            "panela v manifeste), server postav na AppKit (kit.install), vlastný ľavý panel, hornú lištu, prihlásenie, "
+            "panela v manifeste), server postav na AppKit (kit.install) — keď server ešte nemá v závislostiach "
+            "nex-app-kit (napr. balíky spravuje Poetry), pridaj ho tam aj so zámkom presných verzií (poetry lock) —, "
+            "vlastný ľavý panel, hornú lištu, prihlásenie, "
             "Aktualizácie a Nastavenia odstráň aj s ich cestami a tabuľkami (migráciou) a vlastné nastavenia zapíš ako "
             "SettingDefinition — postup je v zručnosti sablona-aplikacie. Kokpit pred Overením overí, že rám je celý."
         ),

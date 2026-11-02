@@ -317,14 +317,13 @@ def convert_project(
         if not files[rel].is_file():
             raise AppTemplateError(f"Projektu chýba {rel} — prevod na šablónu ho potrebuje.")
     pyproject_text = files["backend/pyproject.toml"].read_text(encoding="utf-8")
-    if with_server_dependency(pyproject_text, KIT_PACKAGE) is None:
-        raise AppTemplateError(
-            "Server projektu nemá zoznam závislostí v [project].dependencies (po jednej na riadok) — prevod na šablónu "
-            "doň nevie doplniť nex-app-kit."
-        )
     version = latest_kit_version(run)
     values = scaffold_values(name=name, slug=slug, auth_mode=auth_mode, ai=choice.ai, ports=ports, version=version)
-    pyproject = with_server_dependency(pyproject_text, values["kit_server"])
+    # DEV-289 — a server whose packages another tool keeps (NEX Manager: Poetry with poetry.lock, built by „poetry
+    # export“) is left as it is: a line written without its lock would break the build. The version's Príprava asks the
+    # agent to add nex-app-kit with that tool (ICC_STANDARDS „ram_sablony“), and the frame check before Overenie sees
+    # the server on AppKit.
+    pyproject = with_server_dependency(pyproject_text, values["kit_server"]) or pyproject_text
     originals = {path: path.read_text(encoding="utf-8") if path.is_file() else None for path in files.values()}
     try:
         with tempfile.TemporaryDirectory(prefix="nex-app-kit-") as tmp:

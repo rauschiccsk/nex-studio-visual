@@ -192,13 +192,6 @@ def test_a_failed_step_puts_every_file_back_and_is_said(tmp_path, fail, npm_writ
             "Projekt už má manifest šablóny (frontend/app.manifest.json) — prevod sa druhýkrát nespúšťa.",
         ),
         (
-            lambda r: (r / "backend" / "pyproject.toml").write_text(
-                '[project]\nname = "x"\ndependencies = ["fastapi"]\n', encoding="utf-8"
-            ),
-            "Server projektu nemá zoznam závislostí v [project].dependencies (po jednej na riadok) — prevod na "
-            "šablónu doň nevie doplniť nex-app-kit.",
-        ),
-        (
             lambda r: (r / "frontend" / "package.json").unlink(),
             "Projektu chýba frontend/package.json — prevod na šablónu ho potrebuje.",
         ),
@@ -215,6 +208,30 @@ def test_what_cannot_be_converted_is_said_before_github_is_asked(tmp_path, prepa
 
     assert str(caught.value) == sentence
     assert world.calls == []
+
+
+#: NEX Manager's server (02.11.2026): its packages are kept by Poetry, the build installs them from poetry.lock.
+POETRY_PYPROJECT = """[tool.poetry]
+name = "nex-manager-backend"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115"
+"""
+
+
+def test_a_server_whose_packages_poetry_keeps_is_converted_and_left_as_it_is(tmp_path):
+    """DEV-289 — 02.11.2026 the conversion of NEX Manager stopped: its server has no [project] list. Written there
+    without poetry.lock, the line would break the build; the version adds the kit with Poetry (ram_sablony)."""
+    root = project_on_disk(tmp_path, pyproject=POETRY_PYPROJECT)
+
+    assert convert(root, World()) == "0.3.0"
+
+    assert (root / "backend" / "pyproject.toml").read_text(encoding="utf-8") == POETRY_PYPROJECT
+    assert json.loads((root / "frontend" / "app.manifest.json").read_text(encoding="utf-8")) == MANIFEST
+    assert "nex-app-kit" in json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+    frame = next(s for s in orchestrator.ICC_STANDARDS if s.key == "ram_sablony")
+    assert "Poetry" in frame.scope_sentence and "poetry lock" in frame.scope_sentence
 
 
 def test_the_kit_goes_first_into_the_server_s_own_list_only():
