@@ -73,17 +73,12 @@ def test_the_transfer_names_what_moves_what_goes_and_what_stays():
         assert said in sentence, said
 
 
-def test_nex_manager_waits_for_a_design_of_its_own(db_session):
-    """Director 02.11.2026: „Súhlasím“ — the frame signs people in through NEX Manager, so NEX Manager is not put onto
-    it by the card; another project with the same history is."""
+def test_nex_manager_goes_onto_the_template_once_its_design_is_approved(db_session):
+    """DEV-286 — the design is approved (Director 02.11.2026: „Súhlasím“): NEX Manager takes the frame with its own
+    passwords and stays the one that signs people into the other apps; the card converts it like any running project."""
     from backend.services import app_template, launch_pairing
     from backend.tests.test_an_existing_project_goes_onto_the_template import _project
 
     manager = _project(db_session, slug=launch_pairing.MANAGER_PROJECT)
-    other = _project(db_session)
 
-    assert app_template.conversion_refusal(db_session, manager) == (
-        "NEX Manager sa na šablónu zatiaľ neprevádza — šablóna prihlasuje ľudí cez neho, takže najprv potrebuje "
-        "vlastný návrh, ako prevezme dizajn šablóny a ostane tým, kto prihlasuje."
-    )
-    assert app_template.conversion_refusal(db_session, other) is None
+    assert app_template.conversion_refusal(db_session, manager) is None
