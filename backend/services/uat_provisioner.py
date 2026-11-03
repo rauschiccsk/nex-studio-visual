@@ -2206,7 +2206,15 @@ def unbuildable_images(
     return chybaju
 
 
-def env_version_bump(instance_dir: Path, *, version: str, example: Optional[dict[str, str]] = None) -> dict[str, str]:
+def env_version_bump(
+    instance_dir: Path,
+    *,
+    version: str,
+    example: Optional[dict[str, str]] = None,
+    rendered: Optional[dict[str, str]] = None,
+    admin_password: Optional[str] = None,
+    decided_elsewhere: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """Prostredie inštalácie s novou verziou. Existujúce hodnoty sa NIKDY neprepisujú — okrem verzie aplikácie.
 
     V prostredí žije totožnosť inštalácie — názov databázy, zákazník, tajomstvá. Práve tie sa
@@ -2217,10 +2225,26 @@ def env_version_bump(instance_dir: Path, *, version: str, example: Optional[dict
     (:data:`APP_VERSION_ENV_KEYS`), dostane nasadzovanú verziu. Prepisoval sa len ``PROJECT_VERSION``; NEX Manager
     MÁGERSTAV mal po nasadení 1.4.2 v ``.env`` starú ``VITE_APP_VERSION`` a správnu verziu dostal len z prostredia,
     ktoré kokpit odovzdá pri ``up`` — ručné ``up`` na stroji by vrátilo starú (zmeral Máger Dedo 02.11.2026).
+
+    DEV-301 — novú premennú vyplnia pravidlá prvého zostavenia (``rendered`` — výstup :func:`generate_uat_env` pre to
+    isté nasadenie), nie surová hodnota z ``.env.example``: heslo administrátora od zákazníka, tajomstvo náhodnou
+    hodnotou, zástupný text sa nevpíše. A heslo administrátora od zákazníka (``admin_password``) inštalácia vždy
+    prevezme — Manažér ho mení v kokpite a nasadí znova. NEX Manager 1.5.0 na UAT ICC 03.11.2026 dostal
+    ``ADMIN_INITIAL_PASSWORD`` prázdne z príkladu, hoci ho zákazník mal, a migrácia 005 prenos odmietla.
+    ``decided_elsewhere`` — premenné, o ktorých rozhoduje iné pravidlo nasadenia (adresy: inštalácia s vlastným
+    smerovaním si ich necháva, :func:`cockpits_addresses_into_env`, DEV-164); tie dostanú hodnotu z príkladu ako
+    doteraz.
     """
     env = _parse_env_file(Path(instance_dir) / ".env")
     for kluc, hodnota in (example or {}).items():
-        env.setdefault(kluc, hodnota)
+        if kluc in env:
+            continue
+        if rendered is None or kluc in decided_elsewhere:
+            env[kluc] = hodnota
+        elif kluc in rendered:
+            env[kluc] = rendered[kluc]
+    if admin_password and ADMIN_LOGIN_ENV_KEY in env:
+        env[ADMIN_LOGIN_ENV_KEY] = admin_password
     verzia = version.lstrip("v")
     for kluc in APP_VERSION_ENV_KEYS:
         if kluc in env:
@@ -3797,14 +3821,22 @@ def provision_uat(
             )
         compose_text = render_uat_compose(povysene, routing)
         mala = set(_parse_env_file(env_path))
-        env_riadky = env_version_bump(uat_dir, version=version, example=env_example)
+        adresy = {key: f"https://{public_host}" for key in contract.public_url_keys} | further_public_urls
+        env_riadky = env_version_bump(
+            uat_dir,
+            version=version,
+            example=env_example,
+            rendered=_parse_env_text(env_content),
+            admin_password=admin_password,
+            decided_elsewhere=frozenset(adresy),
+        )
         warnings.extend(
             cockpits_addresses_into_env(
                 env_riadky,
                 had=mala,
                 installation=povysene,
                 cockpits_render=cockpits_render,
-                addresses={key: f"https://{public_host}" for key in contract.public_url_keys} | further_public_urls,
+                addresses=adresy,
             )
         )
         warnings.extend(
