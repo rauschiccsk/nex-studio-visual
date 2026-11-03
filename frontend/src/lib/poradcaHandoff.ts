@@ -15,6 +15,7 @@
 
 import type { InputOwner } from "@/components/riadiace/blockRecovery";
 import { draftKey } from "@/hooks/useDraft";
+import type { PoradcaVersionInfo } from "@/types/poradca";
 
 export type HandoffSurface = InputOwner;
 
@@ -40,6 +41,35 @@ export function appendInstruction(existing: string, instruction: string): string
   if (!add) return existing;
   if (existing.includes(add)) return existing;
   return existing.trim() ? `${existing.trimEnd()}\n\n${add}` : add;
+}
+
+/** DEV-294 — the version whose Riadiace centrum takes Poradca's instruction, or why none does.
+ *
+ * The conversation's own version while its field takes it. A conversation about a finished version, or about the whole
+ * project, hands it to the build that runs now — the pinned version first, otherwise the only one whose field takes
+ * it. 03.11.2026 the Director asked about NEX Manager 1.5.0 in the conversation of the finished 1.4.0 and the button
+ * stayed grey: „stlačím tlačidlo ako obvykle a upresnenie pôjde do riadiaceho centra.“ A build that is not finished
+ * but does not take it now (it waits for the cockpit) is not bypassed into another version. */
+export function instructionTarget(
+  scope: PoradcaVersionInfo | null,
+  versions: readonly PoradcaVersionInfo[],
+  pinnedId: string | null,
+): { version: PoradcaVersionInfo | null; blocked: string | null } {
+  if (scope?.instruction_open) return { version: scope, blocked: null };
+  if (!scope || scope.stage === "done") {
+    const open = versions.filter((v) => v.instruction_open);
+    const chosen = open.find((v) => v.id === pinnedId) ?? (open.length === 1 ? open[0] : null);
+    if (chosen) return { version: chosen, blocked: null };
+    if (open.length > 1) {
+      return { version: null, blocked: "Stavia sa viac verzií — v Projektoch pripni tú, do ktorej pokyn patrí." };
+    }
+  }
+  return {
+    version: null,
+    blocked: scope
+      ? (scope.instruction_closed_reason ?? "Pole Riadiaceho centra teraz pokyn neprijme.")
+      : "Žiadna verzia projektu teraz pokyn neprijme — stavba nebeží.",
+  };
 }
 
 /** Hand an instruction off to the build's Riadiace centrum. Throws when the browser refuses to store it. */

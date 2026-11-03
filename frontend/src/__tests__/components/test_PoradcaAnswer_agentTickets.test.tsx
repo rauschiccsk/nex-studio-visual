@@ -110,13 +110,12 @@ describe("tickets for the agent under Poradca's answer (DEV-218)", () => {
     expect(takeHandoff("v-nk")).toBeNull();
   });
 
-  it("is grey with the reason when the conversation is about the whole project", () => {
+  // DEV-294: a conversation about the whole project hands it to the build that runs — here none runs.
+  it("is grey with the reason when no build would take it", () => {
     answer({}, null);
 
     expect(button()).toBeDisabled();
-    expect(
-      screen.getByText("Rozhovor je o celom projekte — hore vyber verziu, do ktorej stavby pokyn patrí."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Žiadna verzia projektu teraz pokyn neprijme — stavba nebeží.")).toBeInTheDocument();
   });
 
   it("is not there when the answer names no ticket for the agent", () => {

@@ -484,7 +484,7 @@ export default function PoradcaPage() {
                 )}
               </div>
             ) : (
-              <PoradcaAnswer key={m.id} message={m} scopeVersion={scopeVersion} />
+              <PoradcaAnswer key={m.id} message={m} scopeVersion={scopeVersion} projectVersions={context?.versions ?? []} />
             ),
           )}
         </div>

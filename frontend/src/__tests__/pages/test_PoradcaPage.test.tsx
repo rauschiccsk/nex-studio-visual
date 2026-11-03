@@ -175,12 +175,18 @@ describe("PoradcaPage", () => {
     expect(ctx.state.setSelectedVersion).toHaveBeenCalledWith({ versionId: "v13", versionNumber: "1.3.0" });
   });
 
-  it("greys the insert out with the reason when the build cannot take it", async () => {
+  // DEV-294 — Director 03.11.2026: „stlačím tlačidlo ako obvykle a upresnenie pôjde do riadiaceho centra.“ A
+  // conversation about a finished version hands Poradca's instruction to the build that runs now.
+  it("a conversation about a finished version puts the instruction into the build that runs", async () => {
     api.getPoradcaConversationApi.mockResolvedValue(conversation("v11", [ANSWER_WITH_INSTRUCTION]));
     renderPage();
     const button = await screen.findByRole("button", { name: /Vložiť do Riadiaceho centra/ });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("title", "Verzia je hotová — zmena patrí do novej verzie.");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("title", "Vloží pokyn do poľa Riadiaceho centra verzie 1.3.0 — odošleš ho sám.");
+    fireEvent.click(button);
+    expect(await screen.findByText("RIADIACE CENTRUM")).toBeInTheDocument();
+    expect(window.localStorage.getItem("nex.poradca.pending.v13")).toBe("Oprav test_login.");
+    expect(window.localStorage.getItem("nex.poradca.pending.v11")).toBeNull();
   });
 
   it("a new conversation is asked with the chosen scope", async () => {

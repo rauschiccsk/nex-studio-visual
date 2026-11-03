@@ -17,7 +17,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { useCodePaths } from "@/hooks/useCodePaths";
 import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { handOffInstruction } from "@/lib/poradcaHandoff";
+import { handOffInstruction, instructionTarget } from "@/lib/poradcaHandoff";
 import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, longAnswer, stepLabel } from "@/lib/poradcaAnswer";
 import { InlineChoice } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
@@ -28,11 +28,19 @@ interface Props {
   message: PoradcaMessage;
   /** The version the conversation is currently about — `null` = the whole project. */
   scopeVersion: PoradcaVersionInfo | null;
+  /** DEV-294: the project's versions — a conversation about a finished version hands its instruction to the build. */
+  projectVersions?: readonly PoradcaVersionInfo[];
 }
 
-export default function PoradcaAnswer({ message, scopeVersion }: Props) {
+export default function PoradcaAnswer({ message, scopeVersion, projectVersions = [] }: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
+  const pinnedVersionId = useActiveContextStore((s) => s.selectedVersion?.versionId ?? null);
+  const { version: target, blocked: instructionBlocked } = instructionTarget(
+    scopeVersion,
+    projectVersions,
+    pinnedVersionId,
+  );
   const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? null);
   // DEV-88 — a file of the project the answer names is a link into NS Code, at the line it names.
   const codePaths = useCodePaths(projectSlug);
@@ -75,14 +83,14 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
   // Riadiace centrum that takes the Manažér's text now; nothing is sent.
   function handOff(text: string) {
-    if (!scopeVersion) return;
+    if (!target) return;
     try {
-      handOffInstruction(scopeVersion.id, text);
+      handOffInstruction(target.id, text);
     } catch (e: unknown) {
       setError({ message: e instanceof Error ? e.message : "Vloženie zlyhalo" });
       return;
     }
-    setSelectedVersion({ versionId: scopeVersion.id, versionNumber: scopeVersion.version_number });
+    setSelectedVersion({ versionId: target.id, versionNumber: target.version_number });
     navigate("/riadiace-centrum");
   }
 
@@ -116,12 +124,6 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
       setAttaching(false);
     }
   }
-
-  const instructionBlocked = !scopeVersion
-    ? "Rozhovor je o celom projekte — hore vyber verziu, do ktorej stavby pokyn patrí."
-    : scopeVersion.instruction_open
-      ? null
-      : (scopeVersion.instruction_closed_reason ?? "Pole Riadiaceho centra teraz pokyn neprijme.");
 
   // DEV-135 / DEV-205 — „Vložiť do odpovede“ where the answer names the answer for the agent (DEV-208: only there).
   const answerInsert = { insert: handOff, blocked: instructionBlocked };
@@ -212,7 +214,10 @@ export default function PoradcaAnswer({ message, scopeVersion }: Props) {
               type="button"
               onClick={insert}
               disabled={!!instructionBlocked}
-              title={instructionBlocked ?? "Vloží pokyn do poľa Riadiaceho centra — odošleš ho sám."}
+              title={
+                instructionBlocked ??
+                `Vloží pokyn do poľa Riadiaceho centra verzie ${target?.version_number} — odošleš ho sám.`
+              }
               className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary-600"
             >
               <Send className="h-3.5 w-3.5" /> Vložiť do Riadiaceho centra

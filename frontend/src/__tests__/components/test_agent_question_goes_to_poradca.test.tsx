@@ -271,7 +271,7 @@ describe("Poradca's recommended answer comes back into the answer box", () => {
     expect(buttons).toHaveLength(1);
     for (const button of buttons) {
       expect(button).toBeDisabled();
-      expect(button).toHaveAttribute("title", expect.stringMatching(/hore vyber verziu/));
+      expect(button).toHaveAttribute("title", expect.stringMatching(/Žiadna verzia projektu teraz pokyn neprijme/));
     }
   });
 });
