@@ -40,6 +40,7 @@ import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
 import SchemaApprovalBar from "@/components/riadiace/SchemaApprovalBar";
 import PrivateFilesPanel from "@/components/riadiace/PrivateFilesPanel";
 import { blockRecoveryOwnsInput, inputOwner } from "@/components/riadiace/blockRecovery";
+import { composerOffersUprav } from "@/components/riadiace/upravControl";
 import NahlasitZnovaBar from "@/components/riadiace/NahlasitZnovaBar";
 import ZopakovatKonzultaciuBar from "@/components/riadiace/ZopakovatKonzultaciuBar";
 import PokracovatPoOpraveBar from "@/components/riadiace/PokracovatPoOpraveBar";
@@ -119,6 +120,12 @@ export default function RiadiaceCentrumPage() {
     // this page, writes the turn (enqueued behind an in-flight turn when ``deferred``).
     const res = await relayPipelineMessageApi(versionId, text);
     return { deferred: res.deferred };
+  }
+
+  // DEV-297: „Uprav“ from the conversation box — the engine's ``uprav`` with the text as its comment.
+  async function handleUprav(comment: string): Promise<void> {
+    if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
+    setBoard(await postPipelineActionApi(versionId, { action: "uprav", payload: { comment } }));
   }
 
   // --- Render guards (salvaged from the retired AI Agent tab) ---
@@ -400,6 +407,8 @@ export default function RiadiaceCentrumPage() {
             inputReady={!!board}
             owner={inputOwner(board?.state)}
             atVizual={board?.state?.current_stage === "vizual"}
+            offersUprav={composerOffersUprav(board)}
+            onUprav={handleUprav}
           />
         )}
       </div>

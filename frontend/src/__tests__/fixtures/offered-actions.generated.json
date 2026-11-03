@@ -1,0 +1,1796 @@
+[
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "approve_spec",
+   "ask",
+   "hotovo",
+   "skontrolovat",
+   "spustit_stavbu",
+   "spustit_vizual",
+   "uprav",
+   "zopakovat_konzultaciu",
+   "zostav_plan"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "priprava",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "schvalit",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "navrh",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "schvalit",
+   "spustit_stavbu",
+   "spustit_vizual",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "vizual",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pause"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "schvalit",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "programovanie",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "schvalit",
+   "uprav",
+   "verdict",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "verifikacia",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "new_version",
+  "current_stage": "done",
+  "status": "done",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "approve_spec",
+   "ask",
+   "hotovo",
+   "na_riadnu_verziu",
+   "skontrolovat",
+   "spustit_stavbu",
+   "spustit_vizual",
+   "uprav",
+   "zopakovat_konzultaciu",
+   "zostav_plan"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide",
+   "na_riadnu_verziu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "priprava",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide",
+   "na_riadnu_verziu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "navrh",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit",
+   "spustit_stavbu",
+   "spustit_vizual",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide",
+   "na_riadnu_verziu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "vizual",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "pause"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit",
+   "uprav",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide",
+   "na_riadnu_verziu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "programovanie",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "agent_working",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": "manazer",
+  "available_actions": []
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit",
+   "uprav",
+   "verdict",
+   "zopakovat_konzultaciu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "framework_fix",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "awaiting_manazer",
+  "block_reason": null,
+  "resume": "restart",
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "agent_question",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "decision_needed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "ask",
+   "decide",
+   "na_riadnu_verziu"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "agent_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "system_error",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "parse_exhaustion",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "overit_bez_opravy",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "framework_issue",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "nahlasit_znova"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "check_failed",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "blocked",
+  "block_reason": "schema_approval",
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "answer",
+   "ask",
+   "na_riadnu_verziu",
+   "schvalit_schemu",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "verifikacia",
+  "status": "paused",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": [
+   "na_riadnu_verziu",
+   "pokracovat",
+   "uprav"
+  ]
+ },
+ {
+  "flow_type": "fast_fix",
+  "current_stage": "done",
+  "status": "done",
+  "block_reason": null,
+  "resume": null,
+  "pause_reason": null,
+  "available_actions": []
+ }
+]

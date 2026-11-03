@@ -22,6 +22,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore";
 import { useAuthStore } from "@/store/authStore";
 import { schemaChangeSentence, schemaDocLink, SCHEMA_APPROVER_ONLY } from "./databaseSchema";
+import { schvalitBarCarriesUprav } from "./upravControl";
 
 const NOTHING_CHECKED: string[] = [];
 
@@ -146,8 +147,9 @@ export default function SchvalitBar({ board, versionId, onBoard, previewDown = f
             Skontrolované {checkedCount} z {checkKeys.length}
           </span>
         )}
-        {/* Vizuál: no comment box + no "Upraviť" — the composer below owns change-requests (live HMR). */}
-        {!isVizual && (
+        {/* Vizuál: no comment box + no "Upraviť" — the composer below owns change-requests (live HMR). DEV-297: the
+            same rule tells the page that the conversation box need not carry „Uprav“ while this bar does. */}
+        {schvalitBarCarriesUprav(board) && (
           <>
             <input
               lang="sk"

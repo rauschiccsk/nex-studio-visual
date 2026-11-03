@@ -9,7 +9,7 @@
 // at the next turn boundary) — we surface the design-mandated busy hint.
 
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, RotateCcw, Send } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, useDraft, draftKey } from "@/hooks/useDraft";
@@ -35,6 +35,11 @@ const BLOCKED_ABOVE_HINT = "Pokračuj cez lištu vyššie.";
 const CONSULTATION_HINT =
   "Prebieha konzultácia — rozhoduj na karte vyššie. Tu sa môžeš AI partnera len opýtať; dokumenty sa tým nezmenia.";
 
+/** DEV-297: where the box also carries „Uprav“, the two buttons do different things — say which is which.
+ * @internal — exported for its test. */
+export const UPRAV_HINT =
+  "„Poslať“ pošle text AI Agentovi ako správu. „Uprav“ mu vráti prácu na úpravu podľa tohto textu — pri pláne úloh plán.";
+
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
   onRelay: (text: string) => Promise<{ deferred: boolean }>;
@@ -56,6 +61,10 @@ interface Props {
   /** DEV-26: which box takes the Manažér's text in this state (`inputOwner`). Only when it is this one does a
    *  Poradca instruction land here; otherwise one parked here moves on to the box that does. */
   owner?: InputOwner | null;
+  /** DEV-297: the board offers „Uprav“ and no other control sends it (`composerOffersUprav`) — this box carries it. */
+  offersUprav?: boolean;
+  /** Send the text as „Uprav“ (``uprav`` with the text as its comment). */
+  onUprav?: (comment: string) => Promise<void>;
 }
 
 function ConversationComposer({
@@ -67,6 +76,8 @@ function ConversationComposer({
   versionId,
   inputReady = true,
   owner = "rozhovor",
+  offersUprav = false,
+  onUprav,
 }: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
   const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
@@ -122,6 +133,25 @@ function ConversationComposer({
       setSending(false);
     }
   }
+
+  // DEV-297: the same text, sent as „Uprav“ — the work goes back to the agent with it as the comment.
+  async function uprav() {
+    const trimmed = text.trim();
+    if (!trimmed || sending || locked || !onUprav) return;
+    setSending(true);
+    setError(null);
+    setHint(null);
+    try {
+      await onUprav(trimmed);
+      clearDraft();
+      dismissPoradca();
+    } catch (e: unknown) {
+      setError(humanizeApiError(e, "Úprava zlyhala"));
+    } finally {
+      setSending(false);
+    }
+  }
+  const showUprav = offersUprav && !!onUprav;
 
   function onFormSubmit(e: FormEvent) {
     e.preventDefault();
@@ -183,6 +213,7 @@ function ConversationComposer({
       {fromPoradca && (
         <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
       )}
+      {showUprav && <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{UPRAV_HINT}</p>}
       <div className="flex items-end gap-2">
         <textarea
           data-draft="rozhovor"
@@ -225,6 +256,18 @@ function ConversationComposer({
           {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
           Poslať
         </button>
+        {showUprav && (
+          <button
+            type="button"
+            onClick={() => void uprav()}
+            disabled={locked || sending || !text.trim()}
+            title="Vráti prácu AI Agentovi na úpravu podľa tohto textu"
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border-strong)] px-3 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Uprav
+          </button>
+        )}
       </div>
     </form>
   );
