@@ -40,6 +40,43 @@ const CONSULTATION_HINT =
 export const UPRAV_HINT =
   "„Poslať“ pošle text AI Agentovi ako správu. „Uprav“ mu vráti prácu na úpravu podľa tohto textu — pri pláne úloh plán.";
 
+// DEV-298: Poradca's instruction is work, never a question — while the box holds it, „Uprav“ is the main button and
+// Enter sends it so. Remembered per build until the text goes out or the box is emptied, edits and reloads included.
+/** DEV-298: the line while the box holds Poradca's instruction — which button sends it.
+ * @internal — exported for its test. */
+export const UPRAV_INSTRUCTION_HINT =
+  "Pokyn od Poradcu je pokyn na prácu — odošli ho tlačidlom „Uprav“ (aj Enter). „Poslať“ by ho poslal len ako správu.";
+
+const MAIN_BUTTON =
+  "flex h-9 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40";
+const OTHER_BUTTON =
+  "flex h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border-strong)] px-3 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40";
+
+function upravIntentKey(versionId: string | null | undefined): string | null {
+  const key = draftKey("rozhovor", versionId);
+  return key ? `${key}.uprav` : null;
+}
+
+function readUpravIntent(versionId: string | null | undefined): boolean {
+  const key = upravIntentKey(versionId);
+  try {
+    return !!key && window.localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeUpravIntent(versionId: string | null | undefined, on: boolean): void {
+  const key = upravIntentKey(versionId);
+  if (!key) return;
+  try {
+    if (on) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // The browser refuses storage: the main button still follows the instruction while the page stays open.
+  }
+}
+
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
   onRelay: (text: string) => Promise<{ deferred: boolean }>;
@@ -103,6 +140,18 @@ function ConversationComposer({
     restored,
   });
 
+  // DEV-298: the box holds Poradca's instruction — it stays his instruction when he edits it, until it goes out.
+  const [upravIntent, setUpravIntent] = useState<boolean>(() => readUpravIntent(versionId));
+  useEffect(() => {
+    setUpravIntent(readUpravIntent(versionId));
+  }, [versionId]);
+  useEffect(() => {
+    const on = fromPoradca ? true : text.trim() ? upravIntent : false;
+    if (on === upravIntent) return;
+    setUpravIntent(on);
+    writeUpravIntent(versionId, on);
+  }, [fromPoradca, text, upravIntent, versionId]);
+
   // DEV-22 / DEV-26: Poradca's instruction parked here (handed off while the agent was working) must not stay
   // in a box that no longer takes the text — the build blocked on a question, or a consultation opened. Hand it
   // on to the box that took the input over.
@@ -152,6 +201,7 @@ function ConversationComposer({
     }
   }
   const showUprav = offersUprav && !!onUprav;
+  const primaryUprav = showUprav && upravIntent;
 
   function onFormSubmit(e: FormEvent) {
     e.preventDefault();
@@ -162,7 +212,7 @@ function ConversationComposer({
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void submit();
+      void (primaryUprav ? uprav() : submit());
     }
   }
 
@@ -213,7 +263,11 @@ function ConversationComposer({
       {fromPoradca && (
         <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
       )}
-      {showUprav && <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">{UPRAV_HINT}</p>}
+      {showUprav && (
+        <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">
+          {primaryUprav ? UPRAV_INSTRUCTION_HINT : UPRAV_HINT}
+        </p>
+      )}
       <div className="flex items-end gap-2">
         <textarea
           data-draft="rozhovor"
@@ -251,7 +305,8 @@ function ConversationComposer({
         <button
           type="submit"
           disabled={locked || sending || !text.trim()}
-          className="flex h-9 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40"
+          data-primary={primaryUprav ? "false" : "true"}
+          className={primaryUprav ? OTHER_BUTTON : MAIN_BUTTON}
         >
           {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
           Poslať
@@ -262,7 +317,8 @@ function ConversationComposer({
             onClick={() => void uprav()}
             disabled={locked || sending || !text.trim()}
             title="Vráti prácu AI Agentovi na úpravu podľa tohto textu"
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border-strong)] px-3 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
+            data-primary={primaryUprav ? "true" : "false"}
+            className={primaryUprav ? MAIN_BUTTON : OTHER_BUTTON}
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Uprav

@@ -52,7 +52,7 @@ vi.mock("@/components/riadiace/HonestStatusStrip", () => ({ default: () => <div 
 vi.mock("@/components/riadiace/PlanUlohRail", () => ({ default: () => <div /> }));
 
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
-import { UPRAV_HINT } from "@/components/riadiace/ConversationComposer";
+import { UPRAV_HINT, UPRAV_INSTRUCTION_HINT } from "@/components/riadiace/ConversationComposer";
 import RiadiaceCentrumPage from "@/pages/RiadiaceCentrumPage";
 
 const VERSION = "v-150";
@@ -117,7 +117,8 @@ describe("Riadiace centrum at the plan stop — „Uprav“ (DEV-297)", () => {
 
     const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
     await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
-    expect(screen.getByText(UPRAV_HINT)).toBeInTheDocument();
+    // DEV-298: the line says which button sends Poradca's instruction.
+    expect(screen.getByText(UPRAV_INSTRUCTION_HINT)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Uprav" }));
 
@@ -144,5 +145,121 @@ describe("Riadiace centrum at the plan stop — „Uprav“ (DEV-297)", () => {
     expect(screen.getByRole("button", { name: "Upraviť" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Uprav" })).not.toBeInTheDocument();
     expect(screen.queryByText(UPRAV_HINT)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * DEV-298 — the main button is the one to press. 03.11.2026 13:17 the Director inserted Poradca's instruction at the
+ * plan stop of 4.109.0 and it went out as a question again: „Poslať“ was the blue button and Enter sent it, „Uprav“ the
+ * grey one beside it. An instruction from Poradca is work, never a question. Director: „hlavným tlačidlom má byť ten
+ * čo treba kliknúť.“
+ */
+describe("Poradca's instruction goes out as „Uprav“ — the main button and Enter (DEV-298)", () => {
+  function insertFromPoradca() {
+    return render(
+      <MemoryRouter initialEntries={["/poradca"]}>
+        <Routes>
+          <Route
+            path="/poradca"
+            element={<PoradcaAnswer message={MESSAGE as never} scopeVersion={SCOPE as never} projectVersions={[SCOPE] as never} />}
+          />
+          <Route path="/riadiace-centrum" element={<RiadiaceCentrumPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  async function boxWithInstruction() {
+    insertFromPoradca();
+    fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
+    const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
+    await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
+    return box;
+  }
+
+  it("„Uprav“ is the main button, „Poslať“ the other one", async () => {
+    await boxWithInstruction();
+
+    expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "true");
+    expect(screen.getByRole("button", { name: "Poslať" })).toHaveAttribute("data-primary", "false");
+    expect(screen.getByText(UPRAV_INSTRUCTION_HINT)).toBeInTheDocument();
+    expect(screen.queryByText(UPRAV_HINT)).not.toBeInTheDocument();
+  });
+
+  it("Enter sends it as „Uprav“, never as a question", async () => {
+    const box = await boxWithInstruction();
+
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(h.postPipelineActionApi).toHaveBeenCalledWith(VERSION, { action: "uprav", payload: { comment: INSTRUCTION } }),
+    );
+    expect(h.relayPipelineMessageApi).not.toHaveBeenCalled();
+  });
+
+  it("…also after he edited it", async () => {
+    const box = await boxWithInstruction();
+    const edited = `${INSTRUCTION} Bod 7: nič viac.`;
+
+    fireEvent.change(box, { target: { value: edited } });
+    expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "true");
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(h.postPipelineActionApi).toHaveBeenCalledWith(VERSION, { action: "uprav", payload: { comment: edited } }),
+    );
+    expect(h.relayPipelineMessageApi).not.toHaveBeenCalled();
+  });
+
+  it("…and after the page is opened again", async () => {
+    const first = insertFromPoradca();
+    fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
+    const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
+    await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
+    fireEvent.change(box, { target: { value: `${INSTRUCTION} Doplnené.` } });
+    first.unmount();
+
+    render(
+      <MemoryRouter>
+        <RiadiaceCentrumPage />
+      </MemoryRouter>,
+    );
+    const again = screen.getByPlaceholderText(/Napíš AI Agentovi/);
+    await waitFor(() => expect(again).toHaveValue(`${INSTRUCTION} Doplnené.`));
+
+    expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "true");
+  });
+
+  it("his own text: „Poslať“ is the main button and Enter sends a message", async () => {
+    h.ctx.selectedVersion = { versionId: VERSION, versionNumber: "1.5.0" };
+    h.relayPipelineMessageApi.mockResolvedValue({ deferred: false, board: PLAN_STOP });
+    render(
+      <MemoryRouter>
+        <RiadiaceCentrumPage />
+      </MemoryRouter>,
+    );
+    const box = screen.getByPlaceholderText(/Napíš AI Agentovi/);
+
+    fireEvent.change(box, { target: { value: "Koľko úloh má plán?" } });
+    expect(screen.getByRole("button", { name: "Poslať" })).toHaveAttribute("data-primary", "true");
+    expect(screen.getByText(UPRAV_HINT)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "false");
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Koľko úloh má plán?"));
+    expect(h.postPipelineActionApi).not.toHaveBeenCalled();
+  });
+
+  it("once sent, the next text of his own is a message again", async () => {
+    h.relayPipelineMessageApi.mockResolvedValue({ deferred: false, board: PLAN_STOP });
+    const box = await boxWithInstruction();
+    fireEvent.click(screen.getByRole("button", { name: "Uprav" }));
+    await waitFor(() => expect(box).toHaveValue(""));
+
+    fireEvent.change(box, { target: { value: "Ďakujem, ešte otázka." } });
+    expect(screen.getByRole("button", { name: "Poslať" })).toHaveAttribute("data-primary", "true");
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Ďakujem, ešte otázka."));
   });
 });
