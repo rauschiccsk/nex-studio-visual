@@ -39,7 +39,7 @@ SOURCE = {
                 "context": "./docs",
                 "additional_contexts": ["base=docker-image://python:3.12-slim", "app=service:backend", "kit=./kit"],
             },
-            "profiles": ["docs"],
+            # DEV-295: no profile — a service behind one is what only CI runs and does not go into an installation.
         },
     }
 }

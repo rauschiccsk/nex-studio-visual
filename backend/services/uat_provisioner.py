@@ -476,6 +476,48 @@ def park_test_runners(services: dict[str, Any]) -> list[str]:
     return sorted(parked)
 
 
+def drop_ci_only_services(compose: dict[str, Any]) -> list[str]:
+    """DEV-295 — take out of an installation what only CI runs: every service behind a compose profile — the test runner
+    parked above, what only it needs, the project's own profiled services — and the named volumes only they used.
+
+    ICCINT-60 kept them parked in the file („a faithful copy“). 03.11.2026 that copy brought the test values of NEX
+    Websites' test service (its SESSION_SECRET) into ICC's installation on MAGER, the night backup stopped them as a
+    secret and MAGER had no backup of that night (MSG-209). An installation never starts them (DEV-268). A service an
+    application service waits for stays — it is load-bearing whatever it declares. Returns the names taken out."""
+    services = compose.get("services") or {}
+    ci_only = {n for n, s in services.items() if isinstance(s, dict) and s.get("profiles")}
+    removed = sorted(n for n in ci_only if all(d in ci_only for d in _dependents(n, services)))
+    if not removed:
+        return []
+    named = set(compose.get("volumes") or {})
+
+    def mounts(names) -> set[str]:
+        found = set()
+        for n in names:
+            for volume in (services[n] or {}).get("volumes") or []:
+                mount = _named_mount(volume, named)
+                if mount:
+                    found.add(mount[0])
+        return found
+
+    only_theirs = mounts(removed) - mounts(n for n in services if n not in removed and isinstance(services[n], dict))
+    for n in removed:
+        del services[n]
+    for volume in only_theirs:
+        compose["volumes"].pop(volume, None)
+    if "volumes" in compose and not compose["volumes"]:
+        del compose["volumes"]
+    return removed
+
+
+def ci_only_services_removed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """DEV-295: the services this deploy took out of an existing installation — said, not silent. A deploy of an
+    existing installation keeps every other service as it is (it is not rebuilt), so what is missing is what only CI
+    runs."""
+    now = (after or {}).get("services") or {}
+    return sorted(n for n in ((before or {}).get("services") or {}) if n not in now)
+
+
 def _depended_on_by_others(name: str, src_services: dict[str, Any]) -> bool:
     """Does any OTHER service wait for this one? Then it is load-bearing, whatever it declares."""
     for other, svc in src_services.items():
@@ -1988,32 +2030,16 @@ def _precitaj_ak_je(cesta: Path) -> Optional[str]:
         return None
 
 
-def test_runners_parked(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    """DEV-270: the test runners this deploy took out of the running stack — said, not silent. DEV-273: and what only
-    they need, under whichever profile they are."""
-    was = (before or {}).get("services") or {}
-    return sorted(
-        name
-        for name, svc in ((after or {}).get("services") or {}).items()
-        if isinstance(svc, dict)
-        and svc.get("profiles")
-        and isinstance(was.get(name), dict)
-        and not was[name].get("profiles")
-    )
-
-
 def one_shot_checks_switched_off(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """DEV-123: the steps that run once whose inherited health check this deploy switched off — said, not silent.
 
-    A test runner this deploy took out of the stack is not one of them: it no longer runs with the app, and
-    :func:`test_runners_parked` already says so (DEV-270 — NEX Knowledge's deploy of 30.10.2026 said both)."""
+    A test runner this deploy took out of the installation is not one of them (DEV-295:
+    :func:`ci_only_services_removed` says so)."""
     was = (before or {}).get("services") or {}
-    parked = set(test_runners_parked(before, after))
     return sorted(
         name
         for name, svc in ((after or {}).get("services") or {}).items()
         if isinstance(svc, dict)
-        and name not in parked
         and svc.get("healthcheck") == {"disable": True}
         and isinstance(was.get(name), dict)
         and "healthcheck" not in was[name]
@@ -2042,10 +2068,11 @@ def version_bump_from_text(
     for svc in sluzby.values():
         if isinstance(svc, dict) and isinstance(svc.get("image"), str):
             svc["image"] = _bumpni_znacku(svc["image"], project_slug, version)
-    # DEV-270 — a test runner the installation still starts with the app is parked here, at its next deploy;
-    # DEV-273 — and so is what only it needs.
+    # DEV-270 — a test runner the installation still starts with the app is recognised here, at its next deploy;
+    # DEV-273 — and so is what only it needs. DEV-295 — out of the installation they go, with every profiled service.
     park_test_runners(sluzby)
     park_what_only_parked_services_need(sluzby)
+    drop_ci_only_services(novy)
     # DEV-123: a step that runs once (``restart: "no"`` — YAML reads a bare ``no`` as ``False``) inherits the image's
     # HEALTHCHECK and ends "unhealthy" after exiting 0. A new installation gets the check off when it is rendered; one
     # made before gets it here, at its next deploy (19.10.2026: seven such containers on ANDROS, two on MAGER) —
@@ -2228,15 +2255,18 @@ def services_missing_against_source(instance_dir: Path, source: dict[str, Any]) 
 
     # Migračná služba sa ako úloha nerozpoznáva, ale je to tá istá vec pod iným menom.
     ma_migraciu = has_alembic_migrate_service(nase)
+    # DEV-268: a service behind a compose profile (NEX Manager's ``test``, ``test-db`` under ``test``) is not started by
+    # a plain ``up`` — CI asks for it, an installation never has it. DEV-295: nor the test runner and what only it
+    # needs — the deploy takes them out by this same rule, so reporting them would warn at every deploy.
+    len_ci = copy.deepcopy(zdrojove)
+    park_test_runners(len_ci)
+    park_what_only_parked_services_need(len_ci)
 
     chyba = []
     for meno, definicia in zdrojove.items():
         if meno in mena_nase:
             continue
-        # DEV-268: a service behind a compose profile (NEX Manager's ``test``, ``test-db`` under ``test``) is not
-        # started by a plain ``up`` — CI asks for it, an installation never has it. Reporting it warned at every
-        # adoption of such a project (ICC's NEX Manager, 30.10.2026) about something nobody should add.
-        if isinstance(definicia, dict) and definicia.get("profiles"):
+        if isinstance(len_ci.get(meno), dict) and len_ci[meno].get("profiles"):
             continue
         uloha = zdroj_meno_na_ulohu.get(meno)
         if uloha and uloha in nase_ulohy:
@@ -3095,6 +3125,8 @@ def build_uat_compose(
     compose: dict[str, Any] = {"name": name_base, "services": services, "networks": networks}
     if volumes:
         compose["volumes"] = volumes
+    # DEV-295 — what only CI runs does not go to the customer at all (MSG-209: its test values stopped MAGER's backup).
+    drop_ci_only_services(compose)
     return compose
 
 
@@ -3746,11 +3778,11 @@ def provision_uat(
         # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
         # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
         povodne = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
-        odstavene = test_runners_parked(povodne, povysene)
+        odstavene = ci_only_services_removed(povodne, povysene)
         if odstavene:
             warnings.append(
-                f"Skúšobná služba {', '.join(odstavene)} sa odteraz s aplikáciou nespúšťa — jej skúšky patria do CI, "
-                "nie do inštalácie zákazníka."
+                f"Služby {', '.join(odstavene)} spúšťa len CI (skúšky) — z predpisu inštalácie sú preč; skúšky "
+                "patria do CI, nie do inštalácie zákazníka."
             )
         vypnute = one_shot_checks_switched_off(povodne, povysene)
         if vypnute:

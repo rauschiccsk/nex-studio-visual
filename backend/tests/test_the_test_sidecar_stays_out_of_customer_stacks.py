@@ -78,12 +78,12 @@ def test_the_real_project_compose_yields_exactly_the_test_service() -> None:
     assert skipped == {"test"}, f"vynechalo sa {skipped or 'nič'} — malo sa vynechať práve 'test'"
 
 
-def test_the_rendered_stack_parks_the_sidecar_behind_a_profile() -> None:
+def test_the_rendered_stack_has_no_sidecar() -> None:
     """A to hlavné: nie čo si pravidlo myslí, ale čo naozaj skončí v súbore u zákazníka.
 
-    Služba s profilom sa obyčajným ``docker compose up`` nespustí — a zároveň v súbore ostáva, takže
-    vyrenderovaný compose je naďalej verná kópia originálu a kto ho chce spustiť, môže cez
-    ``--profile ci``. Vymazať ju by znamenalo, že zákazníkov súbor tvrdí o projekte nepravdu.
+    Do 03.11.2026 sa bočný kontajner len parkoval za profil a v súbore ostával ako „verná kópia“. Tá priniesla
+    skúšobné hodnoty služby test NEX Websites do inštalácie ICC na MAGERi a nočná záloha ich zastavila ako tajomstvo
+    (MSG-209). DEV-295, Director: „Súhlasím“ — čo spúšťa len CI, do súboru zákazníka nepatrí vôbec.
     """
     from pathlib import Path
 
@@ -107,9 +107,6 @@ def test_the_rendered_stack_parks_the_sidecar_behind_a_profile() -> None:
     )
     services = compose["services"]
 
-    assert services["test"].get("profiles") == [u.TEST_RUNNER_PROFILE], (
-        "bočný kontajner s testami sa u zákazníka stále spúšťa"
-    )
-    assert "test" in services, "kontajner sa vymazal — súbor má ostať vernou kópiou, len sa nespúšťať"
+    assert "test" not in services, "bočný kontajner s testami je stále v súbore zákazníka"
     for part in ("backend", "frontend", "db", "migrate"):
-        assert "profiles" not in services[part], f"{part} sa omylom odparkoval a aplikácia by nenabehla"
+        assert part in services and "profiles" not in services[part], f"{part} chýba alebo sa nespustí s aplikáciou"

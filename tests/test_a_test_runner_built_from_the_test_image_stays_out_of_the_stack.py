@@ -6,6 +6,10 @@ the latter told the cockpit what it is (ICCINT-60). NEX Websites' runner has the
 UAT and PROD stacks — at the deploy of 15.10.2026 its suite (``TRUNCATE … RESTART IDENTITY``) ran in the UAT stack
 against the application's own database. The runner is now recognised by its recipe too, ``Dockerfile.test``, and an
 existing installation gets it parked at its next deploy — said aloud, like every other change a deploy makes.
+
+DEV-295 (03.11.2026): parked was not enough. The parked copy brought NEX Websites' test values into ICC's installation
+on MAGER and the night backup stopped them as a secret (MSG-209). Director: „Súhlasím“ — the runner is now taken out
+of the installation, new or existing.
 """
 
 from __future__ import annotations
@@ -59,7 +63,10 @@ COMPOSE = textwrap.dedent(
 )
 
 ROLES = {"backend": "backend", "frontend": "frontend", "db": "db"}
-SAID = "Skúšobná služba test sa odteraz s aplikáciou nespúšťa — jej skúšky patria do CI, nie do inštalácie zákazníka."
+SAID = (
+    "Služby test spúšťa len CI (skúšky) — z predpisu inštalácie sú preč; skúšky patria do CI, nie do inštalácie "
+    "zákazníka."
+)
 
 
 def test_a_service_built_from_the_test_image_is_the_test_runner():
@@ -82,13 +89,13 @@ def _deploy(tmp_path, version=None):
     )
 
 
-def test_a_new_installation_parks_the_runner_and_keeps_the_app(tmp_path):
+def test_a_new_installation_has_no_runner_and_keeps_the_app(tmp_path):
     _make_project(tmp_path, "nex-knowledge", COMPOSE)
 
     services = yaml.safe_load(_deploy(tmp_path).compose_path.read_text())["services"]
 
-    assert services["test"]["profiles"] == [P.TEST_RUNNER_PROFILE] and services["test"]["restart"] == "no"
-    assert {n for n, s in services.items() if s.get("profiles")} == {"test"}
+    assert set(services) == {"db", "migrate", "backend", "frontend"}
+    assert not [n for n, s in services.items() if s.get("profiles")]
 
 
 def _as_written_on_30_10(compose_path) -> None:
@@ -96,13 +103,12 @@ def _as_written_on_30_10(compose_path) -> None:
     text = compose_path.read_text()
     header = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
     data = yaml.safe_load(text)
-    data["services"]["test"].pop("profiles")
-    data["services"]["test"].pop("healthcheck", None)  # a service that kept running got no switch-off
-    data["services"]["test"]["restart"] = "unless-stopped"
+    # DEV-295: today's render has no runner at all — the installation of 30.10.2026 had it in the stack, so put it back.
+    data["services"]["test"] = dict(yaml.safe_load(COMPOSE)["services"]["test"], restart="unless-stopped")
     compose_path.write_text(header + yaml.safe_dump(data, sort_keys=False))
 
 
-def test_an_existing_installation_gets_the_runner_parked_at_its_next_deploy_and_is_told(tmp_path, monkeypatch):
+def test_an_existing_installation_loses_the_runner_at_its_next_deploy_and_is_told(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "_docker_image_exists", lambda image: True)
     _make_project(tmp_path, "nex-knowledge", COMPOSE)
     _as_written_on_30_10(_deploy(tmp_path).compose_path)
@@ -110,18 +116,20 @@ def test_an_existing_installation_gets_the_runner_parked_at_its_next_deploy_and_
     result = _deploy(tmp_path, version="0.2.1")
 
     services = yaml.safe_load(result.compose_path.read_text())["services"]
-    assert services["test"]["profiles"] == [P.TEST_RUNNER_PROFILE] and services["test"]["restart"] == "no"
-    assert {n for n, s in services.items() if s.get("profiles")} == {"test"}, "a piece of the app was taken out"
+    assert set(services) == {"db", "migrate", "backend", "frontend"}, "a piece of the app was taken out"
     assert SAID in result.warnings
-    # the runner no longer runs with the app — telling about its health check would be noise (30.10.2026 it was told)
+    # the runner is gone — telling about its health check would be noise (30.10.2026 it was told)
     assert not [w for w in result.warnings if w.startswith("Jednorazové kroky") and " test " in w]
+    # nor is the project's runner „a service the installation does not have“ — it never belongs there
+    assert not [w for w in result.warnings if w.startswith("Projekt má služby")]
 
     again = _deploy(tmp_path, version="0.2.2")
 
-    assert not [w for w in again.warnings if w.startswith("Skúšobná služba")], "said again with nothing changed"
+    assert not [w for w in again.warnings if "spúšťa len CI" in w], "said again with nothing changed"
+    assert not [w for w in again.warnings if w.startswith("Projekt má služby")]
 
 
-def test_the_adoption_preview_foresees_the_same_parking():
+def test_the_adoption_preview_foresees_the_same_removal():
     """ICC's NEX Websites, hand-written shape: the runner with ``restart: no`` and no profile — the preview and the
     write go through one function (ICCINT-151)."""
     before = textwrap.dedent(
@@ -144,8 +152,8 @@ def test_the_adoption_preview_foresees_the_same_parking():
 
     after = P.version_bump_from_text(before, version="1.0.1", project_slug="nex-websites")
 
-    assert after["services"]["test"]["profiles"] == [P.TEST_RUNNER_PROFILE]
-    assert P.test_runners_parked(yaml.safe_load(before), after) == ["test"]
+    assert set(after["services"]) == {"db", "backend"}
+    assert P.ci_only_services_removed(yaml.safe_load(before), after) == ["test"]
     assert "profiles" not in after["services"]["backend"] and "profiles" not in after["services"]["db"]
 
 
@@ -161,14 +169,19 @@ def test_a_runner_another_service_waits_for_stays_where_it_is(waits):
     after = P.version_bump_from_text(yaml.safe_dump(before), version="1.0.1", project_slug="x")
 
     assert "profiles" not in after["services"]["test"]
-    assert P.test_runners_parked(before, after) == []
+    assert P.ci_only_services_removed(before, after) == []
 
 
-def test_a_runner_already_behind_its_own_profile_keeps_it():
-    """Career Asistent's installations park their runner under ``test`` themselves — nothing to change, nothing said."""
-    before = {"services": {"test": {"build": {"dockerfile": "Dockerfile.test"}, "profiles": ["test"], "restart": "no"}}}
+def test_a_runner_behind_its_own_profile_goes_too():
+    """Career Asistent's installations park their runner under ``test`` themselves — DEV-295: out it goes as well."""
+    before = {
+        "services": {
+            "backend": {"image": "career-asistent-backend:1.0.0"},
+            "test": {"build": {"dockerfile": "Dockerfile.test"}, "profiles": ["test"], "restart": "no"},
+        }
+    }
 
     after = P.version_bump_from_text(yaml.safe_dump(before), version="1.0.1", project_slug="career-asistent")
 
-    assert after["services"]["test"]["profiles"] == ["test"]
-    assert P.test_runners_parked(before, after) == []
+    assert set(after["services"]) == {"backend"}
+    assert P.ci_only_services_removed(before, after) == ["test"]

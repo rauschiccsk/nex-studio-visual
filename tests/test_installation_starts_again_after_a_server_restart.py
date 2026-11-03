@@ -82,7 +82,7 @@ EXPECTED = {
     "frontend": "unless-stopped",
     "migrate": "no",  # the backend waits for it to finish
     "seed": "no",  # the source says so
-    "test": "no",  # the test runner, parked behind a profile
+    # the test runner is not in the installation at all (DEV-295)
 }
 
 

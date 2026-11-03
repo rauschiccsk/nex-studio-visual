@@ -4,6 +4,9 @@
 its ``test-db``, which exists for that runner alone, running with the app, ``unless-stopped``, back after every restart
 of the server. Nothing that runs with the app waits for it. Now it is parked with the runner, in a new installation
 and in an existing one at its next deploy, and the deploy says so.
+
+DEV-295 (03.11.2026): parked was not enough — what only CI runs is taken out of the installation, the runner and its
+database alike (MSG-209: a parked runner's test values stopped MAGER's backup as a secret).
 """
 
 from __future__ import annotations
@@ -56,7 +59,8 @@ COMPOSE = textwrap.dedent(
 )
 
 SAID = (
-    "Skúšobná služba test-db sa odteraz s aplikáciou nespúšťa — jej skúšky patria do CI, nie do inštalácie zákazníka."
+    "Služby test, test-db spúšťa len CI (skúšky) — z predpisu inštalácie sú preč; skúšky patria do CI, nie do "
+    "inštalácie zákazníka."
 )
 
 
@@ -71,42 +75,44 @@ def _services(result) -> dict:
     return yaml.safe_load(result.compose_path.read_text())["services"]
 
 
-def test_a_new_installation_parks_the_runner_and_its_database(tmp_path):
+def test_a_new_installation_has_neither_the_runner_nor_its_database(tmp_path):
     _make_project(tmp_path, "author-asistent", COMPOSE)
 
     services = _services(_deploy(tmp_path))
 
-    assert {n: s.get("profiles") for n, s in services.items() if s.get("profiles")} == {
-        "test": [P.TEST_RUNNER_PROFILE],
-        "test-db": [P.TEST_RUNNER_PROFILE],
-    }
-    assert services["test-db"]["restart"] == "no"
+    assert "test" not in services and "test-db" not in services
+    assert not [n for n, s in services.items() if s.get("profiles")]
     # what the app runs with stays: its database, the cache the backend waits for too, a worker nobody waits for
     assert {services[n]["restart"] for n in ("db", "redis", "backend", "worker", "frontend")} == {"unless-stopped"}
 
 
-def test_an_existing_installation_gets_the_database_parked_at_its_next_deploy_and_is_told(tmp_path, monkeypatch):
+def test_an_existing_installation_loses_the_runner_and_its_database_at_its_next_deploy_and_is_told(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(P, "_docker_image_exists", lambda image: True)
     _make_project(tmp_path, "author-asistent", COMPOSE)
     first = _deploy(tmp_path)
     text = first.compose_path.read_text()
     header = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
     data = yaml.safe_load(text)
-    data["services"]["test-db"].pop("profiles")  # as the UAT of „tata“ has it on 31.10.2026
-    data["services"]["test-db"]["restart"] = "unless-stopped"
+    # as the UAT of „tata“ had it on 31.10.2026: the runner parked, its database running with the app
+    source = yaml.safe_load(COMPOSE)["services"]
+    data["services"]["test"] = dict(source["test"], profiles=[P.TEST_RUNNER_PROFILE], restart="no")
+    data["services"]["test-db"] = dict(source["test-db"], restart="unless-stopped")
     first.compose_path.write_text(header + yaml.safe_dump(data, sort_keys=False))
 
     result = _deploy(tmp_path, version="1.2.0")
 
     services = _services(result)
-    assert services["test-db"]["profiles"] == [P.TEST_RUNNER_PROFILE] and services["test-db"]["restart"] == "no"
+    assert "test" not in services and "test-db" not in services
     assert "profiles" not in services["redis"] and "profiles" not in services["db"]
     assert SAID in result.warnings
     assert not [w for w in result.warnings if w.startswith("Jednorazové kroky") and "test-db" in w]
+    assert not [w for w in result.warnings if w.startswith("Projekt má služby")]
 
     again = _deploy(tmp_path, version="1.2.1")
 
-    assert not [w for w in again.warnings if w.startswith("Skúšobná služba")], "said again with nothing changed"
+    assert not [w for w in again.warnings if "spúšťa len CI" in w], "said again with nothing changed"
 
 
 def test_a_chain_only_the_runner_needs_is_parked_link_by_link():
