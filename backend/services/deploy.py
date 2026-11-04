@@ -94,6 +94,7 @@ from backend.services import (
     deploy_progress,
     deploy_return,
     launch_pairing,
+    machine_disk,
     private_access,
     prod_machines,
     project_surfaces,
@@ -1359,6 +1360,18 @@ async def deploy(
             "Pre túto inštaláciu už jedno nasadenie beží. Počkaj, kým skončí — druhé spustenie by "
             "siahalo na tie isté súbory a na tie isté kontajnery."
         )
+    # DEV-305 — room on the disk of the machine that builds, before anything is written or built there.
+    room = await asyncio.to_thread(
+        machine_disk.room_refusal,
+        deploy_host,
+        installation=instalacia / "docker-compose.yml",
+        built_here=uat_provisioner.instance_dir_for(
+            environment="uat", customer_slug=_customer_dir_slug(customer), full_project_slug=project.slug
+        )
+        / "docker-compose.yml",
+    )
+    if room:
+        raise ValueError(room)
     deploy_progress.zacni(instalacia)
     try:
         outcome = await runner(
@@ -1380,6 +1393,14 @@ async def deploy(
     # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
     # so the seam stays the 3-tuple every existing fake already returns.
     warnings: list[str] = list(getattr(outcome, "warnings", None) or [])
+    # DEV-305 — a deploy that came up cleans the installation's old images and the build cache on its machine; a full
+    # disk that failed one is said in a sentence.
+    if ok:
+        warnings.extend(
+            await asyncio.to_thread(machine_disk.clean_after_deploy, instalacia / "docker-compose.yml", deploy_host)
+        )
+    else:
+        detail = machine_disk.said_plainly(detail, deploy_host)
     # DEV-68: the same seam carries whether the new version was started — a failed deploy that started it is
     # recorded as UNVERIFIED, so the matrix shows the version that runs, next to the failure.
     started = bool(getattr(outcome, "new_version_started", False))

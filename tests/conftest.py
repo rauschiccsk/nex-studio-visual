@@ -494,6 +494,22 @@ def _deterministic_host_port_probe(monkeypatch, host_ports):
 
 
 @pytest.fixture(autouse=True)
+def _a_machine_with_room(monkeypatch):
+    """DEV-305: every deploy asks the machine's Docker how much room its disk has and cleans up after itself.
+
+    By DEFAULT the suite's machine has plenty of room, no images and a build cache that shrinks — no test reaches a
+    real Docker (on ANDROS a live one). Stubs the four primitives, not the public helpers, so the logic under test
+    really runs; a test about the disk sets its own (``tests/test_the_cockpit_keeps_the_disk_of_the_machine.py``).
+    """
+    from backend.services import machine_disk
+
+    monkeypatch.setattr(machine_disk, "_free_bytes", lambda deploy_host: 10**15)
+    monkeypatch.setattr(machine_disk, "_images", lambda deploy_host: [])
+    monkeypatch.setattr(machine_disk, "_remove", lambda reference, deploy_host: True)
+    monkeypatch.setattr(machine_disk, "_prune_build_cache", lambda cap, deploy_host: True)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_ci_questions(monkeypatch):
     """ICCINT-70: the Verifikácia CI floor now WAITS for the run it just pushed — it retries for up to two
     minutes, then up to twenty more for the run to finish.
