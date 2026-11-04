@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -28,8 +29,10 @@ from backend.services import prod_machines, remote_instance
 GB = 1024**3
 
 #: Where Docker with the containerd image store keeps the layers it unpacks (MAGER: ``driver-type
-#: io.containerd.snapshotter.v1``) — beside ``DockerRootDir``, possibly on another disk.
+#: io.containerd.snapshotter.v1``) — beside ``DockerRootDir``, possibly on another disk — unless containerd's own
+#: config names another ``root`` (MAGER since 04.11.2026: ``/data/containerd``, SERVER-148).
 CONTAINERD_ROOT = "/var/lib/containerd"
+CONTAINERD_CONFIG_DIR = "/etc/containerd"
 
 #: The words Docker and the kernel fail a write with when the disk is full.
 NO_SPACE = "no space left on device"
@@ -83,6 +86,34 @@ def images_from(text: str) -> list[Image]:
     return found
 
 
+def containerd_root_from(config: str) -> Optional[str]:
+    """The ``root`` of containerd's ``config.toml``; its default when the file does not set one; ``None`` when the file
+    does not read."""
+    try:
+        root = tomllib.loads(config).get("root", CONTAINERD_ROOT)
+    except tomllib.TOMLDecodeError:
+        return None
+    return root if isinstance(root, str) and root.startswith("/") else None
+
+
+def _containerd_root(deploy_host: Optional[str]) -> Optional[str]:
+    """Where containerd on the machine keeps its data — read from its config; the default when it has none."""
+    read = _docker(
+        [
+            "run",
+            "--rm",
+            "--mount",
+            f"type=bind,source={CONTAINERD_CONFIG_DIR},target=/c,readonly",
+            remote_instance.IMAGE,
+            "cat",
+            "/c/config.toml",
+        ],
+        deploy_host,
+        timeout=60,
+    )
+    return containerd_root_from(read.stdout) if read.returncode == 0 else CONTAINERD_ROOT
+
+
 def _free_bytes(deploy_host: Optional[str]) -> Optional[int]:
     """Free bytes on the disk Docker writes images and build layers to — the least of its folders; ``None`` unknown."""
     try:
@@ -90,7 +121,12 @@ def _free_bytes(deploy_host: Optional[str]) -> Optional[int]:
         if info.returncode != 0:
             return None
         root, _, status = info.stdout.strip().partition("|")
-        folders = [root] + ([CONTAINERD_ROOT] if "io.containerd.snapshotter" in status else [])
+        folders = [root]
+        if "io.containerd.snapshotter" in status:
+            containerd = _containerd_root(deploy_host)
+            if containerd is None:
+                return None
+            folders.append(containerd)
         mounts = [a for i, f in enumerate(folders) for a in ("--mount", f"type=bind,source={f},target=/m{i},readonly")]
         targets = [f"/m{i}" for i in range(len(folders))]
         df = _docker(["run", "--rm", *mounts, remote_instance.IMAGE, "df", "-Pk", *targets], deploy_host)

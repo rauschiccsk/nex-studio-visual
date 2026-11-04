@@ -285,3 +285,74 @@ async def test_a_deploy_a_full_disk_failed_says_it_plainly(db_session, monkeypat
     assert outcome[0].status == "failed"
     assert outcome[0].detail.startswith("Na stroji ANDROS sa počas nasadenia minulo miesto na disku")
     assert machine.removed == [] and machine.pruned == [], "a failed deploy cleans nothing"
+
+
+# ---------- which folders are measured ----------
+
+#: The real primitive, taken before the suite's default stub replaces it for every test.
+REAL_FREE_BYTES = M._free_bytes
+
+
+class _Docker:
+    """Docker as ``_free_bytes`` meets it: ``info``, the read of containerd's config, the ``df`` container."""
+
+    def __init__(self, driver_status: str, config: str | None = None):
+        self.driver_status, self.config = driver_status, config
+        self.calls: list[list[str]] = []
+
+    def __call__(self, args, deploy_host, *, timeout=120):
+        import subprocess
+
+        self.calls.append(args)
+        if args[0] == "info":
+            return subprocess.CompletedProcess(args, 0, f"/data/docker|{self.driver_status}\n", "")
+        if args[-2:] == ["cat", "/c/config.toml"]:
+            found = self.config is not None
+            return subprocess.CompletedProcess(
+                args, 0 if found else 1, self.config or "", "" if found else "no such file"
+            )
+        targets = [a for a in args if a.startswith("/m")]
+        lines = "".join(f"/dev/sda3 857000000 140000000 600000000 18% {t}\n" for t in targets)
+        return subprocess.CompletedProcess(
+            args, 0, "Filesystem 1024-blocks Used Available Capacity Mounted on\n" + lines, ""
+        )
+
+    def measured(self) -> list[str]:
+        df = next(c for c in self.calls if "df" in c)
+        return [m.split(",")[1].removeprefix("source=") for m in df if m.startswith("type=bind")]
+
+
+SNAPSHOTTER = '[["driver-type","io.containerd.snapshotter.v1"]]'
+
+
+def test_containerd_is_measured_where_the_machine_keeps_it(monkeypatch):
+    """MAGER since 04.11.2026 (SERVER-148): ``root = "/data/containerd"`` in /etc/containerd/config.toml; the old
+    /var/lib/containerd still exists with the data kept for a way back — measuring it would read the wrong disk."""
+    docker = _Docker(SNAPSHOTTER, config='version = 2\nroot = "/data/containerd"\n\n[grpc]\n  address = "/run/x"\n')
+    monkeypatch.setattr(M, "_docker", docker)
+
+    assert REAL_FREE_BYTES("mager") == 600000000 * 1024
+    assert docker.measured() == ["/data/docker", "/data/containerd"]
+
+
+def test_containerd_without_a_root_of_its_own_is_measured_at_its_default(monkeypatch):
+    docker = _Docker(SNAPSHOTTER, config=None)
+    monkeypatch.setattr(M, "_docker", docker)
+
+    assert REAL_FREE_BYTES("mager") == 600000000 * 1024
+    assert docker.measured() == ["/data/docker", "/var/lib/containerd"]
+
+
+def test_docker_without_containerd_measures_its_own_folder_only(monkeypatch):
+    docker = _Docker('[["Backing Filesystem","extfs"]]')
+    monkeypatch.setattr(M, "_docker", docker)
+
+    assert REAL_FREE_BYTES(None) == 600000000 * 1024
+    assert docker.measured() == ["/data/docker"]
+    assert not any(c[-2:] == ["cat", "/c/config.toml"] for c in docker.calls), "no containerd, no config to read"
+
+
+def test_a_containerd_config_that_does_not_read_is_no_measurement(monkeypatch):
+    monkeypatch.setattr(M, "_docker", _Docker(SNAPSHOTTER, config='root = "/data/containerd'))
+
+    assert REAL_FREE_BYTES("mager") is None
