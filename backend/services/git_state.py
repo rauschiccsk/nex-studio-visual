@@ -11,9 +11,10 @@ founding, so the pipeline always starts from a known-committed state.
 Mirrors :mod:`backend.services.nexshared` — takes the project's ``source_path`` (its
 ``/opt/projects/<slug>`` workspace) and shells out to ``git`` with a bounded timeout.
 
-Security note: :func:`commit_all` uses ``git add -A``, which RESPECTS ``.gitignore``.
-Every NEX Studio project gitignores ``.env`` (Create Project, main CLAUDE.md §4), so
-secrets are never staged. This service never pushes — commits stay local.
+Security note: :func:`commit_all` stages only paths ``git status`` reports, and ``git status``
+never reports an untracked ignored file. Every NEX Studio project gitignores ``.env`` (Create
+Project, main CLAUDE.md §4), so secrets are never staged. This service never pushes — commits
+stay local.
 """
 
 from __future__ import annotations
@@ -56,21 +57,35 @@ def workspace_is_git_repo(source_path: str) -> bool:
     return root.is_dir() and (root / ".git").exists()
 
 
-def _run(root: Path, args: list[str], *, timeout: int, c_locale: bool = False) -> subprocess.CompletedProcess:
+def _run(
+    root: Path, args: list[str], *, timeout: int, c_locale: bool = False, stdin: Optional[str] = None
+) -> subprocess.CompletedProcess:
     """Run ``git <args>`` inside ``root`` with a bounded timeout (never raises on nonzero).
 
     ``c_locale`` forces untranslated English output — needed only by the one call whose
     stdout is parsed as prose (``git clean -nd``). Off by default so git keeps reading the
-    ambient locale for everything else (Slovak commit messages).
+    ambient locale for everything else (Slovak commit messages). ``stdin`` is fed to git.
     """
     return subprocess.run(
         ["git", *args],
         cwd=str(root),
+        input=stdin,
         capture_output=True,
         text=True,
         timeout=timeout,
         check=False,
         env={**os.environ, "LC_ALL": "C"} if c_locale else None,
+    )
+
+
+def _run_over(root: Path, args: list[str], paths: Sequence[str], *, timeout: int) -> subprocess.CompletedProcess:
+    """``git <args>`` over exactly *paths*, each taken literally (no glob, no magic) and handed over on stdin, so a long
+    list never hits the limit of a command line."""
+    return _run(
+        root,
+        ["--literal-pathspecs", *args, "--pathspec-from-file=-", "--pathspec-file-nul"],
+        timeout=timeout,
+        stdin="\0".join(paths),
     )
 
 
@@ -82,6 +97,33 @@ def _excluded(exclude: Sequence[str]) -> list[str]:
 def _outside(exclude: Sequence[str]) -> list[str]:
     """The pathspec for the whole workspace except *exclude*; empty when nothing is excluded."""
     return ["--", ".", *_excluded(exclude)] if exclude else []
+
+
+def _status_entries(
+    root: Path, *, exclude: Sequence[str], timeout: int, every_file: bool = False
+) -> list[tuple[str, str, Optional[str]]]:
+    """``git status --porcelain -z`` outside *exclude* as ``(XY, path, source)`` entries.
+
+    ``-z`` emits paths RAW, never quoted, and puts the source of a rename or a copy in the field
+    after its entry — ``source`` carries it, ``None`` elsewhere. *every_file* names each untracked
+    file on its own instead of its untracked folder.
+
+    Raises:
+        ValueError: ``git`` failed.
+    """
+    args = ["status", "--porcelain", "-z", *(["--untracked-files=all"] if every_file else []), *_outside(exclude)]
+    proc = _run(root, args, timeout=timeout)
+    if proc.returncode != 0:
+        raise ValueError("git status zlyhal")
+    fields = iter(proc.stdout.split("\0"))
+    entries: list[tuple[str, str, Optional[str]]] = []
+    for field in fields:
+        if not field:
+            continue
+        xy = field[:2]
+        source = next(fields, None) if set(xy) & {"R", "C"} else None
+        entries.append((xy, field[3:], source))
+    return entries
 
 
 def working_tree_status(
@@ -118,23 +160,37 @@ def working_tree_status(
 
 
 def commit_all(source_path: str, message: str, *, exclude: Sequence[str] = (), timeout: int = 60) -> dict:
-    """Stage + commit ALL pending changes so the tree is clean before founding.
+    """Stage + commit the pending changes the guard shows, so the tree is clean before founding.
 
-    ``git add -A`` (respects ``.gitignore`` — see module note) then ``git commit``.
-    A "nothing to commit" result is a benign no-op (returns ``ok`` when the tree ends
-    up clean), not an error. *exclude* (git pathspec globs) stays out of both — DEV-203: the
-    files the cockpit writes itself; the commit names its paths, so an entry of them staged
-    earlier does not ride along either.
+    The paths come from the same ``git status`` as :func:`working_tree_status` — outside
+    *exclude* (git pathspec globs), DEV-203: the files the cockpit writes itself — and go to
+    ``git add -A`` and ``git commit`` named one by one. DEV-303: a pathspec that names an ignored
+    folder, even as an exception, makes ``git add`` refuse („The following paths are ignored by
+    one of your .gitignore files“), so a project that ignores the cockpit's folders could never
+    save. The commit names its paths, so an entry staged earlier outside them does not ride
+    along. A "nothing to commit" result is a benign no-op (returns ``ok`` when the tree ends
+    up clean), not an error.
 
     Returns ``{ok: bool, error?: str, note?: str}``.
     """
     root = _project_root(source_path)
     msg = (message or "").strip() or "chore: uloženie rozrobených zmien pred založením novej verzie"
-    add = _run(root, ["add", "-A", *_outside(exclude)], timeout=timeout)
-    if add.returncode != 0:
+    pending = _status_entries(root, exclude=exclude, timeout=timeout, every_file=True)
+    # Only work still in the working tree needs staging, under the name it has now: naming a path that is neither in
+    # the index nor on disk (the source of a staged rename, a staged deletion) makes ``git add`` refuse.
+    unstaged = [path for xy, path, _ in pending if xy[1] != " "]
+    if unstaged and _run_over(root, ["add", "-A"], unstaged, timeout=timeout).returncode != 0:
         return {"ok": False, "error": "git add zlyhal"}
-    commit = _run(root, ["commit", "-m", msg, *_outside(exclude)], timeout=timeout)
-    if commit.returncode != 0:
+    # The commit takes what is staged now — both names of a rename; a file added and then deleted is gone from both.
+    staged = [
+        path
+        for xy, name, source in _status_entries(root, exclude=exclude, timeout=timeout, every_file=True)
+        if xy[0] not in " ?"
+        for path in (name, source)
+        if path is not None
+    ]
+    commit = _run_over(root, ["commit", "-m", msg], staged, timeout=timeout) if staged else None
+    if commit is None or commit.returncode != 0:
         # "nothing to commit" (already clean) is benign — verify by re-checking the tree.
         if working_tree_status(source_path, exclude=exclude, timeout=timeout)["clean"]:
             return {"ok": True, "note": "nothing-to-commit"}
@@ -144,10 +200,7 @@ def commit_all(source_path: str, message: str, *, exclude: Sequence[str] = (), t
 
 def _untracked_paths(root: Path, *, exclude: Sequence[str], timeout: int) -> list[str]:
     """Untracked entries from ``git status --porcelain -z`` (``-z`` emits paths RAW, never quoted)."""
-    proc = _run(root, ["status", "--porcelain", "-z", *_outside(exclude)], timeout=timeout)
-    if proc.returncode != 0:
-        raise ValueError("git status zlyhal")
-    return [entry[3:] for entry in proc.stdout.split("\0") if entry[:2] == "??"]
+    return [path for xy, path, _ in _status_entries(root, exclude=exclude, timeout=timeout) if xy == "??"]
 
 
 def _cleanable_paths(root: Path, *, exclude: Sequence[str], timeout: int) -> Optional[set[str]]:
