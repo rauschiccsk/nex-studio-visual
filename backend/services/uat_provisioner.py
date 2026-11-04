@@ -1824,13 +1824,18 @@ def _bumpni_znacku(image: str, project_slug: str, version: str) -> str:
     ``postgres:16-alpine`` nie je náš obraz a povýšiť ho na verziu aplikácie by znamenalo siahnuť na
     databázu — teda presne to, čo sa pri nasadení verzie diať nemá.
     """
-    if ":" not in image:
+    if not _is_ours(image, project_slug):
         return image
     meno, _, _stara = image.rpartition(":")
-    zaklad = project_slug.removeprefix("nex-")
-    if project_slug in meno or zaklad in meno:
-        return f"{meno}:v{version.lstrip('v')}"
-    return image
+    return f"{meno}:v{version.lstrip('v')}"
+
+
+def _is_ours(image: str, project_slug: str) -> bool:
+    """Does *image* belong to THIS project (its name carries the project's slug)? ``postgres:16-alpine`` does not."""
+    if ":" not in image:
+        return False
+    meno = image.rpartition(":")[0]
+    return project_slug in meno or project_slug.removeprefix("nex-") in meno
 
 
 def _env_mapa(svc: Any) -> dict[str, Any]:
@@ -2178,7 +2183,11 @@ UNBUILDABLE = "Nasadenie by zapísalo obrazy, ktoré sa nemajú odkiaľ vziať �
 
 
 def unbuildable_images(
-    before: dict[str, Any], after: dict[str, Any], *, image_exists: Callable[[str], bool]
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    image_exists: Callable[[str], bool],
+    pulled_as_new: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Obrazy, ktorým nasadenie PREPÍSALO značku a nemajú sa odkiaľ vziať — ani postaviť, ani nájsť.
 
@@ -2192,11 +2201,13 @@ def unbuildable_images(
       stiahnuť a nasadenie s ním dosiaľ chodilo; zablokovať ho preto, že tu ešte nie je, by zastavilo
       nasadenia, ktoré sú v poriadku. Prepísanú značku nesie obraz, ktorý je NÁŠ — a register naň
       nemáme. Varovanie, ktoré chodí aj inokedy, sa prestane čítať.
+    * služba z *pulled_as_new* nikdy — nasadenie ju do inštalácie práve doplnilo s cudzím obrazom
+      (``redis:7``, DEV-304) a ten sa stiahne ako pri prvom nasadení.
     """
     stare = {meno: svc.get("image") for meno, svc in (before.get("services") or {}).items() if isinstance(svc, dict)}
     chybaju = []
     for meno, svc in (after.get("services") or {}).items():
-        if not isinstance(svc, dict) or svc.get("build") is not None:
+        if not isinstance(svc, dict) or svc.get("build") is not None or meno in pulled_as_new:
             continue
         obraz = svc.get("image")
         if not isinstance(obraz, str) or obraz == stare.get(meno):
@@ -2256,8 +2267,9 @@ def env_version_bump(
 def services_missing_against_source(instance_dir: Path, source: dict[str, Any]) -> list[str]:
     """Služby, ktoré projekt má a inštalácia nie — porovnané podľa ÚLOHY, nie podľa mena.
 
-    Známy dôsledok toho, že sa inštalácia neprestavuje: novú službu sama nedostane. Musí sa to
-    POVEDAŤ — nie potichu dorobiť prestavbou, lebo práve prestavba je to, čo ICCINT-133 ruší.
+    Známy dôsledok toho, že sa inštalácia neprestavuje: novú službu sama nedostane. Nie potichu
+    dorobiť prestavbou, lebo práve prestavba je to, čo ICCINT-133 ruší — DEV-304 ju doplní sama
+    o sebe a nahlas (:func:`new_services_into_installation`).
 
     ⚠️ Porovnávať mená nestačí a bol by to falošný poplach. Zmerané 15.09.2026 na kópii skutočnej
     inštalácie MÁGERSTAVU: hlásilo ``['db', 'migrate']``, hoci to sú tie isté služby, len sa tam
@@ -2753,6 +2765,144 @@ def web_frontends_into_installation(
             _add_proxy_network(services[name], network)
     bumped["services"] = services
     return missing, []
+
+
+def _awaited(svc: dict[str, Any]) -> dict[str, Any]:
+    """The services *svc* waits for, each with its condition — ``depends_on`` in either of its two forms."""
+    waits = svc.get("depends_on")
+    if isinstance(waits, list):
+        return {name: {"condition": "service_started"} for name in waits}
+    if isinstance(waits, dict):
+        return {name: condition or {"condition": "service_started"} for name, condition in waits.items()}
+    return {}
+
+
+def _why_it_cannot_come(
+    svc: dict[str, Any], installation: dict[str, Any], *, present: set[str], waiting: list[str]
+) -> Optional[str]:
+    """Why the service *svc* would not run in *installation* as it is — ``None`` when it would.
+
+    *present* are the services the installation has (or gets in this deploy); *waiting* the services that wait for
+    *svc* in the cockpit's render — each must be among them, the deploy writes the waiting into it."""
+    volumes = set(installation.get("volumes") or {})
+    networks = set(installation.get("networks") or {}) | {"default"}
+    binds = set(_mount_sources(installation.get("services") or {}))
+    for entry in svc.get("volumes") or []:
+        source = (entry.get("source") if isinstance(entry, dict) else _mount_source(entry)) or None
+        if not source:
+            continue
+        if _is_host_bind(entry):
+            if source not in binds:
+                return f"pripája {source}, čo inštalácia nepripája"
+        elif source not in volumes:
+            return f"potrebuje úložisko {source}, ktoré inštalácia nemá"
+    joined = svc.get("networks")
+    for network in joined if isinstance(joined, (list, dict)) else []:
+        if network not in networks:
+            return f"potrebuje sieť {network}, ktorú inštalácia nemá"
+    for awaited in _awaited(svc):
+        if awaited not in present:
+            return f"čaká na službu {awaited}, ktorú inštalácia nemá"
+    for other in waiting:
+        if other not in present:
+            return f"čaká na ňu služba {other}, ktorú inštalácia pod týmto menom nemá"
+    return None
+
+
+def installed_version(installation: dict[str, Any], project_slug: str) -> Optional[str]:
+    """The version an installation runs — the tag its own images carry (:func:`_bumpni_znacku` writes ``v<version>``);
+    ``None`` when they disagree or it has none of its own."""
+    tags = {
+        image.rpartition(":")[2]
+        for svc in (installation.get("services") or {}).values()
+        if isinstance(svc, dict) and isinstance(image := svc.get("image"), str) and _is_ours(image, project_slug)
+    }
+    return next(iter(tags)).lstrip("v") if len(tags) == 1 else None
+
+
+def services_the_version_brought(
+    project_path: Path, source: dict[str, Any], installed: Optional[str]
+) -> Optional[set[str]]:
+    """DEV-304 — the services the project has now (*source*) and did not have at *installed*, the version the
+    installation runs, read from the project's git at that version's tag. ``None`` when that cannot be told — no
+    version, no tag, no git: then nothing is said to be new."""
+    if not installed:
+        return None
+    for tag in (f"v{installed}", installed):
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(project_path), "show", f"{tag}:docker-compose.yml"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            continue
+        try:
+            then = yaml.safe_load(proc.stdout) or {}
+        except yaml.YAMLError:
+            return None
+        if not isinstance(then, dict) or not isinstance(then.get("services"), dict):
+            return None
+        return set(source.get("services") or {}) - set(then["services"])
+    return None
+
+
+def new_services_into_installation(
+    bumped: dict[str, Any], cockpits_render: dict[str, Any], *, missing: list[str], project_slug: str, version: str
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """DEV-304 — a service a new version brings goes into the installation as the cockpit writes it into a new one.
+
+    04.11.2026 NEX Knowledge 0.2.1 brought ``data-owner`` — a one-shot step that hands ``/data`` to uid 1000 before the
+    backend and the worker start — and the UAT of ICC never got it: a redeploy only raises the version of what an
+    installation has (ICCINT-133 — a whole installation rendered from the project once renamed MÁGERSTAV's services,
+    network, database and customer and took NEX Inbox down for seven minutes). Each of *missing* now comes whole from
+    ``cockpits_render`` (what the cockpit writes into a new installation of the project), its image tagged like every
+    service the redeploy raised (:func:`_bumpni_znacku`), and the installation's services that wait for it in the
+    render wait for it here too. Nothing else of ``bumped`` changes. Only an installation laid out as the cockpit writes
+    it gets anything: one with services under its own names (taken over — ``postgres``, ``alembic-init``) gets nothing,
+    since a service the project calls otherwise would come a second time. A service whose storage, network or awaited
+    service the installation does not have under the same name stays out as well: its storage would be a new empty
+    volume, its order nobody's (:func:`_why_it_cannot_come`).
+
+    Returns ``(added, left_out)`` — ``added`` maps each added service to the services that wait for it, ``left_out``
+    to the reason it stayed out."""
+    services = bumped.get("services") or {}
+    rendered = cockpits_render.get("services") or {}
+    own_names = sorted(set(services) - set(rendered))
+    if own_names:
+        reason = f"inštalácia má služby, ktoré kokpit do novej inštalácie nezapisuje ({', '.join(own_names)})"
+        return {}, {name: reason for name in missing}
+    pending = [name for name in missing if isinstance(rendered.get(name), dict)]
+    left_out = {name: "kokpit ju do novej inštalácie nezapisuje" for name in missing if name not in pending}
+    added: dict[str, list[str]] = {}
+    reasons: dict[str, str] = {}
+    progressed = True
+    while pending and progressed:
+        progressed = False
+        for name in list(pending):
+            waiting = sorted(
+                other
+                for other, svc in rendered.items()
+                if isinstance(svc, dict) and other not in missing and name in _awaited(svc)
+            )
+            why = _why_it_cannot_come(rendered[name], bumped, present=set(services), waiting=waiting)
+            if why:
+                reasons[name] = why
+                continue
+            services[name] = copy.deepcopy(rendered[name])
+            if isinstance(services[name].get("image"), str):
+                services[name]["image"] = _bumpni_znacku(services[name]["image"], project_slug, version)
+            for other in waiting:
+                services[other]["depends_on"] = _awaited(services[other]) | {name: _awaited(rendered[other])[name]}
+            added[name] = waiting
+            pending.remove(name)
+            progressed = True
+    bumped["services"] = services
+    return added, left_out | {name: reasons[name] for name in pending}
 
 
 def cockpits_addresses_into_env(
@@ -3759,6 +3909,7 @@ def provision_uat(
         # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
         surfaces = project_surfaces.surfaces_of_slug(project_path.name)
         pridane: list[str] = []
+        vynechane: list[str] = []
         if len(surfaces) > 1:
             name_base, host = _instance_naming(
                 environment, uat_slug, customer_slug, app, private=private, deploy_host=deploy_host
@@ -3791,13 +3942,49 @@ def provision_uat(
                     f"Webový projekt: inštalácia má vlastné smerovanie, preto do nej {', '.join(vynechane)} "
                     "nepribudol — doplň ho do inštalácie ručne."
                 )
-        chyba = [meno for meno in chyba if meno not in pridane]
-        if chyba:
-            # Známy dôsledok, povedaný nahlas: inštalácia sa neprestavuje, takže novú službu sama
-            # nedostane. Zamlčať to by znamenalo vrátiť sa k prestavbe zadnými dverami.
+        # DEV-164 said already what it added and what it left out for the installation's own routing.
+        chyba = [meno for meno in chyba if meno not in pridane and meno not in vynechane]
+        # DEV-304: a service the new version brought comes as the cockpit writes it into a new installation — said
+        # aloud; the installation is still not rebuilt (ICCINT-133). One the project had already at the version the
+        # installation runs is missing on purpose (a database kept elsewhere) and stays out, as what cannot run in it.
+        verzia_instalacie = installed_version(
+            yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}, project_slug
+        )
+        priniesla = services_the_version_brought(project_path, source, verzia_instalacie)
+        doplnene_sluzby, vynechane_sluzby = new_services_into_installation(
+            povysene,
+            cockpits_render,
+            missing=[meno for meno in chyba if priniesla is not None and meno in priniesla],
+            project_slug=project_slug,
+            version=version,
+        )
+        for meno in chyba:
+            if priniesla is None:
+                vynechane_sluzby[meno] = (
+                    "kokpit nevie povedať, či ju priniesla nová verzia (inštalácia nehlási svoju verziu alebo projekt "
+                    "nemá jej značku v gite)"
+                )
+            elif meno not in priniesla:
+                vynechane_sluzby[meno] = f"projekt ju mal už vo verzii {verzia_instalacie}, na ktorej inštalácia beží"
+        if doplnene_sluzby:
+            kto_caka = {
+                meno: f" ({'čaká' if len(cakaju) == 1 else 'čakajú'} na ňu {', '.join(cakaju)})" if cakaju else ""
+                for meno, cakaju in doplnene_sluzby.items()
+            }
             warnings.append(
-                f"Projekt má služby, ktoré inštalácia nemá: {', '.join(chyba)}. Nasadenie ich "
-                "nedoplní — inštalácia sa neprestavuje. Ak ich tam treba, doplň ich do inštalácie."
+                "Nová verzia priniesla služby, ktoré inštalácia nemala — doplnené tak, ako ich kokpit zapisuje do "
+                "novej inštalácie: " + "; ".join(meno + kto_caka[meno] for meno in doplnene_sluzby) + "."
+            )
+        if vynechane_sluzby:
+            warnings.append(
+                "Projekt má služby, ktoré kokpit do inštalácie nedoplnil: "
+                + "; ".join(f"{meno} — {dovod}" for meno, dovod in vynechane_sluzby.items())
+                + ". Inštalácia beží ďalej bez nich. "
+                + (
+                    "„Postaviť nanovo“ postaví UAT celé z projektu (dáta UAT sa zahodia)."
+                    if environment == "uat"
+                    else "Inštaláciu PROD treba s projektom zladiť ručne."
+                )
             )
         # ICCINT-137 — zistiť PRED zápisom. Bežiaca inštalácia sa nesmie ocitnúť v stave, z ktorého
         # sa nevie reštartovať, kvôli nasadeniu, ktoré aj tak zlyhá.
@@ -3814,7 +4001,16 @@ def provision_uat(
                 f"Jednorazové kroky {', '.join(vypnute)} už po skončení nebudú hlásiť „unhealthy“ — kokpit im vypol "
                 "kontrolu zdravia zdedenú z obrazu."
             )
-        nepostavitelne = unbuildable_images(povodne, povysene, image_exists=_docker_image_exists)
+        nepostavitelne = unbuildable_images(
+            povodne,
+            povysene,
+            image_exists=_docker_image_exists,
+            pulled_as_new=frozenset(
+                meno
+                for meno in doplnene_sluzby
+                if not _is_ours(str((povysene["services"][meno] or {}).get("image") or ""), project_slug)
+            ),
+        )
         if nepostavitelne:
             raise UndeployableImageError(
                 UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."

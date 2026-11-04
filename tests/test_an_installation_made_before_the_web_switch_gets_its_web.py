@@ -10,6 +10,7 @@ the main address, the check of the web failed on a name nobody served, and the M
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -137,3 +138,27 @@ def test_an_installation_with_its_own_routing_keeps_it_and_is_told(career):
         "Webový projekt: inštalácia má vlastné smerovanie, preto do nej web nepribudol — doplň ho do inštalácie ručne."
         in result.warnings
     )
+
+
+def test_its_own_routing_keeps_it_also_where_the_history_shows_the_web_is_new(career):
+    """DEV-304 adds what a new version brought; the web this installation's own routing keeps out stays out all the
+    same — the project's git shows 1.0.0 without it."""
+    project, projects, uat, surfaces = career
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["add", "-A"],
+        ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "1.0.0"],
+        ["tag", "v1.0.0"],
+    ):
+        subprocess.run(["git", "-C", str(project), *args], capture_output=True, check=True)
+    _deploy(projects, uat, "1.0.0")
+    compose_path = uat / "icc" / "career-asistent" / "docker-compose.yml"
+    compose_path.write_text(compose_path.read_text(encoding="utf-8").replace(HOST, "kariera.icc.sk"), encoding="utf-8")
+    _switch_to_web(project, surfaces)
+
+    result = _deploy(projects, uat, "1.1.0")
+
+    assert "web" not in _installation(uat)["services"]
+    assert [w for w in result.warnings if "web" in w] == [
+        "Webový projekt: inštalácia má vlastné smerovanie, preto do nej web nepribudol — doplň ho do inštalácie ručne."
+    ]
