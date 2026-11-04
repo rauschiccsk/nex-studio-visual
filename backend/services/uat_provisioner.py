@@ -3001,6 +3001,71 @@ def _add_proxy_network(svc: dict[str, Any], network: str) -> None:
         svc["networks"] = ["default", network]
 
 
+def _networks_of(svc: dict[str, Any]) -> set[str]:
+    """The compose networks a service is on — ``default`` when it names none."""
+    nets = svc.get("networks")
+    if isinstance(nets, dict):
+        return set(nets)
+    if isinstance(nets, list):
+        return {str(n) for n in nets}
+    return {"default"}
+
+
+def _aliases_of(svc: dict[str, Any], networks: set[str]) -> list[str]:
+    """The aliases a service declares on *networks* (mapping form of ``networks``)."""
+    nets = svc.get("networks")
+    if not isinstance(nets, dict):
+        return []
+    return [
+        str(alias)
+        for name, conf in nets.items()
+        if name in networks and isinstance(conf, dict)
+        for alias in conf.get("aliases") or []
+    ]
+
+
+def links_to_own_backend(compose: dict[str, Any], network: str) -> tuple[dict[str, Any], list[str]]:
+    """DEV-306 — every service on the machine's shared Traefik *network* reaches the backend of ITS installation.
+
+    04.11.2026: in ``nex-proxy-net`` on ANDROS ten containers answered to „backend“ — compose gives a service its name
+    on every network it is on, and it cannot be taken off one — and Docker answers a name from the network first in
+    alphabetical order. A frontend whose project network sorts after the shared one (every ``uat-…``) got all ten, and
+    of ten requests through its nginx (``proxy_pass http://backend:8000``) its own backend answered one; on MAGER
+    Plane's proxy reached Jitsi's „web“ the same way. A ``links`` entry is scoped to the container that has it, so a
+    service linked to its installation's backend gets that one only (measured in a scratch network: 6 of 6).
+
+    Each service on *network* other than the backend gets a link to the backend — its name, and every alias it has on
+    a network they share — when they share one (a link needs it; without it compose would refuse). Nothing else
+    changes. Returns ``(the compose with the links, the services that got a link they did not have)``."""
+    compose = copy.deepcopy(compose)
+    services = compose.get("services") or {}
+    backend = _find_backend(services)
+    if not backend or not isinstance(services.get(backend), dict):
+        return compose, []
+    # The shared network by its key in the compose, or by its name when the compose keys it otherwise.
+    shared = {network} | {
+        key
+        for key, conf in (compose.get("networks") or {}).items()
+        if isinstance(conf, dict) and conf.get("name") == network
+    }
+    backends_networks = _networks_of(services[backend])
+    linked = []
+    for name, svc in services.items():
+        if name == backend or not isinstance(svc, dict) or svc.get("network_mode"):
+            continue
+        own = _networks_of(svc)
+        common = own & backends_networks
+        if not (own & shared) or not common:
+            continue
+        wanted = [backend] + [f"{backend}:{alias}" for alias in _aliases_of(services[backend], common)]
+        links = [str(link) for link in svc.get("links") or []]
+        missing = [link for link in wanted if link not in links]
+        if missing:
+            svc["links"] = links + missing
+            linked.append(name)
+    return compose, linked
+
+
 def _image_tag(version: Optional[str]) -> str:
     """Označenie obrazu odvodené od nasadenej verzie (ICCINT-103).
 
@@ -3377,6 +3442,9 @@ def render_uat_compose(compose: dict[str, Any], routing: Optional[Routing] = Non
     machine the installation runs on (DEV-275), this one when not given.
     """
     routing = routing or routing_for()
+    # DEV-306: whatever path wrote the compose — a first install, a redeploy, an adoption — its services on the shared
+    # network reach their own backend.
+    compose, _ = links_to_own_backend(compose, routing.network)
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
         keep_trailing_newline=True,
@@ -4014,6 +4082,13 @@ def provision_uat(
         if nepostavitelne:
             raise UndeployableImageError(
                 UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."
+            )
+        _, naviazane = links_to_own_backend(povysene, routing.network)
+        if naviazane:
+            # DEV-306 — said once, on the deploy that changed the installation (ICCINT-104: a change is never silent).
+            warnings.append(
+                f"Kokpit naviazal {', '.join(naviazane)} na backend tejto inštalácie — meno backendu z nich už nevedie "
+                "do iných inštalácií v spoločnej sieti."
             )
         compose_text = render_uat_compose(povysene, routing)
         mala = set(_parse_env_file(env_path))

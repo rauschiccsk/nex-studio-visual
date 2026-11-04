@@ -510,6 +510,19 @@ def _a_machine_with_room(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _a_backend_reached_by_its_own_name(monkeypatch):
+    """DEV-306: after every deploy the cockpit asks, inside the running containers, where the backend's name leads.
+
+    By DEFAULT the suite's containers answer with their own backend's address — no test reaches a real Docker. A test
+    about it sets its own (``tests/test_a_frontend_reaches_the_backend_of_its_installation.py``).
+    """
+    from backend.services import backend_reach
+
+    monkeypatch.setattr(backend_reach, "_resolved", lambda container, name, deploy_host: {"10.0.0.2"})
+    monkeypatch.setattr(backend_reach, "_addresses", lambda container, deploy_host: {"10.0.0.2", "172.26.0.2"})
+
+
+@pytest.fixture(autouse=True)
 def _no_real_ci_questions(monkeypatch):
     """ICCINT-70: the Verifikácia CI floor now WAITS for the run it just pushed — it retries for up to two
     minutes, then up to twenty more for the run to finish.

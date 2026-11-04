@@ -89,6 +89,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_VERSION_BUSY,
 )
 from backend.services import (
+    backend_reach,
     ci_status,
     dedo_project_proposal,
     deploy_progress,
@@ -1399,6 +1400,8 @@ async def deploy(
         warnings.extend(
             await asyncio.to_thread(machine_disk.clean_after_deploy, instalacia / "docker-compose.yml", deploy_host)
         )
+        # DEV-306 — the name each service calls its backend by leads to this installation's backend only.
+        warnings.extend(await asyncio.to_thread(backend_reach.check, instalacia / "docker-compose.yml", deploy_host))
     else:
         detail = machine_disk.said_plainly(detail, deploy_host)
     # DEV-68: the same seam carries whether the new version was started — a failed deploy that started it is

@@ -47,6 +47,7 @@ from backend.db.models.versions import Version  # noqa: F401
 from backend.db.session import get_db
 from backend.main import app
 from tests.conftest import (  # noqa: F401
+    _a_backend_reached_by_its_own_name,
     _a_machine_with_room,
     _deterministic_host_port_probe,
     _guard_prod_db_isolation,
