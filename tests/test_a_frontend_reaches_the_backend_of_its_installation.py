@@ -253,3 +253,27 @@ async def test_every_deploy_looks_where_the_name_leads(db_session, monkeypatch, 
     )
 
     assert any(w.startswith("⚠️ Z frontend vedie meno „backend“ aj mimo backendu") for w in outcome.warnings)
+
+
+#: The real primitive, taken before the suite's default stub replaces it for every test.
+REAL_RESOLVED = backend_reach._resolved
+
+
+def test_every_address_the_name_has_is_asked_not_only_the_first(monkeypatch):
+    """nginx uses every address a name resolves to; ``getent hosts`` shows the first only, ``ahosts`` all of them."""
+    import subprocess
+
+    out = (
+        "172.26.0.5      STREAM backend\n172.26.0.5      DGRAM  backend\n"
+        "172.26.0.18     STREAM backend\n172.26.0.18     DGRAM  backend\n"
+    )
+    asked = []
+
+    def docker(args, deploy_host):
+        asked.append(args)
+        return subprocess.CompletedProcess(args, 0, out, "")
+
+    monkeypatch.setattr(backend_reach, "_docker", docker)
+
+    assert REAL_RESOLVED("uat-icc-manager-frontend", "backend", None) == {"172.26.0.5", "172.26.0.18"}
+    assert asked == [["exec", "uat-icc-manager-frontend", "getent", "ahosts", "backend"]]

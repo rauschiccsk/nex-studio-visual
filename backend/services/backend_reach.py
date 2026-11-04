@@ -32,9 +32,10 @@ def _docker(args: list[str], deploy_host: Optional[str]) -> subprocess.Completed
 
 
 def _resolved(container: str, name: str, deploy_host: Optional[str]) -> Optional[set[str]]:
-    """The addresses *name* resolves to inside *container*; ``None`` when it could not be asked."""
+    """Every address *name* resolves to inside *container* — ``ahosts``, as nginx takes them all, not ``hosts`` with
+    the first only; ``None`` when it could not be asked."""
     try:
-        out = _docker(["exec", container, "getent", "hosts", name], deploy_host)
+        out = _docker(["exec", container, "getent", "ahosts", name], deploy_host)
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:
