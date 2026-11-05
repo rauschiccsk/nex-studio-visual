@@ -253,15 +253,19 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         available_actions = [a for a in available_actions if a != "approve_spec"]
     # DEV-261: after Programovanie the step to Verifikácia is held by the CI of the pushed commit — while it runs the
     # state-only set already lacks ``schvalit``; a red one swaps it for „Vrátiť agentovi na opravu“ (opravit_podla_ci).
+    # DEV-308: after Verifikácia the sign-off waits for the CI of the last commit the same way (DEV-201) — the board
+    # says so there too, or the strip reads „Čaká na súhlas“ while nothing can be approved.
     ci_gate: Optional[BoardCiGate] = None
-    if state is not None and state.current_stage == "programovanie" and state.status == "awaiting_manazer":
-        if state.ci_pending_since is not None:
+    if state is not None and state.status == "awaiting_manazer" and state.ci_pending_since is not None:
+        if state.current_stage == "programovanie":
             ci_gate = BoardCiGate(state="pending", message=orchestrator.PROGRAMOVANIE_CI_PENDING_NEXT_ACTION)
-        else:
-            red = orchestrator.programovanie_ci_red(db, version_id)
-            if red is not None:
-                available_actions = sorted({*available_actions, "opravit_podla_ci"} - {"schvalit"})
-                ci_gate = BoardCiGate(state="red", message=orchestrator.CI_RED_SENTENCE.format(detail=red))
+        elif state.current_stage == "verifikacia":
+            ci_gate = BoardCiGate(state="pending", message=orchestrator.VERIFIKACIA_CI_PENDING_GATE)
+    elif state is not None and state.current_stage == "programovanie" and state.status == "awaiting_manazer":
+        red = orchestrator.programovanie_ci_red(db, version_id)
+        if red is not None:
+            available_actions = sorted({*available_actions, "opravit_podla_ci"} - {"schvalit"})
+            ci_gate = BoardCiGate(state="red", message=orchestrator.CI_RED_SENTENCE.format(detail=red))
     # CR-V2-056 (reality-anchoring): compute "verified" LIVE from the repo (PASS-bound SHA vs current HEAD) so
     # the board never shows a frozen PASS — a version whose HEAD drifted past its verified commit reads
     # 'sha_drift' and the FE flags it. One HEAD read for this single-version view.

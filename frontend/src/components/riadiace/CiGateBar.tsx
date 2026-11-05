@@ -2,8 +2,11 @@
 // after the last task. 30.10.2026 NEX Knowledge 0.2.0 offered „Prejsť na overenie" while its CI still ran; the
 // Director: „CI ešte stále beží ale kokpit už ponúka prejsť na overenie."
 //
+// DEV-308: after Verifikácia the sign-off waits for the CI of the last commit the same way (DEV-201).
+//
 // Honest-by-construction: the backend says what holds the step (`board.ci_gate`) and the bar invents nothing.
-//   • pending → „Prejsť na overenie" stands greyed out with the reason; the cockpit offers it by itself once CI is green.
+//   • pending → the held step („Prejsť na overenie", after Verifikácia „Schváliť na Hotovo") stands greyed out with the
+//               reason; the cockpit offers it by itself once CI is green.
 //   • red     → the step is not offered; „Vrátiť agentovi na opravu" (opravit_podla_ci) sends the fix back with what
 //               failed — shown only while the backend offers that action.
 
@@ -13,6 +16,7 @@ import { Hourglass, RotateCw, XCircle } from "lucide-react";
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import { approveLabel } from "./approveLabel";
 
 interface Props {
   board: PipelineBoard | null;
@@ -82,7 +86,7 @@ export default function CiGateBar({ board, versionId, onBoard }: Props) {
               title={gate.message}
               className="flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white opacity-50"
             >
-              Prejsť na overenie
+              {approveLabel(board?.state?.current_stage)}
             </button>
           )}
         </div>

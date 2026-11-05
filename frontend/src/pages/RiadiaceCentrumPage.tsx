@@ -300,6 +300,7 @@ export default function RiadiaceCentrumPage() {
           error={error}
           verifiedProvenance={board?.verified_provenance}
           ci={ci}
+          ciGate={board?.ci_gate}
         />
         <ConversationThread
           versionId={versionId}

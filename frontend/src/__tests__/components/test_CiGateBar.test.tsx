@@ -19,9 +19,9 @@ vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 const PENDING = "Programovanie je hotové — čaká sa na kontroly na GitHube; „Prejsť na overenie“ sa ponúkne, keď dobehnú.";
 const RED = "Kontroly na GitHube po Programovaní zlyhali: CI #65 zlyhal krok test. Vráť prácu agentovi na opravu.";
 
-function boardWith(gate: CiGate | null, actions: string[] = ["ask", "uprav"]): PipelineBoard {
+function boardWith(gate: CiGate | null, actions: string[] = ["ask", "uprav"], stage = "programovanie"): PipelineBoard {
   return {
-    state: { current_stage: "programovanie" },
+    state: { current_stage: stage },
     recent_messages: [],
     available_actions: actions,
     ci_gate: gate,
@@ -49,6 +49,21 @@ describe("CiGateBar — the step to Verifikácia waits for CI (DEV-261)", () => 
     fireEvent.click(step);
     expect(postPipelineActionApi).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Vrátiť agentovi na opravu/ })).not.toBeInTheDocument();
+  });
+
+  it("after Verifikácia the step that waits is the sign-off, not the step to Verifikácia (DEV-308)", () => {
+    const waits =
+      "Verifikácia prešla — „Schváliť na Hotovo“ sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám.";
+    render(
+      <CiGateBar
+        board={boardWith({ state: "pending", message: waits }, ["ask", "verdict"], "verifikacia")}
+        versionId="v-1"
+        onBoard={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(waits)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Schváliť na Hotovo" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Prejsť na overenie" })).not.toBeInTheDocument();
   });
 
   it("on a red CI offers the fix instead of the step and sends it with one click", async () => {

@@ -186,7 +186,7 @@ export interface ConsultationDirection {
 }
 
 /** DEV-261: why „Prejsť na overenie" is held after Programovanie — the CI of the pushed commit still runs, or it is red. */
-interface CiGate {
+export interface CiGate {
   state: "pending" | "red";
   /** The sentence the Manažér reads beside the held step. */
   message: string;

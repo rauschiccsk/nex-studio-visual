@@ -3811,7 +3811,8 @@ export interface components {
         /**
          * BoardCiGate
          * @description DEV-261 — the step from Programovanie to Verifikácia held by the CI of the commit the cockpit pushed: still
-         *     running (``pending``) or red (``red`` — „Vrátiť agentovi na opravu“ is offered instead of the step).
+         *     running (``pending``) or red (``red`` — „Vrátiť agentovi na opravu“ is offered instead of the step). DEV-308 — also
+         *     the sign-off after Verifikácia while the CI of the last commit runs (``pending``; DEV-201).
          */
         BoardCiGate: {
             /** Message */

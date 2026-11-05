@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import type { CiStatus, PipelineState } from "../../services/api/pipeline";
+import type { CiGate, CiStatus, PipelineState } from "../../services/api/pipeline";
 import { elapsedSince } from "../../utils/elapsed";
 import {
   BLOCK_REASON_LABELS,
@@ -26,7 +26,12 @@ import type { BuildPhase, StatusTone } from "../cockpit/labels";
 
 // Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
 // Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
-function statusText(state: PipelineState | null, projectName: string, versionNumber: string): string {
+function statusText(
+  state: PipelineState | null,
+  projectName: string,
+  versionNumber: string,
+  ciGate?: CiGate | null,
+): string {
   // Hotovo: ANY signed-off build reads "Hotovo — pripravené na nasadenie" (green via the existing done→green
   // tone). Mode-agnostic — a completed GUIDED (phase-automaton) build must show "Hotovo" too, not fall through
   // to "Voľný" as it did when this was gated on mode==="conversation". MUST precede the bare-"Voľný" branch
@@ -53,6 +58,15 @@ function statusText(state: PipelineState | null, projectName: string, versionNum
   // awaiting_manazer branch below.
   if (state.status === "awaiting_manazer" && state.resume_after_framework_fix) {
     return "Chyba NEX Studia opravená — čaká na tvoje „Pokračovať“";
+  }
+  // DEV-308: a version held by its checks on GitHub (after Programovanie DEV-261, after Verifikácia DEV-201) waits for
+  // nobody's approval — nothing can be approved until they finish, and the cockpit goes on by itself. NEX Knowledge
+  // 1.0.1, 05.11.2026: „Čaká na súhlas“ here, „… Kokpit to dorieši sám.“ below it. MUST precede the generic branch.
+  if (state.status === "awaiting_manazer" && ciGate?.state === "pending") {
+    return "Čaká na kontroly na GitHube — kokpit pokračuje sám";
+  }
+  if (state.status === "awaiting_manazer" && ciGate?.state === "red") {
+    return "Kontroly na GitHube zlyhali — vráť verziu agentovi na opravu";
   }
   if (state.status === "awaiting_manazer") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
@@ -86,6 +100,8 @@ interface Props {
   /** DEV-51: the build's CI — a `done` version with red (or still running) checks is not "pripravené na
    *  nasadenie", and the deploy screen refuses it; the strip must not say otherwise. */
   ci?: CiStatus | null;
+  /** DEV-308: what holds the version's next step — its checks on GitHub still running (`pending`) or red. */
+  ciGate?: CiGate | null;
 }
 
 function HonestStatusStrip({
@@ -96,6 +112,7 @@ function HonestStatusStrip({
   error,
   verifiedProvenance,
   ci,
+  ciGate,
 }: Props) {
   // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
   // green "overená/Hotovo". Override the derived text + tone for exactly that case.
@@ -114,9 +131,13 @@ function HonestStatusStrip({
         ? "Hotovo — kontroly projektu ešte bežia, nasadenie počká"
         : unconfirmed
           ? "Hotovo — overenie sa nedá potvrdiť"
-          : statusText(state, projectName, versionNumber);
+          : statusText(state, projectName, versionNumber, ciGate);
   const tone: StatusTone =
-    ciBlock === "red" && !drifted ? "red" : unconfirmed || drifted || ciBlock ? "amber" : statusTone(state);
+    (ciBlock === "red" && !drifted) || (state?.status === "awaiting_manazer" && ciGate?.state === "red")
+      ? "red"
+      : unconfirmed || drifted || ciBlock
+        ? "amber"
+        : statusTone(state);
   const working = state?.status === "agent_working";
   // Hodiny, ktoré tikajú len počas práce. Bez nich by „pracuje sa 2 min“ zamrzlo na dvoch minútach a
   // Manažér by z toho čítal opak toho, čo to má povedať.

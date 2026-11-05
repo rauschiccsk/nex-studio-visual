@@ -23,6 +23,7 @@ import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore"
 import { useAuthStore } from "@/store/authStore";
 import { schemaChangeSentence, schemaDocLink, SCHEMA_APPROVER_ONLY } from "./databaseSchema";
 import { schvalitBarCarriesUprav } from "./upravControl";
+import { approveLabel } from "./approveLabel";
 
 const NOTHING_CHECKED: string[] = [];
 
@@ -50,27 +51,14 @@ export default function SchvalitBar({ board, versionId, onBoard, previewDown = f
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
 
-  // Context-aware copy: the SAME `schvalit` verb is the manager's approve/advance at FOUR gates, and the
-  // consequence differs at each. Branch off the board's current stage so the button always names what it does:
-  //   • navrh          → "Schváliť plán"       → posunie do stavby (Programovanie)
-  //   • vizual         → "Schváliť vizuál"     → posunie projekt do stavby (Programovanie)   (CR-1)
-  //   • programovanie  → "Prejsť na overenie"  → posunie na Verifikáciu (overenie Auditorom)
-  //   • verifikacia    → "Schváliť na Hotovo"  → overená verzia sa označí ako Hotovo (terminálny podpis)
-  // Any null/legacy state falls back to the plan-approval copy (the earliest gate).
+  // Context-aware copy: the button names what the SAME `schvalit` verb does at this gate (approveLabel).
   const stage = board.state?.current_stage;
   // At the Vizuál gate the change-requests flow through the always-open composer (typed → the AI applies them
   // live, HMR), so this bar's own comment box + "Upraviť" are redundant + confusing there ("2 editory",
   // Director 2026-07-13). Render Vizuál as a pure approve button; keep the comment/rework input at the other
   // gates (Návrh / Programovanie / Verifikácia) where there is no live composer-apply loop.
   const isVizual = stage === "vizual";
-  const approveLabel =
-    stage === "verifikacia"
-      ? "Schváliť na Hotovo"
-      : stage === "programovanie"
-        ? "Prejsť na overenie"
-        : stage === "vizual"
-          ? "Schváliť vizuál"
-          : "Schváliť plán";
+  const stepLabel = approveLabel(stage);
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
   // DEV-7: a Návrh that changes the database is approved by Ri alone, and approving it writes the Knowledge Base.
   const schema = stage === "navrh" && board.database_schema?.changes ? board.database_schema : null;
@@ -179,7 +167,7 @@ export default function SchvalitBar({ board, versionId, onBoard, previewDown = f
             isVizual && checkKeys.length === 0 ? "ml-auto" : ""
           }`}
         >
-          {submitting ? approveBusyLabel : approveLabel}
+          {submitting ? approveBusyLabel : stepLabel}
         </button>
       </div>
 

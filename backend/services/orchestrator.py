@@ -7212,6 +7212,10 @@ CI_PENDING_NEXT_ACTION = (
 CI_PENDING_REFUSAL = (
     "Hotovo zatiaľ nie: verzia čaká na kontrolu na GitHube — keď dobehne, kokpit ju pustí sám, alebo vráti na opravu."
 )
+#: DEV-308 — what the board's CI gate says beside the held „Schváliť na Hotovo“ while the version waits for its checks.
+VERIFIKACIA_CI_PENDING_GATE = (
+    "Verifikácia prešla — „Schváliť na Hotovo“ sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám."
+)
 
 # DEV-261 — the step from Programovanie to Verifikácia waits for the CI of the commit the cockpit pushed after the last
 # task. 30.10.2026 NEX Knowledge 0.2.0 offered „Prejsť na overenie“ the moment its fix ended, with CI still running; a
