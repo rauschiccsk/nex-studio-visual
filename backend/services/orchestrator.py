@@ -89,6 +89,7 @@ from backend.services import (
     preview_switch,
     project_surfaces,
     public_route,
+    red_main_branch,
     release_note_writer,
     smoke_scratch,
     source_language,
@@ -6403,6 +6404,8 @@ def _verify_env_for_target(deploy_host: Optional[str]) -> Optional[dict[str, str
 
 #: Ako dlho sa čaká na upratanie po nasadení. Je to údržba, nie brána — keď sa nestihne, nevadí.
 CLEANUP_TIMEOUT = 300
+#: DEV-260: how long the look at the main branch's runs may take before the next task of a build (GitHub's listing).
+RED_BRANCH_TIMEOUT = 20
 
 
 async def _uprac_na_cieli(
@@ -15166,6 +15169,30 @@ async def _run_build_round(
         if on_message is not None:
             await on_message(start_msg)
 
+        # DEV-260 — a main branch this version's tasks left red is fixed before the plan goes on: the rule in the
+        # brief is held by GitHub's runs, not by trust.
+        red_first: Optional[str] = None
+        if _project_has_ci(project_root):
+            reds = await red_main_branch.reds_of_version(db, version_id, project_root, timeout=RED_BRANCH_TIMEOUT)
+            if reds:
+                red_first = red_main_branch.fix_first_brief(reds)
+                red_msg = _record_message(
+                    db,
+                    version_id=version_id,
+                    stage="programovanie",
+                    author="system",
+                    recipient="manazer",
+                    kind="notification",
+                    content=(
+                        "Hlavná vetva je červená po úlohe "
+                        + ", ".join(f"#{link.label}" for _run, link in reds)
+                        + f" — AI Agent ju opraví skôr, než pokračuje úlohou #{_task_full_number(db, task)}."
+                    ),
+                    payload={"phase": "programovanie", "red_main_branch": [run.url for run, _link in reds]},
+                )
+                if on_message is not None:
+                    await on_message(red_msg)
+
         prior_failures: list[str] = []
         task_done = False
         for attempt in range(1, _SELF_CHECK_RETRIES + 1):
@@ -15201,6 +15228,9 @@ async def _run_build_round(
                     schema_rule=schema_rule,
                     version_number=version_number,
                 )
+            if red_first is not None:
+                prompt = f"{red_first}\n\n---\n\n{prompt}"
+                red_first = None  # once — the fix belongs to the first turn of the task
             result = await _dispatch_build_turn(
                 db,
                 version_id=version_id,
