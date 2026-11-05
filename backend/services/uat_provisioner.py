@@ -3024,46 +3024,125 @@ def _aliases_of(svc: dict[str, Any], networks: set[str]) -> list[str]:
     ]
 
 
-def links_to_own_backend(compose: dict[str, Any], network: str) -> tuple[dict[str, Any], list[str]]:
-    """DEV-306 — every service on the machine's shared Traefik *network* reaches the backend of ITS installation.
+def _shared_networks(compose: dict[str, Any], network: Optional[str] = None) -> set[str]:
+    """The keys of the networks an installation shares with others on the machine — *network*, and every external one
+    whatever its key (MAGER's ``proxy: {external: true, name: nex-ts-net}``): the containers of other installations
+    are there."""
+    declared = compose.get("networks") or {}
+    return ({network} if network else set()) | {
+        key for key, conf in declared.items() if isinstance(conf, dict) and conf.get("external")
+    }
+
+
+def container_of(compose: dict[str, Any], name: str) -> Optional[str]:
+    """The one container service *name* runs as — its ``container_name``, else the one compose gives the single replica
+    of a named project (``<project>-<service>-1``); ``None`` when no one name is the service's."""
+    svc = (compose.get("services") or {}).get(name)
+    if not isinstance(svc, dict):
+        return None
+    given = svc.get("container_name")
+    if isinstance(given, str) and given:
+        return given
+    replicas = svc.get("scale", (svc.get("deploy") or {}).get("replicas", 1))
+    project = compose.get("name")
+    if not isinstance(project, str) or not project or replicas != 1:
+        return None
+    return f"{project}-{name}-1"
+
+
+@dataclass(frozen=True)
+class InstallationLink:
+    """A service of an installation on its shared network, and another service of it the first one must reach by
+    *names* (the service's name and its aliases on the networks they share) — that one only, not the same names of
+    other installations."""
+
+    caller: str
+    target: str
+    names: tuple[str, ...]
+
+
+def installation_links(compose: dict[str, Any], network: Optional[str] = None) -> list[InstallationLink]:
+    """DEV-306 — the names every service on a shared network (:func:`_shared_networks`) must reach in its installation
+    only: the backend's — it is the name they call, wherever it lives — and those of the other services on a shared
+    network, the names the services of other installations carry there too. A link needs a network both are on."""
+    services = {name: svc for name, svc in (compose.get("services") or {}).items() if isinstance(svc, dict)}
+    shared = _shared_networks(compose, network)
+    backend = _find_backend(services)
+    exposed = [name for name, svc in services.items() if not svc.get("network_mode") and _networks_of(svc) & shared]
+    found = []
+    for caller in exposed:
+        for target, svc in services.items():
+            if target == caller or svc.get("network_mode") or (target != backend and target not in exposed):
+                continue
+            common = _networks_of(services[caller]) & _networks_of(svc)
+            if common:
+                found.append(InstallationLink(caller, target, (target, *_aliases_of(svc, common))))
+    return found
+
+
+def _reached_by_link(svc: dict[str, Any]) -> set[str]:
+    """The names a service already reaches by a link — ``links`` (``svc`` or ``svc:alias``) and ``external_links``
+    (``container`` or ``container:alias``)."""
+    entries = [str(link) for link in [*(svc.get("links") or []), *(svc.get("external_links") or [])]]
+    return {entry.split(":", 1)[-1] for entry in entries}
+
+
+def _dependencies(services: dict[str, Any], name: str) -> set[str]:
+    """Every service *name* waits for, as ``docker compose up`` orders them — ``depends_on`` and ``links``."""
+    seen: set[str] = set()
+    todo = [name]
+    while todo:
+        svc = services.get(todo.pop())
+        if not isinstance(svc, dict):
+            continue
+        for dep in [*(svc.get("depends_on") or []), *(str(link).split(":")[0] for link in svc.get("links") or [])]:
+            if dep not in seen:
+                seen.add(dep)
+                todo.append(dep)
+    return seen
+
+
+def links_within_installation(compose: dict[str, Any], network: str) -> tuple[dict[str, Any], list[str]]:
+    """DEV-306 — every service on the machine's shared Traefik *network* reaches the services of ITS installation.
 
     04.11.2026: in ``nex-proxy-net`` on ANDROS ten containers answered to „backend“ — compose gives a service its name
     on every network it is on, and it cannot be taken off one — and Docker answers a name from the network first in
     alphabetical order. A frontend whose project network sorts after the shared one (every ``uat-…``) got all ten, and
     of ten requests through its nginx (``proxy_pass http://backend:8000``) its own backend answered one; on MAGER
-    Plane's proxy reached Jitsi's „web“ the same way. A ``links`` entry is scoped to the container that has it, so a
-    service linked to its installation's backend gets that one only (measured in a scratch network: 6 of 6).
+    Plane's proxy reached Jitsi's „web“ the same way. A link is scoped to the container that has it, so a service
+    linked to its installation's backend gets that one only (measured in a scratch network: 6 of 6). 05.11.2026 the
+    backends still saw „frontend“ on every installation (five in ``nex-ts-net`` on MAGER, MSG-227).
 
-    Each service on *network* other than the backend gets a link to the backend — its name, and every alias it has on
-    a network they share — when they share one (a link needs it; without it compose would refuse). Nothing else
-    changes. Returns ``(the compose with the links, the services that got a link they did not have)``."""
+    Each name of :func:`installation_links` a service does not reach by a link yet gets one. The backend's by
+    ``links`` — it keeps the start order the frontend's nginx needs — unless the backend waits for that service: two
+    ways that is a cycle ``docker compose up`` refuses („dependency cycle detected: backend -> frontend -> backend“,
+    measured). That one and every other by the container's name (``external_links``, :func:`container_of`): no
+    dependency, the container need not exist yet (measured: 6 of 6 the own frontend, and again after it was recreated).
+    A service with no one container is linked to by nothing. Returns ``(the compose with the links, the services that
+    got a link they did not have)``."""
     compose = copy.deepcopy(compose)
     services = compose.get("services") or {}
     backend = _find_backend(services)
-    if not backend or not isinstance(services.get(backend), dict):
-        return compose, []
-    # The shared network by its key in the compose, or by its name when the compose keys it otherwise.
-    shared = {network} | {
-        key
-        for key, conf in (compose.get("networks") or {}).items()
-        if isinstance(conf, dict) and conf.get("name") == network
-    }
-    backends_networks = _networks_of(services[backend])
-    linked = []
-    for name, svc in services.items():
-        if name == backend or not isinstance(svc, dict) or svc.get("network_mode"):
+    linked: list[str] = []
+    for link in installation_links(compose, network):
+        svc = services[link.caller]
+        missing = [name for name in link.names if name not in _reached_by_link(svc)]
+        if not missing:
             continue
-        own = _networks_of(svc)
-        common = own & backends_networks
-        if not (own & shared) or not common:
+        if link.target == backend and link.caller not in _dependencies(services, link.target):
+            svc["links"] = [str(entry) for entry in svc.get("links") or []] + [
+                name if name == link.target else f"{link.target}:{name}" for name in missing
+            ]
+        elif container := container_of(compose, link.target):
+            svc["external_links"] = [str(entry) for entry in svc.get("external_links") or []] + [
+                f"{container}:{name}" for name in missing
+            ]
+        else:
             continue
-        wanted = [backend] + [f"{backend}:{alias}" for alias in _aliases_of(services[backend], common)]
-        links = [str(link) for link in svc.get("links") or []]
-        missing = [link for link in wanted if link not in links]
-        if missing:
-            svc["links"] = links + missing
-            linked.append(name)
-    return compose, linked
+        if link.caller not in linked:
+            linked.append(link.caller)
+    order = list(services)
+    return compose, sorted(linked, key=order.index)
 
 
 def _image_tag(version: Optional[str]) -> str:
@@ -3443,8 +3522,8 @@ def render_uat_compose(compose: dict[str, Any], routing: Optional[Routing] = Non
     """
     routing = routing or routing_for()
     # DEV-306: whatever path wrote the compose — a first install, a redeploy, an adoption — its services on the shared
-    # network reach their own backend.
-    compose, _ = links_to_own_backend(compose, routing.network)
+    # network reach the services of their own installation.
+    compose, _ = links_within_installation(compose, routing.network)
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
         keep_trailing_newline=True,
@@ -4083,12 +4162,12 @@ def provision_uat(
             raise UndeployableImageError(
                 UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."
             )
-        _, naviazane = links_to_own_backend(povysene, routing.network)
+        _, naviazane = links_within_installation(povysene, routing.network)
         if naviazane:
             # DEV-306 — said once, on the deploy that changed the installation (ICCINT-104: a change is never silent).
             warnings.append(
-                f"Kokpit naviazal {', '.join(naviazane)} na backend tejto inštalácie — meno backendu z nich už nevedie "
-                "do iných inštalácií v spoločnej sieti."
+                f"Kokpit naviazal {', '.join(naviazane)} na ostatné služby tejto inštalácie — mená týchto služieb "
+                "z nich už nevedú do iných inštalácií v spoločnej sieti."
             )
         compose_text = render_uat_compose(povysene, routing)
         mala = set(_parse_env_file(env_path))

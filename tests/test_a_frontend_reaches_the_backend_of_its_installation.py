@@ -8,11 +8,19 @@ others came from NEX Inbox of MÁGERSTAV and other apps. A link is scoped to the
 ``links: [backend]`` the name led 6 of 6 times to the own backend (scratch network). The cockpit now writes the link
 into every compose it writes, says it on the redeploy that adds it, and after every deploy checks where the name leads.
 Director 04.11.2026: „súhlasím“.
+
+05.11.2026 (Máger Dedo, MSG-227): with that, the backends still saw „frontend“ on every installation of the shared
+network (five on MAGER). A link back by ``links`` is a cycle for compose („dependency cycle detected: backend ->
+frontend -> backend“, measured); a link by the container's name (``external_links``) is no dependency, and with it the
+backend got its own frontend 6 of 6 times, and again after the frontend was recreated. Every service on the shared
+network now reaches every other service of its installation there by a link — the backend by ``links`` as before
+(it keeps the start order), the others by their container. Director 05.11.2026: „Súhlasím“.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import pytest
 import yaml
@@ -38,34 +46,123 @@ def _installation(**services) -> dict:
     }
 
 
-# ---------- the link ----------
+def _named(compose: dict) -> dict:
+    """Every container named as ``build_uat_compose`` names it."""
+    for name, svc in compose["services"].items():
+        svc["container_name"] = f"uat-icc-manager-{name}"
+    return compose
+
+
+def _cycle(services: dict) -> Optional[list[str]]:
+    """A dependency cycle as ``docker compose up`` sees one — ``depends_on`` and ``links``; ``external_links`` are
+    none."""
+
+    def needs(name: str) -> list[str]:
+        svc = services.get(name) or {}
+        return [*(svc.get("depends_on") or []), *(str(link).split(":")[0] for link in svc.get("links") or [])]
+
+    done: set[str] = set()
+
+    def visit(name: str, path: list[str]) -> Optional[list[str]]:
+        if name in path:
+            return path + [name]
+        if name in done:
+            return None
+        for dep in needs(name):
+            found = visit(dep, path + [name])
+            if found:
+                return found
+        done.add(name)
+        return None
+
+    return next((found for found in (visit(name, []) for name in services) if found), None)
+
+
+# ---------- the links ----------
 
 
 def test_a_frontend_on_the_shared_network_is_linked_to_its_backend():
-    compose, linked = P.links_to_own_backend(_installation(), NET)
+    compose, linked = P.links_within_installation(_installation(), NET)
 
     assert compose["services"]["frontend"]["links"] == ["backend"]
-    assert linked == ["frontend"]
-    assert "links" not in compose["services"]["backend"], "the backend calls nobody by the shared name"
-    assert "links" not in compose["services"]["worker"], "off the shared network a name cannot lead elsewhere"
-    assert "links" not in compose["services"]["db"]
+    assert "external_links" not in compose["services"]["frontend"], "nothing else of it is on the shared network"
+    assert "links" not in compose["services"]["backend"], "a link back by links is a cycle for compose"
+    assert linked == ["backend", "frontend"]
+    for off in ("worker", "db"):
+        assert not {"links", "external_links"} & set(compose["services"][off]), "off the shared network, no stranger"
 
 
-def test_the_given_compose_is_not_changed():
-    given = _installation()
+def test_the_backend_reaches_the_frontend_of_its_installation_by_its_container():
+    """MSG-227: in ``nex-ts-net`` on MAGER the backends of five installations saw five „frontend“s."""
+    compose, _ = P.links_within_installation(_named(_installation()), NET)
 
-    P.links_to_own_backend(given, NET)
-
-    assert "links" not in given["services"]["frontend"]
+    assert compose["services"]["backend"]["external_links"] == ["uat-icc-manager-frontend:frontend"]
 
 
-def test_both_frontends_of_a_web_project_are_linked():
+def test_no_link_the_cockpit_writes_is_a_cycle_for_compose():
+    web = {"image": "uat-icc-career-web:v1.1.0", "networks": ["default", NET], "depends_on": ["backend"]}
+    installation = _named(_installation(web=web))
+    installation["services"]["frontend"]["depends_on"] = ["backend"]
+
+    compose, _ = P.links_within_installation(installation, NET)
+
+    assert _cycle(compose["services"]) is None
+
+
+def test_the_cycle_check_sees_one():
+    assert _cycle({"backend": {"links": ["frontend"]}, "frontend": {"depends_on": ["backend"]}}) == [
+        "backend",
+        "frontend",
+        "backend",
+    ]
+
+
+def test_a_link_to_the_backend_that_would_close_a_cycle_goes_by_its_container():
+    installation = _named(_installation())
+    installation["services"]["backend"]["depends_on"] = ["frontend"]
+
+    compose, _ = P.links_within_installation(installation, NET)
+
+    assert "links" not in compose["services"]["frontend"]
+    assert compose["services"]["frontend"]["external_links"] == ["uat-icc-manager-backend:backend"]
+    assert _cycle(compose["services"]) is None
+
+
+def test_without_a_container_name_it_is_the_one_compose_gives():
+    compose, _ = P.links_within_installation(_installation(), NET)
+
+    assert compose["services"]["backend"]["external_links"] == ["uat-icc-manager-frontend-1:frontend"]
+
+
+def test_a_service_whose_container_has_no_one_name_is_not_linked_to():
+    """Without a project name, or with more replicas than one, no container name is the service's."""
+    nameless = _installation()
+    del nameless["name"]
+    replicated = _installation()
+    replicated["services"]["frontend"]["deploy"] = {"replicas": 2}
+
+    for installation in (nameless, replicated):
+        compose, linked = P.links_within_installation(installation, NET)
+
+        assert "external_links" not in compose["services"]["backend"]
+        assert compose["services"]["frontend"]["links"] == ["backend"], "a link by the service's name needs none"
+        assert linked == ["frontend"]
+
+
+def test_every_service_of_a_web_project_reaches_every_other_one():
     web = {"image": "uat-icc-career-web:v1.1.0", "networks": ["default", NET]}
 
-    compose, linked = P.links_to_own_backend(_installation(web=web), NET)
+    compose, linked = P.links_within_installation(_named(_installation(web=web)), NET)
 
-    assert linked == ["frontend", "web"]
-    assert compose["services"]["web"]["links"] == ["backend"]
+    services = compose["services"]
+    assert linked == ["backend", "frontend", "web"]
+    assert services["frontend"]["links"] == ["backend"] and services["web"]["links"] == ["backend"]
+    assert services["frontend"]["external_links"] == ["uat-icc-manager-web:web"]
+    assert services["web"]["external_links"] == ["uat-icc-manager-frontend:frontend"]
+    assert services["backend"]["external_links"] == [
+        "uat-icc-manager-frontend:frontend",
+        "uat-icc-manager-web:web",
+    ]
 
 
 def test_links_a_service_had_stay_and_the_backends_aliases_come():
@@ -74,9 +171,39 @@ def test_links_a_service_had_stay_and_the_backends_aliases_come():
     installation["services"]["backend"]["networks"] = {"default": {"aliases": ["api"]}, NET: None}
     installation["services"]["frontend"]["networks"] = {"default": None, NET: None}
 
-    compose, _ = P.links_to_own_backend(installation, NET)
+    compose, _ = P.links_within_installation(installation, NET)
 
     assert compose["services"]["frontend"]["links"] == ["cache", "backend", "backend:api"]
+
+
+def test_the_frontends_aliases_on_the_shared_network_come_too():
+    installation = _named(_installation())
+    installation["services"]["frontend"]["networks"] = {"default": None, NET: {"aliases": ["app"]}}
+
+    compose, _ = P.links_within_installation(installation, NET)
+
+    assert compose["services"]["backend"]["external_links"] == [
+        "uat-icc-manager-frontend:frontend",
+        "uat-icc-manager-frontend:app",
+    ]
+
+
+def test_an_external_link_a_service_had_stays_and_is_not_doubled():
+    installation = _named(_installation())
+    installation["services"]["backend"]["external_links"] = ["redis-1:cache", "uat-icc-manager-frontend:frontend"]
+
+    compose, linked = P.links_within_installation(installation, NET)
+
+    assert compose["services"]["backend"]["external_links"] == ["redis-1:cache", "uat-icc-manager-frontend:frontend"]
+    assert linked == ["frontend"]
+
+
+def test_the_given_compose_is_not_changed():
+    given = _installation()
+
+    P.links_within_installation(given, NET)
+
+    assert not {"links", "external_links"} & (set(given["services"]["frontend"]) | set(given["services"]["backend"]))
 
 
 def test_a_service_that_shares_no_network_with_the_backend_gets_no_link():
@@ -85,7 +212,7 @@ def test_a_service_that_shares_no_network_with_the_backend_gets_no_link():
     installation["services"]["backend"]["networks"] = ["default"]
     installation["services"]["frontend"]["networks"] = [NET]
 
-    compose, linked = P.links_to_own_backend(installation, NET)
+    compose, linked = P.links_within_installation(installation, NET)
 
     assert linked == [] and "links" not in compose["services"]["frontend"]
 
@@ -97,15 +224,15 @@ def test_the_shared_network_is_known_by_its_name_too():
     for name in ("backend", "frontend"):
         installation["services"][name]["networks"] = ["default", "proxy"]
 
-    _, linked = P.links_to_own_backend(installation, "nex-ts-net")
+    _, linked = P.links_within_installation(installation, "nex-ts-net")
 
-    assert linked == ["frontend"]
+    assert linked == ["backend", "frontend"]
 
 
 def test_a_second_pass_adds_nothing():
-    once, _ = P.links_to_own_backend(_installation(), NET)
+    once, _ = P.links_within_installation(_installation(), NET)
 
-    twice, linked = P.links_to_own_backend(once, NET)
+    twice, linked = P.links_within_installation(once, NET)
 
     assert linked == [] and twice == once
 
@@ -156,88 +283,162 @@ def _services(result) -> dict:
     return yaml.safe_load(result.compose_path.read_text(encoding="utf-8"))["services"]
 
 
-def test_a_new_installation_links_its_frontend(tmp_path, monkeypatch):
+def _rewritten_without(result, *keys: tuple[str, str]) -> None:
+    """The installation as an older cockpit wrote it — these ``(service, key)`` not there."""
+    old = yaml.safe_load(result.compose_path.read_text(encoding="utf-8"))
+    for service, key in keys:
+        del old["services"][service][key]
+    header = "".join(
+        line for line in result.compose_path.read_text(encoding="utf-8").splitlines(True) if line[:1] == "#"
+    )
+    result.compose_path.write_text(header + yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
+
+
+def test_a_new_installation_links_its_services(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
 
     first = _deploy(tmp_path, "1.5.0")
 
-    assert _services(first)["frontend"]["links"] == ["backend"]
+    services = _services(first)
+    assert services["frontend"]["links"] == ["backend"]
+    assert services["backend"]["external_links"] == [f"{services['frontend']['container_name']}:frontend"]
     assert not any("naviazal" in w for w in first.warnings), "a new installation is not changed, it is written"
 
 
-def test_an_installation_made_before_gets_the_link_on_its_next_deploy_and_is_told(tmp_path, monkeypatch):
+def test_an_installation_made_before_gets_the_links_on_its_next_deploy_and_is_told(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     first = _deploy(tmp_path, "1.5.0")
-    old = yaml.safe_load(first.compose_path.read_text(encoding="utf-8"))
-    del old["services"]["frontend"]["links"]
-    header = "".join(
-        line for line in first.compose_path.read_text(encoding="utf-8").splitlines(True) if line[:1] == "#"
-    )
-    first.compose_path.write_text(header + yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
+    _rewritten_without(first, ("frontend", "links"), ("backend", "external_links"))
 
     again = _deploy(tmp_path, "1.5.1")
 
     assert _services(again)["frontend"]["links"] == ["backend"]
     assert (
-        "Kokpit naviazal frontend na backend tejto inštalácie — meno backendu z nich už nevedie do iných inštalácií "
-        "v spoločnej sieti." in again.warnings
+        "Kokpit naviazal backend, frontend na ostatné služby tejto inštalácie — mená týchto služieb z nich už nevedú "
+        "do iných inštalácií v spoločnej sieti." in again.warnings
     )
     third = _deploy(tmp_path, "1.5.2")
     assert not any("naviazal" in w for w in third.warnings), "said once, on the deploy that changed it"
 
 
-# ---------- where the name leads on the machine ----------
+def test_an_installation_the_cockpit_linked_to_its_backend_gets_the_link_back(tmp_path, monkeypatch):
+    """What 4.112.1–4.113.2 wrote: the frontend linked to the backend, nothing back."""
+    _project(tmp_path, monkeypatch)
+    first = _deploy(tmp_path, "1.5.0")
+    _rewritten_without(first, ("backend", "external_links"))
+
+    again = _deploy(tmp_path, "1.5.1")
+
+    assert _services(again)["backend"]["external_links"] == [
+        f"{_services(again)['frontend']['container_name']}:frontend"
+    ]
+    assert (
+        "Kokpit naviazal backend na ostatné služby tejto inštalácie — mená týchto služieb z nich už nevedú do iných "
+        "inštalácií v spoločnej sieti." in again.warnings
+    )
+
+
+# ---------- where the names lead on the machine ----------
+
+ADDRESSES = {
+    "uat-icc-manager-backend": {"172.26.0.5", "192.168.64.3"},
+    "uat-icc-manager-frontend": {"172.26.0.7", "192.168.64.4"},
+}
+OWN = {
+    ("uat-icc-manager-frontend", "backend"): {"172.26.0.5"},
+    ("uat-icc-manager-backend", "frontend"): {"172.26.0.7"},
+}
 
 
 @pytest.fixture
 def written(tmp_path) -> Path:
-    compose, _ = P.links_to_own_backend(_installation(), NET)
-    for name, svc in compose["services"].items():
-        svc["container_name"] = f"uat-icc-manager-{name}"
+    compose, _ = P.links_within_installation(_named(_installation()), NET)
     path = tmp_path / "docker-compose.yml"
     path.write_text(yaml.safe_dump(compose), encoding="utf-8")
     return path
 
 
-def test_a_frontend_that_reaches_its_own_backend_says_nothing(written, monkeypatch):
-    monkeypatch.setattr(backend_reach, "_addresses", lambda c, h: {"172.26.0.5", "192.168.64.3"})
-    monkeypatch.setattr(backend_reach, "_resolved", lambda c, n, h: {"172.26.0.5"})
+def _machine(monkeypatch, resolved: dict, asked: Optional[list] = None) -> None:
+    def addresses(container, deploy_host):
+        if asked is not None:
+            asked.append(("own", container))
+        return ADDRESSES.get(container)
+
+    def resolve(container, name, deploy_host):
+        if asked is not None:
+            asked.append((container, name, deploy_host))
+        return resolved.get((container, name))
+
+    monkeypatch.setattr(backend_reach, "_addresses", addresses)
+    monkeypatch.setattr(backend_reach, "_resolved", resolve)
+
+
+def test_services_that_reach_their_own_say_nothing(written, monkeypatch):
+    _machine(monkeypatch, OWN)
 
     assert backend_reach.check(written, None) == []
 
 
-def test_a_frontend_that_reaches_another_backend_is_said(written, monkeypatch):
+def test_every_name_the_cockpit_linked_is_asked_where_it_leads(written, monkeypatch):
     asked = []
-    monkeypatch.setattr(backend_reach, "_addresses", lambda c, h: asked.append(("own", c)) or {"172.26.0.5"})
-    monkeypatch.setattr(
-        backend_reach, "_resolved", lambda c, n, h: asked.append((c, n, h)) or {"172.26.0.5", "172.26.0.18"}
-    )
+    _machine(monkeypatch, OWN, asked)
 
-    said = backend_reach.check(written, "mager")
+    backend_reach.check(written, "mager")
 
-    assert said == [
+    assert sorted(a for a in asked if a[0] != "own") == [
+        ("uat-icc-manager-backend", "frontend", "mager"),
+        ("uat-icc-manager-frontend", "backend", "mager"),
+    ]
+
+
+def test_an_alias_is_asked_as_its_name_is(tmp_path, monkeypatch):
+    installation = _named(_installation())
+    installation["services"]["frontend"]["networks"] = {"default": None, NET: {"aliases": ["app"]}}
+    compose, _ = P.links_within_installation(installation, NET)
+    path = tmp_path / "docker-compose.yml"
+    path.write_text(yaml.safe_dump(compose), encoding="utf-8")
+    _machine(monkeypatch, OWN | {("uat-icc-manager-backend", "app"): {"172.26.0.19"}})
+
+    assert backend_reach.check(path, None) == [
+        "⚠️ Z backend vedie meno „app“ aj mimo služby frontend tejto inštalácie (172.26.0.19) — volanie tým menom "
+        "môže dostať iná aplikácia. Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
+    ]
+
+
+def test_a_frontend_that_reaches_another_backend_is_said(written, monkeypatch):
+    _machine(monkeypatch, OWN | {("uat-icc-manager-frontend", "backend"): {"172.26.0.5", "172.26.0.18"}})
+
+    assert backend_reach.check(written, "mager") == [
         "⚠️ Z frontend vedie meno „backend“ aj mimo backendu tejto inštalácie (172.26.0.18) — požiadavky cez jej nginx "
         "môžu dostať iné aplikácie. Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
     ]
-    assert asked == [("own", "uat-icc-manager-backend"), ("uat-icc-manager-frontend", "backend", "mager")]
+
+
+def test_a_backend_that_reaches_another_frontend_is_said(written, monkeypatch):
+    _machine(monkeypatch, OWN | {("uat-icc-manager-backend", "frontend"): {"172.26.0.7", "172.26.0.19"}})
+
+    assert backend_reach.check(written, None) == [
+        "⚠️ Z backend vedie meno „frontend“ aj mimo služby frontend tejto inštalácie (172.26.0.19) — volanie tým "
+        "menom môže dostať iná aplikácia. Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
+    ]
 
 
 def test_a_name_nobody_could_ask_is_said(written, monkeypatch):
-    monkeypatch.setattr(backend_reach, "_resolved", lambda c, n, h: None)
+    _machine(monkeypatch, {})
 
     assert backend_reach.check(written, None) == [
-        "Kokpit nevedel overiť, kam z frontend vedie meno „backend“ — skontroluj to pred akceptáciou."
+        "Kokpit nevedel overiť, kam z backend vedie meno „frontend“ — skontroluj to pred akceptáciou.",
+        "Kokpit nevedel overiť, kam z frontend vedie meno „backend“ — skontroluj to pred akceptáciou.",
     ]
 
 
 @pytest.mark.asyncio
-async def test_every_deploy_looks_where_the_name_leads(db_session, monkeypatch, written):
+async def test_every_deploy_looks_where_the_names_lead(db_session, monkeypatch, written):
     from backend.services import deploy as deploy_service
     from tests.test_deploy_service import _FakeRunner, _make_customer, _make_project, _make_user, _make_version
 
     monkeypatch.setattr(P, "instance_dir_for", lambda **kw: written.parent)
-    monkeypatch.setattr(backend_reach, "_addresses", lambda c, h: {"172.26.0.5"})
-    monkeypatch.setattr(backend_reach, "_resolved", lambda c, n, h: {"172.26.0.18"})
+    _machine(monkeypatch, OWN | {("uat-icc-manager-frontend", "backend"): {"172.26.0.18"}})
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
     _make_version(db_session, project, "0.1.0")
