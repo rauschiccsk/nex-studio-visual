@@ -247,7 +247,9 @@ class CustomerSettingsContractRead(BaseModel):
 
     settings: list[CustomerSettingRead]
     problems: list[str] = Field(default_factory=list, description="Markers that mean nothing (misspelt, misplaced).")
-    legacy_admin: bool = Field(description="The app takes its admin password from ADMIN_INITIAL_PASSWORD (Tajný kľúč).")
+    legacy_admin: bool = Field(
+        description="The app takes its admin password from ADMIN_INITIAL_PASSWORD (Inicializačné heslo administrátora)."
+    )
 
 
 class ProdMachineRead(BaseModel):

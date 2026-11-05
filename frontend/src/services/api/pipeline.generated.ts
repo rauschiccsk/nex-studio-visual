@@ -4590,7 +4590,7 @@ export interface components {
         CustomerSettingsContractRead: {
             /**
              * Legacy Admin
-             * @description The app takes its admin password from ADMIN_INITIAL_PASSWORD (Tajný kľúč).
+             * @description The app takes its admin password from ADMIN_INITIAL_PASSWORD (Inicializačné heslo administrátora).
              */
             legacy_admin: boolean;
             /**

@@ -1281,7 +1281,7 @@ async def deploy(
     # Block the deploy UP-FRONT (before any teardown) with a clear, actionable message, rather than shipping a
     # lockout. Reads the SAME ``<project>/.env.example`` the provisioner renders from.
     if customer.credential_id is None:
-        from backend.services import claude_agent
+        from backend.services import claude_agent, env_contract
 
         _env_example = claude_agent.PROJECTS_ROOT / project.slug / ".env.example"
         try:
@@ -1290,8 +1290,9 @@ async def deploy(
             _declares_admin = False
         if _declares_admin:
             raise ValueError(
-                "Nasadenie sa nedá spustiť: táto aplikácia potrebuje prihlasovacie heslo administrátora, ale "
-                "zákazník ho nemá nastavené. Najprv nastav heslo zákazníka v sekcii Zákazníci a skús to znova."
+                "Nasadenie sa nedá spustiť: táto aplikácia potrebuje inicializačné heslo administrátora, ale "
+                "zákazník ho nemá nastavené. Nastav ho v Zákazníci → Upraviť zákazníka → "
+                f"„{env_contract.ADMIN_PASSWORD_LABEL}“ a skús to znova."
             )
 
     # Launch-contract gate (v4.0.58, sibling of the admin-password gate above). A ``token`` app is opened by a

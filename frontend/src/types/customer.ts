@@ -46,7 +46,7 @@ export interface CustomerSettingsContract {
   settings: CustomerSetting[];
   /** Markers that mean nothing (misspelt, misplaced) — the deploy refuses until they are fixed. */
   problems: string[];
-  /** The app takes its `admin` password from the customer's „Tajný kľúč“ (ADMIN_INITIAL_PASSWORD). */
+  /** The app takes its `admin` password from the customer's „Inicializačné heslo administrátora“ (ADMIN_INITIAL_PASSWORD). */
   legacy_admin: boolean;
 }
 
@@ -86,3 +86,9 @@ export interface ProdMachine {
   value: string;
   label: string;
 }
+
+/**
+ * DEV-300 — the customer's password the app founds its first administrator with, as a person reads it everywhere in
+ * the cockpit (the backend says it in ``backend/services/env_contract.py``; a test keeps the two the same).
+ */
+export const ADMIN_PASSWORD_LABEL = "Inicializačné heslo administrátora";

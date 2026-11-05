@@ -43,7 +43,8 @@ vi.mock("@/services/api/customers", () => ({
   deleteCustomer: deleteCustomerMock,
   // DEV-274: no other machine known — the form offers no choice of the PROD machine.
   listProdMachines: () => Promise.resolve([]),
-  // DEV-72: an app that takes the admin password from the „Tajný kľúč“ field — the field these tests edit.
+  // DEV-72: an app that takes the admin password from the „Inicializačné heslo administrátora“ field — the field these
+  // tests edit.
   getCustomerSettingsContract: () => Promise.resolve({ settings: [], problems: [], legacy_admin: true }),
 }));
 

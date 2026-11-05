@@ -17,6 +17,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import CustomerSettingsFields from "@/components/customers/CustomerSettingsFields";
 import { customerSettings, missingRequired } from "@/lib/customerSettings";
 import type { CustomerRead, CustomerSettingsContract, ProdMachine } from "@/types/customer";
+import { ADMIN_PASSWORD_LABEL } from "@/types/customer";
 
 /**
  * The shape the deploy path can actually use. `deploy._customer_dir_slug` derives a customer's instance
@@ -144,7 +145,7 @@ export default function CustomersPage() {
     };
   }, [slug]);
 
-  // The „Tajný kľúč“ is the admin password only for an app that reads it (ADMIN_INITIAL_PASSWORD); for any other
+  // The initial admin password is the admin password only for an app that reads it (ADMIN_INITIAL_PASSWORD); for any other
   // it would be stored and never used, so it is not offered. Not loaded yet → offered, as before DEV-72; failed to
   // load → not offered: the form says it does not know what the app asks (DEV-164).
   const offersLegacySecret = contractError === null && (contract === null || contract.legacy_admin);
@@ -267,7 +268,7 @@ export default function CustomersPage() {
   }
 
   async function handleDelete(c: CustomerRead) {
-    if (!window.confirm(`Odstrániť zákazníka ${c.name}? Odstráni sa aj jeho uložený tajný kľúč.`)) return;
+    if (!window.confirm(`Odstrániť zákazníka ${c.name}? Odstráni sa aj jeho uložené inicializačné heslo administrátora.`)) return;
     setLoadError(null);
     try {
       await deleteCustomer(c.id);
@@ -403,7 +404,7 @@ export default function CustomersPage() {
             )}
             {offersLegacySecret && (
               <label className="block text-xs">
-                <span className="text-[var(--color-text-secondary)]">Tajný kľúč (pre zákazníka)</span>
+                <span className="text-[var(--color-text-secondary)]">{ADMIN_PASSWORD_LABEL}</span>
                 <input
                   spellCheck={false}
                   type="password"
@@ -412,11 +413,15 @@ export default function CustomersPage() {
                   autoComplete="new-password"
                   placeholder={
                     editingCustomerId
-                      ? "ponechaj prázdne = bez zmeny; vyplň = zmeň tajný kľúč"
+                      ? "ponechaj prázdne = bez zmeny; vyplň = zmeň heslo"
                       : "uloží sa bezpečne; späť sa už nezobrazí"
                   }
                   className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
                 />
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  Heslo, s ktorým aplikácia pri inštalácii založí účet admin, keď správcu ešte nemá; správca si ho pri
+                  prvom prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne a späť sa už nezobrazí.
+                </span>
               </label>
             )}
           </div>
@@ -515,7 +520,7 @@ export default function CustomersPage() {
                   <span className="font-mono text-xs text-[var(--color-text-muted)]">{c.slug}</span>
                   {c.has_secret && offersLegacySecret && (
                     <span className="flex items-center gap-1 rounded bg-[var(--color-surface)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
-                      <KeyRound className="h-3 w-3" /> tajný kľúč uložený
+                      <KeyRound className="h-3 w-3" /> inicializačné heslo uložené
                     </span>
                   )}
                 </div>

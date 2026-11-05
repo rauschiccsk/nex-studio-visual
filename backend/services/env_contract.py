@@ -45,7 +45,12 @@ VARIABLE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
 #: The quotes a manager-facing text may stand in — typographic, straight, or the two mixed („…" is common).
 _QUOTED = re.compile(r"^[„\"“](.*)[“”\"]$")
 
-#: The legacy contract (v4.0): the customer's „Tajný kľúč“ is the password of the app's ``admin`` login.
+#: DEV-300 — what the cockpit calls the customer's password the app founds its first administrator with, wherever a
+#: person reads it (the frontend says it in ``frontend/src/types/customer.ts``; a test keeps the two the same).
+ADMIN_PASSWORD_LABEL = "Inicializačné heslo administrátora"
+
+#: The legacy contract (v4.0): the customer's „Inicializačné heslo administrátora“ is the password of the app's
+#: ``admin`` login.
 LEGACY_ADMIN_PASSWORD = "ADMIN_INITIAL_PASSWORD"
 
 #: A variable ending so is a secret: the provisioner gives it a random value unless something provides it.
@@ -133,7 +138,8 @@ def for_project(project_path: Path) -> Contract:
 
 
 def declares_legacy_admin(project_path: Path) -> bool:
-    """Whether the app takes its ``admin`` password from ``ADMIN_INITIAL_PASSWORD`` (the „Tajný kľúč“ field)."""
+    """Whether the app takes its ``admin`` password from ``ADMIN_INITIAL_PASSWORD`` (the field
+    :data:`ADMIN_PASSWORD_LABEL`)."""
     path = project_path / ".env.example"
     if not path.is_file():
         return False

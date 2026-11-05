@@ -1,10 +1,11 @@
 /**
  * DEV-72 — the customer form asks for what the app marks in its `.env.example`.
  *
- * 12.10.2026 the form had a „Tajný kľúč“ that career-asistent never read and a raw JSON nobody read; the e-mail and
- * password of the app's first admin had no field. Now the app's marked settings are fields in its own words, a secret
- * is write-only („uložené“), the „Tajný kľúč“ is offered only to an app that reads it, and the list says which
- * required setting a customer still lacks.
+ * 12.10.2026 the form had an admin password field (then called by another name) that career-asistent never read and a
+ * raw JSON nobody read; the e-mail and password of the app's first admin had no field. Now the app's marked settings are
+ * fields in its own words, a secret is write-only („uložené“), the initial admin password (DEV-300: one name,
+ * ADMIN_PASSWORD_LABEL) is offered only to an app that reads it, and the list says which required setting a customer
+ * still lacks.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -14,6 +15,7 @@ import "@testing-library/jest-dom/vitest";
 import CustomersPage from "@/pages/CustomersPage";
 import { ApiError } from "@/services/api";
 import type { CustomerRead, CustomerSettingsContract } from "@/types/customer";
+import { ADMIN_PASSWORD_LABEL } from "@/types/customer";
 
 const { listCustomersMock, createCustomerMock, updateCustomerMock, contractMock } = vi.hoisted(() => ({
   listCustomersMock: vi.fn(),
@@ -82,7 +84,7 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     render(<CustomersPage />);
 
     expect(await screen.findByText("Pred nasadením doplň: Heslo prvého správcu")).toBeInTheDocument();
-    expect(screen.queryByText(/tajný kľúč uložený/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/inicializačné heslo uložené/)).not.toBeInTheDocument();
   });
 
   it("asks for the app's settings in its own words and not for a secret it never reads", async () => {
@@ -94,7 +96,7 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     expect(screen.getByDisplayValue("spravca@icc.sk")).toBeInTheDocument();
     expect(screen.getByText("Heslo prvého správcu")).toBeInTheDocument();
     expect(screen.getByText(/APP_PUBLIC_URL\) dopĺňa kokpit sám/)).toBeInTheDocument();
-    expect(screen.queryByText("Tajný kľúč (pre zákazníka)")).not.toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_PASSWORD_LABEL)).not.toBeInTheDocument();
   });
 
   it("sends every plain setting and only the secrets typed in now", async () => {
@@ -131,7 +133,7 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
   });
 
   it("settings that could not be loaded are said, never passed off as an app that asks nothing (DEV-164)", async () => {
-    // 22.10.2026: the contract answered 500 and the form showed the old „Tajný kľúč“ and no field of the app's.
+    // 22.10.2026: the contract answered 500 and the form showed the old admin password field and no field of the app's.
     contractMock.mockRejectedValue(new ApiError(500, "Internal Server Error"));
     listCustomersMock.mockResolvedValue([ICC]);
     render(<CustomersPage />);
@@ -140,16 +142,22 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     expect(
       await screen.findByText(/^Nastavenia, ktoré aplikácia pýta od zákazníka, sa nepodarilo načítať \(.+\)\. /),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Tajný kľúč (pre zákazníka)")).not.toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_PASSWORD_LABEL)).not.toBeInTheDocument();
   });
 
-  it("an app that reads the „Tajný kľúč“ keeps it", async () => {
+  it("an app that reads the initial admin password keeps the field, named and explained (DEV-300)", async () => {
     contractMock.mockResolvedValue({ settings: [], problems: [], legacy_admin: true });
     listCustomersMock.mockResolvedValue([ICC]);
     render(<CustomersPage />);
     fireEvent.click(await screen.findByTitle("Upraviť zákazníka"));
 
-    expect(await screen.findByText("Tajný kľúč (pre zákazníka)")).toBeInTheDocument();
+    expect(await screen.findByText("Inicializačné heslo administrátora")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Heslo, s ktorým aplikácia pri inštalácii založí účet admin, keď správcu ešte nemá; správca si ho pri prvom " +
+          "prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne a späť sa už nezobrazí.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Nastavenia aplikácie pre tohto zákazníka")).not.toBeInTheDocument();
   });
 });
