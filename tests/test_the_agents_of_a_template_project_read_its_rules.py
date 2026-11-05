@@ -69,6 +69,19 @@ def test_the_rules_say_what_the_director_decided():
         assert decided in ADDENDUM, decided
 
 
+def test_a_change_on_one_screen_shows_on_every_other_one():
+    """DEV-311 — the Director 05.11.2026: „… prosím raz a navždy zabezpečiť, aby nič také už viackrát sa nestalo ani
+    v kokpite ani v našich aplikáciách.“ The agents build to the rule of the template's KONTRAKT.md and keep its
+    guard."""
+    for decided in (
+        "„Údaje na viacerých obrazovkách“",
+        "`onServerChange` z nex-shared",
+        "`frontend/src/test/shared-copies.test.ts` nevypínaš ani neobchádzaš",
+        "ukazuje starý údaj, kým sa stránka neobnoví, je **FAIL**",
+    ):
+        assert decided in ADDENDUM, decided
+
+
 def test_a_web_project_on_a_template_would_read_both_addenda_in_order():
     assert cps.project_type_rules("web", "nsv-standard") == WEB.rstrip() + "\n" + "\n\n---\n\n" + ADDENDUM
     assert cps.project_type_rules("standard", None) == ""

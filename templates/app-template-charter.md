@@ -18,3 +18,10 @@ doplníš za `...previewHandlers({ manifest })` len odpovede vlastných obrazovi
 **nex-app-kit ani nex-shared nepovyšuj z vlastnej iniciatívy.** Kokpit pred Overením skontroluje rám (TemplateApp,
 manifest, server na AppKit, žiadny vlastný ľavý panel, prihlásenie ani Nastavenia) a Audítor overí, že sa rám
 nezmenil mimo manifestu a vyhradených miest — zmena rámu je **FAIL**.
+
+**Údaj zo servera, ktorý ukazuje viac obrazoviek, drží aplikácia na jednom mieste a to sa obnoví samo** (KONTRAKT.md
+šablóny, „Údaje na viacerých obrazovkách“; DEV-311): spoločné úložisko (zustand), ktoré načíta údaje zo servera, sa
+prihlási k zmenám servera (`onServerChange` z nex-shared) a po zmene, ktorej sa týka, sa obnoví; obrazovka si nedrží
+vlastnú kópiu údaja, ktorý ukazuje aj iná obrazovka.
+Stráž `frontend/src/test/shared-copies.test.ts` nevypínaš ani neobchádzaš. Audítor: zmena na jednej obrazovke, po
+ktorej iná ukazuje starý údaj, kým sa stránka neobnoví, je **FAIL**.
