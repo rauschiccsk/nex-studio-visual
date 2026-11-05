@@ -56,6 +56,7 @@ provision+up leg is async (a ~1–2 min docker build) and is injected via
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -1639,11 +1640,24 @@ def _prod_url(customer_slug: str, app: str, *, private: bool = False, prod_host:
     return f"https://{customer_slug}-{app}.{uat_provisioner.routing_for(prod_host, private=private).zone}"
 
 
-def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> None:
+def note_headed_by(text: str, old_number: str, target: str) -> str:
+    """DEV-307 — *text* (a version's release note) with the first heading that names *old_number* naming *target*;
+    the body, and any other mention of the old number, as it is."""
+    from backend.services.release_note_writer import _bare
+
+    heading = re.compile(r"^(#{1,6}[ \t]+)v?" + re.escape(_bare(old_number)) + r"(?![\w.])", re.MULTILINE)
+    return heading.sub(lambda found: f"{found.group(1)}v{_bare(target)}", text, count=1)
+
+
+def _move_release_note_dir(proj_root: Path, old_number: str, target: str, day: date) -> None:
     """Part 1 (per-app-changelog-standard.md §4): when graduation renames the built version, MOVE its
     committed ``RELEASE_NOTES.md`` into the target version dir + commit, so the served version number matches
     the note dir (the endpoint globs ``v*/RELEASE_NOTES.md`` and matches by ``version_number``). Without this
-    the graduated version would show no note. BEST-EFFORT, NEVER raises (a moved note is not a release gate)."""
+    the graduated version would show no note. BEST-EFFORT, NEVER raises (a moved note is not a release gate).
+
+    DEV-307: the note's heading names the new number and ``release-dates.json`` carries the *day* under it, in the
+    same commit — 04.11.2026 NEX Knowledge's moved note still said „## v0.2.1“ and had no day, and the app's own guard
+    turned its main branch red."""
     from backend.services import release_note_writer
     from backend.services.orchestrator import _git_ok
 
@@ -1655,15 +1669,18 @@ def _move_release_note_dir(proj_root: Path, old_number: str, target: str) -> Non
     try:
         new_dir.mkdir(parents=True, exist_ok=True)
         old_file.replace(new_file)
+        new_file.write_text(note_headed_by(new_file.read_text(encoding="utf-8"), old_number, target), encoding="utf-8")
     except OSError:
         return
-    old_rel = str(old_file.relative_to(proj_root))
-    new_rel = str(new_file.relative_to(proj_root))
-    if not _git_ok(proj_root, ["add", "-A", "--", old_rel, new_rel]):
+    paths = [str(old_file.relative_to(proj_root)), str(new_file.relative_to(proj_root))]
+    dates = release_note_writer.move_release_date(proj_root, old_number, target, day)
+    if dates is not None:
+        paths.append(str(dates.relative_to(proj_root)))
+    if not _git_ok(proj_root, ["add", "-A", "--", *paths]):
         return
     _git_ok(
         proj_root,
-        ["commit", "-m", f"docs(release-notes): graduate notes to v{target.lstrip('v')}", "--", old_rel, new_rel],
+        ["commit", "-m", f"docs(release-notes): graduate notes to v{target.lstrip('v')}", "--", *paths],
     )
 
 
@@ -1744,5 +1761,5 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
     db.flush()
     # §4: keep the served note dir in sync with the renamed version (no-op when the number is unchanged).
     if old_number != target:
-        _move_release_note_dir(proj_root, old_number, target)
+        _move_release_note_dir(proj_root, old_number, target, version.release_date)
     return version

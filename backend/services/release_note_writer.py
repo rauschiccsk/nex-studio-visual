@@ -235,6 +235,25 @@ def record_release_dates(proj_root: Path, days: dict[str, date]) -> Path | None:
     return file
 
 
+def move_release_date(proj_root: Path, old_number: str, target: str, day: date) -> Path | None:
+    """DEV-307 — the version renamed at a first PROD (graduation, DEV-170) stands in ``release-dates.json`` under its
+    new number, with the day it came out; the old number goes with it. A project without the file (not on the app
+    template) or with one the cockpit cannot read is left as it is. Returns the file when it changed, else ``None``."""
+    file = Path(proj_root) / "docs" / "specs" / "versions" / RELEASE_DATES
+    try:
+        dates = json.loads(file.read_text(encoding="utf-8")) if file.is_file() else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(dates, dict):
+        return None
+    moved = {k: v for k, v in dates.items() if k != version_notes_dir(proj_root, old_number).name}
+    moved[version_notes_dir(proj_root, target).name] = day.isoformat()
+    if moved == dates:
+        return None
+    file.write_text(json.dumps(moved, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return file
+
+
 def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
     """(Re)generate + write the note for *version_id* under *proj_root*.
 
