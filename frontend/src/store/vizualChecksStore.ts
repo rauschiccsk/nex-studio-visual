@@ -19,6 +19,7 @@ interface VizualChecksState {
   toggle: (versionId: string, key: string) => void;
 }
 
+// Kópia údajov zo servera: žiadna — zaškrtnutia Vizuálu sú len v tomto prehliadači (DEV-312).
 export const useVizualChecksStore = create<VizualChecksState>()(
   persist(
     (set) => ({

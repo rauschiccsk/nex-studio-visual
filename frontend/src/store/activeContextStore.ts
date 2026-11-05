@@ -42,6 +42,10 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { onServerChange } from "nex-shared";
+
+import { getProjectApi } from "@/services/api/projects";
+import { getVersion } from "@/services/api/versions";
 
 /** localStorage key for *username*'s pin. ``undefined`` → the anonymous slot,
  *  which is never written by a signed-in user and so is always empty. */
@@ -149,3 +153,31 @@ export function scopeActiveContextTo(username: string | undefined): Promise<void
   // ``App`` does not — React re-renders when the store lands.
   return Promise.resolve(useActiveContextStore.persist.rehydrate());
 }
+
+// DEV-312 — the chosen project and version are copies of server data that many screens show (Fakturácia, Zákazníci,
+// Metriky, Poznámky, Poradca, the left panel); they follow every change of them, wherever it was made: project
+// settings rename the project, the first PROD deploy renumbers the version to 1.0.0 (DEV-170).
+onServerChange(({ path }) => {
+  const { selectedProject, selectedVersion } = useActiveContextStore.getState();
+  const project = /^\/projects\/([^/]+)$/.exec(path)?.[1];
+  if (project && selectedProject) {
+    void getProjectApi(project)
+      .then((fresh) => {
+        const now = useActiveContextStore.getState().selectedProject;
+        if (now && now.slug === fresh.slug && now.name !== fresh.name) {
+          useActiveContextStore.setState({ selectedProject: { slug: fresh.slug, name: fresh.name } });
+        }
+      })
+      .catch(() => undefined);
+  }
+  if (selectedVersion && (/^\/versions\/[^/]+$/.test(path) || /^\/customers\/[^/]+\/deploy$/.test(path))) {
+    void getVersion(selectedVersion.versionId)
+      .then((fresh) => {
+        const now = useActiveContextStore.getState().selectedVersion;
+        if (now && now.versionId === fresh.id && now.versionNumber !== fresh.version_number) {
+          useActiveContextStore.setState({ selectedVersion: { versionId: fresh.id, versionNumber: fresh.version_number } });
+        }
+      })
+      .catch(() => undefined);
+  }
+});

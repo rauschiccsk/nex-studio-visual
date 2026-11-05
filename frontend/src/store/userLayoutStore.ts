@@ -19,6 +19,7 @@ export interface UserLayoutState {
   reset: () => void;
 }
 
+// Kópia údajov zo servera: mení ich len toto úložisko — rozloženie obrazovky prihláseného číta raz a mení a ukladá len ono (DEV-312).
 export const useUserLayoutStore = create<UserLayoutState>()((set, get) => ({
   layout: null,
   load: async () => {

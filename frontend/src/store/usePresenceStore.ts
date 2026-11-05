@@ -26,6 +26,7 @@ export interface PresenceState {
   setIsAway: (away: boolean) => void;
 }
 
+// Kópia údajov zo servera: žiadna — „som preč“ je príznak tohto prehliadača, server ho nenačítava (DEV-312).
 export const usePresenceStore = create<PresenceState>()(
   persist(
     (set) => ({

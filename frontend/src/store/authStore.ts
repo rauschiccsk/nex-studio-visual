@@ -18,7 +18,7 @@
  */
 
 import type { StoreApi, UseBoundStore } from "zustand";
-import { createAuthStore, type LoginAuthState } from "nex-shared";
+import { createAuthStore, onServerChange, type LoginAuthState } from "nex-shared";
 
 import { TOKEN_STORAGE_KEY } from "@/services/api";
 import type { AuthUser } from "@/services/api/auth";
@@ -78,3 +78,11 @@ const authModule = createAuthStore<AuthUser, [string, string]>({
 
 export const useAuthStore: UseBoundStore<StoreApi<LoginAuthState<AuthUser, [string, string]>>> =
   authModule.useAuthStore;
+
+// DEV-312 — the signed-in person is a copy the left panel and Moje konto show; it follows every change of that person,
+// wherever it was made (Moje konto, Nastavenia → Používatelia). Only the person's row itself — not its password change,
+// after which the old token no longer answers and the caller signs in again.
+onServerChange(({ path }) => {
+  const me = useAuthStore.getState().user;
+  if (me && (path === "/auth/me" || path === `/users/${me.id}`)) void useAuthStore.getState().fetchMe();
+});

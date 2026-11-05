@@ -23,6 +23,7 @@ interface SessionState {
   clear: () => void;
 }
 
+// Kópia údajov zo servera: žiadna — len miesto, kde človek v Znalostnej báze skončil (DEV-312).
 export const useSessionStore = create<SessionState>()(
   persist(
     (set) => ({

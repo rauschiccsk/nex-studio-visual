@@ -74,6 +74,7 @@ function setSlot(
   return { [role]: { ...state[role], ...patch } } as Partial<AgentTerminalState>;
 }
 
+// Kópia údajov zo servera: mení ich len toto úložisko — terminálové sedenia AI Agenta zakladá, načíta a ukončuje len ono (DEV-312).
 export const useAgentTerminalStore = create<AgentTerminalState>()((set, get) => ({
   "ai-agent": EMPTY_SLOT,
   initialized: false,
