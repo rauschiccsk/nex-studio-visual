@@ -1,15 +1,16 @@
-"""DEV-305 — the disk of the machine the cockpit builds on: room checked before a deploy, old images cleaned after one.
+"""DEV-305 — the disk of the machine the cockpit builds on: room checked before a deploy, a full disk said plainly.
 
 04.11.2026 the first deploy of NEX Knowledge to the PROD of ICC filled MAGER's system disk while it built a 4.4 GB image
 („no space left on device“); for a moment nothing could write there, and the Postgres of MÁGERSTAV's NEX Inbox on the
 same disk restarted with a recovery („PANIC: … No space left on device“). Docker there held 22.4 GB of images — every
-deployed version of every installation — and 21.6 GB of build cache: the cockpit built and never cleaned up, and never
-asked whether there was room. Director 04.11.2026: „Súhlasím“.
+deployed version of every installation — and 21.6 GB of build cache, and the cockpit never asked whether there was room.
+Cleaning up after a deploy is not here: it was there already (DEV-124 older versions, ICCINT-154 / DEV-166 the build
+cache — ``orchestrator``), and a second cleanup here disagreed with it (05.11.2026). Director 04.11.2026: „Súhlasím“.
 
 Docker is reached as the deploy reaches it (:func:`remote_instance.docker_env` — another machine through
 ``DOCKER_HOST=ssh://…``, whose key allows Docker only), so the disk is read by a short-lived container that mounts
-Docker's own folders read-only. The four ``_…`` primitives below are the only places that run Docker; the suite stubs
-them (``tests/conftest.py``).
+Docker's own folders read-only. The ``_…`` primitives below are the only places that run Docker; the suite stubs them
+(``tests/conftest.py``).
 """
 
 from __future__ import annotations
@@ -145,22 +146,6 @@ def _images(deploy_host: Optional[str]) -> Optional[list[Image]]:
     return images_from(out.stdout) if out.returncode == 0 else None
 
 
-def _remove(reference: str, deploy_host: Optional[str]) -> bool:
-    """``docker rmi`` without force: an image a container still uses stays."""
-    try:
-        return _docker(["rmi", reference], deploy_host, timeout=120).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _prune_build_cache(cap: int, deploy_host: Optional[str]) -> bool:
-    try:
-        pruned = _docker(["builder", "prune", "-f", "--max-used-space", str(cap)], deploy_host, timeout=600)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return pruned.returncode == 0
-
-
 def installation_images(compose_path: Path) -> dict[str, str]:
     """The images the cockpit built for the installation of *compose_path*, ``{repository: tag it runs}``.
 
@@ -217,46 +202,6 @@ def room_refusal(deploy_host: Optional[str], *, installation: Path, built_here: 
         f"{settings.deploy_disk_reserve_gb} GB rezerva pre databázy na tom istom disku. Požiadaj správcu stroja "
         f"{label}, aby uvoľnil miesto, a nasaď znova."
     )
-
-
-def clean_after_deploy(compose_path: Path, deploy_host: Optional[str]) -> list[str]:
-    """After a deploy that came up: the installation's images of older versions go — the running one and
-    :attr:`settings.deploy_previous_versions_kept` before it stay (the way back, DEV-291) — and the machine's build
-    cache is kept under :attr:`settings.deploy_build_cache_cap_gb`. Returns the sentences for the deploy screen; a
-    cleanup that fails is said, the deploy stands."""
-    running = installation_images(compose_path)
-    if not running:
-        return []
-    label = prod_machines.label(deploy_host)
-    images = _images(deploy_host)
-    if images is None:
-        return [f"Kokpit po nasadení nevedel prečítať obrazy na stroji {label}, staré verzie preto neodpratal."]
-    before = _free_bytes(deploy_host)
-    gone, kept_in_use = [], []
-    for repository, tag in sorted(running.items()):
-        older = sorted(
-            (i for i in images if i.repository == repository and i.tag != tag), key=lambda i: i.created, reverse=True
-        )
-        for image in older[settings.deploy_previous_versions_kept :]:
-            reference = f"{repository}:{image.tag}"
-            (gone if _remove(reference, deploy_host) else kept_in_use).append(reference)
-    pruned = _prune_build_cache(settings.deploy_build_cache_cap_gb * GB, deploy_host)
-    after = _free_bytes(deploy_host)
-    said = []
-    freed = after - before if before is not None and after is not None else None
-    if gone or (freed is not None and freed >= GB):
-        what = (
-            f"zmazal obrazy starších verzií ({len(gone)}): {', '.join(gone)}" if gone else "zmenšil medzipamäť stavieb"
-        )
-        said.append(
-            f"Kokpit po nasadení na stroji {label} {what}"
-            + (f"; voľné miesto na disku Dockera {_gb(before)} → {_gb(after)}." if freed is not None else ".")
-        )
-    if kept_in_use:
-        said.append(f"Tieto staré obrazy na stroji {label} ostali, používa ich kontajner: {', '.join(kept_in_use)}.")
-    if not pruned:
-        said.append(f"Medzipamäť stavieb na stroji {label} sa nepodarilo zmenšiť.")
-    return said
 
 
 def said_plainly(detail: str, deploy_host: Optional[str]) -> str:

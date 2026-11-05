@@ -112,12 +112,10 @@ class Settings(BaseSettings):
     # DEV-305: the disk of the machine the cockpit builds on. 04.11.2026 the first PROD of NEX Knowledge filled MAGER's
     # system disk while it built a 4.4 GB image, and the Postgres of a customer's app on the same disk restarted. A
     # build takes about 2.5× its image (the build stage, the image, the compressed layers — measured on MAGER
-    # 04.11.2026), and the reserve stays free for the databases beside it. After a deploy the installation keeps the
-    # image it runs and the previous version's (the way back, DEV-291); the machine's build cache is kept under its cap.
+    # 04.11.2026), and the reserve stays free for the databases beside it. (What a deploy leaves is cleaned by DEV-124
+    # and ICCINT-154 / DEV-166 — deploy_build_cache_max_gb below.)
     deploy_build_space_factor: float = 2.5
     deploy_disk_reserve_gb: int = 10
-    deploy_previous_versions_kept: int = 1
-    deploy_build_cache_cap_gb: int = 10
     uat_traefik_port: int = 80
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
     # asks for it at every new message of a build, and the history moves only when a build does.

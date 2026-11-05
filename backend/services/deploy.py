@@ -1394,13 +1394,10 @@ async def deploy(
     # :class:`RunnerResult`, an injected/faked runner a plain 3-tuple (→ no warnings). Read via ``getattr``
     # so the seam stays the 3-tuple every existing fake already returns.
     warnings: list[str] = list(getattr(outcome, "warnings", None) or [])
-    # DEV-305 — a deploy that came up cleans the installation's old images and the build cache on its machine; a full
-    # disk that failed one is said in a sentence.
+    # DEV-306 — the name each service calls its backend by leads to this installation's backend only. DEV-305 — a full
+    # disk that failed a deploy is said in a sentence. (Cleaning up after a deploy is the orchestrator's: DEV-124,
+    # ICCINT-154 / DEV-166.)
     if ok:
-        warnings.extend(
-            await asyncio.to_thread(machine_disk.clean_after_deploy, instalacia / "docker-compose.yml", deploy_host)
-        )
-        # DEV-306 — the name each service calls its backend by leads to this installation's backend only.
         warnings.extend(await asyncio.to_thread(backend_reach.check, instalacia / "docker-compose.yml", deploy_host))
     else:
         detail = machine_disk.said_plainly(detail, deploy_host)

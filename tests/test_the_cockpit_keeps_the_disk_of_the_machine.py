@@ -1,11 +1,11 @@
-"""DEV-305 — the cockpit checks the room on the machine's disk before a deploy and cleans up after one.
+"""DEV-305 — the cockpit checks the room on the machine's disk before a deploy and says a full disk plainly.
 
 04.11.2026 the first deploy of NEX Knowledge to the PROD of ICC filled MAGER's system disk while it built a 4.4 GB image
 („no space left on device“), and the Postgres of MÁGERSTAV's NEX Inbox on the same disk restarted with a recovery.
-Docker there held 22.4 GB of images — every deployed version — and 21.6 GB of build cache; the cockpit never cleaned up
-and never asked whether there was room. Now a deploy without room does not start and says why, a deploy that came up
-removes the installation's images of older versions (the running one and the previous stay) and keeps the build cache
-under its cap, and a deploy a full disk failed says so in a sentence. Director 04.11.2026: „Súhlasím“.
+Docker there held 22.4 GB of images and 21.6 GB of build cache, and the cockpit never asked whether there was room.
+Now a deploy without room does not start and says why, and a deploy a full disk failed says so in a sentence. Cleaning
+up after a deploy stays where it was (DEV-124, ICCINT-154 / DEV-166 — ``tests/test_the_cockpit_cleans_up_after_a_deploy
+_in_one_place.py``). Director 04.11.2026: „Súhlasím“.
 """
 
 from __future__ import annotations
@@ -39,29 +39,18 @@ def _compose(path: Path, tag: str = "v1.2.0") -> Path:
 
 
 class _Machine:
-    """A Docker machine: its free space, its images, what was removed and pruned."""
+    """A Docker machine: its free space and its images."""
 
-    def __init__(self, monkeypatch, *, free, images=(), here=(), free_after=None, removable=lambda ref: True):
-        self.free = [free, free_after if free_after is not None else free]
+    def __init__(self, monkeypatch, *, free, images=(), here=()):
+        self.free = free
         self.images, self.here = list(images), list(here)
-        self.removed: list[str] = []
-        self.pruned: list[int] = []
         self.asked: list[object] = []
-        self._removable = removable
         monkeypatch.setattr(M, "_free_bytes", self._free_bytes)
         monkeypatch.setattr(M, "_images", lambda host: self.images if host else (self.here or self.images))
-        monkeypatch.setattr(M, "_remove", self._remove)
-        monkeypatch.setattr(M, "_prune_build_cache", lambda cap, host: self.pruned.append(cap) or True)
 
     def _free_bytes(self, host):
         self.asked.append(host)
-        return self.free.pop(0) if len(self.free) > 1 else self.free[0]
-
-    def _remove(self, reference, host):
-        if self._removable(reference):
-            self.removed.append(reference)
-            return True
-        return False
+        return self.free
 
 
 def _image(repository: str, tag: str, created: str, size: float = 0.3) -> M.Image:
@@ -149,64 +138,6 @@ def test_a_room_nobody_could_measure_stops_the_deploy(tmp_path, monkeypatch):
     assert settings.this_machine_label in said
 
 
-# ---------- cleaning after the deploy ----------
-
-
-def test_after_a_deploy_the_older_versions_go_and_the_previous_stays(tmp_path, monkeypatch):
-    images = [
-        _image(f"{APP}-backend", "v1.2.0", "4"),
-        _image(f"{APP}-backend", "v1.1.0", "3"),
-        _image(f"{APP}-backend", "1.0.0", "2"),
-        _image(f"{APP}-backend", "v1.0.0", "1"),
-        _image(f"{APP}-worker", "v1.2.0", "4"),
-        _image(f"{APP}-worker", "v1.1.0", "3"),
-        _image("mager-inbox-backend", "1.5.0", "1"),
-        _image("pgvector/pgvector", "pg15", "1"),
-    ]
-    machine = _Machine(monkeypatch, free=12 * GB, free_after=20 * GB, images=images)
-
-    said = M.clean_after_deploy(_compose(tmp_path / "docker-compose.yml"), "mager")
-
-    assert machine.removed == [f"{APP}-backend:1.0.0", f"{APP}-backend:v1.0.0"]
-    assert machine.pruned == [settings.deploy_build_cache_cap_gb * GB]
-    assert said == [
-        f"Kokpit po nasadení na stroji MAGER zmazal obrazy starších verzií (2): {APP}-backend:1.0.0, "
-        f"{APP}-backend:v1.0.0; voľné miesto na disku Dockera 12,0 GB → 20,0 GB."
-    ]
-
-
-def test_an_image_a_container_still_uses_stays_and_is_said(tmp_path, monkeypatch):
-    images = [_image(f"{APP}-backend", t, d) for t, d in (("v1.2.0", "4"), ("v1.1.0", "3"), ("v1.0.0", "2"))]
-    _Machine(monkeypatch, free=12 * GB, images=images, removable=lambda ref: False)
-
-    said = M.clean_after_deploy(_compose(tmp_path / "docker-compose.yml"), None)
-
-    assert said == [
-        f"Tieto staré obrazy na stroji {settings.this_machine_label} ostali, používa ich kontajner: "
-        f"{APP}-backend:v1.0.0."
-    ]
-
-
-def test_a_build_cache_that_did_not_shrink_is_said(tmp_path, monkeypatch):
-    machine = _Machine(monkeypatch, free=12 * GB)
-    monkeypatch.setattr(M, "_prune_build_cache", lambda cap, host: False)
-
-    said = M.clean_after_deploy(_compose(tmp_path / "docker-compose.yml"), "mager")
-
-    assert said == ["Medzipamäť stavieb na stroji MAGER sa nepodarilo zmenšiť."]
-    assert machine.removed == []
-
-
-def test_images_nobody_could_read_are_said_and_nothing_goes(tmp_path, monkeypatch):
-    machine = _Machine(monkeypatch, free=12 * GB)
-    monkeypatch.setattr(M, "_images", lambda host: None)
-
-    said = M.clean_after_deploy(_compose(tmp_path / "docker-compose.yml"), "mager")
-
-    assert said == ["Kokpit po nasadení nevedel prečítať obrazy na stroji MAGER, staré verzie preto neodpratal."]
-    assert machine.removed == [] and machine.pruned == []
-
-
 def test_a_full_disk_that_failed_a_deploy_is_said_in_a_sentence():
     docker = "exit 1: failed to extract layer …: write /var/lib/containerd/…: no space left on device"
 
@@ -247,31 +178,8 @@ async def test_a_deploy_without_room_does_not_start(db_session, monkeypatch, ins
 
 
 @pytest.mark.asyncio
-async def test_a_deploy_that_came_up_cleans_up_and_says_it(db_session, monkeypatch, installation):
-    images = [_image(f"{APP}-backend", t, d) for t, d in (("v1.2.0", "4"), ("v1.1.0", "3"), ("v1.0.0", "2"))]
-    machine = _Machine(monkeypatch, free=40 * GB, images=images)
-    user = _make_user(db_session)
-    project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "0.1.0")
-    customer = _make_customer(db_session, project)
-
-    outcome = await deploy_service.deploy(
-        db_session,
-        customer.id,
-        version_number="0.1.0",
-        environment="uat",
-        actor_id=user.id,
-        deploy_runner=_FakeRunner(),
-    )
-
-    assert machine.removed == [f"{APP}-backend:v1.0.0"]
-    assert any(f"zmazal obrazy starších verzií (1): {APP}-backend:v1.0.0" in w for w in outcome.warnings), outcome
-    assert outcome[0].status == "ok"
-
-
-@pytest.mark.asyncio
 async def test_a_deploy_a_full_disk_failed_says_it_plainly(db_session, monkeypatch, installation):
-    machine = _Machine(monkeypatch, free=40 * GB, images=[_image(f"{APP}-backend", "v1.0.0", "1")])
+    _Machine(monkeypatch, free=40 * GB, images=[_image(f"{APP}-backend", "v1.0.0", "1")])
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
     _make_version(db_session, project, "0.1.0")
@@ -284,7 +192,6 @@ async def test_a_deploy_a_full_disk_failed_says_it_plainly(db_session, monkeypat
 
     assert outcome[0].status == "failed"
     assert outcome[0].detail.startswith("Na stroji ANDROS sa počas nasadenia minulo miesto na disku")
-    assert machine.removed == [] and machine.pruned == [], "a failed deploy cleans nothing"
 
 
 # ---------- which folders are measured ----------
