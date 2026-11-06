@@ -76,8 +76,8 @@ pripraví zadanie a jedným kliknutím z neho vznikne projekt — alebo požiada
 
 ### 4.2 Beh otázky bez projektu
 - Pracovný priečinok nápadu `<poradca_data_dir>/ideas/<id>/`, prázdny, pripojený len na čítanie ako `/ideas/<id>`;
-  záznam rozhovoru v tom istom mieste ako dnes (`sessions/<rozhovor>`). Žiadny projekt, žiadny iný priečinok
-  `/opt` — rovnaké oplotenie, rovnaký kontajner, rovnaký strop 3 otázok a 15 minút.
+  záznam rozhovoru v tom istom mieste ako dnes (`sessions/<rozhovor>`). Žiadny projekt ani iný priečinok — len vlastné
+  dáta Poradcu (v PROD `/opt/data/nex-studio-visual/poradca`) a binárka `claude` — rovnaké oplotenie, rovnaký kontajner, rovnaký strop 3 otázok a 15 minút.
 - Stráž (ako `tests/test_poradca_sandbox.py`): zoznam pripojení otázky v nápadu je presne daná množina — bez
   projektu, bez `/opt/projects`, `/opt/customers`, `docker.sock`, Znalostnej bázy na disku.
 

@@ -293,7 +293,9 @@ def _idea_argv(idea_id, attachments=False):
 
 def test_an_idea_works_in_its_own_empty_folder_and_sees_nothing_else(project):
     """The whole mount list of an idea's question, as a set: the home and /tmp, its transcript, its own folder
-    read-only, the claude binary and the question's socket — no project, nothing under /opt, no Knowledge Base."""
+    read-only, the claude binary and the question's socket — no project, no Knowledge Base. Every bound source lies in
+    Poradca's own data or is the claude binary (in PROD the data are /opt/data/nex-studio-visual/poradca, measured
+    06.11.2026)."""
     idea = uuid4()
     argv = _idea_argv(idea)
     mounts = _mounts(argv)
@@ -311,7 +313,11 @@ def test_an_idea_works_in_its_own_empty_folder_and_sees_nothing_else(project):
         ]
     )
     assert f"type=bind,source={data}/ideas/{idea},target={workdir},readonly" in mounts
-    assert not any("/opt/" in m for m in mounts)
+    sources = [m.split("source=")[1].split(",")[0] for m in mounts if m.startswith("type=bind")]
+    assert sources and all(src.startswith(f"{data}/") or src == "/home/andros/.local" for src in sources), sources
+    assert not any(
+        target in m for m in mounts for target in ("/opt/projects", "/opt/customers", "/opt/uat", "/opt/infra")
+    )
     assert argv[argv.index("-w") + 1] == workdir
     assert argv[argv.index("--name") + 1] == "nex-poradca-idea-abc123"
 
