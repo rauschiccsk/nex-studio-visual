@@ -89,7 +89,8 @@ describe("DEV-32 — a half-written text survives leaving the screen, or the fie
     expect(drafted("pages/VersionDetailPage.tsx")).toBe(true);
     expect(drafted("pages/NewVersionPage.tsx")).toBe(true);
     expect(drafted("pages/KnowledgeBasePage.tsx")).toBe(true);
-    expect(drafted("pages/PoradcaPage.tsx")).toBe(true);
+    // DEV-318: Poradca's question field moved to its own component, shared by Poradca and Nápady.
+    expect(drafted("components/poradca/PoradcaComposer.tsx")).toBe(true);
   });
 
   it("a secret is never kept in the browser", () => {

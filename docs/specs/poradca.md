@@ -28,6 +28,8 @@ kokpitu a pracuje bez neho. Schválený smer: samostatný poradca v kokpite, **l
 Položka **Poradca** v bočnej ponuke pod **Riadiacim centrom**. Bez pripnutého projektu alebo bez prístupu
 k nemu je zašednutá s nápovedou (rovnaké vety ako Riadiace centrum). Prístup má vlastník projektu a účet
 admin — ako všade v kokpite. „Autor rozhovoru" je prihlásený účet.
+Nový nápad, ku ktorému ešte projekt nie je, sa s Poradcom rozoberá v položke **Nápady** nad Projektmi — bez
+pripnutého projektu (DEV-318, `ideas.md`); po založení projektu z nápadu ten rozhovor pokračuje tu.
 
 ### Rozhovor
 - Vľavo **zoznam mojich rozhovorov** k projektu (názov podľa prvej otázky, dátum), tlačidlo **Nový rozhovor**;

@@ -48,6 +48,8 @@ const IconBilling = () => <NavIcon glyph="🧾" />;
 // Špecifikácia = the read-only spec shell.
 const IconRiadiace = () => <NavIcon glyph="🎛️" />;
 const IconPoradca = () => <NavIcon glyph="💬" />;
+// DEV-318: Nápady — a new idea talked over with Poradca before any project exists.
+const IconIdeas = () => <NavIcon glyph="💡" />;
 const IconSpec = () => <NavIcon glyph="📄" />;
 // DEV-84: the CI runs of the selected project's repository.
 const IconRepozitar = () => <NavIcon glyph="🔀" />;
@@ -198,6 +200,8 @@ export default function Sidebar() {
       footer={footer}
       // DEV-81: 28 px entries, a two-line brand and a one-line footer — room for the tabs still to come.
       dense
+      // DEV-318: 22 entries at 1280×800 without scrolling (DEV-81) — 26 px rows; Director 06.11.2026: „Súhlasím“.
+      compactRows
       width={layout?.sidebar_width ?? undefined}
       // The default width is kept as „none chosen“ — it then follows the default if that ever changes.
       onWidthChange={
@@ -212,6 +216,10 @@ export default function Sidebar() {
       <NavItem icon={<IconGuide />} label="Ako začať" active={isActive("/getting-started")} onClick={() => navigate("/getting-started")} />
       {/* DEV-89: the person's own quick notes — not tied to the selected project, so among the general entries. */}
       <NavItem icon={<IconNotes />} label="Poznámky" active={isActive("/notes")} onClick={() => navigate("/notes")} />
+      {/* DEV-318: Nápady — a new idea with Poradca before any project exists, so above Projekty (Director 06.11.2026:
+          „Podľa mojej logiky "Návrhy" má byť nie pod ale nad "Projekty".“ — the name became Nápady: „Súhlasím, nazveme to
+          Nápady“). Always open: no project needed. */}
+      <NavItem icon={<IconIdeas />} label="Nápady" active={isActive("/napady")} onClick={() => navigate("/napady")} />
       <NavItem icon={<IconFolder />} label="Projekty" active={isActive("/projects")} onClick={() => navigate("/projects")} />
 
       {/* Selected project indicator — placed directly under Projects

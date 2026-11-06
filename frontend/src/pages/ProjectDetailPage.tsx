@@ -39,6 +39,7 @@ import type { Version } from "@/types/version";
 import { mayOperateProject } from "@/services/permissions";
 import { personName } from "@/utils/person";
 import { formatDate } from "@/utils/format";
+import type { FromIdea } from "@/lib/ideas";
 
 interface JustCreatedState {
   justCreated?: boolean;
@@ -48,6 +49,8 @@ interface JustCreatedState {
   dbPort?: number | null;
   /** Founding steps that did NOT finish (CI, the runner, the smoke test, branch protection). */
   setupWarnings?: string[];
+  /** DEV-318 — founded from an idea (Nápady): where its brief went, or why it did not. */
+  fromIdea?: FromIdea;
 }
 
 // ─── Pipeline bar ─────────────────────────────────────────────────────────────
@@ -258,7 +261,7 @@ export default function ProjectDetailPage() {
       window.history.replaceState({}, "");
       // Auto-dismiss after 8 seconds — but ONLY when everything finished. An unfinished step is
       // something the Manager has to act on; hiding it after eight seconds is how it gets missed.
-      if (st.setupWarnings && st.setupWarnings.length > 0) return;
+      if ((st.setupWarnings && st.setupWarnings.length > 0) || st.fromIdea?.problem) return;
       const timer = setTimeout(() => setJustCreated(null), 8000);
       return () => clearTimeout(timer);
     }
@@ -374,7 +377,8 @@ export default function ProjectDetailPage() {
         // nižšie mu povie to isté. Predtým to žilo len v odpovedi na založenie a pri prevzatí zaniklo
         // skôr, než sa dalo prečítať (zmerané 09.09.2026 pri prevzatí NEX Managera).
         const unfinished = project.setup_warnings ?? justCreated.setupWarnings ?? [];
-        const ok = unfinished.length === 0;
+        const fromIdea = justCreated.fromIdea;
+        const ok = unfinished.length === 0 && !fromIdea?.problem;
         return (
         <div
           className={`mb-4 rounded-lg border px-4 py-3 flex items-start gap-3 ${
@@ -406,12 +410,35 @@ export default function ProjectDetailPage() {
             <div className="font-medium">
               {ok ? "Projekt vytvorený." : "Projekt vytvorený, ale nie všetko sa dokončilo."}
             </div>
-            {!ok && (
+            {unfinished.length > 0 && (
               <ul className="mt-1 list-disc pl-5 text-[12px] space-y-0.5">
                 {unfinished.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
+            )}
+            {fromIdea && (
+              <p data-testid="from-idea" className="mt-1 text-[12px]">
+                {fromIdea.problem
+                  ? `Z nápadu „${fromIdea.title}“: ${fromIdea.problem}`
+                  : `Zadanie z nápadu „${fromIdea.title}“ je vo verzii 0.1.0.`}
+                {fromIdea.ticket && (
+                  <>
+                    {" "}Tiket v DEV:{" "}
+                    {fromIdea.ticketUrl ? (
+                      <a href={fromIdea.ticketUrl} target="_blank" rel="noreferrer" className="underline">
+                        {fromIdea.ticket}
+                      </a>
+                    ) : (
+                      fromIdea.ticket
+                    )}
+                    .
+                  </>
+                )}{" "}
+                <a href={`/napady/${fromIdea.ideaId}`} className="underline">
+                  Otvoriť nápad
+                </a>
+              </p>
             )}
             <div className="text-[12px] text-[var(--color-state-success-fg)] mt-0.5 flex flex-wrap gap-x-3">
               {justCreated.repoUrl && (

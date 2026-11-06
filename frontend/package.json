@@ -22,7 +22,7 @@
     "@xterm/xterm": "^6.0.0",
     "lucide-react": "^1.8.0",
     "monaco-editor": "^0.57.0",
-    "nex-shared": "github:rauschiccsk/nex-shared#v0.33.0",
+    "nex-shared": "github:rauschiccsk/nex-shared#v0.34.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

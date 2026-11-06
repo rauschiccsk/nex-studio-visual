@@ -124,6 +124,24 @@ export const PORADCA_CONVERSATION = {
   updated_at: T2,
 };
 
+/** DEV-318 — an idea of Nápady whose talk is the Poradca conversation above, with a brief ready. */
+export const IDEA: S["IdeaRead"] = {
+  id: "99999999-9999-4999-8999-999999999992",
+  title: "Matrika pre farnosť — krsty, sobáše, pohreby",
+  state: "brief_ready",
+  conversation_id: PORADCA_CONVERSATION.id,
+  author_name: "Mária Manažérová",
+  running: false,
+  cost: 0.42,
+  outcome_project_slug: null,
+  outcome_project_name: null,
+  outcome_backlog_number: null,
+  plane_identifier: null,
+  plane_url: null,
+  created_at: T1,
+  updated_at: T2,
+};
+
 const CONSULTATION = {
   consultation: {
     id: "konzultacia-1",
@@ -1367,6 +1385,11 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/poradca/conversations/{conversation_id}", {
     ...PORADCA_CONVERSATION,
     messages: PORADCA_MESSAGES,
+  });
+  answer("get", "/api/v1/poradca/ideas", [IDEA]);
+  answer("get", "/api/v1/poradca/ideas/{idea_id}", {
+    ...IDEA,
+    conversation: { ...PORADCA_CONVERSATION, messages: PORADCA_MESSAGES },
   });
   answer("get", "/api/v1/poradca/messages/{message_id}/plane-ticket", {
     kind: "nsv",

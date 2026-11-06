@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HardDriveDownload, Pin, PinOff } from "lucide-react";
+import { HardDriveDownload, Pin, PinOff, Lightbulb } from "lucide-react";
 import { listProjectsApi } from "@/services/api/projects";
 import { listVersions } from "@/services/api/versions";
 import { useActiveContextStore } from "@/store/activeContextStore";
@@ -158,9 +158,9 @@ export default function ProjectsPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
         <h1 className="text-lg font-bold text-[var(--color-text-primary)]">Projekty</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
         {/* ICCINT-85: prevzatie existujúceho projektu je INÁ úloha než zakladanie nového, a preto má
             vlastné tlačidlo. Robiť ho formulárom pre zakladanie znamenalo ručne prepisovať porty,
             repozitár a typ — a keď sa manažér pomýlil, evidencia začala tvrdiť niečo iné než disk. */}
@@ -171,6 +171,14 @@ export default function ProjectsPage() {
         >
           <HardDriveDownload className="w-4 h-4" aria-hidden="true" />
           Prevziať existujúci
+        </button>
+        {/* DEV-318: a new idea is talked over with Poradca first — the brief it writes prefills Nový projekt. */}
+        <button
+          onClick={() => navigate("/napady")}
+          className="flex items-center gap-1.5 border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <Lightbulb className="w-4 h-4" aria-hidden="true" />
+          Navrhnúť s Poradcom
         </button>
         <button
           onClick={() => navigate("/projects/new")}
@@ -219,6 +227,13 @@ export default function ProjectsPage() {
           </div>
           <p className="text-sm text-[var(--color-text-muted)] mb-1">Žiadne projekty</p>
           <p className="text-xs text-[var(--color-text-muted)]">Vytvor prvý projekt a začni pracovať v NEX Studio.</p>
+          <button
+            onClick={() => navigate("/napady")}
+            className="mt-4 mr-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] border border-[var(--color-border-strong)] rounded-lg transition-colors"
+          >
+            <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
+            Navrhnúť s Poradcom
+          </button>
           <button
             onClick={() => navigate("/projects/new")}
             className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded-lg transition-colors"

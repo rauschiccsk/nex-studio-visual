@@ -34,7 +34,9 @@ const STEPS: Step[] = [
       <>
         V menu klikni na <strong>Projekty</strong> a potom na <strong>Nový projekt</strong>. Zadaj názov (napr.
         „NEX Ledger“), krátky identifikátor do adries (napr. <em>nex-ledger</em>) a vyber spôsob prihlásenia do
-        aplikácie. Zvyšné polia môžeš nechať tak, ako sú. Klikni na <strong>Vytvoriť projekt</strong>.
+        aplikácie. Zvyšné polia môžeš nechať tak, ako sú. Klikni na <strong>Vytvoriť projekt</strong>. Keď máš
+        zatiaľ len nápad, začni v <strong>Nápadoch</strong>: Poradca sa s tebou poradí, napíše Zadanie a tlačidlom{" "}
+        <strong>Založiť projekt</strong> z neho vznikne projekt aj prvá verzia so Zadaním.
       </>
     ),
   },

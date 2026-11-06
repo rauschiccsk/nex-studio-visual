@@ -28,6 +28,7 @@ import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import UpdatesPage from "./pages/UpdatesPage";
 import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
 import PoradcaPage from "./pages/PoradcaPage";
+import IdeasPage from "./pages/IdeasPage";
 import SpecifikaciaPage from "./pages/SpecifikaciaPage";
 import RepozitarPage from "./pages/RepozitarPage";
 import NsCodePage from "./pages/NsCodePage";
@@ -74,6 +75,9 @@ function App() {
             <Route index element={<DashboardPage />} />
             <Route path="getting-started" element={<GettingStartedPage />} />
             <Route path="notes" element={<NotesPage />} />
+            {/* DEV-318: Nápady — a new idea with Poradca before any project exists */}
+            <Route path="napady" element={<IdeasPage />} />
+            <Route path="napady/:ideaId" element={<IdeasPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="projects/new" element={<NewProjectPage />} />
             <Route path="projects/:slug" element={<ProjectDetailPage />} />

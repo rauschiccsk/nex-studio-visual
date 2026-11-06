@@ -1,5 +1,7 @@
 /**
- * DEV-81 — the sidebar is dense: 28 px tabs, a line instead of the heading above „Nastavenia“.
+ * DEV-81 — the sidebar is dense: 28 px tabs, a line instead of the heading above „Nastavenia“. DEV-318 — with its 22nd
+ * entry (Nápady) the tabs are 26 px (nex-shared compactRows), so all fit 1280×800; the Director 06.11.2026 on lowering
+ * them by 2 px: „Súhlasím“.
  * DEV-82 — its width and its collapsed state are the person's own, kept on the server: the edge is a handle (keys,
  * double click back to the default), the bounds hold, and every change is sent to the server.
  */
@@ -51,10 +53,10 @@ beforeEach(() => {
 });
 
 describe("dense sidebar (DEV-81)", () => {
-  it("has 28 px tabs and a line, not a heading, above Nastavenia", () => {
+  it("has 26 px tabs and a line, not a heading, above Nastavenia", () => {
     renderSidebar();
 
-    expect(screen.getByRole("button", { name: "Prehľad" }).className).toMatch(/\bh-7\b/);
+    expect(screen.getByRole("button", { name: "Prehľad" }).className.split(" ")).toContain("h-[26px]");
     expect(screen.getAllByText("Nastavenia")).toHaveLength(1);
     expect(screen.getByRole("separator", { name: "" }).tagName).toBe("HR");
   });

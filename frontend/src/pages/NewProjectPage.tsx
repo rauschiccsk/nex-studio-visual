@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   createProjectApi,
   getProjectCreatePresetsApi,
@@ -16,6 +16,9 @@ import type { UserRead } from "@/types/user";
 import { isAdminAccount } from "@/services/permissions";
 import { personName } from "@/utils/person";
 import { PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "@/components/project/privateNetwork";
+import { ANSWER_PARAM, IDEA_PARAM, type FromIdea } from "@/lib/ideas";
+import { getIdeaApi, ideaFoundedApi } from "@/services/api/ideas";
+import type { IdeaProjectBrief } from "@/types/poradca";
 
 // ─── Slug helper ─────────────────────────────────────────────────────────────
 
@@ -134,6 +137,49 @@ export default function NewProjectPage() {
 
   const nameRef = useRef<HTMLInputElement>(null);
 
+  // DEV-318: opened from an idea (Nápady) — the form is prefilled from the brief Poradca wrote; the person checks it
+  // and confirms. After the project exists, the idea is told: the brief goes to its 0.1.0, the project gets its ticket.
+  const [params] = useSearchParams();
+  const ideaId = params.get(IDEA_PARAM);
+  const answerId = params.get(ANSWER_PARAM);
+  const [fromIdea, setFromIdea] = useState<{ title: string; brief: IdeaProjectBrief } | null>(null);
+  const [ideaNote, setIdeaNote] = useState<string>("");
+  // The idea's template wins over the presets' default, whichever of the two answers first.
+  const ideaTemplate = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ideaId || !answerId) return;
+    let cancelled = false;
+    getIdeaApi(ideaId)
+      .then((idea) => {
+        if (cancelled) return;
+        const brief = idea.conversation.messages?.find((m) => m.id === answerId)?.idea_project;
+        if (!brief) {
+          setIdeaNote("V tejto odpovedi nápadu nie je zadanie nového projektu — formulár vyplň sám.");
+          return;
+        }
+        setFromIdea({ title: idea.title, brief });
+        if (brief.name) setName(brief.name);
+        if (brief.slug) {
+          setSlug(brief.slug);
+          setSlugManual(true);
+        } else if (brief.name) setSlug(nameToSlug(brief.name));
+        if (brief.description) setDescription(brief.description);
+        if (brief.type === "standard" || brief.type === "web") setType(brief.type);
+        if (brief.auth_mode === "password" || brief.auth_mode === "token") setAuthMode(brief.auth_mode);
+        if (brief.ai != null) setAi(brief.ai);
+        if (brief.template != null) {
+          ideaTemplate.current = brief.template;
+          setTemplate(brief.template);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setIdeaNote(humanizeApiError(e, "Nápad sa nepodarilo načítať").message + " Formulár vyplň sám.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ideaId, answerId]);
+
   // Auto-focus name on mount
   useEffect(() => { nameRef.current?.focus(); }, []);
 
@@ -170,7 +216,7 @@ export default function NewProjectPage() {
         setWebNote(p.web_note ?? "");
         // The template is offered only once listed, so it cannot have been chosen before — always preset.
         setTemplates(p.templates ?? []);
-        setTemplate(p.default_template ?? "");
+        setTemplate(ideaTemplate.current ?? p.default_template ?? "");
         if (optionsTouched.current) return;
         setEnableCicd(p.enable_cicd);
         setFullSmoke(p.full_smoke);
@@ -290,9 +336,12 @@ export default function NewProjectPage() {
         template: chosenTemplate || null,
         ai: chosenTemplate ? ai : false,
       });
+      // DEV-318: the idea learns where it ended — a refusal or a ticket that failed is shown on the project's page.
+      const idea = fromIdea && ideaId && answerId ? await ideaOutcome(ideaId, answerId, project.id, fromIdea.title) : undefined;
       navigate(`/projects/${project.slug}`, {
         state: {
           justCreated: true,
+          fromIdea: idea,
           repoUrl: project.repo_url,
           backendPort: project.backend_port,
           frontendPort: project.frontend_port,
@@ -318,6 +367,17 @@ export default function NewProjectPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* DEV-318 */}
+      {(fromIdea || ideaNote) && (
+        <div
+          role="status"
+          className="flex-shrink-0 border-b border-[var(--color-border-default)] bg-[var(--color-accent-primary)]/10 px-6 py-2 text-xs text-[var(--color-text-secondary)]"
+        >
+          {fromIdea
+            ? `Formulár je vyplnený zo zadania nápadu „${fromIdea.title}“ — skontroluj ho a potvrď. Zadanie pôjde do verzie 0.1.0 a projekt dostane tiket v DEV.`
+            : ideaNote}
+        </div>
+      )}
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-[var(--color-border-default)] flex items-center gap-3 bg-[var(--color-canvas)]">
         <button
@@ -765,4 +825,26 @@ export default function NewProjectPage() {
       </div>
     </div>
   );
+}
+
+
+async function ideaOutcome(ideaId: string, answerId: string, projectId: string, title: string): Promise<FromIdea> {
+  try {
+    const outcome = await ideaFoundedApi(ideaId, answerId, projectId);
+    return {
+      ideaId,
+      title,
+      ticket: outcome.plane_identifier ?? null,
+      ticketUrl: outcome.plane_url ?? null,
+      problem: outcome.ticket_error ? `Tiket v DEV sa nezaložil: ${outcome.ticket_error}` : null,
+    };
+  } catch (e: unknown) {
+    return {
+      ideaId,
+      title,
+      ticket: null,
+      ticketUrl: null,
+      problem: humanizeApiError(e, "Zadanie z nápadu sa do projektu nezapísalo").message,
+    };
+  }
 }

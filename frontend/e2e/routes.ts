@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { PROJECT, VERSION } from "./fixtures";
+import { IDEA, PROJECT, VERSION } from "./fixtures";
 
 const APP = fileURLToPath(new URL("../src/App.tsx", import.meta.url));
 
@@ -18,6 +18,7 @@ const APP = fileURLToPath(new URL("../src/App.tsx", import.meta.url));
 export const PARAMS: Record<string, string> = {
   slug: PROJECT.slug,
   versionId: VERSION.id,
+  ideaId: IDEA.id, // DEV-318 — one idea of Nápady
 };
 
 export interface Page {

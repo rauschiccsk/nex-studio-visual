@@ -29,3 +29,10 @@ export type PoradcaEvent =
   | { type: "queued"; message_id: string; limit: number }
   | { type: "finished"; message_id: string; status: string }
   | { type: "deleted" };
+
+/** DEV-318 — Nápady: a new idea talked over with Poradca before any project exists, and where it ended. */
+export type Idea = S["IdeaRead"];
+export type IdeaDetail = S["IdeaDetail"];
+export type IdeaOutcome = S["IdeaOutcome"];
+/** DEV-318 — a new project's brief in an answer: it prefills the form Nový projekt. */
+export type IdeaProjectBrief = S["IdeaProjectBriefRead"];

@@ -9,6 +9,7 @@ const breadcrumbMap: Record<string, string> = {
   "/getting-started": "Ako začať",
   "/projects": "Projekty",
   "/projects/new": "Nový projekt",
+  "/napady": "Nápady", // DEV-318
   "/notes": "Poznámky",
   "/riadiace-centrum": "Riadiace centrum",
   "/poradca": "Poradca",
@@ -27,6 +28,7 @@ const breadcrumbMap: Record<string, string> = {
 function breadcrumbFor(pathname: string): string {
   if (breadcrumbMap[pathname]) return breadcrumbMap[pathname];
   // Dynamic project-scoped paths (/projects/<slug>[/versions/<id>|/backlog|/metrics]).
+  if (pathname.startsWith("/napady/")) return "Nápad"; // DEV-318 — one idea of Nápady
   if (pathname.startsWith("/projects/")) return "Projekt";
   return "NEX Studio Visual";
 }

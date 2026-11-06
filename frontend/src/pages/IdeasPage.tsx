@@ -1,0 +1,328 @@
+// Nápady (DEV-318, docs/specs/ideas.md) — a new idea talked over with Poradca before any project exists.
+//
+// Director 06.11.2026: „Návrhy nových projektov sa mi zhromažďujú. Navrhni mi riešenie, aby som mohol tie návrhy robiť
+// pokiaľ ty pracuješ nad kokpitom.“ — „Robiť nový projekt pod iným cudzím projektom, je nelogické.“ So this screen
+// needs no pinned project. On the left my ideas (the admin account sees all) with where each stands; on the right the
+// talk with Poradca — the same answers, images and live progress as in a project's Poradca — and, under the latest
+// brief, the two ways it ends: a new project, or the brief added to an existing one. The address carries the idea
+// (`/napady/<id>`); bare `/napady` starts a new one. Director 06.11.2026 on the name: „Súhlasím, nazveme to Nápady“.
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Lightbulb, Trash2 } from "lucide-react";
+
+import ErrorNote from "@/components/common/ErrorNote";
+import IdeaOutcomeActions from "@/components/poradca/IdeaOutcomeActions";
+import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
+import PoradcaComposer from "@/components/poradca/PoradcaComposer";
+import QuestionImages from "@/components/poradca/QuestionImages";
+import { draftKey } from "@/hooks/useDraft";
+import { useFollowBottom } from "@/hooks/useFollowBottom";
+import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
+import { ideaStateLabel } from "@/lib/ideas";
+import { formatCost } from "@/lib/poradcaAnswer";
+import { toUpload } from "@/lib/poradcaImages";
+import { createIdeaApi, getIdeaApi, listIdeasApi, throwAwayIdeaApi } from "@/services/api/ideas";
+import { askPoradcaApi, getPoradcaStatusApi } from "@/services/api/poradca";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import { useActiveContextStore } from "@/store/activeContextStore";
+import type { Idea, PoradcaStatus } from "@/types/poradca";
+import { formatDate } from "@/utils/format";
+
+const NEW_IDEA_DRAFT = "nove";
+
+export default function IdeasPage() {
+  const { ideaId } = useParams<{ ideaId: string }>();
+  const navigate = useNavigate();
+  const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [current, setCurrent] = useState<Idea | null>(null);
+  const [status, setStatus] = useState<PoradcaStatus | null>(null);
+  const [loadError, setLoadError] = useState<HumanError | null>(null);
+  // On a phone the list and the talk take turns, as in Poradca; from md up they stand side by side.
+  const [pane, setPane] = useState<"list" | "talk">("talk");
+  const conversationId = current?.conversation_id ?? null;
+  const { detail, error: convError, setDetail } = usePoradcaConversation(conversationId);
+
+  const refreshList = useCallback(async () => {
+    try {
+      setIdeas(await listIdeasApi());
+    } catch (e: unknown) {
+      setLoadError(humanizeApiError(e, "Nápady sa nepodarilo načítať"));
+    }
+  }, []);
+
+  const refreshCurrent = useCallback(async () => {
+    if (!ideaId) {
+      setCurrent(null);
+      return;
+    }
+    try {
+      setCurrent(await getIdeaApi(ideaId));
+    } catch (e: unknown) {
+      setCurrent(null);
+      setLoadError(humanizeApiError(e, "Nápad sa nepodarilo načítať"));
+    }
+  }, [ideaId]);
+
+  useEffect(() => {
+    void refreshList();
+    getPoradcaStatusApi()
+      .then(setStatus)
+      .catch((e: unknown) => setLoadError(humanizeApiError(e, "Stav Poradcu sa nepodarilo zistiť")));
+  }, [refreshList]);
+
+  useEffect(() => {
+    setLoadError(null);
+    void refreshCurrent();
+  }, [refreshCurrent]);
+
+  // A finished answer may have brought a brief: where the idea stands is read again with the conversation.
+  const lastMessage = detail?.messages?.[detail.messages.length - 1];
+  const finishedAnswers = (detail?.messages ?? []).filter((m) => m.author === "poradca" && m.status !== "running").length;
+  useEffect(() => {
+    if (finishedAnswers === 0) return;
+    void refreshCurrent();
+    void refreshList();
+  }, [finishedAnswers, refreshCurrent, refreshList]);
+
+  const thread = useFollowBottom<HTMLDivElement>(
+    `${detail?.messages?.length ?? 0}:${lastMessage?.steps?.length ?? 0}:${lastMessage?.status ?? ""}`,
+    conversationId,
+  );
+  const running = !!detail?.messages?.some((m) => m.status === "running");
+  const notReady = status && !status.ready ? (status.problems ?? []).join("; ") : null;
+  const concluded = current?.state === "founded" || current?.state === "added";
+  const latestBrief = useMemo(
+    () =>
+      [...(detail?.messages ?? [])]
+        .reverse()
+        .find((m) => m.author === "poradca" && m.status === "done" && (m.idea_project || m.idea_addition)) ?? null,
+    [detail],
+  );
+
+  function openProjectPoradca() {
+    if (!current?.outcome_project_slug) return;
+    setSelectedProject({
+      slug: current.outcome_project_slug,
+      name: current.outcome_project_name ?? current.outcome_project_slug,
+    });
+    navigate(`/poradca?${new URLSearchParams({ c: current.conversation_id }).toString()}`);
+  }
+
+  async function throwAway() {
+    if (!current || !window.confirm(`Zahodiť nápad „${current.title}“? Rozhovor zmizne, jeho cena ostane započítaná.`)) {
+      return;
+    }
+    try {
+      await throwAwayIdeaApi(current.id);
+      navigate("/napady");
+      void refreshList();
+    } catch (e: unknown) {
+      setLoadError(humanizeApiError(e, "Nápad sa nepodarilo zahodiť"));
+    }
+  }
+
+  function open(path: string) {
+    navigate(path);
+    setPane("talk");
+  }
+
+  return (
+    <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] bg-[var(--color-canvas)] md:grid-cols-[260px_minmax(0,1fr)] md:grid-rows-1">
+      <div
+        role="tablist"
+        aria-label="Čo ukázať"
+        className="row-start-1 flex border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+      >
+        {(
+          [
+            ["list", "Nápady"],
+            ["talk", "Rozhovor"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pane === id}
+            onClick={() => setPane(id)}
+            className={`flex-1 py-2 text-xs font-medium ${
+              pane === id
+                ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <aside
+        className={`row-start-2 flex min-h-0 flex-col border-r border-[var(--color-border-default)] bg-[var(--color-surface)] md:col-start-1 md:row-start-1 ${
+          pane === "list" ? "" : "max-md:hidden"
+        }`}
+      >
+        <div className="flex items-center justify-between px-3 py-3">
+          <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Nápady</h1>
+          <button
+            type="button"
+            onClick={() => open("/napady")}
+            className="flex items-center gap-1 rounded-lg bg-primary-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+          >
+            <Lightbulb className="h-3.5 w-3.5" /> Nový nápad
+          </button>
+        </div>
+        <ul aria-label="Moje nápady" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3">
+          {ideas.length === 0 && (
+            <li className="px-2 text-xs text-[var(--color-text-muted)]">Zatiaľ žiadny nápad.</li>
+          )}
+          {ideas.map((i) => (
+            <li key={i.id}>
+              <button
+                type="button"
+                onClick={() => open(`/napady/${i.id}`)}
+                aria-current={i.id === ideaId ? "true" : undefined}
+                className={`w-full rounded-lg px-2 py-1.5 text-left text-xs ${
+                  i.id === ideaId
+                    ? "bg-[var(--color-accent-primary)]/15 text-[var(--color-text-primary)]"
+                    : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                }`}
+              >
+                <span className="block truncate font-medium">{i.title}</span>
+                <span className="block text-[11px] text-[var(--color-text-muted)]">
+                  {ideaStateLabel(i)} · {formatDate(i.updated_at)}
+                  {i.cost != null ? ` · ${formatCost(i.cost)}` : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </aside>
+
+      <section
+        className={`row-start-2 flex min-h-0 min-w-0 flex-col md:col-start-2 md:row-start-1 ${
+          pane === "talk" ? "" : "max-md:hidden"
+        }`}
+      >
+        {current && (
+          <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-[var(--color-border-default)] px-4 py-2">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{current.title}</h2>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                {ideaStateLabel(current)} · {current.author_name}
+              </p>
+            </div>
+            {!concluded && (
+              <button
+                type="button"
+                onClick={() => void throwAway()}
+                disabled={running}
+                className="flex items-center gap-1 rounded-lg border border-[var(--color-border-default)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-state-error-fg)] disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Zahodiť nápad
+              </button>
+            )}
+          </header>
+        )}
+        {current && concluded && (
+          <div
+            role="status"
+            className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-state-success-bg)] px-4 py-2 text-xs text-[var(--color-state-success-fg)]"
+          >
+            <span>
+              {current.state === "founded"
+                ? `Z nápadu vznikol projekt ${current.outcome_project_name}; zadanie je vo verzii 0.1.0.`
+                : `Zadanie je v Zásobníku projektu ${current.outcome_project_name} ako REQ-${current.outcome_backlog_number}.`}
+              {current.plane_identifier ? ` Tiket v DEV: ${current.plane_identifier}.` : ""} Rozhovor pokračuje v
+              Poradcovi projektu.
+            </span>
+            <button type="button" onClick={() => navigate(`/projects/${current.outcome_project_slug}`)} className="underline">
+              Otvoriť projekt
+            </button>
+            <button type="button" onClick={openProjectPoradca} className="underline">
+              Pokračovať v Poradcovi projektu
+            </button>
+          </div>
+        )}
+
+        <div
+          ref={thread.ref}
+          onScroll={thread.onScroll}
+          role="log"
+          aria-label="Rozhovor s Poradcom o nápade"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
+        >
+          <ErrorNote error={loadError} />
+          {convError && <p className="text-xs text-[var(--color-state-error-fg)]">{convError}</p>}
+          {!ideaId && (
+            <div className="max-w-xl space-y-1 text-xs text-[var(--color-text-muted)]">
+              <p>
+                Vlož svoj nápad na novú aplikáciu — pokojne celý text z Obsidianu, aj s náčrtmi obrazoviek. Poradca
+                pozrie, čo už máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie prvej verzie.
+              </p>
+              <p>
+                Z hotového zadania založíš tlačidlom nový projekt, alebo ho pridáš do existujúceho projektu, keď sa
+                ukáže, že tam patrí. Poradca sám nič nezaloží a nič nezmení.
+              </p>
+            </div>
+          )}
+          {(detail?.messages ?? []).map((m) =>
+            m.author === "human" ? (
+              <div
+                key={m.id}
+                className="ml-auto max-w-[80%] whitespace-pre-wrap rounded-lg border border-[var(--color-accent-primary)]/30 bg-[var(--color-accent-primary)]/10 px-3 py-2 text-sm text-[var(--color-text-primary)]"
+              >
+                {m.content}
+                {conversationId && (m.attachments ?? []).length > 0 && (
+                  <QuestionImages conversationId={conversationId} attachments={m.attachments ?? []} />
+                )}
+              </div>
+            ) : (
+              <div key={m.id} className="space-y-2">
+                <PoradcaAnswer message={m} scopeVersion={null} projectVersions={[]} />
+                {current && !concluded && latestBrief?.id === m.id && (
+                  <IdeaOutcomeActions
+                    idea={current}
+                    message={m}
+                    onEnded={(outcome) => {
+                      setCurrent((prev) => (prev ? { ...prev, ...outcome } : prev));
+                      void refreshList();
+                    }}
+                  />
+                )}
+              </div>
+            ),
+          )}
+        </div>
+
+        <PoradcaComposer
+          draftKey={draftKey("ideas", ideaId ?? NEW_IDEA_DRAFT)}
+          disabledReason={
+            concluded
+              ? "Nápad skončil v projekte — rozhovor pokračuje v Poradcovi projektu."
+              : notReady
+                ? `Poradca teraz nevie bežať: ${notReady}`
+                : running
+                  ? "Poradca odpovedá — ďalšiu správu pošleš, keď dokončí."
+                  : null
+          }
+          limits={status}
+          incoming={null}
+          placeholder={ideaId ? "Odpovedz Poradcovi…" : "Opíš svoj nápad…"}
+          onAsk={async (question, images) => {
+            thread.follow();
+            const uploads = await Promise.all(images.map(toUpload));
+            if (conversationId) {
+              setDetail(await askPoradcaApi(conversationId, question, uploads));
+            } else {
+              const created = await createIdeaApi(question, uploads);
+              navigate(`/napady/${created.id}`);
+            }
+            void refreshList();
+          }}
+        />
+      </section>
+    </div>
+  );
+}
