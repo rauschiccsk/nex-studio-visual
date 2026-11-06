@@ -1,4 +1,4 @@
-"""OS-isolated container for the BUILD turns of Príprava, Návrh and Programovanie (ICCINT-16, STEP 2).
+"""OS-isolated container for the BUILD turns of Príprava, Návrh, Vizuál and Programovanie (ICCINT-16 STEP 2, ICCINT-20).
 
 THE PROBLEM. A build turn is ``claude`` with an unrestricted Bash/Write/Edit profile, and today it runs as
 a subprocess OF THE BACKEND — inside a container that bind-mounts ``/opt/customers`` read-write, ``/opt/uat``
@@ -50,17 +50,16 @@ a later Programovanie turn runs project source as root — but that turn WRITES 
 the sandbox grants no capability there; the pipeline's trust in its own repository is a property of the
 pipeline, not a hole this module opened. The network is NOT restricted (see :data:`NETWORK_RESIDUAL`).
 
-AND THE MOUNT LIST BOUNDS PATHS, NOT INODES. A HARD LINK inside the project tree is a second name for a file
-that may live anywhere on the same filesystem — ``/opt/projects``, ``/opt/customers``, ``/opt/uat`` and
-``/opt/infra`` are one device on this host — so mounting the project directory exposes it, read AND write,
-with nothing in the mount list to say so. Planting one needs a namespace where ``/opt`` is a single mount,
-i.e. the docker socket, i.e. a Vizuál/Verifikácia turn: the same STEP 1 pattern of a file placed for a later
-privileged turn to honour, which is why ``.claude`` was frozen. Audit also found this module's own
-preparation step made it worse — :func:`_chown_tree_sync` would ``lchown`` such an entry and thereby GRANT
-the sandbox uid a foreign, root-only inode — so multiply-linked regular files are now skipped and reported
-at ERROR (:func:`prepare_turn`). Detecting them is not the same as preventing them: the honest statement is
-that the mount list bounds every PATH the sandbox can name, and a hard link is how something outside gets a
-path inside.
+AND THE MOUNT LIST BOUNDS PATHS, NOT INODES. A HARD LINK inside the project tree is a second name for a file that may
+live anywhere on the same filesystem — ``/opt/projects``, ``/opt/customers``, ``/opt/uat`` and ``/opt/infra`` are one
+device on this host — so mounting the project directory exposes it, read AND write, with nothing in the mount list to
+say so. Planting one needs a namespace where ``/opt`` is a single mount, i.e. the docker socket, i.e. a Verifikácia
+turn (a Vizuál turn too, until ICCINT-20): the same STEP 1 pattern of a file placed for a later privileged turn to
+honour, which is why ``.claude`` was frozen. Audit also found this module's own preparation step made it worse —
+:func:`_chown_tree_sync` would ``lchown`` such an entry and thereby GRANT the sandbox uid a foreign, root-only inode —
+so multiply-linked regular files are now skipped and reported at ERROR (:func:`prepare_turn`). Detecting them is not
+the same as preventing them: the honest statement is that the mount list bounds every PATH the sandbox can name, and a
+hard link is how something outside gets a path inside.
 
 STEP 2 BRINGS IN PROGRAMOVANIE — THE PHASE THAT CAN ACTUALLY HURT SOMEBODY. Príprava and Návrh write
 documents; Programovanie writes code, moves files and runs processes, and until now it ran as a backend
@@ -75,13 +74,13 @@ the turn a database — a per-build PostgreSQL on a per-build network (:mod:`bui
 no daemon at all. **There is no docker socket here and no broker to one.** A broker would have been a new
 security-critical component of our own making, built to reduce the attack surface; the whole point is to
 have less of that, not more. Building and running the WHOLE app is genuinely a Docker job, and it belongs
-to Vizuál and Verifikácia.
+to the engine — Vizuál's dev server (:func:`vizual_sandbox.spin_up`) — and to Verifikácia.
 
-WHAT THIS IS STILL NOT — SAY IT OUT LOUD. **Vizuál and Verifikácia keep running as backend subprocesses,
-with the docker socket and every one of those host mounts**: they bring the real compose stack up and probe
-it, which is exactly what the socket is for. So after STEP 2 the exposure is removed for THREE phases out of
-five, and for no others. Anyone reading a summary that says "the build is now isolated" is still reading
-something untrue.
+WHAT THIS IS STILL NOT — SAY IT OUT LOUD. **Verifikácia keeps running as a backend subprocess, with the
+docker socket and every one of those host mounts**: it brings the real compose stack up and probes it, which
+is exactly what the socket is for. Vizuál ran so too until ICCINT-20 (:data:`SANDBOXED_PHASES` says why it
+needs not). So the exposure is removed for FOUR phases out of five, and for no others. Anyone reading a
+summary that says "the build is now isolated" is still reading something untrue.
 
 THE KNOWLEDGE BASE IS READABLE, NOT WRITABLE (Director decision, 23.08.2026). The AI Agent charter §3 gives
 the agent three knowledge levels. An earlier version of this sandbox took two of them away; the Director's
@@ -419,8 +418,8 @@ def phase_uses_sandbox(stage: Optional[str]) -> bool:
     """Whether ``stage`` is one of the phases whose build turns are isolated (:data:`SANDBOXED_PHASES`).
 
     Unknown / missing phase → ``False``: an unrecognised caller keeps today's behaviour instead of being
-    silently routed somewhere it was never tested. Vizuál and Verifikácia answer ``False`` by construction,
-    which is what keeps STEP 2 from breaking the two phases that genuinely need Docker.
+    silently routed somewhere it was never tested. Verifikácia answers ``False`` by construction — the one phase
+    that genuinely needs Docker (Vizuál joined the sandbox in ICCINT-20, :data:`SANDBOXED_PHASES` says why).
 
     A ``False`` here is only ever safe when every dispatch actually PASSES its phase. It did not: the audit
     found ``_plan_pass_once`` — the turn behind every task-plan pass in BOTH Príprava and Návrh — omitting
@@ -567,8 +566,9 @@ async def prepare_turn(project_slug: str) -> None:
         writable) — so the agent either reports a framework issue or works around it with ``rm``.
 
     It is deliberately AUTOMATIC and per-turn rather than a deployment migration script: the mixed-ownership
-    state does not only come from the past, it is RE-CREATED whenever a later phase (Programovanie, Vizuál,
-    Verifikácia — still root, by design, until STEP 2) writes into the same session directory or project.
+    state does not only come from the past, it is RE-CREATED whenever something outside the sandbox writes into
+    the same session directory or project: Verifikácia (still root, by design) and the engine itself — its own
+    commits, e.g. the release notes it writes at a deploy (06.11.2026, NEX Manager v1.5.4).
     A migration would fix the projects that exist today and be wrong again by the next Programovanie turn.
 
     Creating the transcript directory is part of the job: ``--mount`` (correctly) REFUSES a source that does
