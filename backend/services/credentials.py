@@ -24,7 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
@@ -170,7 +170,9 @@ def write_content(db: Session, credential_id: UUID, content: str) -> CredentialC
     target.write_text(content, encoding="utf-8")
     target.chmod(0o600)
 
-    # Touch updated_at on the row.
+    # The new content is a change of the entry (DEV-317): without a changed column flush() writes nothing and the
+    # row's onupdate never fires, so updated_at stayed at the last change of the title.
+    cred.updated_at = func.now()
     db.flush()
     db.refresh(cred)
 

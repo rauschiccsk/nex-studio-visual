@@ -138,6 +138,32 @@ class TestCredentialsCRUD:
         assert body["content"] == "hello"
         assert body["size_bytes"] == 5
 
+    def test_put_content_stamps_the_time_of_the_change(self, router_client, db_session):
+        """DEV-317 — a new content is a change of the entry: the list says when it was made. The row is set a day
+        back first; inside one test transaction now() is the same instant as the create."""
+        from datetime import timedelta
+
+        from sqlalchemy import update
+
+        from backend.db.models.credentials import Credential
+
+        created = router_client.post(
+            "/api/v1/credentials",
+            json={"title": "T4", "filename": "T4.md", "content": "old"},
+        ).json()
+        listed = lambda: {c["id"]: c for c in router_client.get("/api/v1/credentials").json()}[created["id"]]  # noqa: E731
+        db_session.execute(
+            update(Credential)
+            .where(Credential.id == uuid.UUID(created["id"]))
+            .values(updated_at=Credential.updated_at - timedelta(days=1))
+        )
+        db_session.expire_all()
+        before = listed()["updated_at"]
+
+        router_client.put(f"/api/v1/credentials/{created['id']}/content", json={"content": "new content"})
+
+        assert listed()["updated_at"] > before
+
     def test_put_content_overwrites_file(self, router_client, credentials_root):
         created = router_client.post(
             "/api/v1/credentials",
