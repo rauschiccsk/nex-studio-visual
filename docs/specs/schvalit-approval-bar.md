@@ -7,9 +7,9 @@ the Príprava/spec gate). So the manager must type free-text "Schvaľujem" (unre
 Add the missing approval button. Branch `v2.0.0-dev`. Self-verify: FE build+lint+test (+ full `pytest`
 from root if any backend touched — this is FE-only, so pytest just for safety).
 
-## Change — a `SchvalitBar` mirroring `SpecApprovalBar`
-New `frontend/src/components/riadiace/SchvalitBar.tsx`, a near-copy of
-`frontend/src/components/riadiace/SpecApprovalBar.tsx` (same styling/props/honest-by-construction
+## Change — a `ApproveBar` mirroring `SpecApprovalBar`
+New `frontend/src/components/controlCenter/ApproveBar.tsx`, a near-copy of
+`frontend/src/components/controlCenter/SpecApprovalBar.tsx` (same styling/props/honest-by-construction
 pattern), differing only:
 - **Gate:** render nothing unless `board?.available_actions?.includes("schvalit")` (NOT approve_spec).
 - **Primary action:** "Schváliť plán" → `postPipelineActionApi(versionId, {action:"schvalit", payload: comment ? {comment} : undefined})`.
@@ -21,19 +21,19 @@ pattern), differing only:
 - Same error handling, `submitting` state, `lang="sk" spellCheck={false}` on the comment input.
 
 ## Mount it
-In `frontend/src/pages/RiadiaceCentrumPage.tsx`, mount `<SchvalitBar board={board} versionId={versionId}
+In `frontend/src/pages/ControlCenterPage.tsx`, mount `<ApproveBar board={board} versionId={versionId}
 onBoard={setBoard} />` right next to `<SpecApprovalBar … />` (~line 153, the same conditional slot above
 the plan rail). Both are honest-by-construction (each renders only when its action is offered), so at most
 one shows at a time — no conflict.
 
 ## Also (small, same theme): audit the other offered actions have a button
 Confirm every manager-facing action the backend can OFFER has a cockpit affordance: `approve_spec`
-(SpecApprovalBar ✓), `zostav_plan`/`spustit_stavbu`/`pause`/`pokracovat` (PlanUlohRail trigger ladder ✓),
+(SpecApprovalBar ✓), `zostav_plan`/`spustit_stavbu`/`pause`/`pokracovat` (TaskPlanRail trigger ladder ✓),
 `schvalit` (this fix), `decide` (ChangeRequest/consultation). If any OTHER offered action has no button,
 note it in the report (don't necessarily build it now) — `schvalit` is the confirmed-missing one.
 
 ## Tests (RED→GREEN)
-- SchvalitBar renders the "Schváliť plán" + "Upraviť" buttons when `available_actions` includes
+- ApproveBar renders the "Schváliť plán" + "Upraviť" buttons when `available_actions` includes
   `schvalit`, and renders NOTHING when it doesn't (honest-by-construction).
 - Clicking "Schváliť plán" calls `postPipelineActionApi` with `action:"schvalit"`; "Upraviť" with
   `action:"uprav"`; the comment is threaded into payload; `onBoard` is called with the returned board.

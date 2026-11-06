@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import CiGateBar from "@/components/riadiace/CiGateBar";
+import CiGateBar from "@/components/controlCenter/CiGateBar";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { PipelineBoard } from "@/services/api/pipeline";
 

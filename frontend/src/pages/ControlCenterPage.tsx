@@ -1,0 +1,450 @@
+/**
+ * ControlCenterPage — the Riadiace centrum, the SPINE of NEX Studio v2 (spine STEP 1).
+ *
+ * Replaces the old Vývoj phase-automaton board + the AI Agent tab with ONE
+ * screen: a live 1:1 conversation between the Manažér and the AI partner — exactly how the Director talks to
+ * Dedo. A thin, HONEST FE over the backend spine: the conversation IS `board.recent_messages` streamed live
+ * over the EXISTING pipeline WS; sends go through the EXISTING single-writer relay. No new WS client, no new
+ * mutating call.
+ *
+ * Layout (CSS grid, single screen, three regions):
+ *   - PhaseBar — read-only phase marker across the top of the conversation column.
+ *   - ConversationThread — the centre (the only min-h-0 overflow region), with HonestStatusStrip pinned above.
+ *   - ConversationComposer — the relay send box at the bottom.
+ *   - TaskPlanRail — the right rail (placeholder; the real task-plan lands in step 3, same cell, no churn).
+ *
+ * Permissions: the pipeline is owner-or-``ri``. Any authenticated user reaches this route (the project list
+ * is deliberately wider — a Medior sees every project and can pin one), so a refusal is a NORMAL state here,
+ * not an impossible one: `usePipelineWs` latches it (`accessDenied`) and this page SAYS it, with the way out.
+ * Project- + version-scoped (follows the pin); the transcript + relay are keyed on the selected version.
+ */
+
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { FolderOpen, Lock } from "lucide-react";
+import { ResizeHandle, useWideScreen } from "nex-shared";
+
+import { useActiveContextStore } from "@/store/activeContextStore";
+import { useUserLayoutStore } from "@/store/userLayoutStore";
+import { usePipelineWs } from "@/hooks/usePipelineWs";
+import {
+  relayPipelineMessageApi,
+  postPipelineActionApi,
+} from "@/services/api/pipeline";
+import ConversationThread from "@/components/controlCenter/ConversationThread";
+import ConversationComposer from "@/components/controlCenter/ConversationComposer";
+import SpecApprovalBar from "@/components/controlCenter/SpecApprovalBar";
+import ApproveBar from "@/components/controlCenter/ApproveBar";
+import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
+import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
+import SchemaApprovalBar from "@/components/controlCenter/SchemaApprovalBar";
+import PrivateFilesPanel from "@/components/controlCenter/PrivateFilesPanel";
+import { blockRecoveryOwnsInput, inputOwner } from "@/components/controlCenter/blockRecovery";
+import { composerOffersRevise } from "@/components/controlCenter/reviseControl";
+import ReportAgainBar from "@/components/controlCenter/ReportAgainBar";
+import RepeatConsultationBar from "@/components/controlCenter/RepeatConsultationBar";
+import ContinueAfterFixBar from "@/components/controlCenter/ContinueAfterFixBar";
+import DedoProposalBar from "@/components/controlCenter/DedoProposalBar";
+import ReverifyBar from "@/components/controlCenter/ReverifyBar";
+import MoveToRegularVersionBar from "@/components/controlCenter/MoveToRegularVersionBar";
+import ReverifyNoFixBar from "@/components/controlCenter/ReverifyNoFixBar";
+import CiGateBar from "@/components/controlCenter/CiGateBar";
+import AskPoradcaBar from "@/components/controlCenter/AskPoradcaBar";
+import PhaseBar from "@/components/controlCenter/PhaseBar";
+import LivePreviewBar from "@/components/controlCenter/LivePreviewBar";
+import { useVizualPreview } from "@/hooks/useVizualPreview";
+import BuildStatus from "@/components/controlCenter/BuildStatus";
+import { useBuildStatus } from "@/components/controlCenter/useBuildStatus";
+import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
+import TaskPlanRail from "@/components/controlCenter/TaskPlanRail";
+import WhereWeLeftOff from "@/components/controlCenter/WhereWeLeftOff";
+
+export default function ControlCenterPage() {
+  const navigate = useNavigate();
+
+  const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+  const versionId = selectedVersion?.versionId ?? null;
+
+  // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
+  // WS client — live streaming already reaches the FE over this hook).
+  const {
+    board,
+    activity,
+    reconnecting,
+    error,
+    accessDenied,
+    versionGone,
+    setBoard,
+  } = usePipelineWs(versionId);
+  // DEV-51: the build's CI, read ONCE — the phase-bar line, the status strip and the rail all show the same answer.
+  const ci = useBuildStatus(versionId);
+  // DEV-127: the live preview of the Vizuál step as it really is — the strip and „Schváliť vizuál“ read the same answer.
+  const vizualPreview = useVizualPreview(versionId, board?.state?.current_stage);
+  // DEV-62: a phone has room for one column — the conversation or the task plan, switched by the tabs on top.
+  // From the tablet up both stand side by side and the tabs are not there.
+  const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
+  const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
+  const planOnPhone = pane === "plan" ? "" : "max-md:hidden";
+  // DEV-84 — a link to one task (`?uloha=20.1.1` from the repository tab) shows the plan, also on a phone.
+  const [searchParams] = useSearchParams();
+  const focusTask = searchParams.get("uloha");
+  useEffect(() => {
+    if (focusTask) setPane("plan");
+  }, [focusTask]);
+  // DEV-82: on a computer the task plan is as wide as the person left it (kept on the server); its left edge is the
+  // handle. Until the layout arrives — and on a tablet or a phone — the column keeps its default from the classes.
+  const wide = useWideScreen();
+  const layout = useUserLayoutStore((s) => s.layout);
+  const saveLayout = useUserLayoutStore((s) => s.save);
+  const [planDragged, setPlanDragged] = useState<number | null>(null);
+  const planLimit = wide ? layout?.limits.plan_width : undefined;
+  const planWidth = planLimit ? (planDragged ?? layout?.plan_width ?? planLimit.default) : undefined;
+
+  async function handleSend(text: string): Promise<{ deferred: boolean }> {
+    if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
+    // COLD-START (spine STEP 1 HOT-FIX): a freshly-created version has NO pipeline yet (``board.state`` is
+    // null), so nothing has ever called ``start`` — a plain relay would raise "Pipeline not started". The
+    // Manažér's FIRST message STARTS the conversation: route it through the ``start`` action (mode=conversation,
+    // the message itself as the kickoff directive) and adopt the returned board. The start dispatches the first
+    // turn immediately (no in-flight turn to queue behind), so it is never ``deferred``.
+    if (!board?.state) {
+      const nextBoard = await postPipelineActionApi(versionId, {
+        action: "start",
+        payload: { mode: "conversation", directive: text },
+      });
+      setBoard(nextBoard);
+      return { deferred: false };
+    }
+    // Pipeline already exists → the SOLE mutating call is the single-writer relay (Model B): the engine, not
+    // this page, writes the turn (enqueued behind an in-flight turn when ``deferred``).
+    const res = await relayPipelineMessageApi(versionId, text);
+    return { deferred: res.deferred };
+  }
+
+  // DEV-297: „Uprav“ from the conversation box — the engine's ``uprav`` with the text as its comment.
+  async function handleUprav(comment: string): Promise<void> {
+    if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
+    setBoard(await postPipelineActionApi(versionId, { action: "uprav", payload: { comment } }));
+  }
+
+  // --- Render guards (salvaged from the retired AI Agent tab) ---
+  // v4.0.35: no role gate here — any authenticated user reaches Riadiace centrum; the backend authz layer
+  // scopes a Junior to their OWN project's pipeline (they can only pin/drive projects they created).
+
+  if (!selectedProject) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Nemáš vybraný projekt
+        </h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Riadiace centrum beží nad konkrétnym projektom. Otvor{" "}
+          <span className="font-mono">Projekty</span> a pripni projekt (a
+          verziu).
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  if (!versionId) {
+    // Project pinned but no version sub-selection — the transcript + relay are version-scoped.
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--color-canvas)] p-6 text-center">
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Vyber verziu projektu{" "}
+          <span className="font-medium">{selectedProject.name}</span> (pin v
+          Projektoch) — Riadiace centrum pracuje a komunikuje nad konkrétnou
+          verziou.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    // A permission refusal, said out loud. Every pipeline read for this version is owner-or-ri, but the
+    // project list shows a Medior EVERY project — so he can pin one he does not own and land here. Before
+    // this, the board simply stayed empty and the status strip read a calm "Voľný" while the socket retried
+    // a door that never opens: the screen lied, and there was no way out without a terminal.
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <Lock className="h-10 w-10 text-[var(--color-text-muted)]" />
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Nemáš prístup k tomuto projektu
+        </h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Projekt <span className="font-medium">{selectedProject.name}</span>{" "}
+          patrí niekomu inému, preto ti jeho Riadiace centrum nevieme otvoriť —
+          nezobrazuje sa žiadny priebeh ani rozhovor. Riadiť ho môže jeho
+          vlastník alebo Manažér; popros o to niekoho z nich, alebo si v
+          Projektoch pripni vlastný projekt.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  if (versionGone) {
+    // The pin lives in activeContextStore, so reopening Riadiace centrum after somebody deletes the pinned
+    // version is an ordinary path, not an exotic one. Say what happened and offer the way out; before this
+    // the socket simply reconnected once a second, forever, behind a board that never filled.
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">
+          Táto verzia už neexistuje
+        </h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Verzia, ktorú máš pripnutú, bola medzitým zmazaná, takže jej Riadiace
+          centrum sa nedá otvoriť. Vyber si v projekte inú verziu.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  const working = board?.state?.status === "agent_working";
+  // A framework_issue block (a NEX-Studio bug) locks the composer — the Manažér cannot chat their way out of it;
+  // ReportAgainBar carries the one concrete move + the "technical team is on it" explanation.
+  const frameworkBlocked =
+    board?.state?.status === "blocked" &&
+    board?.state?.block_reason === "framework_issue";
+  // Category I: when a BlockRecoveryBar (a blocked QUESTION / ERROR) owns the input above, de-emphasise the
+  // always-open composer so there is ONE obvious input. Mirrors BlockRecoveryBar's own render gate (question +
+  // the three error reasons); framework_issue / decision_needed have their own dedicated bars, excluded here.
+  // ICCINT-43: ASK the bar which blocks it owns instead of hand-copying its list — the copy drifted the
+  // moment a new reason was added, leaving the composer competing with a bar that had already claimed it.
+  const blockRecoveryActive = blockRecoveryOwnsInput(board?.state);
+
+  return (
+    <div
+      className="grid h-full grid-cols-1 grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] bg-[var(--color-canvas)] md:grid-cols-[minmax(0,1fr)_320px] md:grid-rows-[auto_minmax(0,1fr)_auto_auto]"
+      style={planWidth ? { gridTemplateColumns: `minmax(0,1fr) ${planWidth}px` } : undefined}
+    >
+      {/* DEV-62: on a phone, the switch between the conversation and the task plan. */}
+      <div
+        role="tablist"
+        aria-label="Čo ukázať"
+        className="col-start-1 row-start-1 flex border-b border-[var(--color-border-default)] bg-[var(--color-surface)] md:hidden"
+      >
+        {(
+          [
+            ["rozhovor", "Rozhovor"],
+            ["plan", "Plán úloh"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pane === id}
+            onClick={() => setPane(id)}
+            className={`flex-1 py-2 text-xs font-medium ${
+              pane === id
+                ? "border-b-2 border-[var(--color-accent-primary)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Top — read-only phase bar (conversation column). */}
+      <div className={`col-start-1 row-start-2 min-w-0 md:row-start-1 ${conversationOnPhone}`}>
+        <PhaseBar board={board ?? null} />
+        {/* DEV-151: why the development of this version stands and what next — written by a person. */}
+        <WhereWeLeftOff versionId={versionId} />
+        {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
+            pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
+        <BuildStatus stav={ci} />
+        {/* DEV-120: the live preview in its own window, during the Vizuál step — the Vizuál tab is gone. */}
+        <LivePreviewBar
+          board={board ?? null}
+          preview={vizualPreview.preview}
+          restarting={vizualPreview.restarting}
+          error={vizualPreview.error}
+          onRestart={vizualPreview.restart}
+        />
+      </div>
+
+      {/* Centre — the SPINE: honest status pinned above the live conversation thread (the overflow region). */}
+      <div className={`col-start-1 row-start-3 flex min-h-0 min-w-0 flex-col md:row-start-2 ${conversationOnPhone}`}>
+        <HonestStatusStrip
+          state={board?.state ?? null}
+          projectName={selectedProject.name}
+          versionNumber={selectedVersion?.versionNumber ?? ""}
+          reconnecting={reconnecting}
+          error={error}
+          verifiedProvenance={board?.verified_provenance}
+          ci={ci}
+          ciGate={board?.ci_gate}
+        />
+        <ConversationThread
+          versionId={versionId}
+          messages={board?.recent_messages ?? []}
+          activity={activity}
+          working={!!working}
+        />
+      </div>
+
+      {/* Approval / change-request moment — sits between the thread and the relay send box. All bars are
+          honest-by-construction (render null unless applicable) and mutually exclusive in practice:
+          SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); ApproveBar on a Návrh gate awaiting
+          the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
+          (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled version whose verified
+          green drifted past HEAD (overit_znovu — CR-V2-057). */}
+      <div className={`col-start-1 row-start-4 min-w-0 md:row-start-3 ${conversationOnPhone}`}>
+        <DecisionCardsBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* ICCINT-25: right under the cards, because it is the same surface failing — when the cards could
+            not be built, this is how you ask for them again instead of being left with the raw findings. */}
+        <RepeatConsultationBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* DEV-7: a database change waiting for Ri — „Schváliť" here, the answer box right below it. */}
+        <SchemaApprovalBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <BlockRecoveryBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* DEV-44: what lies in private/ for the agent — seen and deletable without a terminal. */}
+        <PrivateFilesPanel board={board} versionId={versionId} />
+        <ReportAgainBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* ICCINT-13: the same story's next beat — ReportAgainBar says "our technical team is on it";
+            once they have fixed it and released the build, this is the ONE button that carries it on.
+            The two are mutually exclusive by construction (blocked vs. settled-after-fix). */}
+        <ContinueAfterFixBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        {/* ICCINT-24: a finding our technical team left for the Manažér — editable, and sent to the agent
+            only by his click, through the ordinary verb it names. Renders only when one is open. */}
+        <DedoProposalBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <SpecApprovalBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+        <ApproveBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+          previewDown={
+            !!vizualPreview.preview?.needed &&
+            (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
+          }
+        />
+        {/* DEV-261: after Programovanie the step to Verifikácia waits for the CI of the pushed commit — the reason, or the
+            fix of a red one, stands where „Prejsť na overenie" would. */}
+        <CiGateBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ReverifyBar board={board} versionId={versionId} onBoard={setBoard} />
+        {/* ICCINT-139: rýchla oprava, ktorá tam nepatrí, sa dá preniesť do riadnej verzie. */}
+        <MoveToRegularVersionBar board={board} versionId={versionId} onBoard={setBoard} />
+        <ReverifyNoFixBar
+          board={board}
+          versionId={versionId}
+          onBoard={setBoard}
+        />
+      </div>
+
+      {/* Bottom — the relay send box; on a FINISHED version „Opýtaj sa Poradcu" instead (ICCINT-167): no agent
+          works on a done version, so a message there would go unanswered (the engine refuses it). */}
+      <div className={`col-start-1 row-start-5 min-w-0 md:row-start-4 ${conversationOnPhone}`}>
+        {board?.state?.current_stage === "done" ? (
+          <AskPoradcaBar
+            versionId={versionId}
+            projectName={selectedProject.name}
+            versionNumber={selectedVersion?.versionNumber ?? ""}
+          />
+        ) : (
+          <ConversationComposer
+            versionId={versionId}
+            onRelay={handleSend}
+            disabled={!versionId}
+            frameworkBlocked={frameworkBlocked}
+            blockedAbove={blockRecoveryActive}
+            inputReady={!!board}
+            owner={inputOwner(board?.state)}
+            atVizual={board?.state?.current_stage === "vizual"}
+            offersUprav={composerOffersRevise(board)}
+            onUprav={handleUprav}
+          />
+        )}
+      </div>
+
+      {/* Right rail — the Plán úloh three-layer manager map (STEP 3), spanning the full height. Reads the live
+          board (available_actions gates the "Zostaviť plán" trigger; recent_messages drives tree-freshness). */}
+      <div
+        className={`relative col-start-1 row-start-2 row-span-4 min-h-0 md:col-start-2 md:row-start-1 md:row-span-4 ${planOnPhone}`}
+      >
+        {planLimit && planWidth && (
+          <ResizeHandle
+            value={planWidth}
+            min={planLimit.min}
+            max={planLimit.max}
+            defaultValue={planLimit.default}
+            panel="right"
+            onResize={setPlanDragged}
+            onResizeEnd={(w) => {
+              setPlanDragged(null);
+              if (w !== (layout?.plan_width ?? planLimit.default))
+                void saveLayout({ plan_width: w === planLimit.default ? null : w });
+            }}
+            label="Šírka Plánu úloh"
+            className="absolute inset-y-0 left-0"
+          />
+        )}
+        <TaskPlanRail
+          versionId={versionId}
+          messages={board?.recent_messages ?? []}
+          board={board}
+          onBoard={setBoard}
+          ci={ci}
+          focusTask={focusTask}
+        />
+      </div>
+    </div>
+  );
+}

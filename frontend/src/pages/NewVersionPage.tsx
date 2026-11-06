@@ -13,12 +13,12 @@ import {
   type NexsharedStatus,
   type GitStatus,
 } from "@/services/api/projects";
-import { NexsharedUpgradePrompt } from "@/components/riadiace/NexsharedUpgradePrompt";
-import { AppKitUpgradePrompt } from "@/components/riadiace/AppKitUpgradePrompt";
-import { AppTemplateConversionPrompt } from "@/components/riadiace/AppTemplateConversionPrompt";
-import { templateConversionApplies } from "@/components/riadiace/templateConversion";
+import { NexsharedUpgradePrompt } from "@/components/controlCenter/NexsharedUpgradePrompt";
+import { AppKitUpgradePrompt } from "@/components/controlCenter/AppKitUpgradePrompt";
+import { AppTemplateConversionPrompt } from "@/components/controlCenter/AppTemplateConversionPrompt";
+import { templateConversionApplies } from "@/components/controlCenter/templateConversion";
 import { useLibraryUpgrade } from "@/hooks/useLibraryUpgrade";
-import { DirtyTreeGuard } from "@/components/riadiace/DirtyTreeGuard";
+import { DirtyTreeGuard } from "@/components/controlCenter/DirtyTreeGuard";
 import {
   listVersions,
   createVersion,
@@ -29,10 +29,10 @@ import {
 } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import { useActiveContextStore } from "@/store/activeContextStore";
-import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
+import BriefConflictPanel from "@/components/version/BriefConflictPanel";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
-import { appendZadanie, zadanieClashOf } from "@/components/version/zadanieClash";
-import { unsavedWorkOf } from "@/components/riadiace/unsavedWork";
+import { appendBrief, briefClashOf } from "@/components/version/briefClash";
+import { unsavedWorkOf } from "@/components/controlCenter/unsavedWork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
@@ -380,7 +380,7 @@ export default function NewVersionPage() {
       // formulár ticho zapísal jednu vetu cez 71-riadkovú zákaznícku špecifikáciu — Manažér videl prázdne
       // pole a nemal ako vedieť. Engine to teraz odmietne (409) a vráti, čo tam je; ukážeme mu to a nechá
       // rozhodnúť sa jeho. Hádať za neho je presne to, čo tú prácu zmazalo.
-      const clash = zadanieClashOf(err);
+      const clash = briefClashOf(err);
       // DEV-175: the engine founds no version over unsaved work; when the tree got dirty after the page looked, its
       // answer carries what is unsaved — the guard above shows it with Uložiť / Zahodiť.
       const refusal = unsavedWorkOf(err);
@@ -647,7 +647,7 @@ export default function NewVersionPage() {
                 skutočná náprava je, že to isté pole mu ukáže obsah a nechá ho rozhodnúť sa. */}
             {/* DEV-40: a clash at saving — the disk text with the three choices, nothing written without a click. */}
             {existingZadanie?.origin === "clash" && (
-              <ZadanieConflictPanel
+              <BriefConflictPanel
                 clash={{
                   existing: existingZadanie.text,
                   message: existingZadanie.message ?? "Pre túto verziu už zadanie existuje.",
@@ -655,7 +655,7 @@ export default function NewVersionPage() {
                 busy={saving}
                 onReplace={() => saveVersionAndZadanie(zadanie.trim(), { replaceExisting: true })}
                 onAppend={() =>
-                  saveVersionAndZadanie(appendZadanie(existingZadanie.text, zadanie), { basedOn: existingZadanie.text })
+                  saveVersionAndZadanie(appendBrief(existingZadanie.text, zadanie), { basedOn: existingZadanie.text })
                 }
                 onTakeOver={() => {
                   setZadanie(existingZadanie.text);

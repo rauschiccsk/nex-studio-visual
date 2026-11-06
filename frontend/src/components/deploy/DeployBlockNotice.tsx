@@ -10,7 +10,7 @@
 // This notice closes both halves: (1) LEGIBILITY — plain-Slovak cause, naming the affected version;
 // (2) ACTIONABILITY — the recovery on THIS screen, where the dead end is.
 //
-// Honest-by-construction (mirrors ReverifyBar / SchvalitBar): renders NOTHING when the backend says `ok`,
+// Honest-by-construction (mirrors ReverifyBar / ApproveBar): renders NOTHING when the backend says `ok`,
 // and offers "Over znova" ONLY when the backend says this user may run it right now (`can_reverify`, which
 // is true solely for the `drift` cause — its handler rejects every other shape). Where there is no action
 // this user can take, no button is drawn: a button that 400s or 403s would just move the dead end one click.

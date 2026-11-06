@@ -8,7 +8,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
-import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
+import DeliveryStatementPanel from "@/components/costs/DeliveryStatementPanel";
 import {
   getDeliveryStatement,
   setBillingDiscounts,

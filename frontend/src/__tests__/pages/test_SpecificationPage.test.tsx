@@ -1,0 +1,248 @@
+/**
+ * SpecificationPage — the durable "Schválená / Rozpracované" badge (spine STEP 2 follow-up).
+ *
+ * The badge is derived from the board's DURABLE ``spec_approved`` flag (≥1 kind='approval' message) plus
+ * whether a ``specification.md`` is actually on disk for the pinned version (via ``listProjectSpecs`` →
+ * ``filterVersionDocs``), NOT the truncated recent_messages tail:
+ *   * spec_approved true                → "Schválená"      (takes precedence — approval implies a frozen spec)
+ *   * a specification.md exists, not yet → "Rozpracované"
+ *   * no spec on disk                    → no badge at all
+ */
+
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+
+import SpecificationPage from "@/pages/SpecificationPage";
+
+// ── Hoisted mocks ─────────────────────────────────────────────────────────────
+
+const { getProjectSpecContentMock, listProjectSpecsMock, getPipelineBoardApiMock, contextMock, search } = vi.hoisted(
+  () => ({
+    // DEV-7: the page reads `?doc=` — the address the approval bars open it with.
+    search: { value: "" },
+    getProjectSpecContentMock: vi.fn(),
+    listProjectSpecsMock: vi.fn(),
+    getPipelineBoardApiMock: vi.fn(),
+    contextMock: {
+      selectedProject: { slug: "demo", name: "Demo" } as { slug: string; name: string } | null,
+      selectedVersion: { versionId: "v-1", versionNumber: "2.0.0" } as
+        | { versionId: string; versionNumber: string }
+        | null,
+    },
+  }),
+);
+
+// A specification.md that survives ``filterVersionDocs`` for slug "demo" / version "2.0.0" → hasSpec = true.
+const SPEC_DOC = {
+  relative_path: "demo/docs/specs/versions/v2.0.0/specification.md",
+  filename: "specification.md",
+  category: "docs/specs/versions/v2.0.0",
+  size_bytes: 42,
+  is_directory: false,
+};
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useSearchParams: () => [new URLSearchParams(search.value), vi.fn()],
+  };
+});
+vi.mock("@/store/activeContextStore", () => ({
+  useActiveContextStore: (selector: (s: typeof contextMock) => unknown) => selector(contextMock),
+}));
+vi.mock("@/services/api/projectSpecs", () => ({
+  getProjectSpecContent: getProjectSpecContentMock,
+  listProjectSpecs: listProjectSpecsMock,
+}));
+vi.mock("@/services/api/pipeline", () => ({ getPipelineBoardApi: getPipelineBoardApiMock }));
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("SpecificationPage badge", () => {
+  beforeEach(() => {
+    getProjectSpecContentMock.mockReset();
+    listProjectSpecsMock.mockReset();
+    getPipelineBoardApiMock.mockReset();
+    // Default: the spec exists on disk and reads back as text (individual tests override the board flag).
+    listProjectSpecsMock.mockResolvedValue({ documents: [SPEC_DOC], count: 1 });
+    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Špecifikácia\n\nObsah." });
+  });
+
+  it("shows 'Schválená' (and not 'Rozpracované') when spec_approved is true", async () => {
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: true });
+
+    render(<SpecificationPage />);
+
+    expect(await screen.findByText("Schválená")).toBeInTheDocument();
+    expect(screen.queryByText("Rozpracované")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Rozpracované' when a spec exists but spec_approved is false", async () => {
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+
+    render(<SpecificationPage />);
+
+    expect(await screen.findByText("Rozpracované")).toBeInTheDocument();
+    expect(screen.queryByText("Schválená")).not.toBeInTheDocument();
+  });
+
+  it("shows NO badge when no spec exists on disk", async () => {
+    listProjectSpecsMock.mockResolvedValue({ documents: [], count: 0 });
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+
+    render(<SpecificationPage />);
+
+    // The empty-state prompt is the reliable "settled with no docs" anchor.
+    await screen.findByText(/Zatiaľ tu nie sú žiadne dokumenty/);
+    expect(screen.queryByText("Schválená")).not.toBeInTheDocument();
+    expect(screen.queryByText("Rozpracované")).not.toBeInTheDocument();
+  });
+
+  it("stays un-approved when the board fetch fails (never falsely claims 'Schválená')", async () => {
+    getPipelineBoardApiMock.mockRejectedValue(new Error("no pipeline"));
+
+    render(<SpecificationPage />);
+
+    // A spec exists but the durable flag is unknown → "Rozpracované", never "Schválená".
+    expect(await screen.findByText("Rozpracované")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Schválená")).not.toBeInTheDocument());
+  });
+
+  it("surfaces docs/contracts/ and docs/handoff/ as grouped pills alongside the version spec", async () => {
+    listProjectSpecsMock.mockResolvedValue({
+      documents: [
+        SPEC_DOC,
+        {
+          relative_path: "demo/docs/contracts/api_product_catalog.md",
+          filename: "api_product_catalog.md",
+          category: "demo/docs/contracts",
+          size_bytes: 10,
+          is_directory: false,
+        },
+        {
+          relative_path: "demo/docs/handoff/tibor-genesis-api.md",
+          filename: "tibor-genesis-api.md",
+          category: "demo/docs/handoff",
+          size_bytes: 10,
+          is_directory: false,
+        },
+        // Internal noise that must NOT be surfaced in Dokumenty.
+        {
+          relative_path: "demo/docs/session-logs/2026-07-16-001.md",
+          filename: "2026-07-16-001.md",
+          category: "demo/docs/session-logs",
+          size_bytes: 10,
+          is_directory: false,
+        },
+      ],
+      count: 4,
+    });
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+
+    render(<SpecificationPage />);
+
+    // Deliverable docs render as pills…
+    expect(await screen.findByRole("button", { name: "api_product_catalog" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "tibor-genesis-api" })).toBeInTheDocument();
+    // …grouped under their folder headings…
+    expect(screen.getByText("Kontrakty")).toBeInTheDocument();
+    expect(screen.getByText("Odovzdávka")).toBeInTheDocument();
+    // …while internal folders (session-logs) stay out.
+    expect(screen.queryByRole("button", { name: "2026-07-16-001" })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * "No version pinned" is NOT "this project has no documents".
+ *
+ * The whole document fetch used to be gated on a pinned version, so a project with dozens of documents on
+ * disk rendered the "Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre…" empty state — telling
+ * the manager to go and create what already exists. The page now says what is true: they exist, pick a
+ * version. The genuinely-empty project keeps the original state.
+ */
+describe("SpecificationPage without a pinned version", () => {
+  beforeEach(() => {
+    getProjectSpecContentMock.mockReset();
+    listProjectSpecsMock.mockReset();
+    getPipelineBoardApiMock.mockReset();
+    getPipelineBoardApiMock.mockResolvedValue({ spec_approved: false });
+    getProjectSpecContentMock.mockResolvedValue({ is_text: true, content: "# Obsah" });
+    contextMock.selectedVersion = null;
+  });
+
+  afterEach(() => {
+    contextMock.selectedVersion = { versionId: "v-1", versionNumber: "2.0.0" };
+  });
+
+  it("says the documents exist and how to see them, instead of claiming there are none", async () => {
+    listProjectSpecsMock.mockResolvedValue({
+      documents: [
+        SPEC_DOC,
+        {
+          relative_path: "demo/docs/specs/versions/v1.0.0/design.md",
+          filename: "design.md",
+          category: "docs/specs/versions/v1.0.0",
+          size_bytes: 42,
+          is_directory: false,
+        },
+      ],
+      count: 2,
+    });
+
+    render(<SpecificationPage />);
+
+    expect(
+      await screen.findByText(/Dokumenty tohto projektu sú viazané na verziu \(na disku: 2\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Zatiaľ tu nie sú žiadne dokumenty/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /vyber verziu/i })).toBeInTheDocument();
+  });
+
+  it("keeps the honest 'nothing agreed yet' state for a project that really has no documents", async () => {
+    listProjectSpecsMock.mockResolvedValue({ documents: [], count: 0 });
+
+    render(<SpecificationPage />);
+
+    expect(await screen.findByText(/Zatiaľ tu nie sú žiadne dokumenty/)).toBeInTheDocument();
+    expect(screen.queryByText(/viazané na verziu/)).not.toBeInTheDocument();
+  });
+});
+
+describe("DEV-7 — the approval bars open the schema document directly", () => {
+  const SCHEMA_DOC = {
+    relative_path: "demo/docs/specs/versions/v2.0.0/DATABASE_SCHEMAS.md",
+    filename: "DATABASE_SCHEMAS.md",
+    category: "docs/specs/versions/v2.0.0",
+    size_bytes: 42,
+    is_directory: false,
+  };
+
+  beforeEach(() => {
+    search.value = "";
+    getProjectSpecContentMock.mockReset().mockResolvedValue({ is_text: true, content: "# Schéma" });
+    listProjectSpecsMock.mockReset().mockResolvedValue({ documents: [SPEC_DOC, SCHEMA_DOC], count: 2 });
+    getPipelineBoardApiMock.mockReset().mockResolvedValue({ spec_approved: true });
+  });
+
+  it("`?doc=` opens that document instead of the specification", async () => {
+    search.value = "doc=docs%2Fspecs%2Fversions%2Fv2.0.0%2FDATABASE_SCHEMAS.md";
+
+    render(<SpecificationPage />);
+
+    await waitFor(() =>
+      expect(getProjectSpecContentMock).toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/DATABASE_SCHEMAS.md"),
+    );
+    expect(getProjectSpecContentMock).not.toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/specification.md");
+  });
+
+  it("without `?doc=` the specification opens, as before", async () => {
+    render(<SpecificationPage />);
+
+    await waitFor(() =>
+      expect(getProjectSpecContentMock).toHaveBeenCalledWith("demo", "docs/specs/versions/v2.0.0/specification.md"),
+    );
+  });
+});

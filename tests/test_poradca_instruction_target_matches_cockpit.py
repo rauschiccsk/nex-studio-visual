@@ -2,7 +2,7 @@
 
 Two rules decide the same thing from two sides. The server greys „Vložiť do Riadiaceho centra" out when no box
 of Riadiace centrum takes the text (``_instruction_target``); the screen decides WHICH box takes it
-(``BLOCKED_INPUT_OWNER`` in ``frontend/src/components/riadiace/blockRecovery.ts``). If they drift, the button
+(``BLOCKED_INPUT_OWNER`` in ``frontend/src/components/controlCenter/blockRecovery.ts``). If they drift, the button
 is offered and the instruction lands nowhere — the Director's „the screen blinked and nothing happened"
 (DEV-22) — or a box is there and the button refuses. Read from both sources, never copied into this test.
 """
@@ -18,7 +18,7 @@ from backend.api.routes.poradca import _instruction_target
 from backend.db.models.pipeline import BLOCK_REASON_VALUES, PipelineState
 
 ROOT = Path(__file__).resolve().parents[1]
-SCREEN_RULE = ROOT / "frontend" / "src" / "components" / "riadiace" / "blockRecovery.ts"
+SCREEN_RULE = ROOT / "frontend" / "src" / "components" / "controlCenter" / "blockRecovery.ts"
 
 
 def _screen_owners() -> dict[str, str | None]:

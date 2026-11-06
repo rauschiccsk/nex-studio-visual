@@ -10,7 +10,7 @@ vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (sel: (s: unknown) => unknown) =>
     sel({ selectedProject: { slug: "nex-inbox", name: "NEX Inbox" }, selectedVersion: null }),
 }));
-vi.mock("@/components/naklady/BillingTab", () => ({
+vi.mock("@/components/costs/BillingTab", () => ({
   default: ({ slug }: { slug: string }) => <div>súpisy projektu {slug}</div>,
 }));
 

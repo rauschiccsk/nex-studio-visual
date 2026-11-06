@@ -42,20 +42,20 @@ not "verdikt sa nepodarilo spracovať". Trace `_run_verifikacia_round` → `_set
 actually fires ahead of the Auditor-verdict-parse block). Test: a boot-FAIL result → a recorded
 `kind=verdict` FAIL message with the boot reason + state settled FAIL (not blocked-on-parse).
 
-## C — SchvalitBar shows the wrong copy at a COMPLETED build
+## C — ApproveBar shows the wrong copy at a COMPLETED build
 
 At `programovanie / awaiting_manazer` with ALL tasks done, the cockpit offers `schvalit` (correct — it
-advances programovanie → verifikacia). But `SchvalitBar.tsx` is hardcoded for the Návrh gate: label
+advances programovanie → verifikacia). But `ApproveBar.tsx` is hardcoded for the Návrh gate: label
 **"Schváliť plán"** (line ~95) + consequence *"Schválením potvrdíš návrh a plán; projekt sa posunie do
 stavby (Programovanie)"* (line ~58) — nonsense at a finished build. (Regression from the Bug-1 timeout fix
 that made `schvalit` appear here.)
 
-**Fix:** make SchvalitBar copy context-aware off the board's current stage:
+**Fix:** make ApproveBar copy context-aware off the board's current stage:
 - `current_stage === "navrh"` → keep today's copy ("Schváliť plán" / "…posunie do stavby (Programovanie)").
 - `current_stage === "programovanie"` (build done, schvalit offered) → label **"Prejsť na overenie"**,
   consequence *"Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Auditorom)."*
 The action stays `schvalit`; only the label + consequence + (optionally) the primary-button text change.
-Update/extend the SchvalitBar test for both stages. `frontend/src/components/riadiace/SchvalitBar.tsx`.
+Update/extend the ApproveBar test for both stages. `frontend/src/components/controlCenter/ApproveBar.tsx`.
 
 ## D1 — stop the AI embedding "EPIC N —" in epic/feat TITLES
 

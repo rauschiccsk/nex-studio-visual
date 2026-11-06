@@ -28,7 +28,7 @@ export function useBackendVersion(): string | null {
         if (zivy && d && typeof d.version === "string") setVerzia(d.version);
       })
       .catch(() => {
-        /* cesta nedostupná — panel zostane pri verzii frontendu, viď verziaDoPanela */
+        /* cesta nedostupná — panel zostane pri verzii frontendu, viď versionToPanel */
       });
     return () => {
       zivy = false;

@@ -11,8 +11,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import PlaneTicketFastFix from "@/components/planeTickets/PlaneTicketFastFix";
-import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
-import { unsavedWorkOf } from "@/components/riadiace/unsavedWork";
+import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
+import { unsavedWorkOf } from "@/components/controlCenter/unsavedWork";
 import { ApiError } from "@/services/api";
 import { startFastFixApi } from "@/services/api/pipeline";
 import type { PlaneTicket } from "@/services/api/planeTickets";

@@ -8,7 +8,7 @@ import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
 import { useBackendVersion } from "@/hooks/useBackendVersion";
 import { useCiMain } from "@/hooks/useCiMain";
-import { verziaDoPanela } from "@/lib/verziaDoPanela";
+import { versionToPanel } from "@/lib/versionToPanel";
 import type { UserRole } from "@/types/user";
 import { personName } from "@/utils/person";
 
@@ -139,7 +139,7 @@ export default function Sidebar() {
     <Brand
       initials="NSV"
       name="NEX Studio Visual"
-      version={verziaDoPanela(verziaChrbtice, import.meta.env.VITE_APP_VERSION)}
+      version={versionToPanel(verziaChrbtice, import.meta.env.VITE_APP_VERSION)}
     />
   );
 

@@ -49,7 +49,7 @@ class SilentSocket {
 }
 vi.stubGlobal("WebSocket", SilentSocket);
 
-import OpytajSaPoradcuBar from "@/components/riadiace/OpytajSaPoradcuBar";
+import AskPoradcaBar from "@/components/controlCenter/AskPoradcaBar";
 import PoradcaPage from "@/pages/PoradcaPage";
 
 const VERSION = "v1101";
@@ -89,7 +89,7 @@ function tree() {
         <Route
           path="/riadiace-centrum"
           element={
-            <OpytajSaPoradcuBar
+            <AskPoradcaBar
               versionId={VERSION}
               projectName="NEX Inbox"
               versionNumber="1.10.1"

@@ -8,8 +8,8 @@ import { useState } from "react";
 import { Loader2, X, Zap } from "lucide-react";
 
 import WorkKindChoice from "@/components/common/WorkKindChoice";
-import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
-import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/riadiace/unsavedWork";
+import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
+import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
 import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { startFastFixApi } from "@/services/api/pipeline";
 import type { PlaneTicket } from "@/services/api/planeTickets";

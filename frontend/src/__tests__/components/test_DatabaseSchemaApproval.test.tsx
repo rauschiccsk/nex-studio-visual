@@ -14,8 +14,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import SchvalitBar from "@/components/riadiace/SchvalitBar";
-import SchemaApprovalBar from "@/components/riadiace/SchemaApprovalBar";
+import ApproveBar from "@/components/controlCenter/ApproveBar";
+import SchemaApprovalBar from "@/components/controlCenter/SchemaApprovalBar";
 import { postPipelineActionApi, type DatabaseSchema, type PipelineBoard } from "@/services/api/pipeline";
 
 const { navigateMock, who } = vi.hoisted(() => ({ navigateMock: vi.fn(), who: { role: "ri" as string } }));
@@ -59,7 +59,7 @@ beforeEach(() => {
 
 describe("DEV-7 — the Návrh approval of a database change", () => {
   it("says the Návrh changes the database, how much, and opens the schema", () => {
-    render(<SchvalitBar board={board(["schvalit", "uprav"], "navrh", SCHEMA)} versionId="v-1" onBoard={vi.fn()} />);
+    render(<ApproveBar board={board(["schvalit", "uprav"], "navrh", SCHEMA)} versionId="v-1" onBoard={vi.fn()} />);
 
     expect(screen.getByText(new RegExp(`Návrh mení štruktúru databázy\\. ${CHANGE}`))).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Prezrieť štruktúru databázy" }));
@@ -70,7 +70,7 @@ describe("DEV-7 — the Návrh approval of a database change", () => {
 
   it("is greyed out with the reason for anyone but Ri — the rework stays open", () => {
     who.role = "ha";
-    render(<SchvalitBar board={board(["schvalit", "uprav"], "navrh", SCHEMA)} versionId="v-1" onBoard={vi.fn()} />);
+    render(<ApproveBar board={board(["schvalit", "uprav"], "navrh", SCHEMA)} versionId="v-1" onBoard={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeDisabled();
     expect(screen.getByText(ONLY_RI)).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("DEV-7 — the Návrh approval of a database change", () => {
 
   it("a first schema says it is the first one", () => {
     render(
-      <SchvalitBar
+      <ApproveBar
         board={board(["schvalit"], "navrh", { ...SCHEMA, kb_exists: false, added_lines: 6, removed_lines: 0 })}
         versionId="v-1"
         onBoard={vi.fn()}
@@ -92,7 +92,7 @@ describe("DEV-7 — the Návrh approval of a database change", () => {
   it("a Návrh without a database change is approved by anyone, as before", () => {
     who.role = "ha";
     render(
-      <SchvalitBar board={board(["schvalit"], "navrh", { ...SCHEMA, changes: false })} versionId="v-1" onBoard={vi.fn()} />,
+      <ApproveBar board={board(["schvalit"], "navrh", { ...SCHEMA, changes: false })} versionId="v-1" onBoard={vi.fn()} />,
     );
 
     expect(screen.getByRole("button", { name: /Schváliť plán/ })).toBeEnabled();

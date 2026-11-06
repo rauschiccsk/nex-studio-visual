@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { DirtyTreeGuard } from "../components/riadiace/DirtyTreeGuard";
+import { DirtyTreeGuard } from "../components/controlCenter/DirtyTreeGuard";
 import type { GitStatus } from "@/services/api/projects";
 
 const dirty: GitStatus = {

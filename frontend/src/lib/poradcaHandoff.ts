@@ -13,7 +13,7 @@
 // Text already in the receiving box is never overwritten — the instruction goes under it. The box then says
 // where the text came from: text that appears by itself must not look like the Manažér's own earlier draft.
 
-import type { InputOwner } from "@/components/riadiace/blockRecovery";
+import type { InputOwner } from "@/components/controlCenter/blockRecovery";
 import { draftKey } from "@/hooks/useDraft";
 import type { PoradcaVersionInfo } from "@/types/poradca";
 

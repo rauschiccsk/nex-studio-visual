@@ -22,7 +22,7 @@ vi.mock("@/services/api/pipeline", async (orig) => ({
   postPipelineActionApi,
 }));
 
-import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
+import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 function board(blockReason: string): PipelineBoard {

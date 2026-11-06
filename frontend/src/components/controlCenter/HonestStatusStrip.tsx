@@ -1,0 +1,199 @@
+// HonestStatusStrip — the honest run-status strip pinned above the ConversationThread (spine STEP 1). Reuses
+// the proven headerStatus() derivation from the retired AI Agent tab (CUT) + the
+// reconnecting/error signals from usePipelineWs. The tone comes from the unified cockpit palette (labels.ts,
+// CR-NS-028) — a single source of truth, so "Pozastavené" reads amber and never blue.
+//
+// INVARIANT (honest, derived, never guessed): the text is derived purely from the live pipeline status. A
+// paused / token-stopped run reads "Pozastavené", NOT "working".
+
+import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+
+import type { CiGate, CiStatus, PipelineState } from "../../services/api/pipeline";
+import { elapsedSince } from "../../utils/elapsed";
+import {
+  BLOCK_REASON_LABELS,
+  ciDeployBlock,
+  PHASE_LABELS,
+  PIPELINE_STATUS_TONE,
+  TONE_BANNER,
+  TONE_DOT,
+  verificationDrifted,
+  verificationUnconfirmed,
+} from "../cockpit/labels";
+import type { BuildPhase, StatusTone } from "../cockpit/labels";
+
+
+// Honest status text (salvaged verbatim from the retired AI Agent tab's headerStatus, design §4.4.1):
+// Voľný / Pracuje na <projekt> v<ver> — fáza X / Čaká na súhlas / Pozastavené.
+function statusText(
+  state: PipelineState | null,
+  projectName: string,
+  versionNumber: string,
+  ciGate?: CiGate | null,
+): string {
+  // Hotovo: ANY signed-off build reads "Hotovo — pripravené na nasadenie" (green via the existing done→green
+  // tone). Mode-agnostic — a completed GUIDED (phase-automaton) build must show "Hotovo" too, not fall through
+  // to "Voľný" as it did when this was gated on mode==="conversation". MUST precede the bare-"Voľný" branch
+  // below, else it is shadowed.
+  if (state && state.status === "done") {
+    return "Hotovo — pripravené na nasadenie";
+  }
+  if (!state) return "Voľný";
+  // A framework_issue block means the bug is in NEX Studio itself — our technical team resolves it. Plain
+  // Slovak, no internal "Dedo"/"framework" jargon. The Manažér's one concrete move is "Nahlásiť znova"
+  // (ReportAgainBar). MUST precede the generic blocked branch below.
+  if (state.status === "blocked" && state.block_reason === "framework_issue") {
+    return "NEX Studio má chybu — rieši ju náš technický tím";
+  }
+  // A blocked state names its PRECISE reason (audit Theme 1) — "Systémová chyba" / "Agent sa pýta" / "Treba
+  // tvoje rozhodnutie" — never the generic "Čaká na súhlas" that collapsed five distinct situations into one.
+  // (framework_issue is handled above; decision_needed keeps its own accurate label.)
+  if (state.status === "blocked") {
+    return (state.block_reason && BLOCK_REASON_LABELS[state.block_reason]) || "Čaká na súhlas";
+  }
+  // ICCINT-13: a build our technical team just released from a NEX Studio bug is waiting for the Manažér —
+  // but "Čaká na súhlas" would be the wrong sentence: nothing is being approved, and the reader has been
+  // staring at "NEX Studio má chybu" until a moment ago. Say what changed. MUST precede the generic
+  // awaiting_manazer branch below.
+  if (state.status === "awaiting_manazer" && state.resume_after_framework_fix) {
+    return "Chyba NEX Studia opravená — čaká na tvoje „Pokračovať“";
+  }
+  // DEV-308: a version held by its checks on GitHub (after Programovanie DEV-261, after Verifikácia DEV-201) waits for
+  // nobody's approval — nothing can be approved until they finish, and the cockpit goes on by itself. NEX Knowledge
+  // 1.0.1, 05.11.2026: „Čaká na súhlas“ here, „… Kokpit to dorieši sám.“ below it. MUST precede the generic branch.
+  if (state.status === "awaiting_manazer" && ciGate?.state === "pending") {
+    return "Čaká na kontroly na GitHube — kokpit pokračuje sám";
+  }
+  if (state.status === "awaiting_manazer" && ciGate?.state === "red") {
+    return "Kontroly na GitHube zlyhali — vráť verziu agentovi na opravu";
+  }
+  if (state.status === "awaiting_manazer") return "Čaká na súhlas";
+  if (state.status === "paused") return "Pozastavené";
+  // ICCINT-163: pauza je vyžiadaná, ale AI Agent ešte dorába úlohu — slučka zastane až na jej konci. Pruh tu
+  // hlásil „Pozastavené“ a Director podľa toho poslal pokyn, ktorý sa stratil. Kým sa pracuje, povedz to.
+  if (state.status === "agent_working" && state.pause_reason === "manazer") {
+    return "Pozastavujem — AI Agent dokončuje rozrobenú úlohu";
+  }
+  // agent_working — name the project, version, and live phase. version_number is stored without a leading
+  // "v" (e.g. "1.0.0"), so prefix it here.
+  const phase = PHASE_LABELS[state.current_stage as BuildPhase] ?? state.current_stage;
+  const ver = versionNumber ? ` v${versionNumber}` : "";
+  return `Pracuje na ${projectName}${ver} — fáza ${phase}`;
+}
+
+// Tone from the unified cockpit palette (labels.ts). Idle / done / no state → neutral.
+function statusTone(state: PipelineState | null): StatusTone {
+  if (!state) return "neutral";
+  return PIPELINE_STATUS_TONE[state.status] ?? "neutral";
+}
+
+interface Props {
+  state: PipelineState | null;
+  projectName: string;
+  versionNumber: string;
+  reconnecting: boolean;
+  error: string | null;
+  /** Live verification provenance from the board (audit honest #6). When a `done` version's provenance is
+   *  unconfirmable (unbound / repo_unreadable / hotovo_unbound) the "Hotovo" badge reads AMBER, not green. */
+  verifiedProvenance?: string | null;
+  /** DEV-51: the build's CI — a `done` version with red (or still running) checks is not "pripravené na
+   *  nasadenie", and the deploy screen refuses it; the strip must not say otherwise. */
+  ci?: CiStatus | null;
+  /** DEV-308: what holds the version's next step — its checks on GitHub still running (`pending`) or red. */
+  ciGate?: CiGate | null;
+}
+
+function HonestStatusStrip({
+  state,
+  projectName,
+  versionNumber,
+  reconnecting,
+  error,
+  verifiedProvenance,
+  ci,
+  ciGate,
+}: Props) {
+  // Honest #6: a settled `done` version whose verification could NOT be confirmed must read amber, never a
+  // green "overená/Hotovo". Override the derived text + tone for exactly that case.
+  const unconfirmed = state?.status === "done" && verificationUnconfirmed(verifiedProvenance);
+  // v4.0.56: the same applies — MORE strongly — when the code moved on after the sign-off. Here we do not
+  // merely fail to confirm the check, we KNOW it no longer describes the current code, so a green "pripravené
+  // na nasadenie" is an outright false statement (and the deploy screen refuses that version anyway).
+  const drifted = state?.status === "done" && verificationDrifted(verifiedProvenance);
+  // DEV-51: NEX Inbox 1.7.0, 10.10.2026 — "Zostavenie zlyhalo" above, "Hotovo — pripravené na nasadenie" here.
+  const ciBlock = state?.status === "done" ? ciDeployBlock(ci) : null;
+  const text = drifted
+    ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
+    : ciBlock === "red"
+      ? "Hotovo — kontroly projektu zlyhali, nasadenie je zastavené"
+      : ciBlock === "running"
+        ? "Hotovo — kontroly projektu ešte bežia, nasadenie počká"
+        : unconfirmed
+          ? "Hotovo — overenie sa nedá potvrdiť"
+          : statusText(state, projectName, versionNumber, ciGate);
+  const tone: StatusTone =
+    (ciBlock === "red" && !drifted) || (state?.status === "awaiting_manazer" && ciGate?.state === "red")
+      ? "red"
+      : unconfirmed || drifted || ciBlock
+        ? "amber"
+        : statusTone(state);
+  const working = state?.status === "agent_working";
+  // Hodiny, ktoré tikajú len počas práce. Bez nich by „pracuje sa 2 min“ zamrzlo na dvoch minútach a
+  // Manažér by z toho čítal opak toho, čo to má povedať.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!working) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [working]);
+  // Audit Theme 1: surface the engine's ready-made "čo ďalej" guidance (state.next_action) — previously
+  // rendered NOWHERE. Shown for the settled awaiting_manazer wait (blocked states carry it in their own bar:
+  // BlockRecoveryBar / Decision Cards / the Dedo banner), so it never double-renders.
+  // ICCINT-75: ukazuj tú vetu aj POČAS práce, nielen keď sa čaká na súhlas. Dovtedy vedel Manažér počas
+  // ťahu iba to, v ktorej fáze je — nie čo sa práve robí. Na hranici fázy to znamenalo tri minúty ticha
+  // a vetu „nič sa nedeje, nefunguje to“, hoci agent celý čas pracoval.
+  const guidance =
+    state?.status === "awaiting_manazer" || state?.status === "agent_working"
+      ? (state.next_action || "").trim()
+      : "";
+  // …a odkedy. „Pracuje sa“ bez toho, odkedy, je polovičná odpoveď: inak sa nedá rozoznať ťah spustený
+  // pred pol minútou od ťahu, ktorý visí tretiu hodinu.
+  const since = working ? elapsedSince(state?.working_since ?? null, now) : "";
+
+  return (
+    <div className="flex flex-shrink-0 flex-col border-b border-[var(--color-border-default)] bg-[var(--color-surface)]">
+      <div className="flex items-center gap-2 px-4 py-2">
+        <span
+          className={`flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${TONE_BANNER[tone]}`}
+        >
+          <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${TONE_DOT[tone]} ${working ? "animate-pulse" : ""}`} />
+          <span className="truncate">{text}</span>
+        </span>
+      </div>
+
+      {(guidance || since) && (
+        <div className="flex items-start gap-1.5 border-t border-[var(--color-border-default)] px-4 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <span className="truncate">{guidance}</span>
+          {since && <span className="flex-shrink-0 whitespace-nowrap">· {since}</span>}
+        </div>
+      )}
+
+      {(reconnecting || (error && !reconnecting)) && (
+        <div
+          className={`flex items-center gap-2 border-t px-4 py-1.5 text-[11px] ${
+            reconnecting
+              ? "border-[var(--color-state-warning-bg)] bg-[var(--color-state-warning-bg)] text-[var(--color-state-warning-fg)]"
+              : "border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] text-[var(--color-state-error-fg)]"
+          }`}
+        >
+          {reconnecting && <Loader2 className="h-3 w-3 animate-spin" />}
+          {reconnecting ? "Spojenie stratené — obnovujem…" : error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default HonestStatusStrip;

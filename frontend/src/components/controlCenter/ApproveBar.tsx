@@ -1,0 +1,177 @@
+// ApproveBar — the ``schvalit`` schvaľovacie-body gate (regression fix schvalit-approval-bar.md). A
+// near-mirror of SpecApprovalBar for the OTHER verb the backend offers. The SAME ``schvalit`` is offered at
+// TWO gates, so the copy is CONTEXT-AWARE off the board's current stage (release-smoke-boot-and-batch-fixes.md
+// C): at ``navrh`` it's "Schváliť plán" (Návrh → Programovanie); at ``programovanie`` (build done) it's
+// "Prejsť na overenie" (Programovanie → Verifikácia).
+//
+// Honest-by-construction: renders NOTHING unless the backend currently OFFERS ``schvalit`` in
+// ``board.available_actions``. So SpecApprovalBar (``approve_spec``) and this bar (``schvalit``) are mutually
+// exclusive by construction — at most one shows.
+//
+// Primary → ``schvalit`` ADVANCES the current phase. Secondary "Upraviť" → ``uprav`` (same available_actions
+// set) sends the comment back as the REWORK instruction for the phase. The optional comment threads into
+// ``payload.comment`` for either action.
+
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Database, FileText } from "lucide-react";
+
+import { postPipelineActionApi, type PipelineBoard, type PipelineActionName } from "@/services/api/pipeline";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+import ErrorNote from "@/components/common/ErrorNote";
+import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore";
+import { useAuthStore } from "@/store/authStore";
+import { schemaChangeSentence, schemaDocLink, SCHEMA_APPROVER_ONLY } from "./databaseSchema";
+import { approveBarCarriesRevise } from "./reviseControl";
+import { approveLabel } from "./approveLabel";
+
+const NOTHING_CHECKED: string[] = [];
+
+interface Props {
+  board: PipelineBoard | null;
+  versionId: string;
+  /** Replace the live board with the fresh one the action returns (setBoard from usePipelineWs). */
+  onBoard: (board: PipelineBoard) => void;
+  /** DEV-127: the live preview of the Vizuál step is not running — a vizuál is approved by looking at it. */
+  previewDown?: boolean;
+}
+
+/** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run. */
+const VIZUAL_PREVIEW_DOWN =
+  "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ.";
+
+export default function ApproveBar({ board, versionId, onBoard, previewDown = false }: Props) {
+  const navigate = useNavigate();
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<HumanError | null>(null);
+  const checked = useVizualChecksStore((s) => s.checked[versionId] ?? NOTHING_CHECKED);
+  const role = useAuthStore((s) => s.user?.role);
+
+  // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
+  if (!board?.available_actions?.includes("schvalit")) return null;
+
+  // Context-aware copy: the button names what the SAME `schvalit` verb does at this gate (approveLabel).
+  const stage = board.state?.current_stage;
+  // At the Vizuál gate the change-requests flow through the always-open composer (typed → the AI applies them
+  // live, HMR), so this bar's own comment box + "Upraviť" are redundant + confusing there ("2 editory",
+  // Director 2026-07-13). Render Vizuál as a pure approve button; keep the comment/rework input at the other
+  // gates (Návrh / Programovanie / Verifikácia) where there is no live composer-apply loop.
+  const isVizual = stage === "vizual";
+  const stepLabel = approveLabel(stage);
+  const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
+  // DEV-7: a Návrh that changes the database is approved by Ri alone, and approving it writes the Knowledge Base.
+  const schema = stage === "navrh" && board.database_schema?.changes ? board.database_schema : null;
+  const mayApprove = !schema || (!!role && role === schema.approver_role);
+  // DEV-36: how much of what the Vizuál lists to check he has ticked. Only items that still exist count (a
+  // stale tick never inflates it), and it never blocks the approval — he decides.
+  const checkKeys = isVizual
+    ? (board.vizual_checklists ?? []).flatMap((c) => c.items.map((_, i) => vizualCheckKey(c.seq ?? -1, i)))
+    : [];
+  const checkedCount = checkKeys.filter((k) => checked.includes(k)).length;
+  const consequence =
+    stage === "verifikacia"
+      ? "Potvrdíš overenú verziu (Audítor ju overil); verzia sa označí ako Hotovo a uzavrie."
+      : stage === "programovanie"
+        ? "Potvrdíš dokončenú stavbu; projekt sa posunie na Verifikáciu (overenie Audítorom)."
+        : stage === "vizual"
+          ? "Schválením potvrdíš vizuál; projekt sa posunie do stavby (Programovanie)."
+          : "Schválením potvrdíš návrh a plán; projekt sa posunie do stavby (Programovanie).";
+
+  async function submit(action: PipelineActionName, failMsg: string) {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const trimmed = comment.trim();
+      const nextBoard = await postPipelineActionApi(versionId, {
+        action,
+        payload: trimmed ? { comment: trimmed } : undefined,
+      });
+      onBoard(nextBoard);
+      setComment("");
+    } catch (err: unknown) {
+      setError(humanizeApiError(err, failMsg));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-[var(--color-text-muted)]">{consequence}</p>
+        <button
+          type="button"
+          onClick={() => navigate("/specifikacia")}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          Prezrieť plán / špecifikáciu
+        </button>
+      </div>
+
+      {schema && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+          <Database className="h-3.5 w-3.5 flex-shrink-0 text-[var(--color-accent-primary)]" aria-hidden="true" />
+          <span className="flex-1">
+            Návrh mení štruktúru databázy. {schemaChangeSentence(schema)} Schválením Návrhu sa schváli aj ona a
+            kokpit ju zapíše do Znalostnej bázy.
+          </span>
+          <button
+            type="button"
+            onClick={() => navigate(schemaDocLink(schema))}
+            className="shrink-0 rounded-lg border border-[var(--color-border-default)] px-3 py-1 font-medium transition-colors hover:bg-[var(--color-surface-hover)]"
+          >
+            Prezrieť štruktúru databázy
+          </button>
+        </div>
+      )}
+      {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}
+      {isVizual && previewDown && <p className="text-xs text-[var(--color-text-muted)]">{VIZUAL_PREVIEW_DOWN}</p>}
+
+      <div className="flex items-center gap-2">
+        {checkKeys.length > 0 && (
+          <span className="ml-auto text-xs text-[var(--color-text-secondary)]">
+            Skontrolované {checkedCount} z {checkKeys.length}
+          </span>
+        )}
+        {/* Vizuál: no comment box + no "Upraviť" — the composer below owns change-requests (live HMR). DEV-297: the
+            same rule tells the page that the conversation box need not carry „Uprav“ while this bar does. */}
+        {approveBarCarriesRevise(board) && (
+          <>
+            <input
+              lang="sk"
+              spellCheck={true}
+              type="text"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Komentár k schváleniu / pokyn na úpravu (voliteľné)"
+              disabled={submitting}
+              className="flex-1 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => submit("uprav", "Úprava zlyhala")}
+              disabled={submitting}
+              className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? "Pracujem…" : "Upraviť"}
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => submit("schvalit", "Schválenie zlyhalo")}
+          disabled={submitting || !mayApprove || (isVizual && previewDown)}
+          className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+            isVizual && checkKeys.length === 0 ? "ml-auto" : ""
+          }`}
+        >
+          {submitting ? approveBusyLabel : stepLabel}
+        </button>
+      </div>
+
+      <ErrorNote error={error} />
+    </div>
+  );
+}

@@ -11,7 +11,7 @@ Repro: the Programovanie build agent timed out mid-task (by design → settles t
 "review & continue"). But `determine_available_actions` (orchestrator.py ~561-563) ALWAYS adds `schvalit`
 at a settled `programovanie` WITHOUT checking whether tasks remain — and `pokracovat` is offered ONLY when
 `status=="paused"` (~517). So mid-build (tasks remaining) the cockpit offers `schvalit` (which ADVANCES
-programovanie → verifikacia, FINISHING a 1/33-built version — a footgun, made worse by the new SchvalitBar
+programovanie → verifikacia, FINISHING a 1/33-built version — a footgun, made worse by the new ApproveBar
 button showing there) and NO clean "Pokračovať v stavbe".
 
 Fix — at a settled `programovanie`, gate `schvalit` vs `pokracovat` on **tasks-remaining**:
@@ -26,8 +26,8 @@ Fix — at a settled `programovanie`, gate `schvalit` vs `pokracovat` on **tasks
 - Ensure `apply_action("pokracovat")` RESUMES the per-task build loop (`_run_build_round`) from this
   `awaiting_manazer`-with-tasks-remaining state, not only from `paused` — relax its guard if it currently
   requires `paused`. (pokracovat already re-dispatches `_run_build_round` via the directive path ~4563.)
-- FE is FREE: `PlanUlohRail` already renders "Pokračovať v stavbe" on `pokracovat` (~577) and the
-  SchvalitBar footgun disappears (schvalit no longer offered mid-build).
+- FE is FREE: `TaskPlanRail` already renders "Pokračovať v stavbe" on `pokracovat` (~577) and the
+  ApproveBar footgun disappears (schvalit no longer offered mid-build).
 
 ## Bug 2 — live-activity feed still truncates long lines
 

@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { NexsharedUpgradePrompt } from "../components/riadiace/NexsharedUpgradePrompt";
+import { NexsharedUpgradePrompt } from "../components/controlCenter/NexsharedUpgradePrompt";
 import type { NexsharedStatus } from "@/services/api/projects";
 
 const status: NexsharedStatus = {

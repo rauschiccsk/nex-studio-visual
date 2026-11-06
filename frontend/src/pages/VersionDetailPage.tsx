@@ -7,8 +7,8 @@ import { postPipelineActionApi } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
-import ZadanieConflictPanel from "@/components/version/ZadanieConflictPanel";
-import { appendZadanie, zadanieClashOf, type ZadanieClash } from "@/components/version/zadanieClash";
+import BriefConflictPanel from "@/components/version/BriefConflictPanel";
+import { appendBrief, briefClashOf, type BriefClash } from "@/components/version/briefClash";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import { useActiveContextSync } from "@/hooks/useActiveContextSync";
@@ -51,7 +51,7 @@ export default function VersionDetailPage() {
   const [starting, setStarting] = useState(false);
   const [zadanieError, setZadanieError] = useState<HumanError | null>(null);
   // DEV-40: the disk holds a different Zadanie than the editor started from — shown with a choice, not an error.
-  const [zadanieClash, setZadanieClash] = useState<ZadanieClash | null>(null);
+  const [briefClash, setZadanieClash] = useState<BriefClash | null>(null);
   // The THIRD Zadanie state: not "empty", not "written" — UNKNOWN, because the read itself failed. Set → the
   // editor is locked and Uložiť/Spustiť are closed, so an empty editor can never truncate the saved file.
   const [zadanieUnreadable, setZadanieUnreadable] = useState<HumanError | null>(null);
@@ -125,7 +125,7 @@ export default function VersionDetailPage() {
       setZadanieClash(null);
       zadanieDraft.clear();
     } catch (e: unknown) {
-      const clash = zadanieClashOf(e);
+      const clash = briefClashOf(e);
       if (clash) setZadanieClash(clash);
       else setZadanieError(humanizeApiError(e, "Uloženie Zadania zlyhalo"));
     } finally {
@@ -293,17 +293,17 @@ export default function VersionDetailPage() {
                 </>
               )}
               <ErrorNote error={zadanieError} className="mt-2" />
-              {zadanieClash && (
-                <ZadanieConflictPanel
-                  clash={zadanieClash}
+              {briefClash && (
+                <BriefConflictPanel
+                  clash={briefClash}
                   busy={savingZadanie}
                   onReplace={() => saveZadanie(zadanie.trim(), { replaceExisting: true })}
                   onAppend={() =>
-                    saveZadanie(appendZadanie(zadanieClash.existing, zadanie), { basedOn: zadanieClash.existing })
+                    saveZadanie(appendBrief(briefClash.existing, zadanie), { basedOn: briefClash.existing })
                   }
                   onTakeOver={() => {
-                    setZadanie(zadanieClash.existing);
-                    setZadanieNaDisku(zadanieClash.existing);
+                    setZadanie(briefClash.existing);
+                    setZadanieNaDisku(briefClash.existing);
                     setZadanieClash(null);
                     zadanieDraft.clear();
                   }}

@@ -160,7 +160,7 @@ describe("PoradcaPage", () => {
   });
 
   // DEV-22: the instruction is handed off as PENDING — which box of Riadiace centrum takes it is decided there
-  // (test_PoradcaHandoff_RiadiaceCentrum walks that path through the real page). Here: handed off, not sent,
+  // (test_PoradcaHandoff_ControlCenter walks that path through the real page). Here: handed off, not sent,
   // and the Manažér's own draft is left alone.
   it("hands the instruction off to Riadiace centrum — never sends it", async () => {
     window.localStorage.setItem("nex.draft.rozhovor.v13", "moja rozpísaná veta");

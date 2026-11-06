@@ -17,8 +17,8 @@ vi.mock("react-router-dom", async (importOriginal) => {
 });
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 
-import ConversationThread from "@/components/riadiace/ConversationThread";
-import SchvalitBar from "@/components/riadiace/SchvalitBar";
+import ConversationThread from "@/components/controlCenter/ConversationThread";
+import ApproveBar from "@/components/controlCenter/ApproveBar";
 import { useVizualChecksStore } from "@/store/vizualChecksStore";
 import type { PipelineBoard, PipelineMessage, VizualChecklist } from "@/services/api/pipeline";
 
@@ -91,7 +91,7 @@ function renderCockpit(stage = "vizual") {
   return render(
     <>
       <ConversationThread versionId="v-1" messages={[LINK_MSG, CHANGE_MSG]} activity={[]} working={false} />
-      <SchvalitBar board={board(stage)} versionId="v-1" onBoard={vi.fn()} />
+      <ApproveBar board={board(stage)} versionId="v-1" onBoard={vi.fn()} />
     </>,
   );
 }

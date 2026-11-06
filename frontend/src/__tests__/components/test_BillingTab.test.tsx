@@ -10,13 +10,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import BillingTab from "@/components/naklady/BillingTab";
+import BillingTab from "@/components/costs/BillingTab";
 import type { BillingOverview, BillingRow } from "@/services/api/deliveryStatements";
 
 const { billingMock, panelMock } = vi.hoisted(() => ({ billingMock: vi.fn(), panelMock: vi.fn() }));
 
 vi.mock("@/services/api/deliveryStatements", () => ({ getProjectBilling: billingMock }));
-vi.mock("@/components/naklady/DeliveryStatementPanel", () => ({
+vi.mock("@/components/costs/DeliveryStatementPanel", () => ({
   default: (props: { versionId: string; onChange?: () => void }) => {
     panelMock(props);
     return (

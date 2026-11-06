@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
+import DedoProposalBar from "@/components/controlCenter/DedoProposalBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 vi.mock("@/services/api/pipeline", () => ({

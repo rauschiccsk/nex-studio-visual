@@ -63,8 +63,8 @@ export interface PipelineState {
   mode?: string | null;
   // ICCINT-13: our technical team has fixed the NEX Studio bug this build escalated, and the build is waiting
   // for the Manažér to start the next turn. `true` ⇒ the board offers exactly ONE action (`pokracovat`) and
-  // PokracovatPoOpraveBar owns it — the words matter (a build released after a repair is not a build the
-  // manager paused, and the PlanUlohRail resume rung would say the wrong thing). Absent on an older board.
+  // ContinueAfterFixBar owns it — the words matter (a build released after a repair is not a build the
+  // manager paused, and the TaskPlanRail resume rung would say the wrong thing). Absent on an older board.
   resume_after_framework_fix?: boolean;
   /** DEV-204 — a restart of the cockpit cut the build off; „Pokračovať“ runs the interrupted phase again. */
   resume_after_restart?: boolean;

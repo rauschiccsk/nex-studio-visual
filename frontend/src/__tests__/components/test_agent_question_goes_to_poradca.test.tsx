@@ -27,7 +27,7 @@ vi.mock("@/services/api/poradca", () => ({
   saveRequestToBacklogApi: vi.fn(),
 }));
 
-import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
+import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import { takeHandoff } from "@/lib/poradcaHandoff";
 import { reviewQuestion, takeReview } from "@/lib/poradcaReview";

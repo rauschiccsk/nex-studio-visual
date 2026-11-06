@@ -52,7 +52,7 @@ class SilentSocket {
 }
 vi.stubGlobal("WebSocket", SilentSocket);
 
-import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
 import { handOffReview } from "@/lib/poradcaReview";
 import PoradcaPage from "@/pages/PoradcaPage";
 import type { PipelineBoard } from "@/services/api/pipeline";

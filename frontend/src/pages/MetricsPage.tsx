@@ -18,7 +18,7 @@ import { PHASE_LABELS, type BuildPhase } from "@/components/cockpit/labels";
 import type { AgentModel } from "@/types/user_agent_setting";
 import { familyLabel, modelDisplayName } from "@/utils/modelLabel";
 import type { CostRow, CostTotals, ManagerOverhead, PriceList, ProjectCosts } from "@/types/metrics";
-import DeliveryStatementPanel from "@/components/naklady/DeliveryStatementPanel";
+import DeliveryStatementPanel from "@/components/costs/DeliveryStatementPanel";
 
 type View = "version" | "cumulative";
 

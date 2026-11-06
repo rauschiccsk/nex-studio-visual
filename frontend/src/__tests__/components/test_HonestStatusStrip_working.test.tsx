@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
+import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
 import { elapsedSince } from "@/utils/elapsed";
 import type { PipelineState } from "@/services/api/pipeline";
 

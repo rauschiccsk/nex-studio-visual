@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
+import ReverifyNoFixBar from "@/components/controlCenter/ReverifyNoFixBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));

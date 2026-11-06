@@ -12,7 +12,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 // Every card leads to Poradca (DEV-106) — it lives in the app's router.

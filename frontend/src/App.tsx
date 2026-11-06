@@ -26,11 +26,11 @@ import MetricsPage from "./pages/MetricsPage";
 import BillingPage from "./pages/BillingPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import UpdatesPage from "./pages/UpdatesPage";
-import RiadiaceCentrumPage from "./pages/RiadiaceCentrumPage";
+import ControlCenterPage from "./pages/ControlCenterPage";
 import PoradcaPage from "./pages/PoradcaPage";
 import IdeasPage from "./pages/IdeasPage";
-import SpecifikaciaPage from "./pages/SpecifikaciaPage";
-import RepozitarPage from "./pages/RepozitarPage";
+import SpecificationPage from "./pages/SpecificationPage";
+import RepositoryPage from "./pages/RepositoryPage";
 import NsCodePage from "./pages/NsCodePage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
@@ -99,11 +99,11 @@ function App() {
                 survive; /cockpit + /coordinator keep their existing hop (→ /vyvoj / → /ai-agent,
                 which redirect onward to /riadiace-centrum). Špecifikácia is the read-only spec
                 shell (real .md wired in a later step). */}
-            <Route path="riadiace-centrum" element={<RiadiaceCentrumPage />} />
+            <Route path="riadiace-centrum" element={<ControlCenterPage />} />
             {/* ICCINT-167: Poradca — chats with a read-only agent; beside the build, above the pinned project */}
             <Route path="poradca" element={<PoradcaPage />} />
-            <Route path="specifikacia" element={<SpecifikaciaPage />} />
-            <Route path="repozitar" element={<RepozitarPage />} />
+            <Route path="specifikacia" element={<SpecificationPage />} />
+            <Route path="repozitar" element={<RepositoryPage />} />
             <Route path="ns-code" element={<NsCodePage />} />
             <Route path="ai-agent" element={<Navigate to="/riadiace-centrum" replace />} />
             <Route path="coordinator" element={<Navigate to="/ai-agent" replace />} />

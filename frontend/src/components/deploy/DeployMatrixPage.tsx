@@ -30,7 +30,7 @@ import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } f
 import { acceptanceTesting, combineProgress } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
 import { fmtDeployTime, fmtVer } from "./version";
-import { popisPriebehu } from "./popisPriebehu";
+import { progressDescription } from "./progressDescription";
 
 /**
  * Shared version × customer matrix page for the UAT and PROD tabs (CR-V2-027,
@@ -625,7 +625,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           role="status"
                           className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary-600 dark:text-primary-400"
                         >
-                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadenie beží: {popisPriebehu(progress)}
+                          <Loader2 className="h-3 w-3 animate-spin" /> Nasadenie beží: {progressDescription(progress)}
                         </div>
                       )}
                       {lastDeployAt && (

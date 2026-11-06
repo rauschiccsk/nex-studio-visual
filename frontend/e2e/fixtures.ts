@@ -259,7 +259,7 @@ const STATE = PIPELINE.state!;
 export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
   {
     name: "in the visual stage",
-    // DEV-120: the Vizuál page is gone — the live preview opens from the Riadiace centrum (ZivyNahladBar).
+    // DEV-120: the Vizuál page is gone — the live preview opens from the Riadiace centrum (LivePreviewBar).
     pages: ["/riadiace-centrum"],
     overrides: [
       // DEV-127: the preview of the visual stage is measured dead — the longest form of the strip (reason + button).

@@ -20,7 +20,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import DedoProposalBar from "@/components/riadiace/DedoProposalBar";
+import DedoProposalBar from "@/components/controlCenter/DedoProposalBar";
 import { sendDedoProposalApi, rejectDedoProposalApi, getPipelineBoardApi } from "@/services/api/pipeline";
 import type { PipelineBoard } from "@/services/api/pipeline";
 import { ApiError } from "@/services/api";

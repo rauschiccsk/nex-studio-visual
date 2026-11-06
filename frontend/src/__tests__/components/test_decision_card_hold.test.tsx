@@ -14,7 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 const api = vi.hoisted(() => ({ postPipelineActionApi: vi.fn() }));
 vi.mock("@/services/api/pipeline", () => api);
 
-import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 const VERSION = "v180";

@@ -33,7 +33,7 @@ import {
 } from "@/services/api/deploy";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-import { popisPriebehu } from "@/components/deploy/popisPriebehu";
+import { progressDescription } from "@/components/deploy/progressDescription";
 
 interface Props {
   customerId: string;
@@ -262,7 +262,7 @@ export default function AdoptInstanceDialog({
               }
               className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {busy ? popisPriebehu(priebeh) : `Prevziať a nasadiť ${versionNumber}`}
+              {busy ? progressDescription(priebeh) : `Prevziať a nasadiť ${versionNumber}`}
             </button>
           )}
         </div>

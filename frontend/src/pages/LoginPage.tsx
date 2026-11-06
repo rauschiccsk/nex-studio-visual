@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { LoginForm, type LoginCreds } from "nex-shared";
 import { useAuthStore } from "@/store/authStore";
 import { useBackendVersion } from "@/hooks/useBackendVersion";
-import { verziaDoPanela } from "@/lib/verziaDoPanela";
+import { versionToPanel } from "@/lib/versionToPanel";
 
 export default function LoginPage() {
   const [error, setError] = useState("");
@@ -67,7 +67,7 @@ export default function LoginPage() {
             číslo vpečené do frontendu ako verziu celej aplikácie — a práve na nej ho vidí každý,
             kto ešte nie je vnútri. */}
         <p className="mt-4 text-center text-[11px] text-[var(--color-text-muted)]">
-          NEX Studio {verziaDoPanela(verziaBackendu, import.meta.env.VITE_APP_VERSION)} · ICC
+          NEX Studio {versionToPanel(verziaBackendu, import.meta.env.VITE_APP_VERSION)} · ICC
         </p>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import "@testing-library/jest-dom/vitest";
 import { ApiError } from "nex-shared";
 
-import CiRunnerPanel, { STARTING_POLL_MS } from "@/components/repozitar/CiRunnerPanel";
+import CiRunnerPanel, { STARTING_POLL_MS } from "@/components/repository/CiRunnerPanel";
 import { getCiRunner, startCiRunner, type CiRunner } from "@/services/api/ciRunner";
 
 vi.mock("@/services/api/ciRunner", () => ({ getCiRunner: vi.fn(), startCiRunner: vi.fn() }));

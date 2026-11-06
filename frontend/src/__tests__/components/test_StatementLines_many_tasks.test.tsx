@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import StatementLines from "@/components/naklady/StatementLines";
+import StatementLines from "@/components/costs/StatementLines";
 import type { StatementLine } from "@/services/api/deliveryStatements";
 
 const task = (i: number) => ({ label: `${i}.1.1`, title: `Úloha ${i}`, lines: 1, tokens: 100, kilotokens: "0.1" });

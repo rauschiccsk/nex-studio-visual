@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import ReverifyNoFixBar from "@/components/riadiace/ReverifyNoFixBar";
+import ReverifyNoFixBar from "@/components/controlCenter/ReverifyNoFixBar";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { PipelineBoard } from "@/services/api/pipeline";
 

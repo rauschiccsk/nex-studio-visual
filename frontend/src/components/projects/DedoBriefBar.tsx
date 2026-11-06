@@ -30,8 +30,8 @@ import {
 } from "@/services/api/projects";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-import UnsavedWorkPanel from "@/components/riadiace/UnsavedWorkPanel";
-import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/riadiace/unsavedWork";
+import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
+import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
 import { WARNING_CHROME } from "@/components/common/WarningActionBar";
 import type { WorkKind } from "@/lib/workKind";

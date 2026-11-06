@@ -51,8 +51,8 @@ byte-identický.
    - Súbory: `backend/services/orchestrator.py`, `backend/api/routes/pipeline.py`, `backend/api/routes/versions.py`
    - Overenie: pytest tests/test_conversation_task_plan.py tests/test_orchestrator_v2_routes.py tests/test_conversation_spine.py -x
 4. **backend tests + FE + full self-verify**
-   - tests/test_conversation_task_plan.py (seed conversation like test_conversation_spine; mock invoke_claude+_split_claude_result+_resolve_orch_session+_resolve_dispatch_overrides like navrh _stub_plan_passes with plain_description; DB 9178): FIX1 message.stage AND payload phase priprava vs navrh unchanged; FIX2 zostav_plan only under 3 DB conditions + apply_action raises each; FIX4 empty+populated plain_description; no advance; run_dispatch never entered (patch raise); second zostav_plan replaces in place; navrh byte-identical. FE: plain_description on 3 node types + description on FeatNode; zostav_plan in PipelineActionName 117-128; rewrite PlanUlohRail three-layer (salvage getTaskPlan+refetch+localStorage from TaskPlanPanel; L1 SpecMarkdown empty->muted placeholder never technical; trigger on available_actions); wire messages/board/onBoard in RiadiaceCentrumPage 142; vitest. Then full pytest + FE type-check/build/vitest.
-   - Súbory: `tests/test_conversation_task_plan.py`, `frontend/src/types/task-plan.ts`, `frontend/src/services/api/pipeline.ts`, `frontend/src/components/riadiace/PlanUlohRail.tsx`, `frontend/src/pages/RiadiaceCentrumPage.tsx`, `frontend/src/__tests__/components/test_PlanUlohRail.test.tsx`
+   - tests/test_conversation_task_plan.py (seed conversation like test_conversation_spine; mock invoke_claude+_split_claude_result+_resolve_orch_session+_resolve_dispatch_overrides like navrh _stub_plan_passes with plain_description; DB 9178): FIX1 message.stage AND payload phase priprava vs navrh unchanged; FIX2 zostav_plan only under 3 DB conditions + apply_action raises each; FIX4 empty+populated plain_description; no advance; run_dispatch never entered (patch raise); second zostav_plan replaces in place; navrh byte-identical. FE: plain_description on 3 node types + description on FeatNode; zostav_plan in PipelineActionName 117-128; rewrite TaskPlanRail three-layer (salvage getTaskPlan+refetch+localStorage from TaskPlanPanel; L1 SpecMarkdown empty->muted placeholder never technical; trigger on available_actions); wire messages/board/onBoard in ControlCenterPage 142; vitest. Then full pytest + FE type-check/build/vitest.
+   - Súbory: `tests/test_conversation_task_plan.py`, `frontend/src/types/task-plan.ts`, `frontend/src/services/api/pipeline.ts`, `frontend/src/components/controlCenter/TaskPlanRail.tsx`, `frontend/src/pages/ControlCenterPage.tsx`, `frontend/src/__tests__/components/test_TaskPlanRail.test.tsx`
    - Overenie: full pytest green and npm run type-check and npm run build and npx vitest run
 
 ## Súbory (súhrn)
@@ -61,7 +61,7 @@ byte-identický.
 - `modify` `backend/services/pipeline_status.py` — plain_description schemas 89 100 109 151 160
 - `modify` `backend/db/models/tasks.py` — plain_description column
 - `modify` `backend/api/routes/versions.py` — get_task_plan plain_description 300-329
-- `modify` `frontend/src/components/riadiace/PlanUlohRail.tsx` — three-layer map with placeholder
+- `modify` `frontend/src/components/controlCenter/TaskPlanRail.tsx` — three-layer map with placeholder
 - `create` `tests/test_conversation_task_plan.py` — FIX1-4 tests DB 9178
 
 ## Overenie

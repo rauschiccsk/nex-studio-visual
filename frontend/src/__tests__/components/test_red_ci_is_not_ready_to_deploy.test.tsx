@@ -12,8 +12,8 @@ import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-librar
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
-import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
-import PlanUlohRail from "@/components/riadiace/PlanUlohRail";
+import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
+import TaskPlanRail from "@/components/controlCenter/TaskPlanRail";
 import DeployBlockNotice from "@/components/deploy/DeployBlockNotice";
 import { getTaskPlan } from "@/services/api/versions";
 import type { CiStatus, PipelineBoard, PipelineState } from "@/services/api/pipeline";
@@ -95,7 +95,7 @@ function rail(ci: CiStatus | null) {
     available_actions: [],
     verified_provenance: "hotovo_match",
   } as unknown as PipelineBoard;
-  return <PlanUlohRail versionId="v1" messages={[]} board={board} onBoard={() => {}} ci={ci} />;
+  return <TaskPlanRail versionId="v1" messages={[]} board={board} onBoard={() => {}} ci={ci} />;
 }
 
 describe("the right panel for a finished version", () => {

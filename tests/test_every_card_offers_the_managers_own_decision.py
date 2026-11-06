@@ -21,7 +21,7 @@ from tests.test_orchestrator_v2_consultation import _seed_consultation
 from tests.test_poradca_tools_db import _CARDS, _consultation_world, world  # noqa: F401 — the fixture
 
 ROOT = Path(__file__).resolve().parents[1]
-SCREEN = ROOT / "frontend" / "src" / "components" / "riadiace" / "DecisionCardsBar.tsx"
+SCREEN = ROOT / "frontend" / "src" / "components" / "controlCenter" / "DecisionCardsBar.tsx"
 OWN_TEXT = "Aplikácia má jedného používateľa, ktorý smie všetko — rozdelenie právomocí zruš."
 
 

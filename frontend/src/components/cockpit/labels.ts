@@ -86,7 +86,7 @@ export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   schema_approval: "Treba schváliť štruktúru databázy",
   // A framework_issue means the bug is in NEX Studio itself (not the project) — our technical team resolves it.
   // Plain Slovak, no internal "Dedo"/"framework" jargon (a non-expert Manažér doesn't know who "Dedo" is). The
-  // Manažér's one concrete move is "Nahlásiť znova" (NahlasitZnovaBar); it reads as a system/blocked red state.
+  // Manažér's one concrete move is "Nahlásiť znova" (ReportAgainBar); it reads as a system/blocked red state.
   framework_issue: "NEX Studio má chybu — rieši ju náš technický tím",
 };
 
@@ -215,7 +215,7 @@ const VERIFICATION_DRIFTED_PROVENANCES = [
  * DEV-51 — how the project's checks (CI) on the code that would be deployed stand against a deploy. The backend
  * decides (`deploy.ci_deploy_cause` closes Nasadiť and refuses the deploy itself); this mirrors that rule only
  * so Riadiace centrum never says "pripravené na nasadenie" next to a failed build. Red blocks; a run still
- * going blocks until it finishes; not knowing does not — and says so in its own line (StavZostavenia).
+ * going blocks until it finishes; not knowing does not — and says so in its own line (BuildStatus).
  */
 export type CiDeployBlock = "red" | "running" | null;
 

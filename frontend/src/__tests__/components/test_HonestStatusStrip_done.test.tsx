@@ -2,7 +2,7 @@
  * HonestStatusStrip — the honest status of a FINISHED version (verification #6 and drift).
  *
  * (Until ICCINT-167 this file also pinned the Konzultácia read-only indicator; Konzultácia is gone — a done
- * version now offers „Opýtaj sa Poradcu" instead, see test_OpytajSaPoradcuBar — and the strip must NOT say
+ * version now offers „Opýtaj sa Poradcu" instead, see test_AskPoradcaBar — and the strip must NOT say
  * "Konzultácia" any more.)
  */
 
@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import HonestStatusStrip from "@/components/riadiace/HonestStatusStrip";
+import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
 import type { PipelineState } from "@/services/api/pipeline";
 
 describe("HonestStatusStrip — no Konzultácia on a done version (ICCINT-167)", () => {

@@ -11,30 +11,30 @@
 
 import { describe, expect, it } from "vitest";
 
-import { popisPriebehu } from "@/components/deploy/popisPriebehu";
+import { progressDescription } from "@/components/deploy/progressDescription";
 
 describe("Popis priebehu na tlačidle (ICCINT-153)", () => {
   it("⚠️ ukáže KROK, nie len že sa niečo deje", () => {
-    const text = popisPriebehu({ bezi: true, krok: "staviam obrazy", trva_sekund: 12, krok_trva_sekund: 12 });
+    const text = progressDescription({ bezi: true, krok: "staviam obrazy", trva_sekund: 12, krok_trva_sekund: 12 });
     expect(text).toContain("staviam obrazy");
   });
 
   it("⚠️ a ukáže, ako dlho to už beží — to je odpoveď na „zamrzlo to?“", () => {
-    const text = popisPriebehu({ bezi: true, krok: "staviam obrazy", trva_sekund: 300, krok_trva_sekund: 60 });
+    const text = progressDescription({ bezi: true, krok: "staviam obrazy", trva_sekund: 300, krok_trva_sekund: 60 });
     expect(text).toContain("5 min");
   });
 
   it("pod minútu hlási sekundy — inak by prvé pol minúty ukazovalo „0 min“", () => {
-    const text = popisPriebehu({ bezi: true, krok: "spúšťam kontajnery", trva_sekund: 12, krok_trva_sekund: 12 });
+    const text = progressDescription({ bezi: true, krok: "spúšťam kontajnery", trva_sekund: 12, krok_trva_sekund: 12 });
     expect(text).toContain("12 s");
     expect(text).not.toContain("0 min");
   });
 
   it("kým odpoveď o priebehu nedorazila, ostáva pôvodné slovo — nevymýšľa sa krok", () => {
-    expect(popisPriebehu(null)).toBe("Preberám…");
+    expect(progressDescription(null)).toBe("Preberám…");
   });
 
   it("keď nasadenie nebeží, tiež sa nič nevymýšľa", () => {
-    expect(popisPriebehu({ bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 })).toBe("Preberám…");
+    expect(progressDescription({ bezi: false, krok: null, trva_sekund: 0, krok_trva_sekund: 0 })).toBe("Preberám…");
   });
 });

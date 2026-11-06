@@ -43,7 +43,7 @@ Trigger MOVES current_stage priprava to programovanie mode conversation, _run_bu
 
 ## Frontend
 
-PlanUlohRail.tsx CurrentBuildBanner from board.current_task pipeline.ts 95, TRIGGER mirror zostav_plan 231-277 canProgram includes spustit_stavbu, QUESTION reuses ConversationThread, TOKEN-STOP canResume includes pokracovat plus amber note, add spustit_stavbu to union 117-129, static nginx type-check build vitest
+TaskPlanRail.tsx CurrentBuildBanner from board.current_task pipeline.ts 95, TRIGGER mirror zostav_plan 231-277 canProgram includes spustit_stavbu, QUESTION reuses ConversationThread, TOKEN-STOP canResume includes pokracovat plus amber note, add spustit_stavbu to union 117-129, static nginx type-check build vitest
 
 ## Konzultácia + token-stop
 
@@ -63,8 +63,8 @@ Reuse blocked answer, result kind question blocked 6331-6339 to blocked agent_qu
    - Súbory: `/opt/projects/nex-studio/tests/test_conversation_programming.py`
    - Overenie: cd backend && python -m pytest -q
 4. **Frontend**
-   - pipeline.ts union 117-129, PlanUlohRail CurrentBuildBanner plus ladder 231-277 canProgram canResume, vitest a-e plus REVISION f, type-check build vitest
-   - Súbory: `/opt/projects/nex-studio/frontend/src/components/riadiace/PlanUlohRail.tsx`
+   - pipeline.ts union 117-129, TaskPlanRail CurrentBuildBanner plus ladder 231-277 canProgram canResume, vitest a-e plus REVISION f, type-check build vitest
+   - Súbory: `/opt/projects/nex-studio/frontend/src/components/controlCenter/TaskPlanRail.tsx`
    - Overenie: cd frontend && npm run type-check && npm run build && npx vitest run
 
 ## Súbory (súhrn)
@@ -72,9 +72,9 @@ Reuse blocked answer, result kind question blocked 6331-6339 to blocked agent_qu
 - `modify` `/opt/projects/nex-studio/backend/services/pipeline_runner.py` — _run 192-195 conversation only when current_stage not programovanie
 - `modify` `/opt/projects/nex-studio/backend/api/routes/pipeline.py` — three board post-filters 119-126 spustit_stavbu plus drop schvalit verdict plus drop approve_spec 107
 - `modify` `/opt/projects/nex-studio/frontend/src/services/api/pipeline.ts` — add spustit_stavbu to union 117-129
-- `modify` `/opt/projects/nex-studio/frontend/src/components/riadiace/PlanUlohRail.tsx` — CurrentBuildBanner plus ladder 231-277 canProgram canResume amber note, refetch 196-215 unchanged
+- `modify` `/opt/projects/nex-studio/frontend/src/components/controlCenter/TaskPlanRail.tsx` — CurrentBuildBanner plus ladder 231-277 canProgram canResume amber note, refetch 196-215 unchanged
 - `create` `/opt/projects/nex-studio/tests/test_conversation_programming.py` — backend test DB 9178 SAVEPOINT seeds 85 79 197 covers a-g plus REVISION
-- `modify` `/opt/projects/nex-studio/frontend/src/__tests__/components/test_PlanUlohRail.test.tsx` — vitest a-e plus REVISION f omit schvalit omit approve_spec
+- `modify` `/opt/projects/nex-studio/frontend/src/__tests__/components/test_TaskPlanRail.test.tsx` — vitest a-e plus REVISION f omit schvalit omit approve_spec
 
 ## Overenie
 

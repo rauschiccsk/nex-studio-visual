@@ -13,7 +13,7 @@ import {
   inputOwner,
   isCheckReason,
   isErrorReason,
-} from "@/components/riadiace/blockRecovery";
+} from "@/components/controlCenter/blockRecovery";
 import type { BlockReason } from "@/services/api/pipeline";
 
 const REASONS = Object.keys(BLOCKED_INPUT_OWNER) as BlockReason[];

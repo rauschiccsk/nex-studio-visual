@@ -5,7 +5,7 @@
 
 import { useParams } from "react-router-dom";
 
-import BillingTab from "@/components/naklady/BillingTab";
+import BillingTab from "@/components/costs/BillingTab";
 import { useActiveContextStore } from "@/store/activeContextStore";
 
 export default function BillingPage() {

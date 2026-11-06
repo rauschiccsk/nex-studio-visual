@@ -1,0 +1,403 @@
+/**
+ * SpecificationPage — the read-only project-DOCUMENTS surface (spine STEP 2, route /specifikacia).
+ *
+ * Audit Theme 3 (2026-07-10): previously this rendered exactly ONE hardcoded file
+ * (``docs/specs/versions/v<N>/specification.md``) — the manager could not open design.md, the DB-schema doc,
+ * their own customer-requirements (Zadanie), etc., so most of what the AI produced was invisible from the
+ * cockpit ("DONE = reality the manager can SEE"). Now it lists the pinned version's ``docs/specs/`` documents
+ * (via the EXISTING but previously-unwired ``/project-specs/list``), lets the Manažér pick one, and renders it
+ * with the SAME ``/project-specs/content`` + SpecMarkdown path. Defaults to the specification (unchanged
+ * behaviour when it is the only doc). Read-only; the AI writes + maintains these during the conversation.
+ *
+ * 2026-07-16: also surfaces the project-level HANDOVER docs that live OUTSIDE ``docs/specs/`` —
+ * ``docs/contracts/`` and ``docs/handoff/`` — as their own grouped pill rows, so an external developer
+ * (e.g. Tibor building the NEX Genesis API) can read the contracts + handoff note from the cockpit, not just
+ * via git. The version spec stays the primary group; ``docs/session-logs/`` and other internal noise are
+ * intentionally NOT included.
+ *
+ * Honest states: no project pinned → guard; a project WITH version-bound documents but no version pinned
+ * → say they exist and how to see them (it used to claim the project had none, on projects with dozens);
+ * no docs on disk yet → "nothing agreed yet" + a link to the Riadiace centrum; present → the doc picker +
+ * the rendered Markdown.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { FileText, FolderOpen } from "lucide-react";
+
+import { useActiveContextStore } from "@/store/activeContextStore";
+import { getProjectSpecContent, listProjectSpecs, type ProjectSpecDoc } from "@/services/api/projectSpecs";
+import { getPipelineBoardApi } from "@/services/api/pipeline";
+import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
+import ErrorNote from "@/components/common/ErrorNote";
+import { humanizeApiError, type HumanError } from "@/services/apiError";
+
+// Friendly Slovak names for the known spec documents (fallback = the filename without .md).
+const DOC_LABELS: Record<string, string> = {
+  "specification.md": "Špecifikácia",
+  "design.md": "Návrh",
+  "development-spec.md": "Vývojová špecifikácia",
+  "customer-requirements.md": "Zadanie zákazníka",
+  "DATABASE_SCHEMAS.md": "Databázová schéma",
+  "database_schemas.md": "Databázová schéma",
+  "RELEASE_NOTES.md": "Poznámky k vydaniu",
+};
+// The order the pills appear in (most manager-relevant first); anything else sorts alphabetically after.
+const DOC_ORDER = [
+  "specification.md",
+  "design.md",
+  "development-spec.md",
+  "customer-requirements.md",
+  "DATABASE_SCHEMAS.md",
+  "database_schemas.md",
+  "RELEASE_NOTES.md",
+];
+
+// Project-level handover folders under ``docs/`` (OUTSIDE the version spec) that also belong in Dokumenty —
+// the deliverables an external developer must be able to read from the cockpit. Order = display order after
+// the spec group. Deliberately a small allowlist: session-logs / other internal folders stay out.
+const DELIVERABLE_FOLDERS: { folder: string; title: string }[] = [
+  { folder: "contracts", title: "Kontrakty" },
+  { folder: "handoff", title: "Odovzdávka" },
+];
+
+function labelFor(filename: string): string {
+  return DOC_LABELS[filename] ?? filename.replace(/\.md$/i, "");
+}
+
+// How many version-BOUND spec documents the project has on disk, across ALL its versions. Counted from
+// the unfiltered list so the page can tell "this project has no documents" apart from "you have not
+// pinned a version yet" — two states that used to render the same, false, "there are none" sentence.
+function countVersionBoundDocs(all: ProjectSpecDoc[], slug: string): number {
+  const versionsPrefix = `${slug}/docs/specs/versions/`;
+  return all.filter((d) => !d.is_directory && /\.md$/i.test(d.filename) && d.relative_path.startsWith(versionsPrefix))
+    .length;
+}
+
+// The content endpoint's ``path`` is repo-relative (``docs/...``); the list's ``relative_path`` is prefixed
+// with ``<slug>/`` — strip it.
+function repoPath(doc: ProjectSpecDoc, slug: string): string {
+  const prefix = `${slug}/`;
+  return doc.relative_path.startsWith(prefix) ? doc.relative_path.slice(prefix.length) : doc.relative_path;
+}
+
+// Keep only the pinned version's spec docs: this version's ``docs/specs/versions/v<N>/`` files PLUS the
+// project-level ``docs/specs/`` files (e.g. customer-requirements) — but NOT other versions' folders.
+function filterVersionDocs(all: ProjectSpecDoc[], slug: string, versionNumber: string): ProjectSpecDoc[] {
+  const specsPrefix = `${slug}/docs/specs/`;
+  const versionPrefix = `${slug}/docs/specs/versions/v${versionNumber}/`;
+  const picked = all.filter(
+    (d) =>
+      !d.is_directory &&
+      /\.md$/i.test(d.filename) &&
+      d.relative_path.startsWith(specsPrefix) &&
+      (d.relative_path.startsWith(versionPrefix) || !d.category.includes("/versions/")),
+  );
+  return picked.sort((a, b) => {
+    const ia = DOC_ORDER.indexOf(a.filename);
+    const ib = DOC_ORDER.indexOf(b.filename);
+    const oa = ia === -1 ? 999 : ia;
+    const ob = ib === -1 ? 999 : ib;
+    return oa - ob || a.filename.localeCompare(b.filename);
+  });
+}
+
+// Project-level deliverable docs (contracts / handoff) that live OUTSIDE ``docs/specs/``. Not tied to a
+// version's spec folder, but must be readable from the cockpit (handover to Tibor / external devs). Returns
+// the docs flattened in DELIVERABLE_FOLDERS order, alphabetical within each folder.
+function filterDeliverableDocs(all: ProjectSpecDoc[], slug: string): ProjectSpecDoc[] {
+  const out: ProjectSpecDoc[] = [];
+  for (const { folder } of DELIVERABLE_FOLDERS) {
+    const prefix = `${slug}/docs/${folder}/`;
+    const inFolder = all
+      .filter((d) => !d.is_directory && /\.md$/i.test(d.filename) && d.relative_path.startsWith(prefix))
+      .sort((a, b) => a.filename.localeCompare(b.filename));
+    out.push(...inFolder);
+  }
+  return out;
+}
+
+export default function SpecificationPage() {
+  const navigate = useNavigate();
+  // DEV-7: `?doc=<path in the project>` opens that document — the approval bars link straight to the schema.
+  const [searchParams] = useSearchParams();
+  const wantedDoc = searchParams.get("doc");
+  const selectedProject = useActiveContextStore((s) => s.selectedProject);
+  const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+
+  const slug = selectedProject?.slug;
+  const versionNumber = selectedVersion?.versionNumber;
+  const versionId = selectedVersion?.versionId;
+
+  const [docs, setDocs] = useState<ProjectSpecDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState<HumanError | null>(null);
+  const [bodyError, setBodyError] = useState<HumanError | null>(null);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  // Version-bound documents the project has on disk, regardless of what is pinned (see countVersionBoundDocs).
+  const [versionBoundCount, setVersionBoundCount] = useState(0);
+
+  const [body, setBody] = useState<string | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+
+  // Durable "Schválená" signal from the board (spine STEP 2) — TRUE once the Špecifikácia was frozen.
+  const [specApproved, setSpecApproved] = useState(false);
+
+  // Load the project's document list, filter it, and pick a sensible default (the specification, else the
+  // first doc). Re-fetched when the pinned project / version changes. The fetch runs as soon as a PROJECT is
+  // pinned — the version only narrows WHICH spec folder is shown; gating the whole fetch on a pinned version
+  // is what made a project with dozens of documents report having none.
+  useEffect(() => {
+    let cancelled = false;
+    setDocs([]);
+    setActivePath(null);
+    setBody(null);
+    setVersionBoundCount(0);
+    if (!slug) return;
+    setDocsLoading(true);
+    listProjectSpecs()
+      .then((res) => {
+        if (cancelled) return;
+        setVersionBoundCount(countVersionBoundDocs(res.documents, slug));
+        // No version pinned → no version spec to show (the project-level handover docs are not
+        // version-bound, so they still render, and the note below explains what is missing).
+        const specDocs = versionNumber ? filterVersionDocs(res.documents, slug, versionNumber) : [];
+        const deliverableDocs = filterDeliverableDocs(res.documents, slug);
+        const filtered = [...specDocs, ...deliverableDocs];
+        setDocs(filtered);
+        // Default to the specification (else the first spec doc, else the first deliverable) — unchanged
+        // behaviour for spec-only projects.
+        const wanted = wantedDoc ? filtered.find((d) => repoPath(d, slug) === wantedDoc) : undefined;
+        const def = wanted ?? specDocs.find((d) => d.filename === "specification.md") ?? filtered[0];
+        setActivePath(def ? repoPath(def, slug) : null);
+      })
+      .catch((err: unknown) => {
+        // "Nothing agreed yet" and "the list could not be loaded" are different facts, and this used
+        // to render the first for both — telling the Manager his agreed specification does not exist.
+        if (!cancelled) setDocsError(humanizeApiError(err, "Dokumenty sa nepodarilo načítať"));
+      })
+      .finally(() => {
+        if (!cancelled) setDocsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, versionNumber, wantedDoc]);
+
+  // Load the selected document's content (same endpoint as before), whenever the active pick changes.
+  useEffect(() => {
+    let cancelled = false;
+    setBody(null);
+    setBodyError(null);
+    if (!slug || !activePath) return;
+    setContentLoading(true);
+    getProjectSpecContent(slug, activePath)
+      .then((res) => {
+        if (!cancelled && res.is_text) setBody(res.content);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setBodyError(humanizeApiError(err, "Dokument sa nepodarilo otvoriť"));
+      })
+      .finally(() => {
+        if (!cancelled) setContentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, activePath]);
+
+  // Durable approval flag from the pipeline board (spec_approved). Keyed on the pinned version.
+  useEffect(() => {
+    let cancelled = false;
+    setSpecApproved(false);
+    if (!versionId) return;
+    getPipelineBoardApi(versionId)
+      .then((board) => {
+        if (!cancelled) setSpecApproved(board.spec_approved === true);
+      })
+      .catch(() => {
+        /* no pipeline / unreachable → leave false (never falsely claim "Schválená") */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [versionId]);
+
+  // Group the pills: the version spec first, then each project-level handover folder (contracts / handoff).
+  // Group headings render only when there is more than one group — spec-only projects keep the plain row.
+  const groups = useMemo(() => {
+    const out: { key: string; title: string; docs: ProjectSpecDoc[] }[] = [];
+    if (!slug) return out;
+    const specDocs = docs.filter((d) => d.relative_path.startsWith(`${slug}/docs/specs/`));
+    if (specDocs.length) out.push({ key: "spec", title: "Špecifikácia", docs: specDocs });
+    for (const { folder, title } of DELIVERABLE_FOLDERS) {
+      const inFolder = docs.filter((d) => d.relative_path.startsWith(`${slug}/docs/${folder}/`));
+      if (inFolder.length) out.push({ key: folder, title, docs: inFolder });
+    }
+    return out;
+  }, [docs, slug]);
+
+  const hasSpec = useMemo(() => docs.some((d) => d.filename === "specification.md"), [docs]);
+  // Badge: approved → "Schválená"; a spec exists but isn't frozen → "Rozpracované"; no spec yet → none.
+  const specBadge: "schvalena" | "rozpracovane" | null = specApproved ? "schvalena" : hasSpec ? "rozpracovane" : null;
+
+  // The project HAS documents, they are just bound to a version nobody pinned. Say that — the page used to
+  // render the "nothing has been agreed yet" empty state here, which is false on a project with dozens.
+  const needsVersionPick = !versionNumber && versionBoundCount > 0;
+  const versionPickText =
+    `Dokumenty tohto projektu sú viazané na verziu (na disku: ${versionBoundCount}). ` +
+    "Vyber verziu projektu a otvoria sa tu.";
+
+  if (!selectedProject) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[var(--color-canvas)] p-6 text-center">
+        <FolderOpen className="h-10 w-10 text-[var(--color-text-muted)]" />
+        <h2 className="text-sm font-semibold text-[var(--color-text-secondary)]">Nemáš vybraný projekt</h2>
+        <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+          Dokumenty projektu sú viazané na konkrétny projekt. Otvor <span className="font-mono">Projekty</span> a
+          pripni projekt.
+        </p>
+        <button
+          onClick={() => navigate("/projects")}
+          className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+        >
+          → Otvor Projekty
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--color-canvas)]">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2.5">
+        <FileText className="h-4 w-4 text-[var(--color-text-muted)]" />
+        <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Dokumenty</h1>
+        <span className="text-[var(--color-text-muted)]">·</span>
+        <span className="truncate text-xs text-[var(--color-text-secondary)]">
+          {selectedProject.name}
+          {selectedVersion && (
+            <span className="text-[var(--color-text-muted)]"> · {selectedVersion.versionNumber}</span>
+          )}
+        </span>
+        {specBadge === "schvalena" && (
+          <span className="ml-auto flex-shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+            Schválená
+          </span>
+        )}
+        {specBadge === "rozpracovane" && (
+          <span className="ml-auto flex-shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+            Rozpracované
+          </span>
+        )}
+      </div>
+
+      {/* No version pinned, yet the project HAS version-bound documents — and something else (a contract, a
+          handover note) is already on screen, so the empty state below never runs. Say what is missing here
+          instead of letting the page imply the version spec does not exist. */}
+      {needsVersionPick && docs.length > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
+          <span className="text-[11px] text-[var(--color-text-muted)]">{versionPickText}</span>
+          <button
+            type="button"
+            onClick={() => navigate(`/projects/${slug}`)}
+            className="rounded-full border border-[var(--color-border-default)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+          >
+            → Vybrať verziu
+          </button>
+        </div>
+      )}
+
+      {/* Document picker — one pill per document, grouped: the version spec first, then the project-level
+          handover folders (Kontrakty / Odovzdávka). Hidden when there is ≤1 doc; group headings appear only
+          when more than one group is present. */}
+      {docs.length > 1 && (
+        <div className="flex flex-shrink-0 flex-col gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
+          {groups.map((g) => (
+            <div key={g.key} className="flex flex-wrap items-center gap-1.5">
+              {groups.length > 1 && (
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  {g.title}
+                </span>
+              )}
+              {g.docs.map((d) => {
+                const p = repoPath(d, slug!);
+                const active = p === activePath;
+                return (
+                  <button
+                    key={d.relative_path}
+                    type="button"
+                    onClick={() => setActivePath(p)}
+                    title={labelFor(d.filename)}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      active
+                        ? "border-primary-500 bg-primary-600 text-white"
+                        : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                    }`}
+                  >
+                    {labelFor(d.filename)}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {docsLoading || contentLoading ? (
+        <div className="flex flex-1 items-center justify-center p-6 text-center">
+          <p className="text-xs text-[var(--color-text-muted)]">Načítavam…</p>
+        </div>
+      ) : bodyError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <ErrorNote error={bodyError} />
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            Dokument existuje — len sa ho nepodarilo otvoriť.
+          </p>
+        </div>
+      ) : body !== null ? (
+        body.trim() ? (
+          <div className="flex-1 overflow-y-auto">
+            <SpecMarkdown
+              body={body}
+              className="prose prose-sm dark:prose-invert max-w-none px-6 py-5 text-sm text-[var(--color-text-primary)]"
+            />
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center p-6 text-center">
+            <p className="text-xs text-[var(--color-text-muted)]">Tento dokument je zatiaľ prázdny.</p>
+          </div>
+        )
+      ) : needsVersionPick ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">{versionPickText}</p>
+          <button
+            onClick={() => navigate(`/projects/${slug}`)}
+            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+          >
+            → Otvor projekt a vyber verziu
+          </button>
+        </div>
+      ) : docsError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <ErrorNote error={docsError} />
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            Toto neznamená, že dokumenty neexistujú — nepodarilo sa ich načítať.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="max-w-md text-xs text-[var(--color-text-muted)]">
+            Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre — v rozhovore s AI Agentom sa dohodnete
+            na zadaní a AI ich priebežne zapisuje.
+          </p>
+          <button
+            onClick={() => navigate("/riadiace-centrum")}
+            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500"
+          >
+            → Otvor Riadiace centrum
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

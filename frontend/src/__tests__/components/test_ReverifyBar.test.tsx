@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import ReverifyBar from "@/components/riadiace/ReverifyBar";
+import ReverifyBar from "@/components/controlCenter/ReverifyBar";
 import { postPipelineActionApi } from "@/services/api/pipeline";
 import type { PipelineBoard } from "@/services/api/pipeline";
 

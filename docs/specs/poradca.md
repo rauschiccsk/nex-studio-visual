@@ -128,7 +128,7 @@ Poradca poradí, **ktorým tlačidlom** to urobiť, a podľa situácie ponúkne:
   agent čaká na odpoveď (otázka, chyba, kontrola), do poľa v lište nad rozhovorom („Tvoja odpoveď…“); počas
   konzultácie do aktuálnej karty rozhodnutia, do poľa „Pokyn pre AI partnera“ (viacriadkové, DEV-26); inak do
   poľa rozhovoru. Ktoré pole to je, rozhoduje jediné pravidlo `inputOwner` (úplný zoznam všetkých dôvodov
-  zastavenia v `frontend/src/components/riadiace/blockRecovery.ts`; nový dôvod neprejde kontrolou typov, kým
+  zastavenia v `frontend/src/components/controlCenter/blockRecovery.ts`; nový dôvod neprejde kontrolou typov, kým
   ho niekto nezaradí) a Riadiace centrum ho použije až podľa známeho stavu stavby. Pokyn, ktorý ostal v poli
   rozhovoru, keď text prevzalo iné pole, sa presunie tam. Vždy s označením „Pokyn od Poradcu“ a odošle ho
   človek sám (DEV-22). Keď žiadne pole text neprijme (stavba čaká na opravu kokpitu, hotová verzia), tlačidlo

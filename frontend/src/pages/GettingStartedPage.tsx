@@ -4,7 +4,7 @@
 // walks them, in friendly plain Slovak with no dev-jargon, through the ACTUAL flow: prihlásenie → vytvoriť
 // projekt → vytvoriť verziu a napísať Zadanie → čo znamenajú jednotlivé fázy (Príprava / Návrh / Vizuál /
 // Programovanie / Overenie) → ako schvaľovať a odpovedať na otázky → nasadenie k zákazníkovi. Steps are derived
-// from the real pages (NewProjectPage, NewVersionPage, RiadiaceCentrumPage, the phase labels + the Nasadenie/UAT
+// from the real pages (NewProjectPage, NewVersionPage, ControlCenterPage, the phase labels + the Nasadenie/UAT
 // flow). The phase list MUST stay in sync with PHASE_ORDER (components/cockpit/labels.ts) — an operator who is
 // told to expect four phases is ambushed when the build stops at Vizuál for their approval.
 

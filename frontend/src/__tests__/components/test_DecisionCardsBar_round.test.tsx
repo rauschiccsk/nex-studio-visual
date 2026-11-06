@@ -13,7 +13,7 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
 
-import DecisionCardsBar from "@/components/riadiace/DecisionCardsBar";
+import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 function board(consultation: Record<string, unknown>): PipelineBoard {

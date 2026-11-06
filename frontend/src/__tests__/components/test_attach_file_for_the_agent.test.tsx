@@ -17,11 +17,11 @@ const { uploadPrivateFileApi, listPrivateFilesApi, deletePrivateFileApi } = vi.h
 }));
 vi.mock("@/services/api/projectFiles", () => ({ uploadPrivateFileApi, listPrivateFilesApi, deletePrivateFileApi }));
 
-import AttachFileButton from "@/components/riadiace/AttachFileButton";
-import BlockRecoveryBar from "@/components/riadiace/BlockRecoveryBar";
-import ConversationComposer from "@/components/riadiace/ConversationComposer";
-import PrivateFilesPanel from "@/components/riadiace/PrivateFilesPanel";
-import { withAttachedLine } from "@/components/riadiace/privateFiles";
+import AttachFileButton from "@/components/controlCenter/AttachFileButton";
+import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
+import ConversationComposer from "@/components/controlCenter/ConversationComposer";
+import PrivateFilesPanel from "@/components/controlCenter/PrivateFilesPanel";
+import { withAttachedLine } from "@/components/controlCenter/privateFiles";
 import { ApiError } from "@/services/api";
 import type { PipelineBoard } from "@/services/api/pipeline";
 

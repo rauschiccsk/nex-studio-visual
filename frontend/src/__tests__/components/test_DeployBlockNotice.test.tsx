@@ -8,7 +8,7 @@
  *
  *   LEGIBILITY    — a plain-Slovak cause naming the affected version, with NO engineering jargon in it
  *                   (the last test is the guard: no "commit" / "HEAD" / "SHA" / "drift" reaches the screen).
- *   ACTIONABILITY — honest-by-construction (mirrors ReverifyNoFixBar / SchvalitBar): "Over znova" is drawn
+ *   ACTIONABILITY — honest-by-construction (mirrors ReverifyNoFixBar / ApproveBar): "Over znova" is drawn
  *                   ONLY when the backend says this user may post `overit_znovu` right now (`can_reverify`,
  *                   true solely for the `drift` cause — every other shape is rejected by that handler). A
  *                   button that 400s or 403s would just move the dead end one click further.

@@ -87,7 +87,7 @@ def test_the_frontend_bar_keys_on_what_the_backend_offers() -> None:
     """
     import pathlib
 
-    bar = pathlib.Path("frontend/src/components/riadiace/ReverifyNoFixBar.tsx")
+    bar = pathlib.Path("frontend/src/components/controlCenter/ReverifyNoFixBar.tsx")
     if not bar.is_file():
         pytest.skip("rozhranie nie je v tomto strome — nekontrolované")
 

@@ -29,31 +29,31 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CESTA_NA_VERZIU } from "@/hooks/useBackendVersion";
-import { verziaDoPanela } from "@/lib/verziaDoPanela";
+import { versionToPanel } from "@/lib/versionToPanel";
 
 describe("Verzia v paneli (ICCINT-128)", () => {
   it("pri zhode ukáže jedno číslo, ako doteraz", () => {
-    expect(verziaDoPanela("4.38.4", "4.38.4")).toBe("v4.38.4");
+    expect(versionToPanel("4.38.4", "4.38.4")).toBe("v4.38.4");
   });
 
   it("⚠️ pri rozdiele ukáže OBE a MENOM — inak panel hovorí o celku, kým hovorí o časti", () => {
-    expect(verziaDoPanela("4.38.4", "4.38.0")).toBe("backend v4.38.4 · frontend v4.38.0");
+    expect(versionToPanel("4.38.4", "4.38.0")).toBe("backend v4.38.4 · frontend v4.38.0");
   });
 
   it("kým sa backend neozval, ukáže to, čo vie — nevymýšľa si zhodu", () => {
-    expect(verziaDoPanela(null, "4.38.0")).toBe("v4.38.0");
+    expect(versionToPanel(null, "4.38.0")).toBe("v4.38.0");
   });
 
   it("keď nevieme ani jedno, ostáva „vdev“ ako doteraz — správanie sa nemení tam, kde bolo správne", () => {
-    expect(verziaDoPanela(null, undefined)).toBe("vdev");
+    expect(versionToPanel(null, undefined)).toBe("vdev");
   });
 
   it("neznáme číslo frontendu sa nevydáva za verziu", () => {
-    expect(verziaDoPanela("4.38.4", undefined)).toBe("backend v4.38.4 · frontend neznámy");
+    expect(versionToPanel("4.38.4", undefined)).toBe("backend v4.38.4 · frontend neznámy");
   });
 
   it("obe čísla sú v texte pomenované — z holého čísla sa nedá zistiť, čie je", () => {
-    const text = verziaDoPanela("4.39.0", "4.38.0");
+    const text = versionToPanel("4.39.0", "4.38.0");
     expect(text).toContain("backend v4.39.0");
     expect(text).toContain("frontend v4.38.0");
   });

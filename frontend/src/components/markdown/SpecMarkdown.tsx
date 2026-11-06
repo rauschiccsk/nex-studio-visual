@@ -4,8 +4,8 @@
 // (fenced code → the shared CodeBlock; everything else default GFM). Kept deliberately NARROW: it renders
 // ONLY the duplicated ReactMarkdown+remarkGfm+MARKDOWN_COMPONENTS core and does NOT bundle any prose
 // wrapper/padding — the consumers' wrappers are NOT identical (chat bubbles carry no padding, others do), so
-// each consumer keeps its own wrapper and passes it via the optional ``className``. Consumers: SpecifikaciaPage,
-// ConversationThread (body + question), PlanUlohRail, PoradcaAnswer.
+// each consumer keeps its own wrapper and passes it via the optional ``className``. Consumers: SpecificationPage,
+// ConversationThread (body + question), TaskPlanRail, PoradcaAnswer.
 
 import { createElement, useMemo, type ComponentProps } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";

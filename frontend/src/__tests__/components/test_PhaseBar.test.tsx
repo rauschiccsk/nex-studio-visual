@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import PhaseBar from "@/components/riadiace/PhaseBar";
+import PhaseBar from "@/components/controlCenter/PhaseBar";
 import type {
   PipelineActionName,
   PipelineBoard,

@@ -37,7 +37,7 @@ Kontrola=NEW conversation round STAYS current_stage='priprava', gate_report -> I
 
 ## Frontend
 
-RUNG PlanUlohRail.tsx(:318-376) canCheck(:266-271) else-if AFTER canPause rung(:363-375); skontrolovat->PipelineActionName pipeline.ts(:117-130). MAJOR-1 PhaseBar.tsx(:21-31) reads current_stage but redesign STAYS priprava; FE has NO mode (backend/schemas/pipeline.py:34+; RiadiaceCentrumPage.tsx:59). :128 board={board ?? null}; PhaseBar optional board derives specifikacia/plan/programovanie/kontrola from BOARD SIGNALS (PlanUlohRail :266-271/:273; NOT CurrentBuildBanner :132-146): kontrola=skontrolovat OR payload.kontrola msg OR (agent_working AND programming_complete notif); programovanie=pause/pokracovat/spustit_stavbu OR current_stage=programovanie; plan=spec_approved+no build/check; else specifikacia; reuse MARK_GLYPH/MARK_TONE/TONE_TEXT(:18-19); else phaseMarkFor BYTE-IDENTICAL; no PHASE_LABELS.verifikacia rename (cockpit/labels.ts:26-40). type-check+build+vitest ONLY, never PROD :9197/:9198.
+RUNG TaskPlanRail.tsx(:318-376) canCheck(:266-271) else-if AFTER canPause rung(:363-375); skontrolovat->PipelineActionName pipeline.ts(:117-130). MAJOR-1 PhaseBar.tsx(:21-31) reads current_stage but redesign STAYS priprava; FE has NO mode (backend/schemas/pipeline.py:34+; ControlCenterPage.tsx:59). :128 board={board ?? null}; PhaseBar optional board derives specifikacia/plan/programovanie/kontrola from BOARD SIGNALS (TaskPlanRail :266-271/:273; NOT CurrentBuildBanner :132-146): kontrola=skontrolovat OR payload.kontrola msg OR (agent_working AND programming_complete notif); programovanie=pause/pokracovat/spustit_stavbu OR current_stage=programovanie; plan=spec_approved+no build/check; else specifikacia; reuse MARK_GLYPH/MARK_TONE/TONE_TEXT(:18-19); else phaseMarkFor BYTE-IDENTICAL; no PHASE_LABELS.verifikacia rename (cockpit/labels.ts:26-40). type-check+build+vitest ONLY, never PROD :9197/:9198.
 
 ## Čestnosť + dôkaz
 
@@ -49,11 +49,11 @@ H1 _run_release_smoke(:3738) BOOTS+acceptance records legs stage='priprava' BEFO
 - `modify` `/opt/projects/nex-studio/backend/services/pipeline_runner.py` — VERIFY ONLY :197.
 - `create` `/opt/projects/nex-studio/tests/test_conversation_kontrola.py` — Backend test DB :9178 mirror test_conversation_programming.py + _stub_smoke.
 - `modify` `/opt/projects/nex-studio/frontend/src/services/api/pipeline.ts` — skontrolovat in PipelineActionName(:117-130).
-- `modify` `/opt/projects/nex-studio/frontend/src/pages/RiadiaceCentrumPage.tsx` — MAJOR-1 :128 board prop.
-- `modify` `/opt/projects/nex-studio/frontend/src/components/riadiace/PhaseBar.tsx` — MAJOR-1 optional board->derived strip; else BYTE-IDENTICAL; no PHASE_LABELS.verifikacia rename.
-- `modify` `/opt/projects/nex-studio/frontend/src/components/riadiace/PlanUlohRail.tsx` — canCheck(:266-271); rung AFTER canPause(:363-375).
-- `modify` `/opt/projects/nex-studio/frontend/src/components/riadiace/ConversationThread.tsx` — OPTIONAL chips above :85 (K-2).
-- `modify` `/opt/projects/nex-studio/frontend/src/__tests__/components/test_PlanUlohRail.test.tsx` — rung only when offered.
+- `modify` `/opt/projects/nex-studio/frontend/src/pages/ControlCenterPage.tsx` — MAJOR-1 :128 board prop.
+- `modify` `/opt/projects/nex-studio/frontend/src/components/controlCenter/PhaseBar.tsx` — MAJOR-1 optional board->derived strip; else BYTE-IDENTICAL; no PHASE_LABELS.verifikacia rename.
+- `modify` `/opt/projects/nex-studio/frontend/src/components/controlCenter/TaskPlanRail.tsx` — canCheck(:266-271); rung AFTER canPause(:363-375).
+- `modify` `/opt/projects/nex-studio/frontend/src/components/controlCenter/ConversationThread.tsx` — OPTIONAL chips above :85 (K-2).
+- `modify` `/opt/projects/nex-studio/frontend/src/__tests__/components/test_TaskPlanRail.test.tsx` — rung only when offered.
 - `create` `/opt/projects/nex-studio/frontend/src/__tests__/components/test_PhaseBar.test.tsx` — conversation->labels+derived; legacy->4 phases.
 
 ## Úlohy pre Implementera (poradie)
@@ -82,12 +82,12 @@ H1 _run_release_smoke(:3738) BOOTS+acceptance records legs stage='priprava' BEFO
    - Súbory: `/opt/projects/nex-studio/backend/services/pipeline_runner.py`
    - Overenie: grep.
 7. **FE union+rung**
-   - pipeline.ts(:117-130); PlanUlohRail canCheck(:266-271)+rung AFTER canPause(:363-375).
-   - Súbory: `/opt/projects/nex-studio/frontend/src/services/api/pipeline.ts`, `/opt/projects/nex-studio/frontend/src/components/riadiace/PlanUlohRail.tsx`
+   - pipeline.ts(:117-130); TaskPlanRail canCheck(:266-271)+rung AFTER canPause(:363-375).
+   - Súbory: `/opt/projects/nex-studio/frontend/src/services/api/pipeline.ts`, `/opt/projects/nex-studio/frontend/src/components/controlCenter/TaskPlanRail.tsx`
    - Overenie: type-check+build.
 8. **FE MAJOR-1 PhaseBar**
-   - RiadiaceCentrumPage.tsx:128 board prop; PhaseBar optional board derived strip; else BYTE-IDENTICAL.
-   - Súbory: `/opt/projects/nex-studio/frontend/src/pages/RiadiaceCentrumPage.tsx`, `/opt/projects/nex-studio/frontend/src/components/riadiace/PhaseBar.tsx`
+   - ControlCenterPage.tsx:128 board prop; PhaseBar optional board derived strip; else BYTE-IDENTICAL.
+   - Súbory: `/opt/projects/nex-studio/frontend/src/pages/ControlCenterPage.tsx`, `/opt/projects/nex-studio/frontend/src/components/controlCenter/PhaseBar.tsx`
    - Overenie: test_PhaseBar.test.tsx.
 9. **Tests+suites**
    - test_conversation_kontrola.py; test_PhaseBar.test.tsx; FULL pytest+FE.
@@ -96,4 +96,4 @@ H1 _run_release_smoke(:3738) BOOTS+acceptance records legs stage='priprava' BEFO
 
 ## Overenie
 
-DB :9178 ONLY (conftest SAVEPOINT+_guard_prod_db_isolation); PROD NEVER touched; no docker (_run_release_smoke monkeypatched). test_conversation_kontrola.py mirror test_conversation_programming.py + _stub_smoke + STEP-4 completion notification. Cases: offered ONLY on conversation+spec_approved+programming_complete+not kontrola_done; apply_action raises per precondition, marker stays priprava; gate_report stage='priprava' payload.kontrola NOT verdict/verifikacia; RED->kontrola_floor_red; _settle_phase_boundary+_next_stage never called; SAFETY _verifikacia_passed/version_verified False+deploy.list_verified_versions excludes it, second refused, new programming_complete re-opens. FULL pytest DB :9178; confirm test_conversation_programming.py+backend/tests/integration/test_workflow_deploy_matrix.py green. FE type-check+build+vitest; test_PlanUlohRail.test.tsx+test_PhaseBar.test.tsx.
+DB :9178 ONLY (conftest SAVEPOINT+_guard_prod_db_isolation); PROD NEVER touched; no docker (_run_release_smoke monkeypatched). test_conversation_kontrola.py mirror test_conversation_programming.py + _stub_smoke + STEP-4 completion notification. Cases: offered ONLY on conversation+spec_approved+programming_complete+not kontrola_done; apply_action raises per precondition, marker stays priprava; gate_report stage='priprava' payload.kontrola NOT verdict/verifikacia; RED->kontrola_floor_red; _settle_phase_boundary+_next_stage never called; SAFETY _verifikacia_passed/version_verified False+deploy.list_verified_versions excludes it, second refused, new programming_complete re-opens. FULL pytest DB :9178; confirm test_conversation_programming.py+backend/tests/integration/test_workflow_deploy_matrix.py green. FE type-check+build+vitest; test_TaskPlanRail.test.tsx+test_PhaseBar.test.tsx.
