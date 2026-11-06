@@ -54,6 +54,15 @@ PYTHON = (".py",)
 SCRIPT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 #: Files whose comments start with ``#`` and run to the end of the line.
 _HASH_FILES = re.compile(r"(\.(sh|bash|ya?ml|toml|ini|conf|cfg|env\.example)$|(^|/)(Dockerfile[^/]*|Makefile)$)")
+#: DEV-314: a page and an image drawn in text carry ``<!-- -->`` comments, a stylesheet ``/* */`` ones — code a
+#: customer reads like any other. The page's own text (a title, a paragraph, an image's label) is what the app shows
+#: people and stays as it is. 06.11.2026 the rule did not read them, and Slovak comments of the app template's
+#: index.html and icon.svg would have reached every app unread.
+MARKUP = (".html", ".htm", ".svg")
+STYLE = (".css",)
+#: An image drawn in text: counted as an image, not as code, in what a version delivered (delivered_tokens), but its
+#: comments are text a customer reads.
+_TEXT_IMAGES = (".svg",)
 
 WHAT_COMMENT = "komentár"
 WHAT_DOCSTRING = "docstring"
@@ -258,6 +267,15 @@ def _hash_parts(source: str) -> Iterator[tuple[int, str, str]]:
             yield number, WHAT_COMMENT, comment
 
 
+def _block_parts(source: str, opening: str, closing: str) -> Iterator[tuple[int, str, str]]:
+    """``(line, what, text)`` for every line of every ``opening … closing`` comment — ``<!-- -->`` of a page, ``/* */``
+    of a stylesheet; one left open runs to the end of the file."""
+    for m in re.finditer(re.escape(opening) + r".*?(?:" + re.escape(closing) + r"|\Z)", source, re.DOTALL):
+        first = source.count("\n", 0, m.start()) + 1
+        for offset, text in enumerate(m.group(0).split("\n")):
+            yield first + offset, WHAT_COMMENT, text
+
+
 def _parts_of(path: str, source: str, is_test: bool) -> Optional[Iterator[tuple[int, str, str]]]:
     """The comments, docstrings, test messages and test names of one file by its kind — ``None`` for a kind this rule
     does not read."""
@@ -265,9 +283,18 @@ def _parts_of(path: str, source: str, is_test: bool) -> Optional[Iterator[tuple[
         return _python_parts(source, is_test)
     if path.endswith(SCRIPT):
         return _script_parts(source, is_test)
+    if path.endswith(MARKUP):
+        return _block_parts(source, "<!--", "-->")
+    if path.endswith(STYLE):
+        return _block_parts(source, "/*", "*/")
     if _HASH_FILES.search(path):
         return _hash_parts(source)
     return None
+
+
+def _is_read(path: str) -> bool:
+    """A kind of file whose comments this rule reads (:func:`_parts_of`)."""
+    return path.endswith(PYTHON + SCRIPT + MARKUP + STYLE) or bool(_HASH_FILES.search(path))
 
 
 @for_tests
@@ -288,13 +315,15 @@ def scan(repo: Path, base: str, head: str, version: str = "") -> list[SlovakText
     found: list[SlovakText] = []
     own = own_name(repo)
     for path, numbers in sorted(added_line_numbers(repo, base, head).items()):
-        if not (path.endswith(PYTHON) or path.endswith(SCRIPT) or _HASH_FILES.search(path)):
+        if not _is_read(path):
             continue
         try:
             source = _git(repo, "show", f"{head}:{path}")
         except GitUnreadable:
             continue  # deleted or not text at head
-        kind, _excluded = delivered_tokens.classify(path, head=source[:2000], version=version)
+        kind, excluded = delivered_tokens.classify(path, head=source[:2000], version=version)
+        if excluded == delivered_tokens.EXCLUDED_BINARY and path.endswith(_TEXT_IMAGES):
+            kind = delivered_tokens.KIND_CODE
         if kind not in (delivered_tokens.KIND_CODE, delivered_tokens.KIND_TESTS):
             continue  # documentation, generated, the agent's notes … — not what this rule is about
         is_test = kind == delivered_tokens.KIND_TESTS

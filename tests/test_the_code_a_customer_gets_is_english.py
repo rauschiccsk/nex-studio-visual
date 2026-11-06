@@ -87,6 +87,25 @@ VERSION = {
         'it("shows the saved invoice", () => {});\n'
     ),
     "deploy/run.sh": "#!/bin/sh\n# spustí aplikáciu\necho 'Štart'\n",
+    # DEV-314: the comments of a page, an image drawn in text and a stylesheet are code a customer reads too
+    "frontend/index.html": (
+        "<!doctype html>\n"
+        "<!-- So that the app can be installed (the page „Prehľad“ opens first).\n"
+        "     Manifest je len popis — nič neukladá. -->\n"
+        '<html lang="sk"><head><title>Faktúry</title></head>\n'
+        "<body><p>Prehľad faktúr sa pripravuje.</p></body></html>\n"
+    ),
+    "frontend/public/icon.svg": (
+        "<!-- Značka aplikácie pre plochu -->\n"
+        '<svg xmlns="http://www.w3.org/2000/svg" aria-label="Faktúry"><text>Fá</text></svg>\n'
+    ),
+    "frontend/src/index.css": (
+        "/* Tailwind scans the shared components. */\n"
+        "body { font-family: sans-serif; }\n"
+        '.empty::after { content: "Žiadne faktúry"; }\n'
+        "/* Farby\n"
+        "   aplikácie */\n"
+    ),
     # not flagged
     "backend/app/screen.py": (
         "# The screen says „Faktúra uložená“ after saving — quoted UI text stays as the app shows it.\n"
@@ -109,8 +128,12 @@ def test_the_check_finds_slovak_only_where_a_customer_would_read_code(repo):
         ("backend/app/money.py:4", "komentár"),
         ("backend/tests/test_money.py:2", "hláška skúšky"),
         ("deploy/run.sh:2", "komentár"),
+        ("frontend/index.html:3", "komentár"),
+        ("frontend/public/icon.svg:1", "komentár"),
         ("frontend/src/Invoice.tsx:1", "komentár"),
         ("frontend/src/__tests__/Invoice.test.tsx:1", "meno skúšky"),
+        ("frontend/src/index.css:4", "komentár"),
+        ("frontend/src/index.css:5", "komentár"),
     ]
 
 
@@ -119,6 +142,21 @@ def test_a_comment_the_version_did_not_touch_is_not_its_problem(repo):
     head = _commit(repo, {"backend/app/old.py": "# Starý komentár, ktorý táto verzia nemenila\nx = 2\n"}, "v")
 
     assert source_language.scan(repo, base, head, "1.0.0") == []
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "lines"),
+    [
+        # a page's text between two comments is what the app shows, not a comment
+        ("index.html", "<!-- The list -->\n<p>Prehľad faktúr</p>\n<!-- Koniec zoznamu -->\n", [3]),
+        ("index.css", "/* The list */\n.a::after { content: Prehľad; }\n/* Koniec */\n", [3]),
+        # a comment left open runs to the end of the file
+        ("icon.svg", "<svg><text>Fá</text></svg>\n<!-- neuzavretá\n poznámka", [2, 3]),
+    ],
+)
+def test_a_page_and_a_stylesheet_are_read_only_in_their_comments(path, source, lines):
+    """DEV-314."""
+    assert [f.line for f in source_language.slovak_in(path, source)] == lines
 
 
 def test_a_version_that_translates_the_comment_it_touches_is_clean(repo):
