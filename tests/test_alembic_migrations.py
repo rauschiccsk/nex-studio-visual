@@ -72,6 +72,7 @@ def test_expected_domain_tables_present() -> None:
         "orchestrator_session",
         "poradca_conversations",
         "poradca_messages",
+        "ideas",  # DEV-318 Návrhy
     }
     present = set(Base.metadata.tables.keys())
     missing = expected_tables - present

@@ -87,8 +87,20 @@ def proposal_of(message: PoradcaMessage) -> TicketProposal:
     return proposal
 
 
-def _conversation_and_project(db: Session, message: PoradcaMessage) -> tuple[PoradcaConversation, Project]:
+#: DEV-318 — a new idea has no project: only a problem of the cockpit can be filed from it.
+IDEA_HAS_NO_PROJECT = (
+    "Nápad ešte nemá projekt — tiket na prácu v projekte sa dá založiť až v projekte. Z nápadu ide len tiket na kokpit."
+)
+
+
+def _conversation_and_project(
+    db: Session, message: PoradcaMessage, *, project_needed: bool
+) -> tuple[PoradcaConversation, Optional[Project]]:
     conversation = db.get(PoradcaConversation, message.conversation_id)
+    if conversation is not None and conversation.project_id is None and conversation.idea_id is not None:
+        if project_needed:
+            raise HandoffRefused(IDEA_HAS_NO_PROJECT)
+        return conversation, None
     project = db.get(Project, conversation.project_id) if conversation else None
     if project is None:
         raise HandoffRefused("Projekt rozhovoru už neexistuje.")
@@ -96,9 +108,17 @@ def _conversation_and_project(db: Session, message: PoradcaMessage) -> tuple[Por
 
 
 def context_lines(
-    db: Session, message: PoradcaMessage, conversation: PoradcaConversation, project: Project
+    db: Session, message: PoradcaMessage, conversation: PoradcaConversation, project: Optional[Project]
 ) -> list[str]:
     """What Andros Dedo needs to start on a problem of the cockpit — read now, never taken from the browser."""
+    if project is None:  # DEV-318 — met in a new idea, before any project exists
+        where = (
+            settings.app_public_url.rstrip("/") + f"/napady/{conversation.idea_id}" if settings.app_public_url else ""
+        )
+        return [
+            f"Nápad: „{conversation.title}“ (projekt zatiaľ neexistuje)",
+            f"Nápad v kokpite: {where}" if where else "Nápad v kokpite: v Nápadoch",
+        ]
     lines = [f"Projekt: {project.name}"]
     version_id = message.version_id or conversation.version_id
     version = db.get(Version, version_id) if version_id else None
@@ -163,7 +183,7 @@ def draft(db: Session, plane: PlaneGateway, message: PoradcaMessage, user: Optio
             plane_url=message.plane_url,
         )
     proposal = proposal_of(message)
-    conversation, project = _conversation_and_project(db, message)
+    conversation, project = _conversation_and_project(db, message, project_needed=proposal.kind != "nsv")
     if proposal.kind == "nsv":
         module = plane.find_module(None, COCKPIT_MODULE)
         return Draft(
@@ -221,7 +241,7 @@ def found(
     if message.plane_issue_id:
         return message, False
     proposal = proposal_of(message)
-    conversation, project = _conversation_and_project(db, message)
+    conversation, project = _conversation_and_project(db, message, project_needed=proposal.kind != "nsv")
     labels = (f"{backlog_tickets.TICKET_TYPE_GROUP}: {ticket_type}",)
     if proposal.kind == "nsv":
         context = "\n".join(f"- {line}" for line in context_lines(db, message, conversation, project))

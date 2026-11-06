@@ -15,6 +15,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 from sqlalchemy import select
@@ -113,8 +114,9 @@ def _values_from_text(text: str) -> list[str]:
     return _secret_values_from_env_text(text)
 
 
-def known_secret_values(db: Session, project: Project) -> list[str]:
+def known_secret_values(db: Session, project: Optional[Project]) -> list[str]:
     """Values for exact matching: cockpit environment, settings of the project's UAT installations, the vault.
+    A new idea (DEV-318) has no project and so no installations — the environment and the vault stay.
 
     The access vault is traversed entirely — hiding more is safer than less — and is read through the vault
     service (:mod:`backend.services.credentials`, the same path guards as the API), not directly from files.
@@ -125,7 +127,7 @@ def known_secret_values(db: Session, project: Project) -> list[str]:
         values.append(os.environ.get(name, ""))
     for name in _ENV_URLS:
         values.append(_url_password(os.environ.get(name, "")))
-    for installation in uat_installations(db, project):
+    for installation in uat_installations(db, project) if project is not None else ():
         values += _values_from_file(installation.directory / ".env")
     from backend.services import credentials as credentials_service
 

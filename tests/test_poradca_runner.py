@@ -465,3 +465,61 @@ async def test_a_conversation_from_before_the_change_gets_the_charter_at_its_nex
     world["db"].commit()
     await _ask(world, "Druhá otázka")
     assert "charta" in calls[1].prompt
+
+
+# ── DEV-318 Nápady: a question of a new idea ─────────────────────────────────────────────────────────────────────────
+
+
+async def test_an_idea_question_runs_in_its_own_folder_with_the_idea_rules_and_tools(world, monkeypatch):
+    """No project: the idea's folder, the rules of Nápady, the idea's tools and its title as the context line; the
+    same conversation later moved to a project goes on there with the project's rules (DEV-30 refresh)."""
+    from backend.db.models.idea import Idea
+    from backend.services.poradca import idea_tools
+
+    db = world["db"]
+    idea = Idea(author_id=world["user"].id)
+    db.add(idea)
+    db.flush()
+    conversation = runner.new_conversation(db, idea_id=idea.id, author=world["user"], version_id=None, title="Matrika")
+    db.commit()
+    seen: dict = {}
+    data = sandbox.data_dir()
+    monkeypatch.setattr(
+        sandbox,
+        "prepare",
+        lambda cid, tok, idea_id=None: (seen.setdefault("prepared_for", idea_id), data / "s", _mk(data / "run" / tok))[
+            1:
+        ],
+    )
+    monkeypatch.setattr(runner, "_idea_charter_text", lambda: "charta návrhov")
+    monkeypatch.setattr(idea_tools, "build_idea_tools", lambda **kw: seen.setdefault("tools_for", kw) and [])
+    patched = sandbox.run_argv
+
+    def _capture(**kw):
+        seen.setdefault("calls", []).append(kw)
+        return patched(**kw)
+
+    monkeypatch.setattr(sandbox, "run_argv", _capture)
+
+    _, answer = runner.ask(db, conversation, "Mám nápad na matriku.", world["user"])
+    await _finish(answer.id)
+    db.expire_all()
+
+    assert db.get(PoradcaMessage, answer.id).status == "done"
+    first = seen["calls"][0]
+    assert (first["project_slug"], first["idea_id"], first["overlays"]) == (None, idea.id, [])
+    assert first["call"].charter_text == "charta návrhov"
+    assert first["call"].prompt.startswith("[Kontext z kokpitu]\nNápad „Matrika“ — projekt zatiaľ neexistuje.")
+    assert seen["prepared_for"] == idea.id
+    assert seen["tools_for"] == {"user_id": world["user"].id}
+
+    # The idea ended in a project: the conversation goes on there, with the project's rules once (DEV-30).
+    conversation = db.get(PoradcaConversation, conversation.id)
+    conversation.project_id = world["conversation"].project_id
+    db.commit()
+    _, again = runner.ask(db, conversation, "A teraz v projekte?", world["user"])
+    await _finish(again.id)
+    second = seen["calls"][1]
+    assert (second["project_slug"] is not None, second["idea_id"]) == (True, None)
+    assert second["call"].charter_text is None  # resumed, not a new session
+    assert second["call"].prompt.startswith("[Pravidlá Poradcu sa od začiatku tohto rozhovoru zmenili.")

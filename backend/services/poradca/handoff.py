@@ -54,6 +54,20 @@ _TICKET = re.compile(
 _ATTRIBUTE = re.compile(r'([a-z-]+)="([^"]*)"')
 
 BLOCK_AGENT_TICKETS = "tiket-pre-agenta"
+
+#: DEV-318 — the two ways a new idea (Nápady) ends: a brief for a new project, or a brief added to an existing one.
+BLOCK_IDEA_PROJECT = "zadanie-projektu"
+BLOCK_IDEA_ADDITION = "doplnenie-projektu"
+_IDEA_ADDITION = re.compile(
+    rf"<{BLOCK_IDEA_ADDITION}((?:\s+[a-z-]+=\"[^\"]*\")*)\s*>\s*(.*?)\s*</{BLOCK_IDEA_ADDITION}>", re.S
+)
+#: What Poradca writes in the head of a new project's brief → the field of the form Nový projekt.
+IDEA_TYPES = ("standard", "web")
+IDEA_AUTH = {"password": "password", "token": "token"}
+IDEA_NO_TEMPLATE = "ziadna"
+_IDEA_YES = {"ano": True, "áno": True, "nie": False}
+#: Who pays the new project's first version (DEV-118 work kinds) — a new project is never a fix.
+IDEA_WORK_KINDS = {"poziadavka": "change", "požiadavka": "change", "dar": "gift"}
 #: The most tickets one answer attaches for the agent — a brief names a few, never a register.
 MAX_AGENT_TICKETS = 5
 _TICKET_IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]{0,11}-\d{1,7}\b")
@@ -65,6 +79,12 @@ _TITLE_MAX = 200
 
 class HandoffRefused(ValueError):
     """Z tejto správy sa požiadavka uložiť nedá — veta pre človeka."""
+
+
+#: DEV-318 — a new idea has no Zásobník of its own; its brief reaches a project through its outcome.
+IDEA_NOT_A_PROJECT_YET = (
+    "Nápad ešte nemá projekt — zadanie do Zásobníka projektu pridá tlačidlo „Pridať do projektu“ pod zadaním."
+)
 
 
 @dataclass(frozen=True)
@@ -89,7 +109,7 @@ class TicketProposal:
 #: DEV-264 — every block Poradca prepares for someone else to act on.
 _HANDOFF_BLOCK = re.compile(
     rf"<({BLOCK_INSTRUCTION}|{BLOCK_BACKLOG}|{BLOCK_BACKLOG_LEGACY}|{BLOCK_TICKET_NSV}|{BLOCK_TICKET_PROJECT}"
-    rf"|{BLOCK_AGENT_TICKETS})\b[^>]*>(.*?)</\1>",
+    rf"|{BLOCK_AGENT_TICKETS}|{BLOCK_IDEA_PROJECT}|{BLOCK_IDEA_ADDITION})\b[^>]*>(.*?)</\1>",
     re.S,
 )
 #: What may trail the last sentence of an answer without making it anything but a question.
@@ -118,6 +138,80 @@ def extract_block(text: str, name: str) -> Optional[str]:
         return None
     body = match.group(1).strip()
     return body or None
+
+
+@dataclass(frozen=True)
+class ProjectBrief:
+    """DEV-318 — a new project from an idea: what the form Nový projekt is filled with, and the brief of 0.1.0.
+
+    A head line the cockpit cannot read is left out (the form keeps its default) — never guessed."""
+
+    name: Optional[str]
+    slug: Optional[str]
+    description: Optional[str]
+    type: Optional[str]
+    auth_mode: Optional[str]
+    #: ``None`` — no template named; ``""`` — Poradca named none on purpose (``ziadna``).
+    template: Optional[str]
+    ai: Optional[bool]
+    #: ``change`` (the customer pays) or ``gift`` (ICC for free) — the work kind of the project's ticket (DEV-118).
+    work_kind: Optional[str]
+    brief: str
+
+
+@dataclass(frozen=True)
+class ProjectAddition:
+    """DEV-318 — an idea's brief for an existing project; it becomes a requirement of that project's Zásobník."""
+
+    project_slug: str
+    title: str
+    brief: str
+
+
+def project_brief(text: str) -> Optional[ProjectBrief]:
+    """The brief for a new project in the answer (``<zadanie-projektu>``): head ``kľúč: hodnota``, a ``---`` line,
+    then the brief. ``None`` without the block or without a brief under the line."""
+    body = extract_block(text, BLOCK_IDEA_PROJECT)
+    if body is None:
+        return None
+    head, sep, brief = body.partition("\n---")
+    brief = brief.strip()
+    if not sep or len(brief) < _MIN_REQUEST_CHARS:
+        return None
+    values: dict[str, str] = {}
+    for line in head.splitlines():
+        key, colon, value = line.partition(":")
+        if colon and key.strip() and value.strip():
+            values[key.strip().casefold()] = value.strip()
+    kind = values.get("typ", "").casefold()
+    auth = values.get("prihlasenie", "").casefold()
+    template = values.get("sablona")
+    return ProjectBrief(
+        name=values.get("meno"),
+        slug=values.get("slug"),
+        description=values.get("opis"),
+        type=kind if kind in IDEA_TYPES else None,
+        auth_mode=IDEA_AUTH.get(auth),
+        template=None if template is None else ("" if template.casefold() == IDEA_NO_TEMPLATE else template),
+        ai=_IDEA_YES.get(values.get("ai", "").casefold()),
+        work_kind=IDEA_WORK_KINDS.get(values.get("druh", "").casefold()),
+        brief=brief,
+    )
+
+
+def project_addition(text: str) -> Optional[ProjectAddition]:
+    """The brief for an existing project in the answer (``<doplnenie-projektu projekt="slug">``): the first line is
+    a short title. ``None`` without the block, without the project or with too little text."""
+    match = _IDEA_ADDITION.search(text or "")
+    if not match:
+        return None
+    attributes = dict(_ATTRIBUTE.findall(match.group(1)))
+    slug = attributes.get("projekt", "").strip()
+    body = match.group(2).strip()
+    if not slug or len(body) < _MIN_REQUEST_CHARS:
+        return None
+    title, _, rest = body.partition("\n")
+    return ProjectAddition(project_slug=slug, title=title.strip()[:_TITLE_MAX], brief=body)
 
 
 def backlog_request(text: str) -> Optional[str]:
@@ -170,6 +264,8 @@ def backlog_item_from_message(db: Session, message: PoradcaMessage) -> SavedRequ
     if summary is None or len(summary) < _MIN_REQUEST_CHARS:
         raise HandoffRefused("V tejto odpovedi nie je požiadavka do Zásobníka.")
     conversation = db.get(PoradcaConversation, message.conversation_id)
+    if conversation is not None and conversation.project_id is None and conversation.idea_id is not None:
+        raise HandoffRefused(IDEA_NOT_A_PROJECT_YET)
     project = db.get(Project, conversation.project_id) if conversation else None
     if project is None:
         raise HandoffRefused("Projekt rozhovoru už neexistuje.")

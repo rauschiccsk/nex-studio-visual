@@ -10,7 +10,19 @@ never the content the tool returned. The content may carry anything the agent sa
 the secrets filter, goes to the database and the browser (design 4.1, finding B7 of the independent review).
 """
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Float, ForeignKey, Identity, Index, String, Text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Identity,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
@@ -45,8 +57,12 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
 
     __tablename__ = "poradca_conversations"
 
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    #: Empty while the conversation is a new idea that belongs to no project yet (DEV-318, ``idea_id``); the idea's
+    #: outcome gives it the project it ended in, and the conversation goes on there.
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="SET NULL"), nullable=True)
+    #: DEV-318 — the idea (Nápady) this conversation is the talk of; it stays after the idea ended, as its origin.
+    idea_id = Column(UUID(as_uuid=True), ForeignKey("ideas.id", ondelete="RESTRICT"), nullable=True)
     #: Author of the conversation — the logged-in account. They and the admin account see it. RESTRICT (ICCINT-169):
     #: deleting the author would take away the conversations and the cost of answers from Náklady — deactivate instead.
     author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
@@ -71,6 +87,9 @@ class PoradcaConversation(Base, UUIDMixin, TimestampMixin):
             f"review_stage IS NULL OR review_stage IN ({_in(STAGE_VALUES)})",
             name="ck_poradca_conversations_review_stage",
         ),
+        # DEV-318: a conversation is about a project or is a new idea — never about nothing.
+        CheckConstraint("project_id IS NOT NULL OR idea_id IS NOT NULL", name="ck_poradca_conversations_subject"),
+        UniqueConstraint("idea_id", name="uq_poradca_conversations_idea_id"),
     )
 
 

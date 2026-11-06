@@ -255,7 +255,7 @@ def _requirements(n: int) -> str:
 class PoradcaTools:
     """Tools of one question — bound to the project, the conversation's version and the person asking."""
 
-    def __init__(self, *, project_id: UUID, version_id: Optional[UUID], user_id: UUID) -> None:
+    def __init__(self, *, project_id: Optional[UUID], version_id: Optional[UUID], user_id: UUID) -> None:
         self.project_id = project_id
         self.version_id = version_id
         self.user_id = user_id
@@ -263,7 +263,7 @@ class PoradcaTools:
     # ── helpers ────────────────────────────────────────────────────────────────
 
     def _project(self, db: Session) -> Project:
-        project = db.get(Project, self.project_id)
+        project = db.get(Project, self.project_id) if self.project_id is not None else None
         if project is None:
             raise ToolError("Projekt rozhovoru už neexistuje.")
         return project
@@ -961,6 +961,26 @@ def _project_containers(docker_ps_json: str, slug: str, installations: list[UatI
     return sorted(out, key=lambda r: (r["kind"], r["name"]))
 
 
+def knowledge_tools(t: "PoradcaTools") -> list[Tool]:
+    """The Knowledge Base tools — they need only the person asking, so a new idea (DEV-318) has them too."""
+    return [
+        Tool(
+            "znalostna_baza",
+            "Vyhľadávanie v Znalostnej báze ICC s právami človeka, ktorý sa pýta. Vráti cesty dokumentov a úryvky.",
+            _schema({"dotaz": {"type": "string"}}, ["dotaz"]),
+            t.znalostna_baza,
+            lambda a: f"„{str(a.get('dotaz', ''))[:80]}“",
+        ),
+        Tool(
+            "znalostna_baza_dokument",
+            "Celý dokument zo Znalostnej bázy podľa cesty z vyhľadávania (s právami človeka, ktorý sa pýta).",
+            _schema({"cesta": {"type": "string"}}, ["cesta"]),
+            t.znalostna_baza_dokument,
+            lambda a: str(a.get("cesta", "")),
+        ),
+    ]
+
+
 def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) -> list[Tool]:
     """Tools of one question. The agent reads the descriptions — they say what the tool returns and what it does not."""
     t = PoradcaTools(project_id=project_id, version_id=version_id, user_id=user_id)
@@ -1048,20 +1068,7 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             t.ci,
             lambda a: "posledný commit",
         ),
-        Tool(
-            "znalostna_baza",
-            "Vyhľadávanie v Znalostnej báze ICC s právami človeka, ktorý sa pýta. Vráti cesty dokumentov a úryvky.",
-            _schema({"dotaz": {"type": "string"}}, ["dotaz"]),
-            t.znalostna_baza,
-            lambda a: f"„{str(a.get('dotaz', ''))[:80]}“",
-        ),
-        Tool(
-            "znalostna_baza_dokument",
-            "Celý dokument zo Znalostnej bázy podľa cesty z vyhľadávania (s právami človeka, ktorý sa pýta).",
-            _schema({"cesta": {"type": "string"}}, ["cesta"]),
-            t.znalostna_baza_dokument,
-            lambda a: str(a.get("cesta", "")),
-        ),
+        *knowledge_tools(t),
         Tool(
             "databaza_uat",
             "Jeden dotaz SELECT, WITH alebo EXPLAIN do databázy inštalácie UAT — len na čítanie, najviac "

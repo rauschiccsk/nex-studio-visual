@@ -9,7 +9,8 @@ the build, because Poradca only reads:
     are not loaded; file tools do not reach outside the working directory — not even via a symbolic link.
     Measured on 05.10.2026 with CLI 2.1.289: the tool list held only ``Glob``, ``Grep``, ``Read`` and Poradca's tools;
     reading ``/etc/hostname`` was refused both directly and via a link in the project;
-  * **project read-only** — writes are refused by the kernel, not by a promise in the prompt;
+  * **project read-only** — writes are refused by the kernel, not by a promise in the prompt; a new idea (Nápady,
+    DEV-318) has no project: its working directory is an empty folder of its own, read-only too, and nothing else;
   * **secret files overlaid with an empty file** (``.env*``, keys, certificates, …) and likewise every
     file with multiple hard links — a hard link is a second name for a file that may lie anywhere on the same
     disk, and restricted mode cannot tell it from a regular file. A settings template (``.env.example``) is overlaid
@@ -107,6 +108,22 @@ def data_dir() -> Path:
 
 def session_dir(conversation_id: UUID) -> Path:
     return data_dir() / "sessions" / str(conversation_id)
+
+
+#: DEV-318 — where the container works on a new idea (Nápady): an empty folder of the idea, never under ``/opt``.
+CONTAINER_IDEAS_DIR = "/ideas"
+#: The name an idea's question gives its container and network — an idea has no project slug.
+IDEA_LABEL = "idea"
+
+
+def idea_dir(idea_id: UUID) -> Path:
+    """The idea's working directory on the host — empty: what Poradca reads about an idea comes from its tools."""
+    return data_dir() / "ideas" / str(idea_id)
+
+
+def idea_dirs(idea_id: UUID) -> tuple[str, str]:
+    """``(path in the container, path on the host)`` of an idea's working directory."""
+    return f"{CONTAINER_IDEAS_DIR}/{idea_id}", str(idea_dir(idea_id))
 
 
 def attachments_dir(conversation_id: UUID) -> Path:
@@ -282,8 +299,9 @@ def template_copies(project_dir: str, overlays: list[str], token: str) -> dict[s
     return copies
 
 
-def prepare(conversation_id: UUID, token: str) -> tuple[Path, Path]:
+def prepare(conversation_id: UUID, token: str, idea_id: Optional[UUID] = None) -> tuple[Path, Path]:
     """Creates the conversation transcript directory and the socket directory of the question; returns their paths.
+    A new idea (DEV-318) also gets its empty working directory.
 
     The owner is the container user (1000), because Claude Code writes the transcript in it. The empty file for
     overlays is created once, read-only.
@@ -306,6 +324,8 @@ def prepare(conversation_id: UUID, token: str) -> tuple[Path, Path]:
     try:
         sessions = session_dir(conversation_id)
         sessions.mkdir(parents=True, exist_ok=True)
+        if idea_id is not None:
+            idea_dir(idea_id).mkdir(parents=True, exist_ok=True)
         run = run_dir(token)
         run.mkdir(parents=True, exist_ok=True)
         empty = empty_file()
@@ -385,7 +405,8 @@ def _assert_mount_safe(*parts: str) -> None:
 
 def run_argv(
     *,
-    project_slug: str,
+    project_slug: Optional[str] = None,
+    idea_id: Optional[UUID] = None,
     conversation_id: UUID,
     token: str,
     network: Optional[str],
@@ -400,8 +421,20 @@ def run_argv(
     rozhovor nejaké má — priložené snímky TOHTO rozhovoru len na čítanie (DEV-52).
     ABSENT (guarded by a test): ``docker.sock``, ``/opt/customers``, ``/opt/uat``, ``/opt/infra``,
     Knowledge Base, access vault, shared ``~/.claude``, build agent transcripts.
+
+    A question about a project names it (``project_slug``); a question of a new idea (DEV-318) names the idea
+    (``idea_id``) and works in the idea's empty folder — no project, no ``.git``, nothing to overlay. Exactly one.
     """
-    container_dir, host_dir = project_dirs(project_slug)
+    if (project_slug is None) == (idea_id is None):
+        raise PoradcaUnavailable(f"{_LABEL}: otázka patrí projektu alebo nápadu — práve jednému")
+    if project_slug is not None:
+        label = project_slug
+        container_dir, host_dir = project_dirs(project_slug)
+    else:
+        label = IDEA_LABEL
+        container_dir, host_dir = idea_dirs(idea_id)
+        if overlays or templates:
+            raise PoradcaUnavailable(f"{_LABEL}: nápad nemá projekt, nie je v ňom čo prekryť")
     _assert_mount_safe(
         host_dir, container_dir, str(session_dir(conversation_id)), str(run_dir(token)), str(empty_file())
     )
@@ -414,7 +447,7 @@ def run_argv(
         "run",
         "--rm",
         "--name",
-        container_name(project_slug, token),
+        container_name(label, token),
         # Build marker: a container surviving a backend restart (the question keeps running, nobody reads it, it writes
         # to the conversation transcript) is cleaned up at start by ``build_db.reap_orphans`` — like its network.
         "--label",

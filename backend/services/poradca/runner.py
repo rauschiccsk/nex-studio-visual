@@ -69,6 +69,8 @@ DEFAULT_EFFORT = "high"
 MAX_CONCURRENT_KEY = "poradca_max_concurrent"
 
 _CHARTER = Path(__file__).resolve().parents[3] / "templates" / "poradca-charter.md"
+#: DEV-318 — Poradca's rules for a new idea (Nápady): how a new project is shaped and its brief written.
+_IDEA_CHARTER = _CHARTER.parent / "poradca-ideas-charter.md"
 _STREAM_LINE_LIMIT = 16 * 1024 * 1024
 
 
@@ -296,6 +298,19 @@ def _charter_text(project_type: str, template: str | None = None) -> str:
     return text.rstrip() + "\n\n---\n\n" + TYPE_RULES_INTRO + "\n\n" + rules
 
 
+def _idea_charter_text() -> str:
+    """Poradca's rules for a new idea (DEV-318) — read at every question, so a changed file reaches the next one."""
+    return _IDEA_CHARTER.read_text(encoding="utf-8")
+
+
+def idea_scope_line(title: str) -> str:
+    """What we are talking about in a new idea (DEV-318) — there is no project, version or installation yet."""
+    return (
+        f"Nápad „{title}“ — projekt zatiaľ neexistuje. Projekt z neho založí, alebo zadanie do "
+        "existujúceho projektu pridá, až človek tlačidlom pod zadaním, ktoré napíšeš."
+    )
+
+
 def _charter_sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -386,24 +401,34 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
     try:
         with SessionLocal() as db:
             conversation = db.get(PoradcaConversation, conversation_id)
-            project = db.get(Project, conversation.project_id)
-            # DEV-171: the rules follow the project's type — a project switched to Web gives its conversation the
-            # Web rules at its next question (the sha differs, DEV-30).
-            charter = _charter_text(project.type, project.template)
-            charter_sha = _charter_sha(charter)
+            # DEV-318: a new idea has no project until its outcome gives it one — then it goes on as the project's.
+            project = db.get(Project, conversation.project_id) if conversation.project_id else None
             user = db.get(User, user_id)
             limit = max_concurrent(db)
-            scope = scope_line(db, project, conversation.version_id)
             model, effort = _model_and_effort(db, user_id)
+            asker = " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
+            session_id = conversation.claude_session_id
+            if project is not None:
+                # DEV-171: the rules follow the project's type — a project switched to Web gives its conversation the
+                # Web rules at its next question (the sha differs, DEV-30).
+                charter = _charter_text(project.type, project.template)
+                scope = scope_line(db, project, conversation.version_id)
+                slug, idea_id = project.slug, None
+                from backend.services.poradca.tools import build_tools
+
+                tools = build_tools(project_id=project.id, version_id=conversation.version_id, user_id=user_id)
+            else:
+                charter = _idea_charter_text()
+                scope = idea_scope_line(conversation.title)
+                slug, idea_id = None, conversation.idea_id
+                from backend.services.poradca.idea_tools import build_idea_tools
+
+                tools = build_idea_tools(user_id=user_id)
+            charter_sha = _charter_sha(charter)
             secret_filter = SecretFilter(known_secret_values(db, project))
             entry.secret_filter = secret_filter
-            asker = " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
-            slug, session_id = project.slug, conversation.claude_session_id
             # DEV-30: Claude Code ignores a new charter on --resume — a changed one goes into the question itself.
             charter_refresh = not first and conversation.charter_sha != charter_sha
-            from backend.services.poradca.tools import build_tools
-
-            tools = build_tools(project_id=project.id, version_id=conversation.version_id, user_id=user_id)
 
         if _slots.active >= max(1, limit):
             hub.publish(
@@ -417,27 +442,35 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             raise asyncio.CancelledError
 
         token = build_sandbox.turn_token()
-        _sessions, run_path = await asyncio.to_thread(sandbox.prepare, conversation_id, token)
+        # DEV-318: an idea's question also gets the idea's empty working folder.
+        prepare_args = (conversation_id, token) if idea_id is None else (conversation_id, token, idea_id)
+        _sessions, run_path = await asyncio.to_thread(sandbox.prepare, *prepare_args)
         # ICCINT-168: what an answer cost is read from the session record — the sum before the answer and after it (also
         # someone stops it or it times out). The run result carries the sum for the whole conversation, not the answer.
         transcript = usage_ledger.build_transcript(sandbox.session_dir(conversation_id), session_id)
         before = await asyncio.to_thread(usage_ledger.last_cost_state, transcript)
         launched_at = datetime.now(timezone.utc)
-        container_dir, host_dir = sandbox.project_dirs(slug)
-        overlays = await asyncio.to_thread(sandbox.overlay_paths, host_dir)
-        # DEV-177: the settings template is read with names, comments and markers — never a value.
-        templates = await asyncio.to_thread(sandbox.template_copies, host_dir, overlays, token)
+        if slug is not None:
+            container_dir, host_dir = sandbox.project_dirs(slug)
+            overlays = await asyncio.to_thread(sandbox.overlay_paths, host_dir)
+            # DEV-177: the settings template is read with names, comments and markers — never a value.
+            templates = await asyncio.to_thread(sandbox.template_copies, host_dir, overlays, token)
+        else:
+            container_dir, _host_dir = sandbox.idea_dirs(idea_id)
+            overlays, templates = [], {}
+        label = slug or sandbox.IDEA_LABEL
 
         async def on_step(tool: str, target: str) -> None:
             await _record_step(entry, message_id, tool, target)
 
         server = McpServer(str(run_path / sandbox.SOCKET_NAME), tools, secret_filter, on_step)
         await server.start()
-        network = sandbox.network_name(slug, token)
+        network = sandbox.network_name(label, token)
         try:
-            await build_db.create_fenced_network(network, f"poradca-{slug}", token)
+            await build_db.create_fenced_network(network, f"poradca-{label}", token)
             argv = sandbox.run_argv(
                 project_slug=slug,
+                idea_id=idea_id,
                 conversation_id=conversation_id,
                 token=token,
                 network=network,
@@ -453,7 +486,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                 overlays=overlays,
                 templates=templates,
             )
-            entry.container = sandbox.container_name(slug, token)
+            entry.container = sandbox.container_name(label, token)
             content, usage = await asyncio.wait_for(
                 _stream(argv, entry, message_id, container_dir), timeout=settings.poradca_question_timeout
             )
@@ -602,10 +635,18 @@ async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_di
 
 
 def new_conversation(
-    db: Session, *, project: Project, author: User, version_id: Optional[UUID], title: str
+    db: Session,
+    *,
+    project: Optional[Project] = None,
+    idea_id: Optional[UUID] = None,
+    author: User,
+    version_id: Optional[UUID],
+    title: str,
 ) -> PoradcaConversation:
+    """A conversation about a project — or the talk of a new idea (DEV-318), which belongs to no project yet."""
     conversation = PoradcaConversation(
-        project_id=project.id,
+        project_id=project.id if project is not None else None,
+        idea_id=idea_id,
         version_id=version_id,
         author_id=author.id,
         title=title[:200] or "Rozhovor",

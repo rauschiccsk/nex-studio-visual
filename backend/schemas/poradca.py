@@ -60,6 +60,30 @@ class PoradcaChoiceRead(BaseModel):
     question: Optional[str] = None
 
 
+class IdeaProjectBriefRead(BaseModel):
+    """DEV-318 — a new project's brief in an idea's answer: what the form Nový projekt is prefilled with. A field
+    Poradca did not name (or named so the cockpit cannot read it) is ``None`` and the form keeps its default."""
+
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    auth_mode: Optional[str] = None
+    #: ``None`` — not named; ``""`` — no template on purpose.
+    template: Optional[str] = None
+    ai: Optional[bool] = None
+    #: ``change`` or ``gift`` — who pays the first version; without it the project is not founded from the idea.
+    work_kind: Optional[str] = None
+    brief: str
+
+
+class IdeaAdditionRead(BaseModel):
+    """DEV-318 — an idea's brief for an existing project: it goes to that project's Zásobník."""
+
+    project_slug: str
+    title: str
+
+
 class PoradcaMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -97,6 +121,9 @@ class PoradcaMessageRead(BaseModel):
     agent_tickets: list[str] = Field(default_factory=list)
     #: DEV-264 — the answer asks the person and prepared something anyway: nothing is offered until the answer.
     held_for_answer: bool = False
+    #: DEV-318 — the idea's two outcomes this answer offers (only in a finished answer that asks nothing).
+    idea_project: Optional[IdeaProjectBriefRead] = None
+    idea_addition: Optional[IdeaAdditionRead] = None
 
 
 class PoradcaAgentTicketsAttached(BaseModel):
@@ -118,7 +145,10 @@ class PoradcaBacklogSaved(BaseModel):
 
 class PoradcaConversationRead(BaseModel):
     id: UUID
-    project_id: UUID
+    #: ``None`` while the conversation is a new idea that belongs to no project yet (DEV-318, ``idea_id``).
+    project_id: Optional[UUID] = None
+    #: DEV-318 — the idea (Nápady) this conversation is the talk of; it stays after the idea ended, as its origin.
+    idea_id: Optional[UUID] = None
     #: What we are talking about — ``None`` = the whole project.
     version_id: Optional[UUID] = None
     version_number: Optional[str] = None
@@ -276,3 +306,64 @@ class PoradcaTicketFounded(BaseModel):
     plane_identifier: str
     plane_url: str
     created: bool
+
+
+# ── DEV-318 Nápady ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class IdeaCreate(BaseModel):
+    """A new idea — its first message to Poradca: the rough idea, as text (also pasted from Obsidian) and images."""
+
+    question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
+    attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
+
+    @field_validator("question")
+    @classmethod
+    def _no_nul(cls, value: str) -> str:
+        return _refuse_nul(value)
+
+
+class IdeaRead(BaseModel):
+    id: UUID
+    title: str
+    #: ``open`` (Rozpracovaný), ``brief_ready`` (Zadanie hotové), ``founded`` (Založený ako …),
+    #: ``added`` (Pridaný do …).
+    state: str
+    conversation_id: UUID
+    author_name: str
+    #: An answer is running now.
+    running: bool = False
+    #: What its answers cost in euros, by the price list of Náklady; ``None`` before any priced answer.
+    cost: Optional[float] = None
+    outcome_project_slug: Optional[str] = None
+    outcome_project_name: Optional[str] = None
+    #: When the brief was added to an existing project: the Zásobník requirement's number (REQ-N).
+    outcome_backlog_number: Optional[int] = None
+    #: The founded project's ticket in the DEV register.
+    plane_identifier: Optional[str] = None
+    plane_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IdeaDetail(IdeaRead):
+    conversation: PoradcaConversationDetail
+
+
+class IdeaFoundedCreate(BaseModel):
+    """The person founded a project from the brief of this answer (the form Nový projekt, prefilled from it)."""
+
+    message_id: UUID
+    project_id: UUID
+
+
+class IdeaAddedCreate(BaseModel):
+    """The brief of this answer goes to the Zásobník of the project it names."""
+
+    message_id: UUID
+
+
+class IdeaOutcome(IdeaRead):
+    #: The founded project's ticket could not be filed now — the sentence why; the idea stays founded, a second
+    #: click files it.
+    ticket_error: Optional[str] = None

@@ -33,7 +33,7 @@ from backend.api.routes.project_files import record_private_file
 from backend.config.settings import settings
 from backend.core import authz
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
-from backend.core.security import get_current_user, verify_ws_token
+from backend.core.security import get_current_user, require_shu_or_above, verify_ws_token
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
@@ -42,6 +42,14 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
 from backend.schemas.poradca import (
+    IdeaAddedCreate,
+    IdeaAdditionRead,
+    IdeaCreate,
+    IdeaDetail,
+    IdeaFoundedCreate,
+    IdeaOutcome,
+    IdeaProjectBriefRead,
+    IdeaRead,
     PoradcaAgentTicketsAttached,
     PoradcaAsk,
     PoradcaBacklogSaved,
@@ -62,8 +70,19 @@ from backend.schemas.poradca import (
     PoradcaVersionInfo,
 )
 from backend.services import claude_agent, metrics, plane_tickets, project_files
+from backend.services import version as version_service
 from backend.services.plane_gateway import PlaneError
-from backend.services.poradca import agent_tickets, attachments, choices, handoff, readiness, review, runner, tickets
+from backend.services.poradca import (
+    agent_tickets,
+    attachments,
+    choices,
+    handoff,
+    ideas,
+    readiness,
+    review,
+    runner,
+    tickets,
+)
 from backend.services.poradca.context import known_secret_values
 from backend.services.poradca.secrets_filter import SecretFilter
 
@@ -85,15 +104,19 @@ def _author_name(user: Optional[User]) -> str:
     return " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
 
 
-def _check_version(db: Session, project: Project, version_id: Optional[uuid.UUID]) -> None:
+def _check_version(db: Session, project: Optional[Project], version_id: Optional[uuid.UUID]) -> None:
     if version_id is None:
         return
     version = db.get(Version, version_id)
-    if version is None or version.project_id != project.id:
+    if project is None or version is None or version.project_id != project.id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Verzia nepatrí k tomuto projektu.")
 
 
-def _conversation_for(db: Session, user: User, conversation_id: uuid.UUID) -> tuple[PoradcaConversation, Project]:
+def _conversation_for(
+    db: Session, user: User, conversation_id: uuid.UUID
+) -> tuple[PoradcaConversation, Optional[Project]]:
+    """The conversation and its project — the author's or any for admin. A new idea (DEV-318) has no project yet:
+    its author (or admin) is all the access it needs, ``None`` stands for the project."""
     conversation = db.get(PoradcaConversation, conversation_id)
     if (
         conversation is None
@@ -101,6 +124,8 @@ def _conversation_for(db: Session, user: User, conversation_id: uuid.UUID) -> tu
         or not (conversation.author_id == user.id or authz.is_admin(user))
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.")
+    if conversation.project_id is None:
+        return conversation, None
     project = authz.assert_project_id_access(db, user, conversation.project_id)
     return conversation, project
 
@@ -115,6 +140,16 @@ def _captured_backlog_number(db: Session, msg: PoradcaMessage) -> Optional[int]:
 def _ticket_proposal(content: str) -> Optional[PoradcaTicketProposalRead]:
     proposal = handoff.ticket_proposal(content)
     return PoradcaTicketProposalRead(kind=proposal.kind, title=proposal.title) if proposal else None
+
+
+def _idea_project(content: str) -> Optional[IdeaProjectBriefRead]:
+    brief = handoff.project_brief(content)
+    return IdeaProjectBriefRead(**asdict(brief)) if brief else None
+
+
+def _idea_addition(content: str) -> Optional[IdeaAdditionRead]:
+    addition = handoff.project_addition(content)
+    return IdeaAdditionRead(project_slug=addition.project_slug, title=addition.title) if addition else None
 
 
 def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
@@ -148,6 +183,8 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         plane_url=msg.plane_url,
         agent_tickets=handoff.agent_tickets(msg.content) if offers else [],
         held_for_answer=held,
+        idea_project=_idea_project(msg.content) if offers else None,
+        idea_addition=_idea_addition(msg.content) if offers else None,
         choices=[
             PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
             for c in choices.choices(db, msg.content, msg.version_id)
@@ -170,6 +207,7 @@ def _conversation_read(db: Session, conversation: PoradcaConversation) -> Poradc
     return PoradcaConversationRead(
         id=conversation.id,
         project_id=conversation.project_id,
+        idea_id=conversation.idea_id,
         version_id=conversation.version_id,
         version_number=version.version_number if version else None,
         author_id=conversation.author_id,
@@ -230,6 +268,135 @@ def _edit(db: Session, conversation: PoradcaConversation, **values: object) -> N
         runner.edit_conversation(db, conversation, **values)
     except runner.ConversationGone as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Rozhovor sa nenašiel.") from exc
+
+
+# ── DEV-318 Nápady: a new idea talked over before any project exists ─────────────────────────────────────────────────
+
+
+def _idea_read(db: Session, idea, conversation: PoradcaConversation) -> IdeaRead:
+    project = ideas.outcome_project(db, idea)
+    read = _conversation_read(db, conversation)
+    return IdeaRead(
+        id=idea.id,
+        title=conversation.title,
+        state=ideas.state(db, idea, conversation),
+        conversation_id=conversation.id,
+        author_name=read.author_name,
+        running=read.running,
+        cost=ideas.cost(db, conversation.id),
+        outcome_project_slug=project.slug if project else None,
+        outcome_project_name=project.name if project else None,
+        outcome_backlog_number=ideas.outcome_backlog_number(db, idea),
+        plane_identifier=idea.plane_identifier,
+        plane_url=idea.plane_url,
+        created_at=idea.created_at,
+        updated_at=conversation.updated_at,
+    )
+
+
+def _idea_for(db: Session, user: User, idea_id: uuid.UUID):
+    try:
+        return ideas.get_for(db, user, idea_id)
+    except ideas.IdeaGone as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Nápad sa nenašiel.") from exc
+
+
+@router.get("/ideas", response_model=list[IdeaRead])
+def list_ideas(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> list[IdeaRead]:
+    """The person's ideas (all for the admin account), the most recently talked first."""
+    return [_idea_read(db, idea, conversation) for idea, conversation in ideas.visible(db, current_user)]
+
+
+@router.post("/ideas", response_model=IdeaDetail, status_code=status.HTTP_201_CREATED)
+async def create_idea(
+    payload: IdeaCreate, db: Session = Depends(get_db), current_user: User = Depends(require_shu_or_above)
+) -> IdeaDetail:
+    """A new idea: its conversation with Poradca starts with the rough idea. Whoever may found a project may start
+    one (the same role as Nový projekt)."""
+    images = _accept_images(payload.attachments)
+    idea, conversation = ideas.create(db, author=current_user, title=_title(payload.question))
+    db.commit()
+    _ask(db, conversation, payload.question, current_user, images)
+    return IdeaDetail(**_idea_read(db, idea, conversation).model_dump(), conversation=_detail(db, conversation))
+
+
+@router.get("/ideas/{idea_id}", response_model=IdeaDetail)
+def get_idea(
+    idea_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> IdeaDetail:
+    idea, conversation = _idea_for(db, current_user, idea_id)
+    return IdeaDetail(**_idea_read(db, idea, conversation).model_dump(), conversation=_detail(db, conversation))
+
+
+@router.post("/ideas/{idea_id}/founded", response_model=IdeaOutcome)
+def idea_founded(
+    idea_id: uuid.UUID,
+    payload: IdeaFoundedCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> IdeaOutcome:
+    """The person founded a project from the idea's brief: its 0.1.0 gets the brief, the talk moves to it, and the
+    project gets its ticket in the DEV register. A second click returns the same — and files a ticket that failed."""
+    idea, conversation = _idea_for(db, current_user, idea_id)
+    project = authz.assert_project_id_access(db, current_user, payload.project_id)
+    try:
+        idea = ideas.found(db, idea, conversation, message_id=payload.message_id, project=project)
+        db.commit()
+    except ideas.OutcomeRefused as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except version_service.ZadanieWouldBeOverwritten as exc:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Verzia 0.1.0 projektu už má iné zadanie — zadanie z nápadu ho neprepíše.",
+        ) from exc
+    ticket_error = None
+    try:
+        ideas.file_project_ticket(db, plane_tickets.gateway(), current_user, idea, conversation, project)
+        db.commit()
+    except PlaneError as exc:
+        db.rollback()
+        ticket_error = str(exc)
+    db.refresh(idea)
+    return IdeaOutcome(**_idea_read(db, idea, conversation).model_dump(), ticket_error=ticket_error)
+
+
+@router.post("/ideas/{idea_id}/added", response_model=IdeaOutcome)
+def idea_added(
+    idea_id: uuid.UUID,
+    payload: IdeaAddedCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> IdeaOutcome:
+    """The idea's brief goes to the Zásobník of the existing project it names; the talk moves to that project."""
+    idea, conversation = _idea_for(db, current_user, idea_id)
+    try:
+        slug = ideas.addition_target(db, conversation, payload.message_id)
+        project = authz.assert_project_slug_access(db, current_user, slug)
+        idea = ideas.add(db, idea, conversation, message_id=payload.message_id, project=project)
+        db.commit()
+    except ideas.OutcomeRefused as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.refresh(idea)
+    return IdeaOutcome(**_idea_read(db, idea, conversation).model_dump())
+
+
+@router.delete("/ideas/{idea_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def throw_away_idea(
+    idea_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> Response:
+    """Throw an idea away — its talk is gone as a deleted conversation's is; the cost of its answers stays."""
+    idea, conversation = _idea_for(db, current_user, idea_id)
+    try:
+        await ideas.throw_away(db, idea, conversation)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except runner.PoradcaBusy as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/status", response_model=PoradcaStatus)

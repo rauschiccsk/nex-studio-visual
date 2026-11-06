@@ -1300,6 +1300,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/ideas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ideas
+         * @description The person's ideas (all for the admin account), the most recently talked first.
+         */
+        get: operations["list_ideas_api_v1_poradca_ideas_get"];
+        put?: never;
+        /**
+         * Create Idea
+         * @description A new idea: its conversation with Poradca starts with the rough idea. Whoever may found a project may start
+         *     one (the same role as Nový projekt).
+         */
+        post: operations["create_idea_api_v1_poradca_ideas_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/ideas/{idea_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Idea */
+        get: operations["get_idea_api_v1_poradca_ideas__idea_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Throw Away Idea
+         * @description Throw an idea away — its talk is gone as a deleted conversation's is; the cost of its answers stays.
+         */
+        delete: operations["throw_away_idea_api_v1_poradca_ideas__idea_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/ideas/{idea_id}/added": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idea Added
+         * @description The idea's brief goes to the Zásobník of the existing project it names; the talk moves to that project.
+         */
+        post: operations["idea_added_api_v1_poradca_ideas__idea_id__added_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/poradca/ideas/{idea_id}/founded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idea Founded
+         * @description The person founded a project from the idea's brief: its 0.1.0 gets the brief, the talk moves to it, and the
+         *     project gets its ticket in the DEV register. A second click returns the same — and files a ticket that failed.
+         */
+        post: operations["idea_founded_api_v1_poradca_ideas__idea_id__founded_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/agent-tickets": {
         parameters: {
             query?: never;
@@ -5544,6 +5631,219 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * IdeaAddedCreate
+         * @description The brief of this answer goes to the Zásobník of the project it names.
+         */
+        IdeaAddedCreate: {
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+        };
+        /**
+         * IdeaAdditionRead
+         * @description DEV-318 — an idea's brief for an existing project: it goes to that project's Zásobník.
+         */
+        IdeaAdditionRead: {
+            /** Project Slug */
+            project_slug: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * IdeaCreate
+         * @description A new idea — its first message to Poradca: the rough idea, as text (also pasted from Obsidian) and images.
+         */
+        IdeaCreate: {
+            /** Attachments */
+            attachments?: components["schemas"]["PoradcaAttachmentUpload"][];
+            /** Question */
+            question: string;
+        };
+        /** IdeaDetail */
+        IdeaDetail: {
+            /** Author Name */
+            author_name: string;
+            conversation: components["schemas"]["PoradcaConversationDetail"];
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Cost */
+            cost?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Outcome Backlog Number */
+            outcome_backlog_number?: number | null;
+            /** Outcome Project Name */
+            outcome_project_name?: string | null;
+            /** Outcome Project Slug */
+            outcome_project_slug?: string | null;
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** State */
+            state: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * IdeaFoundedCreate
+         * @description The person founded a project from the brief of this answer (the form Nový projekt, prefilled from it).
+         */
+        IdeaFoundedCreate: {
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+        };
+        /** IdeaOutcome */
+        IdeaOutcome: {
+            /** Author Name */
+            author_name: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Cost */
+            cost?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Outcome Backlog Number */
+            outcome_backlog_number?: number | null;
+            /** Outcome Project Name */
+            outcome_project_name?: string | null;
+            /** Outcome Project Slug */
+            outcome_project_slug?: string | null;
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** State */
+            state: string;
+            /** Ticket Error */
+            ticket_error?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * IdeaProjectBriefRead
+         * @description DEV-318 — a new project's brief in an idea's answer: what the form Nový projekt is prefilled with. A field
+         *     Poradca did not name (or named so the cockpit cannot read it) is ``None`` and the form keeps its default.
+         */
+        IdeaProjectBriefRead: {
+            /** Ai */
+            ai?: boolean | null;
+            /** Auth Mode */
+            auth_mode?: string | null;
+            /** Brief */
+            brief: string;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Template */
+            template?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Work Kind */
+            work_kind?: string | null;
+        };
+        /** IdeaRead */
+        IdeaRead: {
+            /** Author Name */
+            author_name: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Cost */
+            cost?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Outcome Backlog Number */
+            outcome_backlog_number?: number | null;
+            /** Outcome Project Name */
+            outcome_project_name?: string | null;
+            /** Outcome Project Slug */
+            outcome_project_slug?: string | null;
+            /** Plane Identifier */
+            plane_identifier?: string | null;
+            /** Plane Url */
+            plane_url?: string | null;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /** State */
+            state: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * IssueStatementWrite
          * @description DEV-54 — the valid statement the Manažér confirmed to replace; empty when the version has none yet.
          */
@@ -6239,13 +6539,12 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Idea Id */
+            idea_id?: string | null;
             /** Messages */
             messages?: components["schemas"]["PoradcaMessageRead"][];
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
+            /** Project Id */
+            project_id?: string | null;
             /**
              * Running
              * @default false
@@ -6282,11 +6581,10 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
+            /** Idea Id */
+            idea_id?: string | null;
+            /** Project Id */
+            project_id?: string | null;
             /**
              * Running
              * @default false
@@ -6346,6 +6644,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            idea_addition?: components["schemas"]["IdeaAdditionRead"] | null;
+            idea_project?: components["schemas"]["IdeaProjectBriefRead"] | null;
             /** Input Tokens */
             input_tokens?: number | null;
             /** Instruction */
@@ -10935,6 +11235,189 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaConversationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_ideas_api_v1_poradca_ideas_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaRead"][];
+                };
+            };
+        };
+    };
+    create_idea_api_v1_poradca_ideas_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdeaCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_idea_api_v1_poradca_ideas__idea_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    throw_away_idea_api_v1_poradca_ideas__idea_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    idea_added_api_v1_poradca_ideas__idea_id__added_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdeaAddedCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaOutcome"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    idea_founded_api_v1_poradca_ideas__idea_id__founded_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdeaFoundedCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaOutcome"];
                 };
             };
             /** @description Validation Error */

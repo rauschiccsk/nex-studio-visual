@@ -11,6 +11,7 @@ from backend.db.models.delivery_statement import DeliveryStatement
 from backend.db.models.deploy import DeployEvent, DeployRefusal
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
+from backend.db.models.idea import Idea
 from backend.db.models.model_price import ModelPrice
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -32,6 +33,7 @@ from backend.db.models.versions import Version
 __all__ = [
     "AgentTerminalSession",
     "BacklogItem",
+    "Idea",
     "Base",
     "UUIDMixin",
     "TimestampMixin",

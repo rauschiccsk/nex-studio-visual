@@ -267,3 +267,76 @@ def test_what_discard_cannot_remove_the_startup_sweep_does(project, monkeypatch)
 
 def test_sweep_without_a_trash_does_nothing(project):
     assert sandbox.sweep_trash() == 0
+
+
+# ── DEV-318 Nápady: a new idea has no project ────────────────────────────────────────────────────────────────────────
+
+
+def _idea_argv(idea_id, attachments=False):
+    call = sandbox.ClaudeCall(
+        prompt="Mám nápad na aplikáciu pre matriku.",
+        claude_session_id=uuid4(),
+        charter_text="charta návrhov",
+        model="opus",
+        effort="high",
+        attachments=attachments,
+    )
+    return sandbox.run_argv(
+        idea_id=idea_id,
+        conversation_id=uuid4(),
+        token="abc123",
+        network="nex-poradca-idea-abc123",
+        call=call,
+        overlays=[],
+    )
+
+
+def test_an_idea_works_in_its_own_empty_folder_and_sees_nothing_else(project):
+    """The whole mount list of an idea's question, as a set: the home and /tmp, its transcript, its own folder
+    read-only, the claude binary and the question's socket — no project, nothing under /opt, no Knowledge Base."""
+    idea = uuid4()
+    argv = _idea_argv(idea)
+    mounts = _mounts(argv)
+    data = sandbox.data_dir()
+    workdir = f"{sandbox.CONTAINER_IDEAS_DIR}/{idea}"
+    kinds = sorted(m.split(",target=")[-1].split(",")[0] if "type=bind" in m else m.split(",")[1] for m in mounts)
+    assert kinds == sorted(
+        [
+            "destination=/home/andros",
+            "destination=/tmp",
+            f"/home/andros/.claude/projects/-ideas-{idea}",
+            workdir,
+            "/home/andros/.local",
+            sandbox.CONTAINER_RUN_DIR,
+        ]
+    )
+    assert f"type=bind,source={data}/ideas/{idea},target={workdir},readonly" in mounts
+    assert not any("/opt/" in m for m in mounts)
+    assert argv[argv.index("-w") + 1] == workdir
+    assert argv[argv.index("--name") + 1] == "nex-poradca-idea-abc123"
+
+
+def test_an_idea_reads_its_images_too(project):
+    mounts = _mounts(_idea_argv(uuid4(), attachments=True))
+    assert any(m.endswith(f"target={sandbox.CONTAINER_ATTACHMENTS_DIR},readonly") for m in mounts)
+
+
+def test_a_question_belongs_to_a_project_or_an_idea_exactly(project):
+    call = sandbox.ClaudeCall(prompt="?", claude_session_id=uuid4(), charter_text=None, model=None, effort=None)
+    common = dict(conversation_id=uuid4(), token="t", network=None, call=call, overlays=[])
+    with pytest.raises(sandbox.PoradcaUnavailable):
+        sandbox.run_argv(**common)
+    with pytest.raises(sandbox.PoradcaUnavailable):
+        sandbox.run_argv(project_slug="demo", idea_id=uuid4(), **common)
+    with pytest.raises(sandbox.PoradcaUnavailable):
+        sandbox.run_argv(idea_id=uuid4(), **{**common, "overlays": [".env"]})
+
+
+def test_an_idea_gets_its_working_folder_prepared(project):
+    idea = uuid4()
+    sandbox.data_dir().mkdir(parents=True, exist_ok=True)
+    try:
+        sandbox.prepare(uuid4(), "tok", idea)
+    except sandbox.PoradcaUnavailable:
+        pass  # chown needs root outside the container; the folder is made before it
+    assert sandbox.idea_dir(idea).is_dir()

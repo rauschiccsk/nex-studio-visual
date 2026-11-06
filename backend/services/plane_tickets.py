@@ -33,6 +33,7 @@ SOURCES = {
     "zasobnik": "zo Zásobníka",
     "plane_tikety": "zo záložky Plane tikety",
     "kokpit": "z kokpitu",
+    "ideas": "z Nápadov",  # DEV-318 — the ticket of a project founded from an idea
 }
 
 
@@ -95,7 +96,7 @@ def file_ticket(
     db: Session,
     gateway: PlaneGateway,
     *,
-    project: Project,
+    project: Optional[Project],
     user: Optional[User],
     source: str,
     title: str,
@@ -110,15 +111,19 @@ def file_ticket(
     ``doer`` goes to the ``Robí:`` line the Dedos' gate reads (who works on it now). The text ends with who founded
     the ticket through the cockpit and from where. A ticket about work on the project carries its ``work_kind``
     (DEV-118) — nothing is written without it; a problem of the cockpit itself is nobody's bill and carries none.
+    A problem of the cockpit met in a new idea (DEV-318) has no project — only such a ticket may come without one.
     """
     if (work_kind is None and module_name is None) or (work_kind is not None and work_kind not in WORK_KIND_LABELS):
         raise PlaneError(WORK_KIND_MISSING)
+    if project is None and module_name is None:
+        raise PlaneError("Tiket na prácu v projekte potrebuje projekt.")
     if work_kind is not None:
         labels = (*labels, WORK_KIND_LABELS[work_kind])
     module = gateway.ensure_module(module_name) if module_name else module_for(db, project, gateway)
     text = (
         f"Robí: {doer}\n\n{description.strip()}\n\n"
-        f"Založil: {person(user)} cez NEX Studio Visual ({SOURCES.get(source, source)}), projekt {project.name}."
+        f"Založil: {person(user)} cez NEX Studio Visual ({SOURCES.get(source, source)}), "
+        + (f"projekt {project.name}." if project is not None else "Nápady (projekt zatiaľ neexistuje).")
     )
     return gateway.create_ticket(title=title, description=text, module=module, labels=labels)
 
