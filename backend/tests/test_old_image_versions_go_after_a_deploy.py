@@ -58,7 +58,7 @@ def compose(tmp_path) -> Path:
     return path
 
 
-def _docker(monkeypatch, *, used: tuple[str, ...] = (), images=None, rm_fails: tuple[str, ...] = ()):
+def _docker(monkeypatch, *, used: tuple[str, ...] = (), images=None, rm_fails: tuple[str, ...] = (), df_fails=False):
     """Docker on the target, in memory: lists images and the images containers use, removes tags."""
     images = dict(IMAGES if images is None else images)
     calls: list[dict] = []
@@ -78,6 +78,11 @@ def _docker(monkeypatch, *, used: tuple[str, ...] = (), images=None, rm_fails: t
                 return _Proc("Error response from daemon: conflict", 1)
             images.pop(cmd[3])
             return _Proc(f"Untagged: {cmd[3]}\n")
+        if cmd[:3] == ["docker", "system", "df"]:
+            if df_fails:
+                return _Proc("Error response from daemon", 1)
+            unique = {image_id: size for image_id, size in images.values()}
+            return _Proc(f"Images\t{sum(unique.values()):.2f}GB\nContainers\t1.5GB\nBuild Cache\t0B\n")
         raise AssertionError(f"unexpected docker call {cmd}")
 
     monkeypatch.setattr(O.asyncio, "create_subprocess_exec", _exec)
@@ -102,8 +107,46 @@ def test_the_running_version_and_the_way_back_stay_older_ones_go(monkeypatch, co
     assert "nex-inbox-backend:latest" in left and "nex-manager-backend:v1.0.0" in left
     assert detail == (
         "OK Staršie verzie obrazov zmazané: nex-inbox-backend v1.6.0, v1.5.6, v1.5.0, v1.4.0; "
-        "nex-inbox-frontend v1.6.0 (spolu približne 8,4 GB)."
+        "nex-inbox-frontend v1.6.0 (uvoľnené približne 8,4 GB)."
     )
+
+
+def test_both_tags_of_the_way_back_stay(monkeypatch, compose) -> None:
+    """DEV-305: 06.11.2026 the PROD deploy of NEX Knowledge 1.0.1 kept ``v1.0.0`` and removed ``1.0.0`` — two tags of
+    the version to go back to, and only one of them stayed. Every tag of the newest older version stays."""
+    images = {
+        "nex-inbox-backend:v1.8.0": ("sha256:a180", 2.1),
+        "nex-inbox-backend:v1.7.1": ("sha256:a171", 2.1),
+        "nex-inbox-backend:1.7.1": ("sha256:a171", 2.1),
+        "nex-inbox-backend:1.6.0": ("sha256:a160", 2.1),
+    }
+    calls, left = _docker(monkeypatch, images=images)
+    asyncio.run(O._uprac_stare_verzie(True, "OK", "mager", compose))
+    assert {"nex-inbox-backend:v1.7.1", "nex-inbox-backend:1.7.1"} <= set(left)
+    assert _removed(calls) == ["nex-inbox-backend:1.6.0"]
+
+
+def test_the_freed_space_is_measured_not_summed(monkeypatch, compose) -> None:
+    """DEV-305: the report said „približne 26,5 GB“ for tags that shared one image and its layers — removing a second
+    tag frees nothing. What Docker says the images take before and after is what was freed."""
+    images = {
+        "nex-inbox-backend:v1.8.0": ("sha256:a180", 2.1),
+        "nex-inbox-backend:v1.7.1": ("sha256:a171", 2.1),
+        "nex-inbox-backend:v1.5.0": ("sha256:a150", 2.1),
+        "nex-inbox-backend:1.5.0": ("sha256:a150", 2.1),
+    }
+    calls, _ = _docker(monkeypatch, images=images)
+    detail = asyncio.run(O._uprac_stare_verzie(True, "OK", "mager", compose))
+    assert _removed(calls) == ["nex-inbox-backend:v1.5.0", "nex-inbox-backend:1.5.0"]
+    assert detail == "OK Staršie verzie obrazov zmazané: nex-inbox-backend v1.5.0, 1.5.0 (uvoľnené približne 2,1 GB)."
+
+
+def test_without_a_measurement_no_space_is_claimed(monkeypatch, compose) -> None:
+    calls, _ = _docker(monkeypatch, df_fails=True)
+    detail = asyncio.run(O._uprac_stare_verzie(True, "OK", "mager", compose))
+    assert _removed(calls)
+    assert detail.startswith("OK Staršie verzie obrazov zmazané: nex-inbox-backend v1.6.0")
+    assert "GB" not in detail and detail.endswith("nex-inbox-frontend v1.6.0.")
 
 
 def test_an_older_version_a_container_uses_stays(monkeypatch, compose) -> None:
@@ -146,6 +189,7 @@ def test_nothing_to_remove_says_nothing(monkeypatch, compose) -> None:
     calls, _ = _docker(monkeypatch, images=images)
     assert asyncio.run(O._uprac_stare_verzie(True, "OK", "mager", compose)) == "OK"
     assert _removed(calls) == []
+    assert not [c for c in calls if c["cmd"][:3] == ["docker", "system", "df"]], "measured with nothing to remove"
 
 
 def test_a_failed_removal_is_said_and_never_fails_the_deploy(monkeypatch, compose) -> None:

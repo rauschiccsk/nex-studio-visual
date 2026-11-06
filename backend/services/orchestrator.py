@@ -6469,8 +6469,8 @@ async def _uprac_na_cieli(
 
 #: DEV-124: a version tag of an installation's image — ``1.8.0`` or ``v1.8.0``; anything else (``latest``) is kept.
 _IMAGE_VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
-_IMAGE_SIZE = re.compile(r"^([\d.]+)\s*([kMG]?B)$")
-_SIZE_UNITS = {"B": 1, "kB": 1e3, "MB": 1e6, "GB": 1e9}
+_IMAGE_SIZE = re.compile(r"^([\d.]+)\s*([kMGT]?B)$")
+_SIZE_UNITS = {"B": 1, "kB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12}
 
 
 def _image_version(tag: str) -> Optional[tuple[int, int, int]]:
@@ -6504,6 +6504,20 @@ async def _docker_out(cmd: list[str], env: Optional[dict[str, str]]) -> str:
     if proc.returncode != 0:
         raise RuntimeError((out or b"").decode("utf-8", "replace").strip()[:200])
     return (out or b"").decode("utf-8", "replace")
+
+
+async def _images_size(env: Optional[dict[str, str]]) -> Optional[float]:
+    """Bytes the images take on the machine as Docker counts them (shared layers once); None when it cannot say."""
+    try:
+        out = await _docker_out(["docker", "system", "df", "--format", "{{.Type}}\t{{.Size}}"], env)
+    except RuntimeError:
+        return None
+    for row in out.splitlines():
+        kind, _, size = row.partition("\t")
+        found = _IMAGE_SIZE.match(size.strip())
+        if kind.strip() == "Images" and found:
+            return float(found.group(1)) * _SIZE_UNITS[found.group(2)]
+    return None
 
 
 async def _uprac_stare_verzie(ok: bool, detail: str, deploy_host: Optional[str], compose_path: Path) -> str:
@@ -6544,26 +6558,36 @@ async def _uprac_stare_verzie(ok: bool, detail: str, deploy_host: Optional[str],
         if len(parts) == 4 and parts[0] in deployed and _image_version(parts[1]):
             tags.setdefault(parts[0], []).append((_image_version(parts[1]), parts[1], parts[2], parts[3]))
 
+    doomed: list[tuple[str, str]] = []
+    for repo, versions in tags.items():
+        current = _image_version(deployed[repo])
+        # DEV-305: the way back is a VERSION, not a tag — its 1.0.0 and v1.0.0 both stay (06.11.2026 one of them went).
+        way_back = max((v[0] for v in versions if v[0] < current), default=None)
+        doomed += [
+            (repo, tag)
+            for version, tag, image_id, _size in sorted(versions, reverse=True)
+            if version < current and version != way_back and image_id not in used
+        ]
     removed: dict[str, list[str]] = {}
     failed: list[str] = []
-    freed = 0.0
-    for repo, versions in tags.items():
-        older = sorted((v for v in versions if v[0] < _image_version(deployed[repo])), reverse=True)
-        for _, tag, image_id, size in older[1:]:
-            if image_id in used:
-                continue
-            try:
-                await _docker_out(["docker", "image", "rm", f"{repo}:{tag}"], env)
-            except RuntimeError:
-                failed.append(f"{repo}:{tag}")
-                continue
-            removed.setdefault(repo, []).append(tag)
-            found = _IMAGE_SIZE.match(size.strip())
-            freed += float(found.group(1)) * _SIZE_UNITS[found.group(2)] if found else 0.0
+    before = await _images_size(env) if doomed else None
+    for repo, tag in doomed:
+        try:
+            await _docker_out(["docker", "image", "rm", f"{repo}:{tag}"], env)
+        except RuntimeError:
+            failed.append(f"{repo}:{tag}")
+            continue
+        removed.setdefault(repo, []).append(tag)
     if removed:
         names = "; ".join(f"{repo} {', '.join(tags_)}" for repo, tags_ in removed.items())
-        gigabytes = f"{freed / 1e9:.1f}".replace(".", ",")
-        detail = f"{detail} Staršie verzie obrazov zmazané: {names} (spolu približne {gigabytes} GB)."
+        after = await _images_size(env) if before is not None else None
+        # DEV-305: measured, not summed — a second tag of an image frees nothing and versions share layers.
+        freed = (
+            f" (uvoľnené približne {f'{max(before - after, 0) / 1e9:.1f}'.replace('.', ',')} GB)"
+            if before is not None and after is not None
+            else ""
+        )
+        detail = f"{detail} Staršie verzie obrazov zmazané: {names}{freed}."
     if failed:
         detail = f"{detail} ⚠️ Niektoré staršie verzie obrazov sa zmazať nepodarilo: {', '.join(failed)}."
     return detail
