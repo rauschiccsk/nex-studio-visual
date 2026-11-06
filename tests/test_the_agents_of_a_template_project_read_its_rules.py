@@ -76,6 +76,7 @@ def test_a_change_on_one_screen_shows_on_every_other_one():
     for decided in (
         "„Údaje na viacerých obrazovkách“",
         "`onServerChange` z nex-shared",
+        "`Copy of server data: none — …` či `Copy of server data: changed only by this store — …`",  # DEV-316
         "`frontend/src/test/shared-copies.test.ts` nevypínaš ani neobchádzaš",
         "ukazuje starý údaj, kým sa stránka neobnoví, je **FAIL**",
     ):
