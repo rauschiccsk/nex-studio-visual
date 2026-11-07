@@ -7,6 +7,20 @@ from pydantic_settings import BaseSettings
 #: REMOVED from ``os.environ`` as it is read — see :func:`_take_dedo_plaintext_token`.
 DEDO_TOKEN_ENV = "DEDO_API_TOKEN"
 
+#: DEV-320: the colours an account can have — each window of the cockpit shows its account's colour, so several accounts
+#: side by side on one desktop (each in its own Chrome profile) are not mixed up. A new account takes the next one in
+#: turn; the person changes it in Nastavenia. Distinct in light and dark mode; seven accounts on the Director's desktop.
+ACCOUNT_COLORS: tuple[str, ...] = (
+    "#2563eb",  # blue
+    "#16a34a",  # green
+    "#dc2626",  # red
+    "#9333ea",  # purple
+    "#ea580c",  # orange
+    "#0891b2",  # cyan
+    "#db2777",  # pink
+    "#ca8a04",  # amber
+)
+
 
 def _take_dedo_plaintext_token() -> str:
     """Read Dedo's plaintext secret out of the environment and TAKE IT WITH US — leaving nothing behind.

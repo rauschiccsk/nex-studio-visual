@@ -1,6 +1,8 @@
 import { useLocation } from "react-router-dom";
 import { Header, ThemeToggle } from "nex-shared";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuthStore } from "@/store/authStore";
+import { personName } from "@/utils/person";
 
 // Audit Theme 6: the breadcrumb names EVERY page (was only 4 → most read the generic "NEX Studio"). DEV-93: the
 // router's own pages are checked against this list (test_Topbar_names_every_page), so a new page cannot fall out.
@@ -46,6 +48,7 @@ export default function Topbar() {
   // wired to the existing per-user ThemeContext.
   const { isDark, toggleDark } = useTheme();
 
+  const user = useAuthStore((s) => s.user);
   const label = breadcrumbFor(location.pathname);
   const labelTooltip = breadcrumbTooltips[location.pathname];
 
@@ -62,7 +65,25 @@ export default function Topbar() {
           </span>
         </div>
       }
-      right={<ThemeToggle theme={isDark ? "dark" : "light"} onToggle={toggleDark} />}
+      right={
+        <div className="flex items-center gap-3">
+          {/* DEV-320: whose window this is — the account's name beside its colour. */}
+          {user && (
+            <span
+              data-testid="account-chip"
+              className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]"
+            >
+              <span
+                data-testid="account-chip-colour"
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: user.accent_color ?? "var(--color-text-muted)" }}
+              />
+              {personName(user) || user.username}
+            </span>
+          )}
+          <ThemeToggle theme={isDark ? "dark" : "light"} onToggle={toggleDark} />
+        </div>
+      }
     />
   );
 }

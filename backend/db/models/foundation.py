@@ -35,6 +35,8 @@ class User(Base, UUIDMixin, TimestampMixin):
     # Force a change of an admin-set initial password before the user can use the app (v4.0.32).
     # Set true on admin create + admin reset; cleared when the user changes their OWN password.
     must_change_password = Column(Boolean, nullable=False, server_default="false")
+    # DEV-320: the account's own colour (one of ``ACCOUNT_COLORS``) — the window shows it beside the account's name.
+    accent_color = Column(String(7), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("username", name="uq_users_username"),

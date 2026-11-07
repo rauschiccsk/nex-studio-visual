@@ -29,6 +29,7 @@ export const USER: S["AuthUser"] = {
   is_active: true,
   must_change_password: false,
   telegram_chat_id: null,
+  accent_color: "#2563eb",
   created_at: T0,
   updated_at: T0,
 };
@@ -810,6 +811,8 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
 
 export function registerFixtures(): void {
   answer("get", "/api/v1/auth/me", USER);
+  // DEV-320 — the colours an account may take (Settings → Moje konto → Farba konta).
+  answer("get", "/api/v1/auth/accent-colors", ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#db2777", "#ca8a04"]);
   answer("get", "/api/v1/user-layout", LAYOUT);
   answer("put", "/api/v1/user-layout", LAYOUT);
   // DEV-89 — an open note with a long first line, and one resolved into a request of the selected project.

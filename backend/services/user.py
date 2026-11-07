@@ -39,6 +39,7 @@ import bcrypt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.config.settings import ACCOUNT_COLORS
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.poradca import PoradcaConversation
 from backend.db.models.projects import Project
@@ -131,6 +132,12 @@ def _get_by_email(db: Session, email: str) -> Optional[User]:
     return db.execute(stmt).scalar_one_or_none()
 
 
+def next_account_color(db: Session) -> str:
+    """DEV-320: the colour the next account takes — the palette in turn, by how many accounts there are."""
+    count = db.execute(select(func.count()).select_from(User)).scalar_one()
+    return ACCOUNT_COLORS[count % len(ACCOUNT_COLORS)]
+
+
 def create(db: Session, data: UserCreate) -> User:
     """Create a new user with bcrypt-hashed password and initial session.
 
@@ -167,6 +174,7 @@ def create(db: Session, data: UserCreate) -> User:
     ).decode("utf-8")
 
     user = User(
+        accent_color=next_account_color(db),
         username=data.username,
         email=data.email,
         password_hash=hashed,
@@ -263,7 +271,7 @@ def update_own_profile(db: Session, user_id: UUID, data: SelfProfileUpdate) -> U
         if existing is not None and existing.id != user.id:
             raise ValueError(f"User with email {new_email!r} already exists")
 
-    allowed_fields = {"email", "first_name", "last_name", "telegram_chat_id"}
+    allowed_fields = {"email", "first_name", "last_name", "telegram_chat_id", "accent_color"}
     for field, value in update_data.items():
         if field in allowed_fields:
             setattr(user, field, value)

@@ -66,6 +66,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/accent-colors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Accent Colors
+         * @description DEV-320: the colours an account can choose — the palette is the server's, Nastavenia only offers it.
+         */
+        get: operations["accent_colors_api_v1_auth_accent_colors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -3602,6 +3622,8 @@ export interface components {
          * @description Safe user representation for auth responses (no password_hash).
          */
         AuthUser: {
+            /** Accent Color */
+            accent_color?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -7597,6 +7619,8 @@ export interface components {
          *     string clears ``first_name`` / ``last_name`` / ``telegram_chat_id``.
          */
         SelfProfileUpdate: {
+            /** Accent Color */
+            accent_color?: string | null;
             /** Email */
             email?: string | null;
             /** First Name */
@@ -8284,6 +8308,8 @@ export interface components {
          *     instance via ``UserRead.model_validate(obj)``.
          */
         UserRead: {
+            /** Accent Color */
+            accent_color?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -9091,6 +9117,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accent_colors_api_v1_auth_accent_colors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
         };

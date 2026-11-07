@@ -42,6 +42,7 @@ import {
 } from "@/components/settings/AutonomyDialPanel";
 import { buildUsernameIndex } from "@/components/settings/sessionUsernames";
 import { useAuthStore } from "@/store/authStore";
+import AccountColorPicker from "@/components/settings/AccountColorPicker";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
 import { modelOptionLabel } from "@/utils/modelLabel";
@@ -676,21 +677,25 @@ export default function SettingsPage() {
         konto: user ? (
           // "Moje konto" (v4.0.50): the self-scoped Users form — edit own name/e-mail/Telegram + change
           // own password. Username (login) + role (access) are read-only. Every role sees this tab.
-          <MyAccountPanel
-            user={{
-              username: user.username,
-              role,
-              email: user.email,
-              first_name: user.first_name,
-              last_name: user.last_name,
-              telegram_chat_id: user.telegram_chat_id,
-            }}
-            roleLabel={USER_ROLE_LABELS[role] ?? role}
-            onSaveProfile={handleSaveMyProfile}
-            onChangePassword={handleChangeMyPassword}
-            onTestTelegram={telegramTestApi}
-            passwordMinLength={5}
-          />
+          // DEV-320: below it the account's colour.
+          <>
+            <MyAccountPanel
+              user={{
+                username: user.username,
+                role,
+                email: user.email,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                telegram_chat_id: user.telegram_chat_id,
+              }}
+              roleLabel={USER_ROLE_LABELS[role] ?? role}
+              onSaveProfile={handleSaveMyProfile}
+              onChangePassword={handleChangeMyPassword}
+              onTestTelegram={telegramTestApi}
+              passwordMinLength={5}
+            />
+            <AccountColorPicker />
+          </>
         ) : null,
         users: (
           // canManage is unconditionally true: the old Users tab had no FE role

@@ -28,6 +28,8 @@ export interface AuthUser {
   /** True while the user still has an admin-set initial password that must be changed before using
    *  the app (v4.0.32). The app blocks behind a change-password screen while this is set. */
   must_change_password?: boolean;
+  /** DEV-320: the account's colour — every window shows it, so accounts side by side are not mixed up. */
+  accent_color?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +40,8 @@ export interface SelfProfileUpdate {
   first_name?: string | null;
   last_name?: string | null;
   telegram_chat_id?: string | null;
+  /** DEV-320: one colour of the server's palette (``GET /auth/accent-colors``). */
+  accent_color?: string;
 }
 
 /** Mirrors ``backend.schemas.auth.LoginResponse``. */
@@ -126,6 +130,11 @@ export function getMeApi(): Promise<AuthUser> {
  */
 export function updateMyProfileApi(data: SelfProfileUpdate): Promise<AuthUser> {
   return api.patch<AuthUser>("/auth/me", data);
+}
+
+/** DEV-320: the colours an account can have — the palette is the server's. Maps to ``GET /auth/accent-colors``. */
+export function getAccentColorsApi(): Promise<string[]> {
+  return api.get<string[]>("/auth/accent-colors");
 }
 
 /**

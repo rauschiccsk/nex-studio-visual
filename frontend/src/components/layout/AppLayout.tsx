@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { AppShell } from "nex-shared";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import AccountBand from "./AccountBand";
 import PageErrorBoundary from "@/components/layout/PageErrorBoundary";
 import { PersistentTerminalsLayer } from "@/components/PersistentTerminalsLayer";
 import { useAuthStore } from "@/store/authStore";
@@ -24,6 +25,8 @@ export default function AppLayout() {
       </PageErrorBoundary>
       {/* Overlay anchored in AppShell's relative <main> region. */}
       <PersistentTerminalsLayer />
+      {/* DEV-320: the account's colour across the top and its name in the window's title. */}
+      <AccountBand />
     </AppShell>
   );
 }

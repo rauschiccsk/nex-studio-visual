@@ -27,7 +27,9 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from backend.config.settings import ACCOUNT_COLORS
 
 # Mirrors the CHECK constraint `role IN ('ri', 'ha', 'shu')` on the
 # ``users`` table.
@@ -183,6 +185,15 @@ class SelfProfileUpdate(BaseModel):
     first_name: Optional[str] = Field(default=None, max_length=100)
     last_name: Optional[str] = Field(default=None, max_length=100)
     telegram_chat_id: Optional[str] = Field(default=None, max_length=64)
+    # DEV-320: only a colour of the palette — the window shows it, a free value could be unreadable.
+    accent_color: Optional[str] = Field(default=None, max_length=7)
+
+    @field_validator("accent_color")
+    @classmethod
+    def _one_of_the_palette(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in ACCOUNT_COLORS:
+            raise ValueError("farba konta musí byť jedna z ponúkaných")
+        return value
 
 
 class UserRead(BaseModel):
@@ -205,5 +216,6 @@ class UserRead(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    accent_color: Optional[str] = None
     created_at: datetime
     updated_at: datetime

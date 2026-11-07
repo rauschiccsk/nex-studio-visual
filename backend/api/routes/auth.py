@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from backend.config.settings import ACCOUNT_COLORS
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -189,6 +190,12 @@ def update_me(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.refresh(user)
     return AuthUser.model_validate(user)
+
+
+@router.get("/accent-colors", response_model=list[str], status_code=status.HTTP_200_OK)
+def accent_colors(current_user: User = Depends(get_current_user)) -> list[str]:
+    """DEV-320: the colours an account can choose — the palette is the server's, Nastavenia only offers it."""
+    return list(ACCOUNT_COLORS)
 
 
 @router.post(

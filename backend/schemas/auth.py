@@ -55,6 +55,8 @@ class AuthUser(BaseModel):
     # True when the user still has an admin-set initial password that must be changed before using
     # the app (v4.0.32). The client blocks the app behind a change-password screen while this is set.
     must_change_password: bool = False
+    # DEV-320: the account's colour — the window shows it so accounts side by side are not mixed up.
+    accent_color: str | None = None
     created_at: datetime
     updated_at: datetime
 
