@@ -285,6 +285,8 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
             raise ValueError(f"Project with name {new_name!r} already exists")
 
     for field, value in update_data.items():
+        # keeps a value on null: the only optional fields the screen can empty here are the ports, and a cleared port
+        # would be freed even while an install runs on it (the projects table is the port ledger) — DEV-323.
         if field in allowed_fields and value is not None:
             setattr(project, field, value)
 

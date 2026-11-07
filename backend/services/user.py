@@ -46,6 +46,7 @@ from backend.db.models.foundation import User, UserSession
 from backend.db.models.poradca import PoradcaConversation
 from backend.db.models.projects import Project
 from backend.schemas.user import SelfProfileUpdate, UserCreate, UserRole, UserUpdate
+from backend.services.patch import apply_changes
 
 
 def list_users(
@@ -196,9 +197,9 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
     Only ``username``, ``email``, ``role`` and
     ``is_active`` may be changed — ``id``, ``created_at`` and
     ``updated_at`` are immutable (``updated_at`` is refreshed automatically
-    by the ORM ``onupdate=func.now()`` trigger). Fields that are ``None``
-    in the payload are treated as "leave unchanged" to support PATCH
-    semantics.
+    by the ORM ``onupdate=func.now()`` trigger). PATCH semantics: a field
+    that was not sent stays; a sent ``None`` clears an optional field
+    (name, surname, Telegram) and leaves a required one (DEV-323).
 
     Uniqueness of ``username`` is re-validated when it changes so the
     caller receives a clean :class:`ValueError` rather than a DB-level
@@ -230,9 +231,8 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
         if existing is not None and existing.id != user.id:
             raise ValueError(f"User with username {new_username!r} already exists")
 
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(user, field, value)
+    # DEV-323: a sent null clears an optional field (surname, name, Telegram) and leaves a required one.
+    apply_changes(user, update_data, allowed_fields)
 
     db.flush()
     return user

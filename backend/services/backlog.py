@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.versions import Version
 from backend.schemas.backlog import BacklogItemCreate, BacklogItemUpdate, BacklogStatus
+from backend.services.patch import apply_changes
 
 
 def list_backlog(
@@ -107,9 +108,8 @@ def update(db: Session, item_id: UUID, data: BacklogItemUpdate) -> BacklogItem:
     item = get_by_id(db, item_id)
     update_data = data.model_dump(exclude_unset=True)
     allowed_fields = {"title", "description", "priority", "status"}
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(item, field, value)
+    # DEV-323: a sent null clears the description and leaves the title, priority and status.
+    apply_changes(item, update_data, allowed_fields)
     # DEV-121: a rejection carries its reason (it is written to the requirement's ticket); a requirement returned
     # to the Zásobník sheds it.
     if update_data.get("status") == "rejected":

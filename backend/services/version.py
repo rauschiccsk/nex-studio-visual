@@ -75,6 +75,7 @@ from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 from backend.schemas.version import VersionCreate, VersionUpdate
 from backend.services import backlog as backlog_service
+from backend.services.patch import apply_changes
 
 #: Filesystem root every project workspace lives under (mirrors
 #: :data:`backend.services.project_specs.PROJECTS_ROOT`).
@@ -502,10 +503,9 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
     ``project_id`` and ``created_at`` are immutable and ``updated_at``
     is auto-stamped by the ORM ``onupdate=func.now()`` trigger.
 
-    PATCH semantics: fields that are ``None`` in the payload are left
-    untouched. This means the "clear to NULL" transitions (e.g. "remove
-    target_date") are not expressible through this service; they are
-    rare corrections that belong to admin tooling.
+    PATCH semantics: a field that was not sent stays; a sent ``None``
+    clears an optional field (name, description, target_date,
+    release_date) and leaves a required one (DEV-323).
 
     .. note::
 
@@ -557,9 +557,8 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
             )
         _move_founding_zadanie(db, version, new_version_number)
 
-    for field, value in update_data.items():
-        if field in allowed_fields and value is not None:
-            setattr(version, field, value)
+    # DEV-323: a sent null clears an optional field (name, description, dates) and leaves a required one.
+    apply_changes(version, update_data, allowed_fields)
 
     db.flush()
     return version
