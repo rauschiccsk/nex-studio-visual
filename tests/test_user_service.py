@@ -4,8 +4,8 @@ Exercises every public CRUD entry point against the SAVEPOINT-isolated
 session provided by ``tests/conftest.py``. Verifies:
 
 * Happy-path list / get / create / update / delete.
-* ``ValueError`` on duplicate ``username`` / ``email`` during create and
-  update (unique-constraint guard).
+* ``ValueError`` on duplicate ``username`` during create and update
+  (unique-constraint guard); a shared ``email`` is accepted (DEV-321).
 * ``ValueError`` on missing ``id`` for get / update / delete.
 * Immutable fields (``id``, ``created_at``) stay unchanged on update.
 * List filters (``role``, ``is_active``) and pagination.
@@ -71,14 +71,12 @@ class TestUserService:
                 _payload(username="dup", email="two@example.com"),
             )
 
-    def test_create_duplicate_email_raises(self, db_session):
-        """Second ``create`` with the same ``email`` must raise ``ValueError``."""
-        service.create(db_session, _payload(username="a", email="dup@example.com"))
-        with pytest.raises(ValueError, match="email"):
-            service.create(
-                db_session,
-                _payload(username="b", email="dup@example.com"),
-            )
+    def test_create_shared_email_allowed(self, db_session):
+        """DEV-321: a second account may take the same ``email`` — only the username is unique."""
+        first = service.create(db_session, _payload(username="a", email="dup@example.com"))
+        second = service.create(db_session, _payload(username="b", email="dup@example.com"))
+        assert first.id != second.id
+        assert first.email == second.email == "dup@example.com"
 
     def test_create_defaults_is_active_true(self, db_session):
         """``is_active`` defaults to True when omitted via schema default."""
@@ -199,13 +197,13 @@ class TestUserService:
         with pytest.raises(ValueError, match="username"):
             service.update(db_session, other.id, UserUpdate(username="taken"))
 
-    def test_update_duplicate_email_raises(self, db_session):
-        """``update`` cannot change email to one already used by another user."""
+    def test_update_to_shared_email_allowed(self, db_session):
+        """DEV-321: ``update`` may give an account the e-mail another account already has."""
         service.create(db_session, _payload(username="u1", email="taken@example.com"))
         other = service.create(db_session, _payload(username="u2", email="free@example.com"))
 
-        with pytest.raises(ValueError, match="email"):
-            service.update(db_session, other.id, UserUpdate(email="taken@example.com"))
+        updated = service.update(db_session, other.id, UserUpdate(email="taken@example.com"))
+        assert updated.email == "taken@example.com"
 
     def test_update_same_username_allowed(self, db_session):
         """Updating with the same ``username`` is a no-op, not a conflict."""
@@ -498,11 +496,12 @@ class TestUpdateOwnProfile:
         assert user.is_active is True
         assert user.username == "prof2"
 
-    def test_email_collision_raises(self, db_session):
+    def test_shared_email_allowed(self, db_session):
+        """DEV-321: My account may take the e-mail another account already has."""
         service.create(db_session, _payload(username="prof3", email="taken@ex.com", role="ha"))
         me = service.create(db_session, _payload(username="prof4", email="mine@ex.com", role="shu"))
-        with pytest.raises(ValueError, match="already exists"):
-            service.update_own_profile(db_session, me.id, SelfProfileUpdate(email="taken@ex.com"))
+        updated = service.update_own_profile(db_session, me.id, SelfProfileUpdate(email="taken@ex.com"))
+        assert updated.email == "taken@ex.com"
 
     def test_partial_update_leaves_others(self, db_session):
         user = service.create(

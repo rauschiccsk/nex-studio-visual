@@ -132,10 +132,10 @@ class TestDuplicateUsername:
         assert "already exists" in resp2.json()["detail"].lower()
 
 
-class TestDuplicateEmail:
-    """Duplicate email returns 409."""
+class TestSharedEmail:
+    """DEV-321: a second account with the same email is created — only the username is unique."""
 
-    def test_returns_409(self, client, db_session):
+    def test_returns_201(self, client, db_session):
         seed_user(db_session, username="ri_edup", password="Nex12345", role="ri")
         token = login_user(client, username="ri_edup", password="Nex12345")
 
@@ -153,8 +153,8 @@ class TestDuplicateEmail:
             json=payload2,
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp2.status_code == 409
-        assert "already exists" in resp2.json()["detail"].lower()
+        assert resp2.status_code == 201
+        assert resp2.json()["email"] == "shared@example.com"
 
 
 class TestHaCannotCreate:

@@ -10,10 +10,12 @@ Design notes (per DESIGN.md §1.1 Foundation — Auth & Users and
 :mod:`backend.db.models.foundation`):
     * ``id``, ``created_at`` and ``updated_at`` are server-managed and
       therefore immutable from the service layer.
-    * ``username`` and ``email`` are both ``UNIQUE`` — :func:`create` and
-      :func:`update` validate these constraints before :meth:`Session.flush`
-      so the router receives a clean :class:`ValueError` rather than a raw
-      :class:`~sqlalchemy.exc.IntegrityError`.
+    * ``username`` is ``UNIQUE`` — :func:`create` and :func:`update`
+      validate it before :meth:`Session.flush` so the router receives a
+      clean :class:`ValueError` rather than a raw
+      :class:`~sqlalchemy.exc.IntegrityError`. ``email`` is NOT unique
+      (DEV-321): one person may hold several accounts with one e-mail;
+      sign-in is by username and nobody is looked up by e-mail.
     * ``role`` is constrained by a CHECK (``ri`` | ``ha`` | ``shu``). The
       Pydantic ``UserRole`` literal mirrors the DB constraint, so the
       service does not need to revalidate it — if an invalid value ever
@@ -126,12 +128,6 @@ def _get_by_username(db: Session, username: str) -> Optional[User]:
     return db.execute(stmt).scalar_one_or_none()
 
 
-def _get_by_email(db: Session, email: str) -> Optional[User]:
-    """Internal helper — look up a user by unique email."""
-    stmt = select(User).where(User.email == email)
-    return db.execute(stmt).scalar_one_or_none()
-
-
 def next_account_color(db: Session) -> str:
     """DEV-320: the colour the next account takes — the palette in turn, by how many accounts there are."""
     count = db.execute(select(func.count()).select_from(User)).scalar_one()
@@ -141,8 +137,8 @@ def next_account_color(db: Session) -> str:
 def create(db: Session, data: UserCreate) -> User:
     """Create a new user with bcrypt-hashed password and initial session.
 
-    Validates both unique constraints (``username``, ``email``) before
-    insertion so the caller receives a clean :class:`ValueError` (HTTP 409
+    Validates the unique ``username`` before insertion (the e-mail may be
+    shared, DEV-321) so the caller receives a clean :class:`ValueError` (HTTP 409
     at the router layer) instead of a raw
     :class:`~sqlalchemy.exc.IntegrityError` coming out of ``flush``.
 
@@ -160,13 +156,10 @@ def create(db: Session, data: UserCreate) -> User:
         generated ``id``, ``created_at`` and ``updated_at`` populated.
 
     Raises:
-        ValueError: If another user already uses the same ``username`` or
-            ``email``.
+        ValueError: If another user already uses the same ``username``.
     """
     if _get_by_username(db, data.username) is not None:
         raise ValueError(f"User with username {data.username!r} already exists")
-    if _get_by_email(db, data.email) is not None:
-        raise ValueError(f"User with email {data.email!r} already exists")
 
     hashed = bcrypt.hashpw(
         data.password.encode("utf-8"),
@@ -207,13 +200,13 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
     in the payload are treated as "leave unchanged" to support PATCH
     semantics.
 
-    Uniqueness of ``username`` and ``email`` is re-validated when those
-    fields are changed so the caller receives a clean :class:`ValueError`
-    rather than a DB-level integrity error.
+    Uniqueness of ``username`` is re-validated when it changes so the
+    caller receives a clean :class:`ValueError` rather than a DB-level
+    integrity error. The e-mail may be shared with another account (DEV-321).
 
     Raises:
         ValueError: If the user does not exist, or if a new ``username``
-            / ``email`` collides with another user.
+            collides with another user.
     """
     user = get_by_id(db, user_id)
 
@@ -237,12 +230,6 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
         if existing is not None and existing.id != user.id:
             raise ValueError(f"User with username {new_username!r} already exists")
 
-    new_email = update_data.get("email")
-    if new_email is not None and new_email != user.email:
-        existing = _get_by_email(db, new_email)
-        if existing is not None and existing.id != user.id:
-            raise ValueError(f"User with email {new_email!r} already exists")
-
     for field, value in update_data.items():
         if field in allowed_fields and value is not None:
             setattr(user, field, value)
@@ -256,20 +243,14 @@ def update_own_profile(db: Session, user_id: UUID, data: SelfProfileUpdate) -> U
 
     Only ``email`` / ``first_name`` / ``last_name`` / ``telegram_chat_id`` may change — ``username``,
     ``role`` and ``is_active`` are NOT touched here (role + activation are admin-only; username is the
-    login identity). PATCH semantics: only supplied fields are applied. ``email`` uniqueness is
-    re-validated so the caller gets a clean :class:`ValueError` (HTTP 409) rather than an IntegrityError.
+    login identity). PATCH semantics: only supplied fields are applied. The e-mail may be shared with another
+    account (DEV-321).
 
     Raises:
-        ValueError: If the user does not exist, or a new ``email`` collides with another user.
+        ValueError: If the user does not exist.
     """
     user = get_by_id(db, user_id)
     update_data = data.model_dump(exclude_unset=True)
-
-    new_email = update_data.get("email")
-    if new_email is not None and new_email != user.email:
-        existing = _get_by_email(db, new_email)
-        if existing is not None and existing.id != user.id:
-            raise ValueError(f"User with email {new_email!r} already exists")
 
     allowed_fields = {"email", "first_name", "last_name", "telegram_chat_id", "accent_color"}
     for field, value in update_data.items():

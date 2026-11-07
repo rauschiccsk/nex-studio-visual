@@ -40,7 +40,6 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("username", name="uq_users_username"),
-        UniqueConstraint("email", name="uq_users_email"),
         CheckConstraint(
             "role IN ('ri', 'ha', 'shu')",
             name="ck_users_role",

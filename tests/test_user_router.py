@@ -14,7 +14,7 @@ Covers:
 * Pagination via ``skip`` and ``limit``.
 * Filter by ``role`` and ``is_active``.
 * 404 on missing id (get, patch, delete).
-* 409 on duplicate ``username`` / ``email``.
+* 409 on duplicate ``username``; a shared ``email`` is accepted (DEV-321).
 * 422 on schema validation failure (invalid role) and on RESTRICT FK
   (delete blocked by an existing project).
 """
@@ -144,12 +144,14 @@ class TestUserRouter:
         resp = router_client.post("/api/v1/users", json=dup)
         assert resp.status_code == 409
 
-    def test_create_duplicate_email_returns_409(self, router_client):
+    def test_create_shared_email_returns_201(self, router_client):
+        """DEV-321: one person, several accounts, one e-mail — only the username is unique."""
         base = _payload(email="shared@example.com")
         assert router_client.post("/api/v1/users", json=base).status_code == 201
-        dup = _payload(email="shared@example.com")  # same email, different username
-        resp = router_client.post("/api/v1/users", json=dup)
-        assert resp.status_code == 409
+        same_email = _payload(email="shared@example.com")  # same email, different username
+        resp = router_client.post("/api/v1/users", json=same_email)
+        assert resp.status_code == 201
+        assert resp.json()["email"] == "shared@example.com"
 
     def test_create_invalid_role_returns_422(self, router_client):
         payload = _payload(role="bogus")

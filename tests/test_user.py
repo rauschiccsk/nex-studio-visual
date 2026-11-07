@@ -56,17 +56,16 @@ class TestUserModel:
             db_session.flush()
         db_session.rollback()
 
-    def test_unique_email(self, db_session):
-        """Duplicate email must be rejected."""
+    def test_shared_email_allowed(self, db_session):
+        """DEV-321: two accounts may share one email — only the username is unique."""
         u1 = _make_user(email="dup@example.com")
         db_session.add(u1)
         db_session.flush()
 
         u2 = _make_user(email="dup@example.com")
         db_session.add(u2)
-        with pytest.raises((IntegrityError, ProgrammingError)):
-            db_session.flush()
-        db_session.rollback()
+        db_session.flush()
+        assert u1.id != u2.id
 
     def test_role_check_constraint(self, db_session):
         """Invalid role value must be rejected by CHECK constraint."""

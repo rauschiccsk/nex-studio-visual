@@ -1,7 +1,7 @@
 """Tests for PATCH /api/v1/auth/me — self-service profile edit (v4.0.33).
 
 Every authenticated user may edit their OWN safe fields (email / name / telegram); role, activation and
-username are never editable here. A colliding email → 409.
+username are never editable here. An email another account has is accepted (DEV-321).
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ class TestSelfProfileUpdate:
 
         assert resp.status_code == 422
 
-    def test_email_collision_returns_409(self, client, db_session):
+    def test_email_another_account_has_is_accepted(self, client, db_session):
+        # DEV-321: one person, several accounts, one e-mail.
         # seed_user derives the email as "<username>@test.local".
         seed_user(db_session, username="taken", password="InitPass1", role="ha")
         seed_user(db_session, username="nazar3", password="InitPass1", role="shu")
@@ -54,4 +55,5 @@ class TestSelfProfileUpdate:
             headers={"Authorization": f"Bearer {token}"},
         )
 
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        assert resp.json()["email"] == "taken@test.local"

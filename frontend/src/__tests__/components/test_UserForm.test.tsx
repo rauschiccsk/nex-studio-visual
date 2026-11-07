@@ -132,9 +132,9 @@ describe("UserForm — mode='create'", () => {
 
   it("shows the error message when provided", () => {
     render(
-      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="Email already exists" onSubmit={vi.fn()} onCancel={vi.fn()} />,
+      <UserForm mode="create" roleOptions={ROLE_OPTIONS} fieldSchema={FIELD_SCHEMA} submitting={false} error="Username already exists" onSubmit={vi.fn()} onCancel={vi.fn()} />,
     );
-    expect(screen.getByText(/email already exists/i)).toBeInTheDocument();
+    expect(screen.getByText(/username already exists/i)).toBeInTheDocument();
   });
 });
 
