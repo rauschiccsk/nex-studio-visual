@@ -68,6 +68,13 @@ function toForm(p: ProjectRead): FormState {
 
 /** Only what actually changed — a PATCH that re-sends every field would make the port
  *  checks run on an edit that never touched a port. */
+const PORT_FIELDS = ["backend_port", "frontend_port", "db_port"] as const;
+
+/** DEV-324: an assigned port is never emptied — the server refuses it (backend/services/project.py, the projects
+ *  table is the port ledger); the screen says so at the field before a save. */
+const PORT_STAYS =
+  "Pridelený port sa nedá vymazať — kokpit ho drží v evidencii portov, aby ho nedostal iný projekt, kým na ňom beží inštalácia. Zmeniť ho na iné číslo môžeš.";
+
 function diff(project: ProjectRead, form: FormState): ProjectUpdate {
   const out: ProjectUpdate = {};
   const port = (raw: string): number | null => (raw.trim() === "" ? null : Number(raw));
@@ -124,6 +131,8 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
       setSaving(false);
     }
   };
+
+  const emptiedPorts = PORT_FIELDS.filter((f) => editing && form[f].trim() === "" && project[f] != null);
 
   const touchesPorts =
     form.backend_port !== (project.backend_port?.toString() ?? "") ||
@@ -203,7 +212,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
           />
         </div>
 
-        {(["backend_port", "frontend_port", "db_port"] as const).map((field, i) => (
+        {PORT_FIELDS.map((field, i) => (
           <div key={field} className={i === 2 ? "col-span-2 sm:col-span-1" : ""}>
             <label className={LABEL_CLS} htmlFor={`proj-${field}`}>
               {["Backend", "Frontend", "Databáza"][i]}
@@ -217,6 +226,11 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
               disabled={!editing || saving}
               onChange={(e) => setForm({ ...form, [field]: e.target.value })}
             />
+            {emptiedPorts.includes(field) && (
+              <p data-testid={`port-stays-${field}`} className="mt-1 text-xs text-[var(--color-state-error-fg)]">
+                {PORT_STAYS}
+              </p>
+            )}
           </div>
         ))}
 
@@ -306,7 +320,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || emptiedPorts.length > 0}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-4 py-2 transition-colors disabled:opacity-50"
           >
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

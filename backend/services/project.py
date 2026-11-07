@@ -64,6 +64,15 @@ from backend.schemas.project import (
 )
 from backend.services import system_setting as system_setting_service
 
+#: The project's ports — held in the port ledger (the projects table).
+PORT_FIELDS = ("backend_port", "frontend_port", "db_port")
+
+#: Why an assigned port cannot be emptied (shown to the person on the settings screen, DEV-324).
+ASSIGNED_PORT_STAYS = (
+    "Pridelený port sa nedá vymazať — kokpit ho drží v evidencii portov, aby ho nedostal iný projekt, "
+    "kým na ňom beží inštalácia. Zmeniť ho na iné číslo môžeš."
+)
+
 
 def list_projects(
     db: Session,
@@ -284,9 +293,15 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
         if existing is not None and existing.id != project.id:
             raise ValueError(f"Project with name {new_name!r} already exists")
 
+    # DEV-324: an assigned port is never emptied — the projects table is the port ledger, and a freed port could go to
+    # another project while an install still runs on it. Moving it to another number stays allowed.
+    for field in PORT_FIELDS:
+        if field in update_data and update_data[field] is None and getattr(project, field) is not None:
+            raise ValueError(ASSIGNED_PORT_STAYS)
+
     for field, value in update_data.items():
-        # keeps a value on null: the only optional fields the screen can empty here are the ports, and a cleared port
-        # would be freed even while an install runs on it (the projects table is the port ledger) — DEV-323.
+        # keeps a value on null: an emptied assigned port is refused above, and the other optional fields (repo_url,
+        # source_path, kb_path) are not on the settings screen — clearing them is not offered (DEV-323, DEV-324).
         if field in allowed_fields and value is not None:
             setattr(project, field, value)
 

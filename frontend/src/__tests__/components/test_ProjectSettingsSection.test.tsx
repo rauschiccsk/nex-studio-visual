@@ -137,5 +137,33 @@ describe("DEV-42 — „Prístup len zo súkromnej siete“ in the project setti
 
     await waitFor(() => expect(updateProjectApi).toHaveBeenCalledWith("p1", { private_network: true }));
   });
+
+  // DEV-324 — an assigned port is never emptied: the server refuses it (the projects table is the port ledger),
+  // and the screen says so at the field instead of letting a save report success while the port stays.
+  it("an emptied assigned port says why it stays and Uložiť waits", () => {
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+    fireEvent.change(screen.getByLabelText("Databáza"), { target: { value: "" } });
+
+    expect(screen.getByTestId("port-stays-db_port")).toHaveTextContent(
+      "Pridelený port sa nedá vymazať — kokpit ho drží v evidencii portov, aby ho nedostal iný projekt, kým na ňom beží inštalácia. Zmeniť ho na iné číslo môžeš.",
+    );
+    expect(screen.getByRole("button", { name: /Uložiť/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Uložiť/ }));
+    expect(updateProjectApi).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Databáza"), { target: { value: "10199" } });
+    expect(screen.queryByTestId("port-stays-db_port")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Uložiť/ })).toBeEnabled();
+  });
+
+  it("a port the project never had may stay empty", () => {
+    renderSection({ project: { ...PROJECT, db_port: null } as unknown as ProjectRead });
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+    fireEvent.change(screen.getByLabelText("Popis"), { target: { value: "bez databázy" } });
+
+    expect(screen.queryByTestId("port-stays-db_port")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Uložiť/ })).toBeEnabled();
+  });
 });
 

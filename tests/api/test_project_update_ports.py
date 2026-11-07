@@ -122,3 +122,33 @@ def test_update_without_ports_is_untouched_by_the_check(client, db_session, owne
     resp = client.patch(f"/api/v1/projects/{project.id}", json={"description": "nový popis"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["description"] == "nový popis"
+
+
+# DEV-324 — an assigned port is never emptied. The settings screen sends an emptied port field as null, and the
+# update used to drop it silently: the save reported success and the port stayed. The projects table is the port
+# ledger, so a freed port could go to another project while an install still runs on it — the server refuses it
+# out loud instead.
+def test_update_refuses_to_empty_an_assigned_port(client, db_session, owner) -> None:
+    project = _project(db_session, owner, base=10350)
+    resp = client.patch(f"/api/v1/projects/{project.id}", json={"db_port": None})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"].startswith("Pridelený port sa nedá vymazať")
+
+
+def test_the_update_keeps_the_assigned_port_it_refused(db_session, owner) -> None:
+    from backend.schemas.project import ProjectUpdate
+    from backend.services import project as project_service
+
+    project = _project(db_session, owner, base=10370)
+    with pytest.raises(ValueError, match="Pridelený port sa nedá vymazať"):
+        project_service.update(db_session, project.id, ProjectUpdate(backend_port=None, description="iný"))
+    assert (project.backend_port, project.description) == (10370, "testovací projekt")
+
+
+def test_a_project_without_a_port_may_send_an_empty_one(client, db_session, owner) -> None:
+    project = _project(db_session, owner, base=10360)
+    project.db_port = None
+    db_session.flush()
+    resp = client.patch(f"/api/v1/projects/{project.id}", json={"db_port": None, "description": "bez databázy"})
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["db_port"], resp.json()["description"]) == (None, "bez databázy")
