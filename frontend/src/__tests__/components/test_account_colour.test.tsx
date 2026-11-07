@@ -5,6 +5,10 @@
  *
  * Director 07.11.2026: „aby som mohol paralelne púšťať viac kokpitov … (aj farebne rozlíšené)“ — each account runs in
  * its own Chrome profile, and an app window does not show the profile's colour, so the cockpit has to.
+ *
+ * DEV-322 — the window's title is the account's name alone (the taskbar preview showed „NEX Studio Visual - Alexan…“;
+ * Director: „NEX Visual študio je zbytočný informácia, vídim to podľa ikony NSV“). Leaving the signed-in layout gives
+ * the title back, so the sign-in page does not keep the last person's name.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,13 +71,20 @@ describe("a window says whose it is", () => {
   it("a band across the top has the account's colour and the window's title names the account", () => {
     render(<AccountBand />);
     expect(screen.getByTestId("account-band")).toHaveStyle({ backgroundColor: "#dc2626" });
-    expect(document.title).toBe("Zoltán Rausch · NEX Studio Visual");
+    expect(document.title).toBe("Zoltán Rausch");
+  });
+
+  it("leaving the signed-in layout gives the window its plain title back", () => {
+    const { unmount } = render(<AccountBand />);
+    expect(document.title).toBe("Zoltán Rausch");
+    unmount();
+    expect(document.title).toBe("NEX Studio Visual");
   });
 
   it("an account without a name is named by its username", () => {
     useAuthStore.setState({ user: { ...ZOLTAN, first_name: null, last_name: null, username: "rausch" } });
     render(<AccountBand />);
-    expect(document.title).toBe("rausch · NEX Studio Visual");
+    expect(document.title).toBe("rausch");
   });
 });
 
