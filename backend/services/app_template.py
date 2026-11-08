@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.services import create_project_postscaffold as postscaffold
 from backend.services import nexshared
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,11 @@ def apply_template(
 # check refuses a frame that is not whole). Nothing of the project is deleted here.
 
 MANIFEST = "frontend/app.manifest.json"
-_CONVERTED_PATHS = (MANIFEST, "frontend/package.json", "frontend/package-lock.json", "backend/pyproject.toml")
+#: DEV-325: the conversion's commit carries the cockpit's current pre-commit hook too — an older project (NEX Websites,
+#: July) kept a hook that runs ruff on a backend change, the cockpit has no ruff, and the commit died; the cockpit's
+#: hook skips a linter that is not there.
+_HOOK = ".githooks/pre-commit"
+_CONVERTED_PATHS = (MANIFEST, "frontend/package.json", "frontend/package-lock.json", "backend/pyproject.toml", _HOOK)
 #: The first ``dependencies = [`` of the ``[project]`` table, written one item per line.
 _PROJECT_DEPENDENCIES_RE = re.compile(
     r"^\[project\][ \t]*\n(?:(?!\[).*\n)*?dependencies[ \t]*=[ \t]*\[[ \t]*\n", re.MULTILINE
@@ -292,6 +297,13 @@ def with_template_packages(project_package: dict, scaffold_package: dict) -> tup
     return package, resolve
 
 
+def _last_words(result: subprocess.CompletedProcess) -> str:
+    """The last line git or its hook printed (stderr first) — the reason a commit was refused, short enough to show."""
+    lines = [line.strip() for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines() if line.strip()]
+    errors = [line.strip() for line in (result.stderr or "").splitlines() if line.strip()]
+    return ((errors or lines or ["git neodpovedal nič"])[-1])[:300]
+
+
 def convert_project(
     target: Path,
     choice: TemplateChoice,
@@ -316,6 +328,8 @@ def convert_project(
     for rel in ("frontend/package.json", "backend/pyproject.toml"):
         if not files[rel].is_file():
             raise AppTemplateError(f"Projektu chýba {rel} — prevod na šablónu ho potrebuje.")
+    # DEV-325: an earlier attempt that failed after `git add` left these staged — start from the index of HEAD.
+    run(["git", "reset", "-q", "--", *_CONVERTED_PATHS], cwd=str(target))
     pyproject_text = files["backend/pyproject.toml"].read_text(encoding="utf-8")
     version = latest_kit_version(run)
     values = scaffold_values(name=name, slug=slug, auth_mode=auth_mode, ai=choice.ai, ports=ports, version=version)
@@ -341,7 +355,11 @@ def convert_project(
         )
         if lock.returncode != 0 or nexshared.effective_version(str(target), "frontend", KIT_PACKAGE) != version:
             raise AppTemplateError("Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install).")
-        added = run(["git", "add", "--", *_CONVERTED_PATHS], cwd=str(target))
+        if postscaffold.PRECOMMIT_HOOK_TEMPLATE.is_file():
+            files[_HOOK].parent.mkdir(parents=True, exist_ok=True)
+            files[_HOOK].write_text(postscaffold.PRECOMMIT_HOOK_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+            files[_HOOK].chmod(0o755)
+        added = run(["git", "add", "--", *[rel for rel in _CONVERTED_PATHS if files[rel].exists()]], cwd=str(target))
         committed = run(
             [
                 "git",
@@ -352,13 +370,19 @@ def convert_project(
             cwd=str(target),
         )
         if added.returncode != 0 or committed.returncode != 0:
-            raise AppTemplateError("Prevod na šablónu sa nepodarilo zapísať do gitu projektu.")
+            # DEV-325: say what git answered (a refusing hook prints its reason) — in the log and to the person.
+            failed = added if added.returncode != 0 else committed
+            answer = _last_words(failed)
+            logger.warning("App template conversion of %s: git %s failed: %s", slug, failed.args[1], answer)
+            raise AppTemplateError(f"Prevod na šablónu sa nepodarilo zapísať do gitu projektu: {answer}")
     except (AppTemplateError, OSError, ValueError) as exc:
         for path, original in originals.items():
             if original is None:
                 path.unlink(missing_ok=True)
             else:
                 path.write_text(original, encoding="utf-8")
+        # DEV-325: what `git add` staged goes back too — the files alone were put back, the index kept the conversion.
+        run(["git", "reset", "-q", "--", *_CONVERTED_PATHS], cwd=str(target))
         if isinstance(exc, AppTemplateError):
             raise
         raise AppTemplateError(f"Prevod na šablónu sa nepodaril: {exc}") from exc

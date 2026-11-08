@@ -10,6 +10,7 @@ whole. A project with a version in progress or an installation is not converted,
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -23,6 +24,7 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import app_template, orchestrator
+from backend.services import create_project_postscaffold as postscaffold
 from backend.services.app_template import AppTemplateError, TemplateChoice
 
 KIT = "github:rauschiccsk/nex-app-kit#v0.3.0"
@@ -60,16 +62,17 @@ MANIFEST = {"template": "nsv-standard", "name": "NEX Knowledge", "initials": "NK
 class World:
     """GitHub, the kit's renderer, npm and git — answered as they answer, every call recorded."""
 
-    def __init__(self, *, npm_writes: str | None = "0.3.0", fail: str | None = None) -> None:
+    def __init__(self, *, npm_writes: str | None = "0.3.0", fail: str | None = None, answer: str = "zlyhalo") -> None:
         self.calls: list[list[str]] = []
         self.npm_writes = npm_writes
         self.fail = fail
+        self.answer = answer
 
     def __call__(self, argv: list[str], cwd: str | None = None, **_kwargs) -> subprocess.CompletedProcess:
         self.calls.append(argv)
         what = " ".join(argv[:2])
         if self.fail and self.fail in what:
-            return subprocess.CompletedProcess(argv, 1, "", "zlyhalo")
+            return subprocess.CompletedProcess(argv, 1, "", self.answer)
         if what == "git ls-remote":
             return subprocess.CompletedProcess(argv, 0, "x\trefs/tags/v0.2.0\ny\trefs/tags/v0.3.0\n", "")
         if argv[0] == "python3":
@@ -164,12 +167,61 @@ def test_a_newer_nex_shared_of_the_project_stays(tmp_path):
     assert next(argv for argv in world.calls if argv[0] == "npm")[-1] == KIT
 
 
+# ── DEV-325: an older project's hook, a clean index, git's own words ────────────────────────────────────────────
+
+HOOK = ".githooks/pre-commit"
+
+
+def test_the_conversion_commits_the_cockpit_s_current_hook(tmp_path):
+    """NEX Websites (08.11.2026) carried the July hook that runs ruff on a backend change; the cockpit has no ruff, so
+    the conversion's commit died. The commit carries the cockpit's own hook, which skips a linter that is not there."""
+    root = project_on_disk(tmp_path)
+    (root / ".githooks").mkdir()
+    (root / HOOK).write_text("#!/usr/bin/env bash\n# the July hook: ruff or die\n", encoding="utf-8")
+    world = World()
+
+    convert(root, world)
+
+    assert (root / HOOK).read_text(encoding="utf-8") == postscaffold.PRECOMMIT_HOOK_TEMPLATE.read_text(encoding="utf-8")
+    assert os.access(root / HOOK, os.X_OK)
+    add = next(argv for argv in world.calls if argv[:2] == ["git", "add"])
+    assert HOOK in add
+
+
+def test_the_conversion_starts_from_a_clean_index(tmp_path):
+    """A failed conversion left its files staged in NEX Websites' index — a new attempt first puts them back."""
+    root = project_on_disk(tmp_path)
+    world = World()
+
+    convert(root, world)
+
+    git = [argv for argv in world.calls if argv[0] == "git" and argv[1] != "ls-remote"]
+    assert git[0][:4] == ["git", "reset", "-q", "--"]
+    assert set(git[0][4:]) == set(app_template._CONVERTED_PATHS)
+
+
+def test_a_failed_commit_unstages_what_it_added_and_says_what_git_answered(tmp_path):
+    root = project_on_disk(tmp_path)
+    before = files(root)
+    said = "❌ ruff format --check FAILED — run: cd backend && ruff format ."
+    world = World(fail="git commit", answer=said)
+
+    with patch.object(app_template.logger, "warning") as warned:
+        with pytest.raises(AppTemplateError) as caught:
+            convert(root, world)
+
+    assert str(caught.value) == f"Prevod na šablónu sa nepodarilo zapísať do gitu projektu: {said}"
+    assert world.calls[-1][:4] == ["git", "reset", "-q", "--"]
+    assert files(root) == before
+    assert said in [str(arg) for call in warned.call_args_list for arg in call.args]
+
+
 @pytest.mark.parametrize(
     "fail,npm_writes,sentence",
     [
         ("npm install", "0.3.0", "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install)."),
         (None, "0.2.0", "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install)."),
-        ("git commit", "0.3.0", "Prevod na šablónu sa nepodarilo zapísať do gitu projektu."),
+        ("git commit", "0.3.0", "Prevod na šablónu sa nepodarilo zapísať do gitu projektu: zlyhalo"),
         ("render.py", "0.3.0", "Kostru šablóny sa nepodarilo vyplniť: zlyhalo"),
     ],
 )
