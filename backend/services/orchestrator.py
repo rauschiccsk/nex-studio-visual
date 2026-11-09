@@ -77,6 +77,7 @@ from backend.services import (
     dedo_message,
     delivery_statement,
     deploy_progress,
+    deploy_rehearsal,
     deploy_return,
     env_contract,
     failure_framing,
@@ -6492,6 +6493,20 @@ def _deployed_images(compose_path: Path) -> dict[str, str]:
     return deployed
 
 
+async def throw_away_rehearsal_images(reference: str, env: Optional[dict[str, str]]) -> None:
+    """DEV-329 — the images a deploy rehearsal built, by their rehearsal tag (``<name>-*:skuska``) — cleaned up here,
+    in the one module that throws images away; an installation's images carry other tags and are never matched."""
+    try:
+        listed = await _docker_out(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}", "--filter", f"reference={reference}"], env
+        )
+        images = [line.strip() for line in listed.splitlines() if line.strip()]
+        if images:
+            await _docker_out(["docker", "image", "rm", "-f", *images], env)
+    except RuntimeError as exc:
+        logger.warning("deploy rehearsal: images %s were not removed: %s", reference, exc)
+
+
 async def _docker_out(cmd: list[str], env: Optional[dict[str, str]]) -> str:
     """Output of one docker call within :data:`CLEANUP_TIMEOUT`; :class:`RuntimeError` when it fails or hangs."""
     try:
@@ -9637,7 +9652,16 @@ async def _run_release_smoke(
         acceptance = await _run_release_acceptance(
             stack, project_slug, coverage_req, declared_assertions, unmatched_note
         )
-        return (boot_ok, boot_detail), acceptance
+    # DEV-329 — once the app runs from its own compose, the deploy is rehearsed: the installation the cockpit would
+    # write (a new one and every existing UAT one), built and started on its own. Until 09.11.2026 nobody ran it before
+    # „Nasadiť“, and NEX Websites 1.1.0 passed this Verifikácia and failed on ICC's UAT (DEV-328). A failed rehearsal
+    # is the Verifikácia's finding, said in a sentence; after the smoke stack is down, so the two never meet.
+    if acceptance[0]:
+        rehearsed, rehearsal = await deploy_rehearsal.rehearse(project_slug, version_label)
+        if not rehearsed:
+            return (False, rehearsal), acceptance
+        boot_detail = f"{boot_detail} {rehearsal}"
+    return (boot_ok, boot_detail), acceptance
 
 
 def _latest_navrh_gate_report_payload(db: Session, version_id: uuid.UUID) -> dict[str, Any]:

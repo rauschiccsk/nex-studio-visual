@@ -319,3 +319,18 @@ def _no_docker_for_the_data_owners(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(instance_data_dirs, "_docker", _docker)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_deploy_rehearsal(monkeypatch):
+    """DEV-329 — after a passing smoke the Verifikácia rehearses the deploy: real installations are read, images built.
+
+    By DEFAULT no test reaches it — a smoke test would otherwise read /opt/uat and spawn Docker. The rehearsal's own
+    tests call its parts, and the real ``rehearse`` they import before this fixture runs.
+    """
+    from backend.services import deploy_rehearsal
+
+    async def rehearsed(project_slug: str, version: str, **_kw: object) -> tuple[bool, str]:
+        return True, "Skúška nasadenia: v skúškach kokpitu sa nespúšťa."
+
+    monkeypatch.setattr(deploy_rehearsal, "rehearse", rehearsed)
