@@ -387,13 +387,12 @@ def idea_added(
 async def throw_away_idea(
     idea_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ) -> Response:
-    """Throw an idea away — its talk is gone as a deleted conversation's is; the cost of its answers stays."""
+    """Delete an idea from Nápady — one that ended nowhere with its talk (the cost of its answers stays), one that ended
+    in a project from the list only: its talk stays in the project's Poradca (DEV-331)."""
     idea, conversation = _idea_for(db, current_user, idea_id)
     try:
         await ideas.throw_away(db, idea, conversation)
         db.commit()
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except runner.PoradcaBusy as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

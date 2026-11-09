@@ -23,7 +23,7 @@ from backend.db.models.idea import Idea
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.session import get_db
 from backend.schemas.poradca import PoradcaStatus
-from backend.services.poradca import handoff, ideas, runner, tickets
+from backend.services.poradca import handoff, runner, tickets
 
 BRIEF = """Rozumiem, tu je zadanie.
 
@@ -148,7 +148,9 @@ def test_an_answer_that_asks_is_no_brief_yet(db_session, answers):
     assert idea["state"] == "open"
 
 
-def test_a_thrown_away_idea_is_gone_and_a_concluded_one_cannot_be(db_session, answers):
+def test_a_thrown_away_idea_is_gone_and_a_concluded_one_leaves_the_list_its_talk_stays(db_session, answers):
+    """DEV-331 (Director 09.11.2026 „Súhlasím“): an idea that ended in a project leaves the list of Nápady and its talk
+    stays in the project's Poradca — the history of how the project came about. Until then the cockpit refused."""
     me = _user(db_session)
     c = _client(db_session, me)
     first = c.post("/api/v1/poradca/ideas", json={"question": "Prvý"}).json()
@@ -157,11 +159,27 @@ def test_a_thrown_away_idea_is_gone_and_a_concluded_one_cannot_be(db_session, an
     assert c.delete(f"/api/v1/poradca/ideas/{first['id']}").status_code == 204
     assert [i["id"] for i in c.get("/api/v1/poradca/ideas").json()] == [second["id"]]
     assert c.get(f"/api/v1/poradca/ideas/{first['id']}").status_code == 404
+    gone = db_session.get(PoradcaConversation, uuid.UUID(first["conversation_id"]))
+    assert gone.deleted_at is not None, "an idea that ended nowhere is thrown away whole, its talk too"
 
     db_session.get(Idea, uuid.UUID(second["id"])).outcome = "added"
     db_session.flush()
-    r = c.delete(f"/api/v1/poradca/ideas/{second['id']}")
-    assert r.status_code == 409 and r.json()["detail"] == ideas.CONCLUDED
+    assert c.delete(f"/api/v1/poradca/ideas/{second['id']}").status_code == 204
+    assert c.get("/api/v1/poradca/ideas").json() == []
+    kept = db_session.get(PoradcaConversation, uuid.UUID(second["conversation_id"]))
+    db_session.refresh(kept)
+    assert kept.deleted_at is None, "the talk of an idea that ended in a project stays with the project"
+
+
+def test_an_idea_is_renamed_through_its_conversation(db_session, answers):
+    """DEV-331 — the idea's title is its conversation's: renamed the way a Poradca conversation is."""
+    c = _client(db_session, _user(db_session))
+    idea = c.post("/api/v1/poradca/ideas", json={"question": "Matrika"}).json()
+
+    r = c.put(f"/api/v1/poradca/conversations/{idea['conversation_id']}/title", json={"title": "Pravoslávna matrika"})
+
+    assert r.status_code == 200
+    assert [i["title"] for i in c.get("/api/v1/poradca/ideas").json()] == ["Pravoslávna matrika"]
 
 
 def test_the_briefs_are_read_from_the_answer():

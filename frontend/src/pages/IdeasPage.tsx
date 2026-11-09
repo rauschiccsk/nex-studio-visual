@@ -9,12 +9,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Lightbulb, Trash2 } from "lucide-react";
+import { Lightbulb } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import IdeaOutcomeActions from "@/components/poradca/IdeaOutcomeActions";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaComposer from "@/components/poradca/PoradcaComposer";
+import PoradcaConversationItem, { type Removal } from "@/components/poradca/PoradcaConversationItem";
 import QuestionImages from "@/components/poradca/QuestionImages";
 import { draftKey } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
@@ -23,13 +24,24 @@ import { ideaStateLabel } from "@/lib/ideas";
 import { formatCost } from "@/lib/poradcaAnswer";
 import { toUpload } from "@/lib/poradcaImages";
 import { createIdeaApi, getIdeaApi, listIdeasApi, throwAwayIdeaApi } from "@/services/api/ideas";
-import { askPoradcaApi, getPoradcaStatusApi } from "@/services/api/poradca";
+import { askPoradcaApi, getPoradcaStatusApi, renamePoradcaConversationApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { Idea, PoradcaStatus } from "@/types/poradca";
 import { formatDate } from "@/utils/format";
 
 const NEW_IDEA_DRAFT = "nove";
+
+/** DEV-331 — an idea that ended in a project leaves only the list; its talk stays with the project (Director 09.11.2026). */
+function ideaRemoval(idea: Idea): Removal | undefined {
+  if (idea.state !== "founded" && idea.state !== "added") return undefined;
+  const where = idea.outcome_project_name ? `projektu ${idea.outcome_project_name}` : "projektu";
+  return {
+    question: `Odstrániť „${idea.title}“ zo zoznamu Nápadov?`,
+    note: `Rozhovor ostane v Poradcovi ${where}.`,
+    action: "Odstrániť",
+  };
+}
 
 export default function IdeasPage() {
   const { ideaId } = useParams<{ ideaId: string }>();
@@ -110,16 +122,28 @@ export default function IdeasPage() {
     navigate(`/poradca?${new URLSearchParams({ c: current.conversation_id }).toString()}`);
   }
 
-  async function throwAway() {
-    if (!current || !window.confirm(`Zahodiť nápad „${current.title}“? Rozhovor zmizne, jeho cena ostane započítaná.`)) {
-      return;
-    }
+  // DEV-331 — renamed and deleted in its row exactly as a Poradca conversation (Director 09.11.2026).
+  async function rename(idea: Idea, title: string): Promise<boolean> {
     try {
-      await throwAwayIdeaApi(current.id);
-      navigate("/napady");
-      void refreshList();
+      await renamePoradcaConversationApi(idea.conversation_id, title);
+      await refreshList();
+      if (idea.id === ideaId) void refreshCurrent();
+      return true;
     } catch (e: unknown) {
-      setLoadError(humanizeApiError(e, "Nápad sa nepodarilo zahodiť"));
+      setLoadError(humanizeApiError(e, "Nápad sa nepodarilo premenovať"));
+      return false;
+    }
+  }
+
+  async function remove(idea: Idea): Promise<boolean> {
+    try {
+      await throwAwayIdeaApi(idea.id);
+      if (idea.id === ideaId) navigate("/napady");
+      await refreshList();
+      return true;
+    } catch (e: unknown) {
+      setLoadError(humanizeApiError(e, "Nápad sa nepodarilo vymazať"));
+      return false;
     }
   }
 
@@ -178,24 +202,19 @@ export default function IdeasPage() {
             <li className="px-2 text-xs text-[var(--color-text-muted)]">Zatiaľ žiadny nápad.</li>
           )}
           {ideas.map((i) => (
-            <li key={i.id}>
-              <button
-                type="button"
-                onClick={() => open(`/napady/${i.id}`)}
-                aria-current={i.id === ideaId ? "true" : undefined}
-                className={`w-full rounded-lg px-2 py-1.5 text-left text-xs ${
-                  i.id === ideaId
-                    ? "bg-[var(--color-accent-primary)]/15 text-[var(--color-text-primary)]"
-                    : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-                }`}
-              >
-                <span className="block truncate font-medium">{i.title}</span>
-                <span className="block text-[11px] text-[var(--color-text-muted)]">
-                  {ideaStateLabel(i)} · {formatDate(i.updated_at)}
-                  {i.cost != null ? ` · ${formatCost(i.cost)}` : ""}
-                </span>
-              </button>
-            </li>
+            <PoradcaConversationItem
+              key={i.id}
+              noun="nápad"
+              conversation={{ title: i.title, running: i.running, version_number: null, updated_at: i.updated_at }}
+              active={i.id === ideaId}
+              busy={i.running}
+              authorName={null}
+              subtitle={`${ideaStateLabel(i)} · ${formatDate(i.updated_at)}${i.cost != null ? ` · ${formatCost(i.cost)}` : ""}`}
+              removal={ideaRemoval(i)}
+              onSelect={() => open(`/napady/${i.id}`)}
+              onRename={(title) => rename(i, title)}
+              onDelete={() => remove(i)}
+            />
           ))}
         </ul>
       </aside>
@@ -213,16 +232,6 @@ export default function IdeasPage() {
                 {ideaStateLabel(current)} · {current.author_name}
               </p>
             </div>
-            {!concluded && (
-              <button
-                type="button"
-                onClick={() => void throwAway()}
-                disabled={running}
-                className="flex items-center gap-1 rounded-lg border border-[var(--color-border-default)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-state-error-fg)] disabled:opacity-40"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Zahodiť nápad
-              </button>
-            )}
           </header>
         )}
         {current && concluded && (

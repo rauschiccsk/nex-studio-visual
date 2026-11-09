@@ -34,7 +34,6 @@ STATE_FOUNDED = OUTCOME_FOUNDED
 STATE_ADDED = OUTCOME_ADDED
 
 #: Why a concluded idea cannot be thrown away — its conversation is the project's now.
-CONCLUDED = "Nápad už skončil v projekte — jeho rozhovor patrí projektu; zmazať ho môžeš v Poradcovi projektu."
 
 
 #: The version a project founded from an idea gets its brief in — the one the cockpit founds with every new project.
@@ -285,13 +284,13 @@ def add(db: Session, idea: Idea, conversation: PoradcaConversation, *, message_i
 
 
 async def throw_away(db: Session, idea: Idea, conversation: PoradcaConversation) -> None:
-    """The author throws the idea away: its talk is wiped as a deleted conversation's is, the cost stays.
+    """The author deletes the idea from Nápady. One that ended nowhere is thrown away whole — its talk is wiped as a
+    deleted conversation's is, the cost stays. One that ended in a project only leaves the list: its talk stays in the
+    project's Poradca, the history of how the project came about (DEV-331, Director 09.11.2026: „Súhlasím“).
 
     Raises:
-        ValueError: the idea already ended in a project (:data:`CONCLUDED`).
         runner.PoradcaBusy: an answer is still running.
     """
-    if idea.outcome is not None:
-        raise ValueError(CONCLUDED)
-    await runner.delete_conversation(db, conversation)
+    if idea.outcome is None:
+        await runner.delete_conversation(db, conversation)
     idea.deleted_at = datetime.now(timezone.utc)

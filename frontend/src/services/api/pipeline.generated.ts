@@ -1358,7 +1358,8 @@ export interface paths {
         post?: never;
         /**
          * Throw Away Idea
-         * @description Throw an idea away — its talk is gone as a deleted conversation's is; the cost of its answers stays.
+         * @description Delete an idea from Nápady — one that ended nowhere with its talk (the cost of its answers stays), one that ended
+         *     in a project from the list only: its talk stays in the project's Poradca (DEV-331).
          */
         delete: operations["throw_away_idea_api_v1_poradca_ideas__idea_id__delete"];
         options?: never;
