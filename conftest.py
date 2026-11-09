@@ -334,3 +334,18 @@ def _no_real_deploy_rehearsal(monkeypatch):
         return True, "Skúška nasadenia: v skúškach kokpitu sa nespúšťa."
 
     monkeypatch.setattr(deploy_rehearsal, "rehearse", rehearsed)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_version_question(monkeypatch):
+    """DEV-336 — after every deploy the cockpit asks, inside the running backend, which version it reports.
+
+    By DEFAULT no test reaches a real Docker for it: the version cannot be read, which is no claim. The tests about it
+    call the real ``instance_version`` they import before this fixture runs.
+    """
+    from backend.services import orchestrator
+
+    async def unread(compose, project_slug, deploy_host=None):
+        return None
+
+    monkeypatch.setattr(orchestrator, "instance_version", unread)

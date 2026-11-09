@@ -7018,6 +7018,79 @@ async def instance_health(
     return {str(k): (str(v[0]), str(v[1])) for k, v in data.items() if isinstance(v, list) and len(v) == 2}
 
 
+#: DEV-336 — what a deploy says when the app reports another version than the one the cockpit deployed.
+VERSION_MISMATCH = (
+    "Aplikácia hlási verziu {reported}, nasadená je {deployed} — beží iná verzia, než kokpit nasadil "
+    "(starý obraz alebo číslo verzie zapísané v kóde). Over to skôr, než verziu akceptuješ alebo nasadíš ďalej."
+)
+#: DEV-336 — what it says when the app's health answers without naming a version.
+VERSION_NOT_REPORTED = (
+    "Aplikácia vo svojej kontrole zdravia verziu nehlási — kokpit nevie overiť, že beží nasadená verzia {deployed}."
+)
+
+
+def version_mismatch(deployed: str, reported: Optional[str]) -> Optional[str]:
+    """DEV-336: the sentence when the version the app reports is not the deployed one — ``None`` when it is, and when
+    the health could not be read at all (no claim: the other post-deploy checks speak for it). 09.11.2026 Author
+    Asistent 1.0.0 in TATA's PROD reported 0.1.0 and its deploy had ended as a plain success."""
+    if reported is None:
+        return None
+    if not reported.strip():
+        return VERSION_NOT_REPORTED.format(deployed=_bare_version(deployed.strip()))
+    if _bare_version(reported.strip()) == _bare_version(deployed.strip()):
+        return None
+    return VERSION_MISMATCH.format(reported=reported.strip(), deployed=_bare_version(deployed.strip()))
+
+
+def _version_probe_src(port: int, path: str) -> str:
+    """In-container probe: the ``version`` the app's health names (``""`` when none), ``null`` when unreadable."""
+    url = f"http://localhost:{port}{path}"
+    return (
+        "import json, urllib.request\n"
+        "try:\n"
+        f"    d = json.load(urllib.request.urlopen('{url}', timeout=10))\n"
+        "    v = d.get('version') if isinstance(d, dict) else None\n"
+        "    out = '' if v is None else str(v)\n"
+        "except Exception:\n"
+        "    out = None\n"
+        "print(json.dumps(out))\n"
+    )
+
+
+async def instance_version(compose: Path, project_slug: str, deploy_host: Optional[str] = None) -> Optional[str]:
+    """DEV-336: the version the installation's backend names on its health endpoint — read inside the backend, where
+    the installation runs, like :func:`instance_health`; ``""`` when it names none, ``None`` when it cannot be read."""
+    try:
+        services = (yaml.safe_load(compose.read_text(encoding="utf-8")) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    be_role = uat_provisioner.identify_service_roles(services).get("backend")
+    if be_role is None:
+        return None
+    port = uat_provisioner.detect_internal_port(services[be_role], 8000)
+    path = uat_provisioner.resolve_be_health_path(services[be_role], claude_agent.PROJECTS_ROOT / project_slug)
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose),
+        "exec",
+        "-T",
+        be_role,
+        "python",
+        "-c",
+        _version_probe_src(port, path),
+    ]
+    rc, out = await _compose_smoke_step(cmd, 30, env=_verify_env_for_target(deploy_host))
+    if rc != 0:
+        return None
+    try:
+        value = json.loads((out or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _health_worse(before: dict[str, tuple[str, str]], after: dict[str, tuple[str, str]]) -> list[str]:
     return [
         f"{name} — {after[name][1] or after[name][0]} (pred nasadením {before[name][0]}, teraz {after[name][0]})"

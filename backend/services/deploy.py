@@ -1086,6 +1086,13 @@ async def _default_deploy_runner(
                 + "; ".join(worse)
                 + ". Skontroluj to skôr, než verziu akceptuješ alebo nasadíš ďalej."
             )
+        # DEV-336 — and the version it says it is: Author Asistent 1.0.0 reported 0.1.0 after a „successful“ deploy.
+        reported = await orchestrator.instance_version(
+            result.compose_path, project_slug, deploy_host if is_prod else None
+        )
+        mismatch = orchestrator.version_mismatch(version_number, reported)
+        if mismatch:
+            warnings.append(mismatch)
     return RunnerResult(ok, detail, url, warnings, new_version_started=_started(outcome) and not returned)
 
 
