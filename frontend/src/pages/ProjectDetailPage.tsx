@@ -357,7 +357,7 @@ export default function ProjectDetailPage() {
 
   if (error || !project) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
           {error || "Projekt nebol nájdený."}
         </div>
@@ -366,7 +366,7 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       {/* "Just created" banner — 8s when everything ran; stays put when a step did not finish. */}
       {justCreated && (() => {
         // A green tick over an unfinished setup is the cockpit lying about its own work. When a founding

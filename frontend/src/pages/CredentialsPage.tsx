@@ -272,7 +272,7 @@ export default function CredentialsPage() {
             )}
 
             {mode === "view" && selected && (
-              <div className="max-w-3xl space-y-4">
+              <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex-1">{selected.title}</h2>
                   <button
@@ -313,7 +313,7 @@ export default function CredentialsPage() {
             )}
 
             {mode === "edit" && selected && (
-              <div className="max-w-3xl space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex-1">{selected.title} — úprava</h2>
                   <button
@@ -345,7 +345,7 @@ export default function CredentialsPage() {
             )}
 
             {mode === "create" && (
-              <div className="max-w-3xl space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex-1">Nový prístup</h2>
                   <button

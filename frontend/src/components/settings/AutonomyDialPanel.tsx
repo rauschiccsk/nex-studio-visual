@@ -135,7 +135,7 @@ export function AutonomyDialPanel({
   }
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6">
       <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] mb-1">
         Miera autonómie
       </h2>

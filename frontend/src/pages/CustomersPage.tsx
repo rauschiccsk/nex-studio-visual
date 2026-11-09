@@ -300,7 +300,7 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    <div className="p-6">
       <div className="mb-1 flex items-center justify-between">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Zákazníci</h1>
         <button

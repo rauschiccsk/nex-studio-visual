@@ -112,7 +112,7 @@ export default function GettingStartedPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="p-6">
       <header className="mb-6">
         <h1 className="text-xl font-bold text-[var(--color-text-primary)]">Ako začať</h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">

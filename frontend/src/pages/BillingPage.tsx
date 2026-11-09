@@ -14,7 +14,7 @@ export default function BillingPage() {
   const projectName = selectedProject?.slug === slug ? selectedProject?.name : slug;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6">
       <h1 className="text-base font-bold text-[var(--color-text-primary)] mb-2">Fakturácia — {projectName}</h1>
       {slug && <BillingTab slug={slug} />}
     </div>

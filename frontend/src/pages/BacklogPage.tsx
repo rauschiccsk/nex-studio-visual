@@ -302,7 +302,7 @@ export default function BacklogPage() {
 
   if (error || !project) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
           {error || "Projekt nebol nájdený."}
         </div>
@@ -311,7 +311,7 @@ export default function BacklogPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Zásobník</h1>

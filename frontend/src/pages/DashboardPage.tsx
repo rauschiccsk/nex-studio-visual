@@ -84,7 +84,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       {/* DEV-21: the cockpit as an app in its own window — offered on the start page, the NEX Manager pattern. The
           button hides itself once the cockpit runs installed; its hint says why when the browser cannot install. */}
       <div className="mb-6 flex justify-end">

@@ -156,7 +156,7 @@ export default function ProjectsPage() {
   }, []);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
         <h1 className="text-lg font-bold text-[var(--color-text-primary)]">Projekty</h1>

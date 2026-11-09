@@ -86,7 +86,7 @@ export default function PlaneTicketsPage() {
   }, [slug, view, reload]);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       <h1 className="text-base font-bold text-[var(--color-text-primary)] mb-1">Plane tikety</h1>
       <p className="text-xs text-[var(--color-text-muted)] mb-4">
         Tikety projektu v evidencii DEV

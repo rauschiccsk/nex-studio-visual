@@ -420,7 +420,7 @@ export default function NewVersionPage() {
 
   if (loadError) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
           {loadError}
         </div>

@@ -182,7 +182,7 @@ export default function VersionDetailPage() {
 
   if (error || !project || !version) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
           {error || "Verzia nebola nájdená."}
         </div>
@@ -238,7 +238,7 @@ export default function VersionDetailPage() {
 
       {/* ── Body ── */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="max-w-3xl mx-auto">
+        <div className="">
           {version.status === "planned" ? (
             <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5">
               <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">

@@ -318,7 +318,7 @@ function AgentsTab({
       />
       {/* CR-V2-038: honest clarity — "Max" is the ceiling (ultracode is NOT a higher level), and the
           AI Agent's dynamic-helper capability is built in, not a missing toggle. */}
-      <div className="px-6 pb-6 max-w-3xl space-y-1 text-[11px] text-[var(--color-text-muted)]">
+      <div className="px-6 pb-6 space-y-1 text-[11px] text-[var(--color-text-muted)]">
         <p>
           <strong>„Max"</strong> je najvyššia úroveň uvažovania — niet vyššej. „Ultracode" nie je vyššia
           úroveň; je to len schopnosť spúšťať dynamických pomocníkov — a tú má AI Agent zabudovanú.

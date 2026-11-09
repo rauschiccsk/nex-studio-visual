@@ -608,7 +608,7 @@ export default function MetricsPage() {
 
   if (error || !metrics) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6">
         <div className="rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-4 text-sm text-[var(--color-state-error-fg)]">
           {error ? <ErrorNote error={error} /> : "Náklady nedostupné."}
         </div>
@@ -654,7 +654,7 @@ export default function MetricsPage() {
   );
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6">
       {header}
       {/* Assumption strip — always visible, never behind a tooltip. */}
       <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-[11px] text-[var(--color-text-muted)] mb-4">

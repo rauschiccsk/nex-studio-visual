@@ -136,7 +136,7 @@ export default function RepositoryPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-1 flex items-center justify-between gap-2">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Repozitár</h1>
         <button

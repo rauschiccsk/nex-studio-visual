@@ -468,7 +468,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
   const currentCol = environment === "uat" ? (r: DeployMatrixRow) => r.uat_version : (r: DeployMatrixRow) => r.prod_version;
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="p-6">
       <div className="mb-1 flex items-center justify-between">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">{labels.title}</h1>
         <button
@@ -556,7 +556,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                   <tr key={row.customer_id} className="align-top max-md:block max-md:py-2">
                     {/* Customer */}
                     <td className="px-3 py-3 max-md:block max-md:py-1.5">
-                      <div className="font-medium text-[var(--color-text-primary)]">{row.customer_name}</div>
+                      <div className="font-medium text-[var(--color-text-primary)] md:min-w-[10rem]">{row.customer_name}</div>
                       <div className="font-mono text-[11px] text-[var(--color-text-muted)]">{row.customer_slug}</div>
                       {environment === "prod" && row.prod_machine && (
                         <div className="text-[11px] text-[var(--color-text-muted)]">na stroji {row.prod_machine}</div>

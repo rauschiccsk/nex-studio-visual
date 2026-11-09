@@ -37,6 +37,8 @@ export default function UpdatesPage() {
 
   return (
     <ReleaseNotes
+      // DEV-332 — the cockpit uses the whole space beside the menu on every page.
+      width="full"
       notes={notes}
       loading={loading}
       error={error || null}

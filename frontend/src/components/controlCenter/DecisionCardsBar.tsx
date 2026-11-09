@@ -335,7 +335,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
         </span>
       </div>
 
-      <div className="max-w-3xl px-4 py-3">
+      <div className="px-4 py-3">
         {/* ICCINT-72: koľké kolo, a koľko ich ešte môže prísť. Bez toho Manažér nevie, či je na začiatku,
             alebo pred posledným kolom — a či sa vôbec oplatí čakať ďalšie. */}
         {/* ICCINT-124: SMER, nie stav. „rozhodni 1 zo 4 (kolo 4 z 5)“ hovorí, koľko zostáva;

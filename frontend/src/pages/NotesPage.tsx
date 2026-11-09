@@ -200,7 +200,7 @@ export default function NotesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="mb-1 flex items-center justify-between gap-2">
         <h1 className="text-base font-bold text-[var(--color-text-primary)]">Poznámky</h1>
         <button
