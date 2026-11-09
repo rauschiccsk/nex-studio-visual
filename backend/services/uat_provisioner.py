@@ -1018,12 +1018,20 @@ def _manager_internal_url(compose_text: Optional[str]) -> Optional[str]:
     return None
 
 
+#: DEV-330 — what the deploy says when the Manager would not hand a known app a new key; never a value.
+NEW_KEY_REFUSED = (
+    "NEX Manager nevydal aplikácii '{slug}' nový kľúč ({reason}). Aplikácia je nasadená, ale z NEX Managera sa "
+    "otvorí až po ďalšom „Nasadiť znova“, keď kľúč dostane."
+)
+
+
 def ensure_module_registered(
     manager: PairedManager,
     *,
     slug: str,
     display_name: str,
     app_url: str,
+    needs_key: bool = False,
 ) -> tuple[Optional[str], Optional[str]]:
     """Tell the paired Manager this app exists, so it can be opened from it (ICCINT-59).
 
@@ -1043,6 +1051,12 @@ def ensure_module_registered(
 
     The provisioning token is read from the Manager's own ``.env`` and never logged, never returned. The Manager is
     asked at its ``api_url`` — on another machine its own address there (DEV-278).
+
+    DEV-330 — ``needs_key``: the app uses its key and the installation has none. For a module the Manager already
+    knows it then hands out a new one (``rotate-identity-key``, the same provisioning token): NEX Websites was
+    registered by its 1.0 deploy, which did not use the key, so it was written nowhere, and 1.1.0 on the app template
+    could not be opened from the Manager (09.11.2026). Never asked where the installation has a key — a new one would
+    make the working one invalid.
     """
     token = manager.env.get(PROVISIONING_TOKEN_ENV) or ""
     if not manager.api_url:
@@ -1067,7 +1081,14 @@ def ensure_module_registered(
                         client.patch(
                             f"{api}/{module['id']}", headers=headers, json={"base_url": app_url}
                         ).raise_for_status()
-                    return None, None
+                    if not needs_key:
+                        return None, None
+                    try:
+                        rotated = client.post(f"{api}/{module['id']}/rotate-identity-key", headers=headers)
+                        rotated.raise_for_status()
+                        return rotated.json().get("identity_key") or None, None
+                    except (httpx.HTTPError, ValueError) as exc:
+                        return None, NEW_KEY_REFUSED.format(slug=slug, reason=type(exc).__name__)
             created = client.post(
                 api,
                 headers=headers,
@@ -3914,6 +3935,8 @@ def provision_uat(
                 slug=project_slug,
                 display_name=_module_display_name(project_slug),
                 app_url=own[0] if own else f"https://{app_host}",
+                # DEV-330 — the app uses its key at the Manager and the installation has none to keep.
+                needs_key=MANAGER_API_KEY_ENV in env_example and not preserved_secrets.get(MANAGER_API_KEY_ENV),
             )
 
     synthesised_secrets: list[str] = []
@@ -4180,7 +4203,8 @@ def provision_uat(
                 "z nich už nevedú do iných inštalácií v spoločnej sieti."
             )
         compose_text = render_uat_compose(povysene, routing)
-        mala = set(_parse_env_file(env_path))
+        pred_nasadenim = _parse_env_file(env_path)
+        mala = set(pred_nasadenim)
         adresy = {key: f"https://{public_host}" for key in contract.public_url_keys} | further_public_urls
         env_riadky = env_version_bump(
             uat_dir,
@@ -4207,10 +4231,17 @@ def provision_uat(
         )
         # DEV-272 — the pairing comes from the Manager, also into an existing installation. DEV-278: on another machine
         # too — its Manager is read there.
-        prepojene = renew_pairing(
-            env_riadky,
-            paired_manager_values(paired_manager, manager_base_url=manager_base_url, manager_api_key=manager_api_key),
+        hodnoty_prepojenia = paired_manager_values(
+            paired_manager, manager_base_url=manager_base_url, manager_api_key=manager_api_key
         )
+        renew_pairing(env_riadky, hodnoty_prepojenia)
+        # DEV-330 — said against the installation as it was before this deploy: a key the version adds (NEX Websites
+        # 1.1.0 asks the Manager with a key 1.0 never had) is written by the version bump above, before the pairing.
+        prepojene = [
+            PAIRING_LABELS[k]
+            for k, v in hodnoty_prepojenia.items()
+            if env_riadky.get(k) == v and pred_nasadenim.get(k) != v
+        ]
         if prepojene:
             warnings.append(PAIRING_RENEWED.format(what=", ".join(prepojene)))
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"

@@ -67,9 +67,9 @@ class _Registry:
         self.modules: set[str] = set()
         self.issued = 0
 
-    def register(self, manager, *, slug, display_name, app_url):
+    def register(self, manager, *, slug, display_name, app_url, needs_key=False):
         assert manager.api_url == "http://uat-mager-manager-backend:8000"
-        if slug in self.modules:
+        if slug in self.modules and not needs_key:  # DEV-330: a known app without its key gets a new one
             return None, None
         self.modules.add(slug)
         self.issued += 1
