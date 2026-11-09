@@ -2005,7 +2005,7 @@ def render_version_bump(
     source: Optional[dict[str, Any]] = None,
     project_path: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Compose existujúcej inštalácie s povýšenými značkami obrazov. Nič iné sa nemení.
+    """Compose existujúcej inštalácie s povýšenými značkami obrazov a stavbou z nasadzovanej verzie (DEV-328).
 
     ICCINT-137 — okrem jedného: keď je daný ``source``, prenesie sa k povýšenej značke aj ``build:``
     zo zdrojového projektu. Bez neho je povýšená značka iba menom: ``up -d --build`` postaví len
@@ -2014,8 +2014,12 @@ def render_version_bump(
     NEX Inboxu 1.5.1 a nechalo inštaláciu ukazovať na obraz, ktorý neexistuje.
 
     Páruje sa podľa ÚLOHY, nie podľa mena: inštalácia volá tie isté služby ``postgres`` a
-    ``alembic-init``, zdroj ``db`` a ``migrate``. Vlastné ``build:`` inštalácie sa neprepisuje a
-    cudzí obraz (postgres) ho nikdy nedostane — ten sa neberie zo zdrojákov.
+    ``alembic-init``, zdroj ``db`` a ``migrate``. Cudzí obraz (postgres) ``build:`` nikdy nedostane —
+    ten sa neberie zo zdrojákov.
+
+    DEV-328 — ``build:`` služby, ktorú projekt stavia, sa berie z nasadzovanej verzie projektu vždy, aj keď
+    ho inštalácia už má: stavba patrí verzii, nie inštalácii. Služba, ktorú projekt nestavia, si svoj
+    ``build:`` ponechá.
     """
     return version_bump_from_text(
         (Path(instance_dir) / "docker-compose.yml").read_text(encoding="utf-8"),
@@ -2139,18 +2143,24 @@ def version_bump_from_text(
         if meno
     }
 
+    # DEV-328 — the project is the one source of how a service is built: every service of the installation the project
+    # builds gets the build of the version being deployed, also one that already has a build. Until 09.11.2026 a
+    # service with a build kept the one of the first deploy, so NEX Websites 1.1.0 — whose backend gained two further
+    # folders going onto the app template — was built the 1.0 way and its step ``migrate`` asked for an image
+    # ``frontend``. What is the installation's own (names, networks, volumes, variables, ports) stays untouched above.
+    zdroj_sluzby = (source or {}).get("services") or {}
     for meno_sluzby, svc in sluzby.items():
-        if not isinstance(svc, dict) or svc.get("build") is not None:
+        if not isinstance(svc, dict):
             continue
         obraz = svc.get("image")
-        if not isinstance(obraz, str):
-            continue
-        build = stavia.get(obraz.split(":", 1)[0])
+        build = stavia.get(obraz.split(":", 1)[0]) if isinstance(obraz, str) else None
         if build is None:
             rola = next((r for r, m in _inst_role.items() if m == meno_sluzby), None)
             build = stavia_podla_roly.get(rola) if rola else None
+        if build is None and isinstance(zdroj_sluzby.get(meno_sluzby), dict):
+            build = zdroj_sluzby[meno_sluzby].get("build")
         if build is None:
-            continue  # cudzí obraz (postgres) sa zo zdrojákov neberie
+            continue  # cudzí obraz (postgres) sa zo zdrojákov neberie; služba, ktorú projekt nestavia, ostáva, aká je
         svc["build"] = _abs_build(build, Path(project_path))
     # DEV-267: a step that runs another service's image is built the way that service is. The hand-written NEX Manager
     # of ICC runs ``migrate`` on ``nexmanager-backend`` — as the project does, both from one Dockerfile — but the

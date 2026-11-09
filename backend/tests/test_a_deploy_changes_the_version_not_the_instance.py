@@ -208,8 +208,11 @@ def test_a_foreign_image_never_gains_a_build(tmp_path):
     assert "build" not in novy["services"]["postgres"]
 
 
-def test_the_instances_own_build_is_not_overwritten(tmp_path):
-    """Ked si instalacia ``build:`` nesie sama, je to jej rozhodnutie — nasadenie do neho nesiaha."""
+def test_the_build_of_a_service_the_project_builds_comes_from_the_project(tmp_path):
+    """DEV-328 (Director 09.11.2026 „Súhlasím“): stavba patrí verzii, nie inštalácii. Do 09.11.2026 tu stálo
+    „keď si inštalácia ``build:`` nesie sama, je to jej rozhodnutie“ — a NEX Websites 1.1.0 sa preto na UAT staval
+    po starom a nasadenie zlyhalo. Služba, ktorú projekt stavia, dostane stavbu z nasadzovanej verzie, aj keď
+    inštalácia nejakú má."""
     d = _instalacia(tmp_path)
     obsah = (d / "docker-compose.yml").read_text(encoding="utf-8")
     (d / "docker-compose.yml").write_text(
@@ -224,7 +227,7 @@ def test_the_instances_own_build_is_not_overwritten(tmp_path):
 
     novy = P.render_version_bump(d, version="1.5.0", source=ZDROJ, project_path=zdrojovy_projekt)
 
-    assert novy["services"]["backend"]["build"] == "/vlastna/cesta"
+    assert novy["services"]["backend"]["build"] == {"context": str(zdrojovy_projekt)}
 
 
 def test_without_a_source_nothing_changes(tmp_path):
