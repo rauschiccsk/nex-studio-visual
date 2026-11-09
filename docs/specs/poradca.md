@@ -106,6 +106,13 @@ pripnutého projektu (DEV-318, `ideas.md`); po založení projektu z nápadu ten
      `plane_tikety`, `naklady` a `fakturacia` čítajú tie isté služby ako obrazovky. Stráž
      `tests/test_poradca_sees_every_screen_of_the_project.py` porovná obrazovky projektu v ľavom menu so zoznamom
      `tools.SCREENS`: nová obrazovka bez nástroja Poradcu (alebo bez zapísaného dôvodu v `tools.NOT_READ`) je chyba.
+   - **Zadanie verzie a jej tikety DEV** (v4.121.0, DEV-327): nástroj `stavba` vždy ukáže zadanie verzie (najnovšia
+     správa `kickoff`, nad 6 000 znakov skrátená so značkou) a tikety DEV, ktoré má verzia v Plane
+     (`versions.plane_identifier`) alebo ktoré zadanie menuje, bez ohľadu na 50 posledných správ. 09.11.2026 Poradca
+     radil ku karte NEX Inbox 1.10.3 bez merania vykonávača zapísaného v DEV-167 — zadanie s tiketom bolo staršie než
+     okno správ. Charta: pri verdikte Audítora či karte rozhodnutia prečítaj tieto tikety nástrojom `plane_tiket` aj
+     s komentármi, zmerané má prednosť pred úvahou; pokyn, ktorý by zmenil pravidlo Špecifikácie, nedávaj agentovi —
+     polož ho Manažérovi ako otázku. Stráž `tests/test_poradca_knows_what_the_build_is_for.py`.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).
@@ -219,7 +226,7 @@ databázu neurčuje AI, ale backend z projektu. Každý výstup prejde filtrom t
 
 | nástroj | čo vráti | strop |
 |---|---|---|
-| `stavba` | fáza, stav, dôvod, `next_action`, rozhovor; tlačidlá z toho istého balíka, z ktorého kreslí obrazovka | 50 správ |
+| `stavba` | fáza, stav, dôvod, `next_action`, zadanie verzie a jej tikety DEV, rozhovor; tlačidlá z toho istého balíka, z ktorého kreslí obrazovka | 50 správ, zadanie 6 000 znakov |
 | `plan_uloh` | plán úloh verzie a stav úloh | — |
 | `git_historia`, `git_zmena` | `git log` / `git show` jedného commitu; commit len podľa vzoru `^[0-9a-f]{7,40}$`, `--end-of-options`, cesty za `--`, bez shellu (B6) | 100 commitov / 2 000 riadkov |
 | `zaznam_agenta` | záznam agenta stavby rozobraný na kroky (nástroj, súbor/príkaz, chyba) (B3) | posledných 200 krokov |

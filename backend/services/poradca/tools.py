@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from backend.config.settings import settings
 from backend.core.local_time import local_time
 from backend.db.models.foundation import User
+from backend.db.models.pipeline import PipelineMessage
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
@@ -65,6 +66,9 @@ ACTION_LABELS: dict[str, str] = {
 
 _MESSAGES_LIMIT = 50
 _MESSAGE_CHARS = 1500
+#: DEV-327 — the version's brief in ``stavba``: longer is cut with a mark; the DEV tickets are named from all of it.
+_BRIEF_CHARS = 6000
+_DEV_TICKET = re.compile(rf"\b{re.escape(settings.plane_dev_project)}-\d{{1,7}}\b", re.IGNORECASE)
 _GIT_LOG_MAX = 100
 _GIT_SHOW_LINES = 2000
 _AGENT_STEPS_MAX = 200
@@ -231,6 +235,35 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
     return out
 
 
+def _brief_lines(db: Session, version: Version) -> list[str]:
+    """DEV-327 — what the build is for: the version's brief (the newest kickoff, as the Manažér started the build) and
+    the DEV tickets the version has in Plane or the brief names. ``stavba`` shows only the newest messages, so after 50
+    of them the brief and its ticket were gone: 09.11.2026 Poradca advised on NEX Inbox 1.10.3 without the measurement
+    of the CI runner written in DEV-167 and suspected what it had ruled out."""
+    kickoff = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == version.id, PipelineMessage.kind == "kickoff")
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    brief = (kickoff.content or "").strip() if kickoff is not None else ""
+    lines: list[str] = []
+    if brief:
+        when = local_time(kickoff.created_at).strftime("%d.%m.%Y %H:%M") if kickoff.created_at else ""
+        shown = brief if len(brief) <= _BRIEF_CHARS else brief[:_BRIEF_CHARS].rstrip() + " …"
+        lines.append(f"\nZadanie verzie (ako Manažér stavbu spustil, {when}):\n{shown}")
+    tickets: list[str] = []
+    for found in _DEV_TICKET.findall(f"{version.plane_identifier or ''} {brief}"):
+        if found.upper() not in tickets:
+            tickets.append(found.upper())
+    if tickets:
+        lines.append(
+            f"Tikety DEV tejto verzie: {', '.join(tickets)}. Ľudia a Dedo do nich zapisujú merania a rozhodnutia — "
+            "pred radou k zastavenej stavbe ich prečítaj nástrojom plane_tiket aj s komentármi."
+        )
+    return lines
+
+
 def _vizual_checklist_lines(checklists: list) -> list[str]:
     """DEV-36: what the Manažér was asked to check in the Vizuál, as his screen shows it — so when he asks
     Poradca to check the Vizuál too, Poradca walks the same items, links included."""
@@ -311,6 +344,7 @@ class PoradcaTools:
                 f"Fáza: {state.current_stage}; stav: {state.status}; dôvod zastavenia: {state.block_reason or '—'}; "
                 f"čo ďalej: {state.next_action or '—'}."
             )
+            lines.extend(_brief_lines(db, version))
             actions = board.available_actions or []
             labels = dict(ACTION_LABELS)
             if "pokracovat" in actions and orchestrator.plan_awaits_start(db, version.id):
