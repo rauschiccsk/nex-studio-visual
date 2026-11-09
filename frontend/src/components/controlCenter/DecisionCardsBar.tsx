@@ -15,7 +15,7 @@
 // `board.available_actions` — which it does ONLY at `blocked` + `decision_needed`. So this bar and the other
 // approval bars are mutually exclusive by construction; at most one shows.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CircleAlert, Lightbulb } from "lucide-react";
 
 import {
@@ -28,7 +28,7 @@ import { inputOwner } from "@/components/controlCenter/blockRecovery";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
 import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
-import { FROM_PORADCA_LABEL } from "@/lib/poradcaHandoff";
+import { FROM_PORADCA_LABEL, type HandedChoice } from "@/lib/poradcaHandoff";
 import { directionToRow, roundGain } from "@/lib/consultationDirection";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -69,6 +69,11 @@ interface ConsultDecision {
  * (``OWN_DECISION_LABEL`` in ``backend/services/pipeline_status.py``) for Poradca and the agent.
  */
 const OWN_DECISION_LABEL = "Vlastné rozhodnutie";
+
+/** A label with its whitespace collapsed — how the server compares Poradca's choice with the card (choices.py). */
+function plainLabel(text: string): string {
+  return text.split(/\s+/).filter(Boolean).join(" ");
+}
 /**
  * Veta o pôvode rozhodnutia (ICCINT-123). `null` pre staré karty bez toho údaja — vymyslená veta by
  * bola horšia než žiadna, lebo by tvrdila niečo o pôvode, ktorý nepoznáme.
@@ -228,6 +233,24 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const answered = useMemo(() => (latest ? answeredLabels(messages, latest.seq) : {}), [messages, latest]);
 
   const [picked, setPicked] = useState<string | null>(null);
+  // DEV-220: his own decision is written in the same box — the text Poradca hands over lands there too.
+  const [own, setOwn] = useState(false);
+  // DEV-333 — the card a choice handed off from Poradca may pick on: its number and options, set while rendering.
+  const choiceTarget = useRef<{ card: number; options: { id: string; label: string }[] } | null>(null);
+  const pickedRef = useRef<{ picked: string | null; own: boolean }>({ picked: null, own: false });
+  pickedRef.current = { picked, own };
+  const takeChoice = useCallback((choice: HandedChoice) => {
+    const target = choiceTarget.current;
+    if (!target || choice.card !== target.card) return; // a choice for another card picks nothing here
+    if (pickedRef.current.picked != null || pickedRef.current.own) return; // never over what he picked himself
+    const label = plainLabel(choice.label);
+    if (label === OWN_DECISION_LABEL) {
+      setOwn(true);
+      return;
+    }
+    const option = target.options.find((o) => plainLabel(o.label) === label);
+    if (option) setPicked(option.id);
+  }, []);
   // DEV-26: the card's instruction for the AI partner is a writing surface like any other — it takes
   // Poradca's instruction during a consultation, keeps its lines, and survives a trip to another screen.
   // One draft per card, so an instruction written for one decision never rides along with the next one.
@@ -249,9 +272,8 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
     text: note,
     setText: noteDraft.setText,
     restored: noteDraft.restored,
+    onChoice: takeChoice,
   });
-  // DEV-220: his own decision is written in the same box — the text Poradca hands over lands there too.
-  const [own, setOwn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
 
@@ -270,6 +292,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
   const ziskRiadok = roundGain(board.consultation_direction?.last_round);
   const current = idx >= 0 ? consultation.decisions[idx] : null;
   if (!current) return null; // all decided → the apply is dispatching; the card disappears
+  choiceTarget.current = { card: idx + 1, options: current.options }; // card N is decision N, as Poradca counts
   // DEV-4: where this card's question came from and what a different choice reopens — read from the whole record.
   const context = board.decision_context?.[current.key];
   const origin = povodVeta(current, context);

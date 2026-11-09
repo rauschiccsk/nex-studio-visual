@@ -17,7 +17,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { useCodePaths } from "@/hooks/useCodePaths";
 import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { handOffInstruction, instructionTarget } from "@/lib/poradcaHandoff";
+import { greenCardChoice, handOffInstruction, instructionTarget, type HandedChoice } from "@/lib/poradcaHandoff";
 import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, longAnswer, stepLabel } from "@/lib/poradcaAnswer";
 import { InlineChoice } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
@@ -77,15 +77,16 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
   const instruction = held ? null : (message.instruction ?? longAnswer(message.content ?? ""));
 
   function insert() {
-    if (instruction) handOff(instruction);
+    // DEV-333 — the green choice of a card goes with the instruction, and the card has it picked.
+    if (instruction) handOff(instruction, greenCardChoice(choices));
   }
 
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
   // Riadiace centrum that takes the Manažér's text now; nothing is sent.
-  function handOff(text: string) {
+  function handOff(text: string, choice: HandedChoice | null = null) {
     if (!target) return;
     try {
-      handOffInstruction(target.id, text);
+      handOffInstruction(target.id, text, choice);
     } catch (e: unknown) {
       setError({ message: e instanceof Error ? e.message : "Vloženie zlyhalo" });
       return;

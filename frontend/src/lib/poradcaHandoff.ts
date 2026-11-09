@@ -72,12 +72,32 @@ export function instructionTarget(
   };
 }
 
-/** Hand an instruction off to the build's Riadiace centrum. Throws when the browser refuses to store it. */
-export function handOffInstruction(versionId: string, instruction: string): void {
+/** DEV-333 — the option Poradca marked green for a Decision Card (``<volba karta="N">``), handed off with its
+ * instruction so the card has it picked. Only a choice the card offers word for word travels (status ``on_card``). */
+export interface HandedChoice {
+  card: number;
+  label: string;
+}
+
+const CHOICE_SUFFIX = ".choice";
+
+/** The green card choice among an answer's choices — the first one, as the answer names it first. */
+export function greenCardChoice(
+  choices: ReadonlyArray<{ card?: number | null; label: string; status: string }>,
+): HandedChoice | null {
+  const green = choices.find((c) => typeof c.card === "number" && c.status === "on_card");
+  return green ? { card: green.card as number, label: green.label } : null;
+}
+
+/** Hand an instruction off to the build's Riadiace centrum — with the green choice of the card it belongs to
+ * (DEV-333); the newest hand-off's choice stands. Throws when the browser refuses to store it. */
+export function handOffInstruction(versionId: string, instruction: string, choice: HandedChoice | null = null): void {
   try {
     const key = pendingKey(versionId);
     const next = appendInstruction(window.localStorage.getItem(key) ?? "", instruction);
     window.localStorage.setItem(key, next);
+    if (choice) window.localStorage.setItem(key + CHOICE_SUFFIX, JSON.stringify(choice));
+    else window.localStorage.removeItem(key + CHOICE_SUFFIX);
   } catch {
     throw new Error("Prehliadač nedovolil uložiť text — skopíruj pokyn ručne.");
   }
@@ -91,6 +111,23 @@ export function takeHandoff(versionId: string): string | null {
     const text = window.localStorage.getItem(key);
     window.localStorage.removeItem(key);
     return text && text.trim() ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The choice handed off with the pending instruction, removed from the slot (DEV-333) — taken with the text. */
+export function takeHandedChoice(versionId: string): HandedChoice | null {
+  try {
+    const key = pendingKey(versionId) + CHOICE_SUFFIX;
+    const raw = window.localStorage.getItem(key);
+    window.localStorage.removeItem(key);
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    if (value && typeof value === "object") {
+      const { card, label } = value as Partial<HandedChoice>;
+      if (typeof card === "number" && typeof label === "string") return { card, label };
+    }
+    return null;
   } catch {
     return null;
   }
