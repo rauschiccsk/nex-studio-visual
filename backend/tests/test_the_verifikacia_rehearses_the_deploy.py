@@ -147,11 +147,14 @@ def test_the_rehearsal_has_an_identity_of_its_own_and_runs_what_the_installation
     out = R.isolated(INSTALLATION, "nex-websites-skuska-nasadenia-1", env)
 
     assert out["name"] == "nex-websites-skuska-nasadenia-1"
-    assert "networks" not in out
+    assert out["networks"] == {"inbox-net": {}}, (
+        "the outside network goes; the app's own stays, under the rehearsal's name"
+    )
     assert out["volumes"] == {"db-data": {}}, "a volume's real name or external reaches the customer's data"
     backend = out["services"]["backend"]
-    for key in ("container_name", "ports", "networks", "labels"):
+    for key in ("container_name", "ports", "labels"):
         assert key not in backend, key
+    assert backend["networks"] == ["inbox-net"]
     assert backend["image"] == "nex-websites-skuska-nasadenia-1-backend:skuska"
     assert backend["volumes"] == [
         "/app/data",
@@ -339,3 +342,62 @@ async def test_no_rehearsal_when_the_acceptance_failed(smoke):
 
     assert ok and acceptance[0] is False
     assert smoke["asked"] == []
+
+
+#: DEV-339 — Author Asistent's own networks: the AI worker reaches out only through the egress gateway.
+SEALED = {
+    "networks": {
+        "app": {},
+        "ai_internal": {"internal": True, "driver_opts": {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}},
+        "egress_out": {"ipam": {"config": [{"subnet": "10.240.7.0/24"}]}},
+        "nex-proxy-net": {"external": True},
+    },
+    "services": {
+        "backend": {"build": ".", "networks": ["app", "ai_internal", "nex-proxy-net"]},
+        "worker": {"build": ".", "networks": {"ai_internal": {"ipv4_address": "10.240.6.5"}}},
+        "egress": {"image": "ubuntu/squid", "networks": ["ai_internal", "egress_out"]},
+        "frontend": {"build": ".", "networks": ["nex-proxy-net"]},
+    },
+}
+
+
+def test_the_app_s_own_networks_stay_and_only_the_outside_one_goes(tmp_path):
+    """09.11.2026 the rehearsal took every network away and Author Asistent's backend, which checks that its AI worker
+    is sealed off, called itself unhealthy — a failure the real deploy does not have."""
+    out = R.isolated(SEALED, "author-asistent-skuska-nasadenia-0", tmp_path / ".env")
+
+    assert out["networks"] == {
+        "app": {},
+        "ai_internal": {"internal": True, "driver_opts": {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}},
+        "egress_out": {},  # a fixed subnet would collide with the installation's own
+    }
+    services = out["services"]
+    assert services["backend"]["networks"] == ["app", "ai_internal"]
+    assert services["worker"]["networks"] == {"ai_internal": {}}, "a fixed address belongs to the installation"
+    assert services["egress"]["networks"] == ["ai_internal", "egress_out"]
+    assert "networks" not in services["frontend"], "only the outside network was named — the default one serves"
+
+
+def test_a_required_customer_value_gets_the_smoke_s_test_value(tmp_path, monkeypatch):
+    """DEV-339 — Author Asistent's first account comes from required customer values the Manažér enters at a real first
+    install (AUTHOR_USERNAME, AUTHOR_INITIAL_PASSWORD). The rehearsal had nobody to enter them, the backend stopped at
+    „The account does not exist yet“ — it now gives them the smoke's test values (one rule, ``_smoke_contract_value``).
+    """
+    monkeypatch.setattr(P, "_docker_image_exists", lambda image: True)
+    project = _project(tmp_path, NEW)
+    (project / ".env.example").write_text(
+        "DB_PASSWORD=\nSECRET_KEY=\n"
+        "# @customer required: „Prihlasovacie meno“\nAUTHOR_USERNAME=\n\n"
+        "# @customer-secret required: „Počiatočné heslo“\nAUTHOR_INITIAL_PASSWORD=\n\n"
+        "# @customer: „Nepovinné“\nEGRESS_EXTRA_DENY=\n",
+        encoding="utf-8",
+    )
+
+    targets = R.render_targets(
+        "nex-websites", "1.1.0", projects_root=tmp_path / "projects", uat_root=tmp_path / "uat", work=tmp_path / "w"
+    )
+
+    env = P._parse_env_file(targets[0].env)
+    assert env["AUTHOR_USERNAME"] == O.SMOKE_CUSTOMER_VALUE
+    assert len(env["AUTHOR_INITIAL_PASSWORD"]) >= 32, "a secret gets a random value by UAT's own rule"
+    assert not env.get("EGRESS_EXTRA_DENY"), "an optional customer value stays as a real first install leaves it"

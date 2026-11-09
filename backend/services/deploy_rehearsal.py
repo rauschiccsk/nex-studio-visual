@@ -12,7 +12,8 @@ So the Verifikácia now writes the installation with the deploy's own code (``ua
 new customer and, from a copy, for every existing UAT installation of the project — into a throwaway folder, builds its
 images from the verified commit (``verified_build``) and starts them. What makes it a rehearsal is only its identity
 (:func:`isolated`): its own compose name, no Traefik route, no published port, no outside network, its own empty volumes
-and the synthetic settings of a first install — never a customer's data or ``.env``. Then it is taken down.
+and the synthetic settings of a first install — never a customer's data or ``.env``; a required customer value, which
+the Manažér enters at a real first install, gets the smoke's test value (DEV-339). Then it is taken down.
 
 Not rehearsed, and said so: moving a customer's real data (the rehearsal database is empty), the machine MAGER (the
 build runs on ANDROS) and the pairing with a customer's NEX Manager — the deploy itself checks the door afterwards.
@@ -31,7 +32,7 @@ from typing import Any, Optional
 import yaml
 
 from backend.core.agent_env import project_env
-from backend.services import build_provenance, verified_build
+from backend.services import build_provenance, env_contract, verified_build
 from backend.services import uat_provisioner as P
 
 #: The customer a rehearsal installs for — a folder in a throwaway root only, never a real customer.
@@ -66,6 +67,24 @@ def _existing_installations(uat_root: Path, project_slug: str) -> list[Path]:
     return found
 
 
+def _customer_test_values(project_path: Path) -> dict[str, str]:
+    """What the Manažér would enter at a real first install, for a rehearsal: each REQUIRED customer value gets the
+    smoke's test value — one rule (``orchestrator._smoke_contract_value``); an optional one stays unset, as a real
+    first install leaves it.
+
+    DEV-339: 09.11.2026 Author Asistent 1.0.1 failed its rehearsal on „The account does not exist yet — set
+    AUTHOR_USERNAME and AUTHOR_INITIAL_PASSWORD“ — values every real deploy carries from the customer's settings."""
+    from backend.services import orchestrator as O  # the smoke's own rule; imported here — it imports this module
+
+    contract = env_contract.for_project(project_path)
+    values = {}
+    for setting in contract.of_kind(env_contract.CUSTOMER, env_contract.CUSTOMER_SECRET):
+        value = O._smoke_contract_value(setting.key, contract)
+        if value is not None:
+            values[setting.key] = value
+    return values
+
+
 def render_targets(
     project_slug: str, version: str, *, projects_root: Path, uat_root: Path, work: Path
 ) -> list[Rendered]:
@@ -75,6 +94,7 @@ def render_targets(
     (its synthetic settings) overwritten with a copy of the installation's own compose, and the deploy into it — the
     version bump that kept the old build of NEX Websites on 09.11.2026. Nothing outside ``work`` is written."""
     app = P.derive_uat_slug(project_slug)
+    customer_values = _customer_test_values(projects_root / project_slug)
 
     def provision(root: Path, customer: str) -> P.ProvisionResult:
         return P.provision_uat(
@@ -88,6 +108,7 @@ def render_targets(
             customer_slug=customer,
             app=app,
             full_project_slug=project_slug,
+            customer_values=customer_values,
         )
 
     fresh = provision(work / "nova", REHEARSAL_CUSTOMER)
@@ -115,23 +136,57 @@ def _isolated_mount(mount: Any) -> Any:
     return mount
 
 
+def _own_networks(networks: Any) -> dict[str, Any]:
+    """The app's own networks, under the rehearsal's compose name: an outside one (``external``) goes; a network's real
+    ``name`` and fixed subnets (``ipam``) go — they would reach or collide with the installation's; the rest stays.
+
+    DEV-339: 09.11.2026 the rehearsal took every network away, and Author Asistent — whose AI worker reaches out only
+    through its egress gateway on an ``internal`` network — called its backend unhealthy, a failure no deploy has."""
+    own: dict[str, Any] = {}
+    for key, net in (networks or {}).items() if isinstance(networks, dict) else ():
+        net = dict(net or {})
+        if net.get("external"):
+            continue
+        for setting in ("name", "ipam"):
+            net.pop(setting, None)
+        own[key] = net
+    return own
+
+
+def _service_networks(networks: Any, own: dict[str, Any]) -> Any:
+    """A service's networks among the app's own ones — a fixed address on one belongs to the installation."""
+    if isinstance(networks, dict):
+        return {
+            key: {k: v for k, v in (cfg or {}).items() if k not in ("ipv4_address", "ipv6_address")}
+            for key, cfg in networks.items()
+            if key in own
+        }
+    return [key for key in networks if key in own]
+
+
 def isolated(compose: dict[str, Any], name: str, env: Path) -> dict[str, Any]:
     """The installation's compose with an identity of its own — everything it builds and runs stays as it is.
 
     Its own compose name; no ``container_name`` (the installation's containers keep theirs), no published port, no
-    Traefik label, no outside network (the default network of its own name instead); its own empty volumes (a
+    Traefik label, no outside network — its own networks stay, under its own name (DEV-339); its own empty volumes (a
     volume's real ``name`` or ``external`` would reach the customer's data); a folder of the machine becomes an empty
     volume; images it builds are tagged for the rehearsal; the settings it reads are the rehearsal's ``env``."""
     out = copy.deepcopy(compose)
     out["name"] = name
-    out.pop("networks", None)
+    own = _own_networks(out.pop("networks", None))
+    if own:
+        out["networks"] = own
     if isinstance(out.get("volumes"), dict):
         out["volumes"] = {key: {} for key in out["volumes"]}
     for service, svc in (out.get("services") or {}).items():
         if not isinstance(svc, dict):
             continue
-        for key in ("container_name", "ports", "networks", "labels"):
+        for key in ("container_name", "ports", "labels"):
             svc.pop(key, None)
+        if svc.get("networks") is not None:
+            svc["networks"] = _service_networks(svc["networks"], own)
+            if not svc["networks"]:
+                svc.pop("networks")
         if svc.get("build") is not None:
             svc["image"] = f"{name}-{service}:{REHEARSAL_TAG}"
         if svc.get("volumes"):
