@@ -95,8 +95,10 @@ describe("Nápady (DEV-318)", () => {
     ideasApi.createIdeaApi.mockResolvedValue({ ...idea("open"), id: "i3", conversation: { messages: [] } });
     renderAt("/napady");
 
+    // The list stands at once, empty („Zatiaľ žiadny nápad.“), and fills when the ideas arrive — wait for them
+    // (CI 10.11.2026 found it still empty on a slower runner).
     const list = await screen.findByRole("list", { name: "Moje nápady" });
-    expect(within(list).getByText(/Zadanie hotové/)).toBeInTheDocument();
+    expect(await within(list).findByText(/Zadanie hotové/)).toBeInTheDocument();
     expect(within(list).getByText(/Založený ako NEX Sklad/)).toBeInTheDocument();
 
     fireEvent.change(await screen.findByPlaceholderText(/Opíš svoj nápad/), { target: { value: "Matrika pre farnosť" } });
