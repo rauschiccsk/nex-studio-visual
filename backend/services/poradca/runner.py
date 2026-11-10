@@ -154,6 +154,8 @@ _slots = _Slots()
 @dataclass
 class _Running:
     conversation_id: UUID
+    #: Who answers — named in every sentence the question ends with (DEV-343).
+    agent: "Agent" = field(default_factory=lambda: PORADCA)
     container: Optional[str] = None
     process: Any = None
     stop_requested: bool = False
@@ -162,6 +164,28 @@ class _Running:
     #: Secrets filter of this question — every step and log passes through it (finding of the 05.10.2026 review: steps
     #: of built-in tools and Claude's error output previously went out unfiltered).
     secret_filter: SecretFilter = field(default_factory=SecretFilter)
+
+
+@dataclass(frozen=True)
+class Agent:
+    """DEV-343 — who answers in a conversation, in the forms the cockpit's sentences need.
+
+    Director 10.11.2026: the agent of Nápady was called Poradca like the project's, „keď rozprávame s chlapcami medzi
+    sebou pojem Poradca je chaotická“ — so a new idea's agent is the Projektant, a project's stays the Poradca."""
+
+    name: str  # „Poradca odpovedá“
+    whom: str  # „Poradcu sa nepodarilo spustiť“, „Pravidlá Poradcu“
+    to_whom: str  # „povedz to Poradcovi“
+
+
+PORADCA = Agent("Poradca", "Poradcu", "Poradcovi")
+PROJEKTANT = Agent("Projektant", "Projektanta", "Projektantovi")
+
+
+def agent_of(conversation: PoradcaConversation) -> Agent:
+    """An idea's conversation — no project yet — is the Projektant's; once its project exists, the Poradca's (the
+    same rule that picks the charter in :func:`_run`)."""
+    return PORADCA if conversation.project_id is not None else PROJEKTANT
 
 
 #: Running answers by message id — for stopping.
@@ -198,7 +222,7 @@ def ask(
         )
     ).first()
     if running is not None:
-        raise PoradcaBusy("V tomto rozhovore už Poradca odpovedá — počkaj, alebo ho zastav.")
+        raise PoradcaBusy(f"V tomto rozhovore už {agent_of(conversation).name} odpovedá — počkaj, alebo ho zastav.")
     first = (
         db.execute(select(PoradcaMessage.id).where(PoradcaMessage.conversation_id == conversation.id)).first() is None
     )
@@ -352,13 +376,16 @@ def _topic(db: Session, project: Project, version_id: Optional[UUID]) -> str:
 
 #: DEV-30: how a changed charter is handed to a conversation that started under an older one.
 _CHARTER_REFRESH = (
-    "[Pravidlá Poradcu sa od začiatku tohto rozhovoru zmenili. Odteraz platia tieto aktuálne pravidlá — "
+    "[Pravidlá {whom} sa od začiatku tohto rozhovoru zmenili. Odteraz platia tieto aktuálne pravidlá — "
     "nahrádzajú tie zo začiatku rozhovoru:]\n{charter}\n[Koniec aktuálnych pravidiel]\n\n"
 )
 
 
-def _prompt(scope: str, asker: str, question: str, charter_refresh: Optional[str] = None) -> str:
-    refresh = _CHARTER_REFRESH.format(charter=charter_refresh) if charter_refresh else ""
+def _prompt(
+    scope: str, asker: str, question: str, charter_refresh: Optional[str] = None, agent: Optional[Agent] = None
+) -> str:
+    whom = (agent or PORADCA).whom
+    refresh = _CHARTER_REFRESH.format(charter=charter_refresh, whom=whom) if charter_refresh else ""
     return f"{refresh}[Kontext z kokpitu]\n{scope}\nPýta sa: {asker}.\n\n{question}"
 
 
@@ -425,6 +452,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
 
                 tools = build_idea_tools(user_id=user_id)
             charter_sha = _charter_sha(charter)
+            entry.agent = agent_of(conversation)
             secret_filter = SecretFilter(known_secret_values(db, project))
             entry.secret_filter = secret_filter
             # DEV-30: Claude Code ignores a new charter on --resume — a changed one goes into the question itself.
@@ -475,7 +503,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                 token=token,
                 network=network,
                 call=sandbox.ClaudeCall(
-                    prompt=_prompt(scope, asker, question, charter if charter_refresh else None),
+                    prompt=_prompt(scope, asker, question, charter if charter_refresh else None, entry.agent),
                     claude_session_id=session_id,
                     charter_text=charter if first else None,
                     model=model,
@@ -506,12 +534,12 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
         error = None
     except sandbox.PoradcaUnavailable as exc:
         logger.error("poradca: sandbox unavailable: %s", exc)
-        status, error = FAILED, f"Poradcu sa nepodarilo spustiť: {exc}"
+        status, error = FAILED, f"{entry.agent.whom} sa nepodarilo spustiť: {exc}"
     except _QuestionFailed as exc:
         status, error = (STOPPED, None) if entry.stop_requested else (FAILED, str(exc))
     except Exception:  # noqa: BLE001 — the question must not stay hanging
         logger.exception("poradca: question %s failed", message_id)
-        status, error = FAILED, "Poradca zlyhal na strane kokpitu. Podrobnosti sú v logu backendu."
+        status, error = FAILED, f"{entry.agent.name} zlyhal na strane kokpitu. Podrobnosti sú v logu backendu."
     finally:
         if acquired:
             await _slots.release()
@@ -630,7 +658,7 @@ async def _stream(argv: list[str], entry: _Running, message_id: UUID, project_di
             entry.secret_filter(stderr_text)[:500],
         )
         detail = (result_text or "").strip()[:300] if is_error else ""
-        raise _QuestionFailed("Poradca skončil bez odpovede." + (f" ({detail})" if detail else ""))
+        raise _QuestionFailed(f"{entry.agent.name} skončil bez odpovede." + (f" ({detail})" if detail else ""))
     return str(result_text).strip(), usage
 
 
@@ -711,7 +739,9 @@ def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
     ).first()
     if running is not None:
         db.rollback()
-        raise PoradcaBusy("Kým Poradca odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.")
+        raise PoradcaBusy(
+            f"Kým {agent_of(conversation).name} odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav."
+        )
     try:
         trashed = sandbox.move_to_trash(conversation.id)
     except OSError:

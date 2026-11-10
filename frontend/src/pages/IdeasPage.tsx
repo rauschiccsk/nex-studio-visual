@@ -81,7 +81,7 @@ export default function IdeasPage() {
     void refreshList();
     getPoradcaStatusApi()
       .then(setStatus)
-      .catch((e: unknown) => setLoadError(humanizeApiError(e, "Stav Poradcu sa nepodarilo zistiť")));
+      .catch((e: unknown) => setLoadError(humanizeApiError(e, "Stav Projektanta sa nepodarilo zistiť")));
   }, [refreshList]);
 
   useEffect(() => {
@@ -259,7 +259,7 @@ export default function IdeasPage() {
           ref={thread.ref}
           onScroll={thread.onScroll}
           role="log"
-          aria-label="Rozhovor s Poradcom o nápade"
+          aria-label="Rozhovor s Projektantom o nápade"
           className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
         >
           <ErrorNote error={loadError} />
@@ -267,12 +267,12 @@ export default function IdeasPage() {
           {!ideaId && (
             <div className="max-w-xl space-y-1 text-xs text-[var(--color-text-muted)]">
               <p>
-                Vlož svoj nápad na novú aplikáciu — pokojne celý text z Obsidianu, aj s náčrtmi obrazoviek. Poradca
-                pozrie, čo už máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie prvej verzie.
+                Vlož svoj nápad na novú aplikáciu — pokojne celý text z Obsidianu, aj s náčrtmi obrazoviek.
+                Projektant pozrie, čo už máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie prvej verzie.
               </p>
               <p>
                 Z hotového zadania založíš tlačidlom nový projekt, alebo ho pridáš do existujúceho projektu, keď sa
-                ukáže, že tam patrí. Poradca sám nič nezaloží a nič nezmení.
+                ukáže, že tam patrí. Projektant sám nič nezaloží a nič nezmení.
               </p>
             </div>
           )}
@@ -289,7 +289,7 @@ export default function IdeasPage() {
               </div>
             ) : (
               <div key={m.id} className="space-y-2">
-                <PoradcaAnswer message={m} scopeVersion={null} projectVersions={[]} />
+                <PoradcaAnswer message={m} scopeVersion={null} projectVersions={[]} agentName="Projektant" />
                 {current && !concluded && latestBrief?.id === m.id && (
                   <IdeaOutcomeActions
                     idea={current}
@@ -311,14 +311,14 @@ export default function IdeasPage() {
             concluded
               ? "Nápad skončil v projekte — rozhovor pokračuje v Poradcovi projektu."
               : notReady
-                ? `Poradca teraz nevie bežať: ${notReady}`
+                ? `Projektant teraz nevie bežať: ${notReady}`
                 : running
-                  ? "Poradca odpovedá — ďalšiu správu pošleš, keď dokončí."
+                  ? "Projektant odpovedá — ďalšiu správu pošleš, keď dokončí."
                   : null
           }
           limits={status}
           incoming={null}
-          placeholder={ideaId ? "Odpovedz Poradcovi…" : "Opíš svoj nápad…"}
+          placeholder={ideaId ? "Odpovedz Projektantovi…" : "Opíš svoj nápad…"}
           onAsk={async (question, images) => {
             thread.follow();
             const uploads = await Promise.all(images.map(toUpload));

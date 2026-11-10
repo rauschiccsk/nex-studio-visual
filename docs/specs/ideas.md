@@ -1,4 +1,9 @@
-# Nápady — nový nápad s Poradcom, bez projektu (DEV-318)
+# Nápady — nový nápad s Projektantom, bez projektu (DEV-318)
+
+> **DEV-343 (10.11.2026):** agent v Nápadoch sa volá **Projektant**, Poradca ostáva len pri projektoch. Director: „my
+> v kokpite máme už agenta Poradca, a keď rozprávame s chlapcami medzi sebou pojem Poradca je chaotická“. Text nižšie
+> vznikol pred premenovaním — kde hovorí o Poradcovi v nápade, myslí Projektanta; po založení projektu rozhovor
+> pokračuje s Poradcom projektu. Meno určuje `runner.agent_of` (rozhovor bez projektu = Projektant).
 
 Stav: **schválené Directorom 06.11.2026** („Súhlasím, priprav to a môžeš začať to robiť.“), postavené vo v4.117.0.
 

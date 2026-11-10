@@ -136,3 +136,58 @@ describe("Nápady (DEV-318)", () => {
     expect(screen.queryByRole("button", { name: /Zahodiť nápad/ })).toBeNull();
   });
 });
+
+describe("Nápady name their agent the Projektant (DEV-343)", () => {
+  /** Everything the screen says — its text and what it says in placeholders, labels and hover titles. */
+  function said(): string {
+    const attrs = Array.from(document.querySelectorAll("[placeholder],[aria-label],[title]")).flatMap((el) =>
+      ["placeholder", "aria-label", "title"].map((a) => el.getAttribute(a) ?? ""),
+    );
+    return [document.body.textContent ?? "", ...attrs].join("\n");
+  }
+  /** „Poradca“ on this screen only ever names the project's Poradca (Director 10.11.2026: „pojem Poradca je chaotická“). */
+  const notTheProjects = (text: string) => text.match(/Poradc\p{L}*(?!\p{L})(?! projektu)/gu);
+
+  it("an idea in talk is the Projektant's — its answers, its work, its field and its row", async () => {
+    const talking = idea("open", { running: true });
+    ideasApi.listIdeasApi.mockResolvedValue([talking]);
+    ideasApi.getIdeaApi.mockResolvedValue(talking);
+    poradcaApi.getPoradcaConversationApi.mockResolvedValue({
+      id: "c1",
+      messages: [
+        { ...brief("m-1", "Sklad"), content: "Aký je rozsah prvej verzie?", idea_project: null },
+        { ...brief("m-2", "Sklad"), content: "", status: "running", idea_project: null },
+      ],
+    });
+    renderAt("/napady/i1");
+
+    await screen.findByText("Aký je rozsah prvej verzie?");
+    expect(screen.getAllByText("Projektant").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Projektant pracuje/)).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: "Rozhovor s Projektantom o nápade" })).toBeInTheDocument();
+    expect(notTheProjects(said())).toBeNull();
+  });
+
+  it("an ended idea names the Poradca only as the project's", async () => {
+    const ended = idea("founded", { outcome_project_slug: "orthodox-register", outcome_project_name: "Orthodox Register" });
+    ideasApi.listIdeasApi.mockResolvedValue([ended]);
+    ideasApi.getIdeaApi.mockResolvedValue(ended);
+    poradcaApi.getPoradcaConversationApi.mockResolvedValue({ id: "c1", messages: [brief("m-new", "Orthodox Register")] });
+    renderAt("/napady/i1");
+
+    await screen.findByText("Zadanie.");
+    expect(screen.getByText(/rozhovor pokračuje v Poradcovi projektu/)).toBeInTheDocument();
+    expect(notTheProjects(said())).toBeNull();
+  });
+});
+
+describe("a new idea starts with the Projektant (DEV-343)", () => {
+  it("the empty Nápady say who will talk it over", async () => {
+    ideasApi.listIdeasApi.mockResolvedValue([]);
+    renderAt("/napady");
+
+    expect(await screen.findByText(/Projektant pozrie, čo už máme/)).toBeInTheDocument();
+    expect(screen.getByText(/Projektant sám nič nezaloží/)).toBeInTheDocument();
+    expect((document.body.textContent ?? "").match(/Poradc/g)).toBeNull();
+  });
+});

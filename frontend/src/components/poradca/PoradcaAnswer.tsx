@@ -30,9 +30,11 @@ interface Props {
   scopeVersion: PoradcaVersionInfo | null;
   /** DEV-294: the project's versions — a conversation about a finished version hands its instruction to the build. */
   projectVersions?: readonly PoradcaVersionInfo[];
+  /** DEV-343 — who answers: the project's Poradca, or the Projektant of an idea in Nápady. */
+  agentName?: "Poradca" | "Projektant";
 }
 
-export default function PoradcaAnswer({ message, scopeVersion, projectVersions = [] }: Props) {
+export default function PoradcaAnswer({ message, scopeVersion, projectVersions = [], agentName = "Poradca" }: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const pinnedVersionId = useActiveContextStore((s) => s.selectedVersion?.versionId ?? null);
@@ -132,13 +134,13 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
 
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
-      <div className="mb-1 text-[11px] font-semibold text-[var(--color-text-secondary)]">Poradca</div>
+      <div className="mb-1 text-[11px] font-semibold text-[var(--color-text-secondary)]">{agentName}</div>
 
       {running && (
         <div className="space-y-1" aria-live="polite">
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Poradca pracuje…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {agentName} pracuje…
             </span>
             <button
               type="button"

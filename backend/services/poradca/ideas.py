@@ -39,12 +39,13 @@ STATE_ADDED = OUTCOME_ADDED
 #: The version a project founded from an idea gets its brief in — the one the cockpit founds with every new project.
 FIRST_VERSION = "0.1.0"
 
-NO_BRIEF = "V nápade ešte nie je zadanie — Poradca ho napíše, keď je všetko jasné."
-REWRITTEN = "Toto zadanie Poradca neskôr prepísal — použi to posledné, pod jeho poslednou odpoveďou."
+NO_BRIEF = "V nápade ešte nie je zadanie — Projektant ho napíše, keď je všetko jasné."
+REWRITTEN = "Toto zadanie Projektant neskôr prepísal — použi to posledné, pod jeho poslednou odpoveďou."
 NOT_A_NEW_PROJECT = "Posledné zadanie dopĺňa existujúci projekt — tlačidlo pod ním ho pridá do jeho Zásobníka."
 NOT_AN_ADDITION = "Posledné zadanie je na nový projekt — tlačidlo pod ním otvorí formulár Nový projekt."
 NO_WORK_KIND = (
-    "V zadaní chýba, kto prvú verziu platí (zákazník, alebo je to dar ICC) — povedz to Poradcovi a on zadanie doplní."
+    "V zadaní chýba, kto prvú verziu platí (zákazník, alebo je to dar ICC) — povedz to Projektantovi "
+    "a on zadanie doplní."
 )
 NOT_NEW = (
     f"Projekt už nemá nezačatú verziu {FIRST_VERSION} — zadanie z nápadu patrí len do projektu, ktorý si z neho práve "

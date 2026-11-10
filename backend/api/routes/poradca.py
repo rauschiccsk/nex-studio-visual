@@ -253,7 +253,8 @@ def _ask(
     ready = readiness.status(db)
     if not ready.ready:
         raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, detail="Poradca teraz nevie bežať: " + "; ".join(ready.problems)
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{runner.agent_of(conversation).name} teraz nevie bežať: " + "; ".join(ready.problems),
         )
     try:
         runner.ask(db, conversation, question, user, images or [])

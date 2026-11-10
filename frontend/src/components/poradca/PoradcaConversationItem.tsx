@@ -15,7 +15,6 @@ import { formatDate } from "@/utils/format";
 import type { PoradcaConversation } from "@/types/poradca";
 
 const TITLE_MAX_CHARS = 200;
-const DELETE_BUSY_REASON = "Kým Poradca odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.";
 
 /** What a row deletes, said in its confirmation — a conversation for good unless the caller says otherwise. */
 export interface Removal {
@@ -25,8 +24,9 @@ export interface Removal {
 }
 
 const NOUNS = {
-  rozhovor: { rename: "Premenovať rozhovor", remove: "Vymazať rozhovor", field: "Názov rozhovoru" },
-  nápad: { rename: "Premenovať nápad", remove: "Vymazať nápad", field: "Názov nápadu" },
+  rozhovor: { rename: "Premenovať rozhovor", remove: "Vymazať rozhovor", field: "Názov rozhovoru", agent: "Poradca" },
+  // DEV-343: an idea's agent is the Projektant — the Poradca is the project's.
+  nápad: { rename: "Premenovať nápad", remove: "Vymazať nápad", field: "Názov nápadu", agent: "Projektant" },
 } as const;
 
 interface Props {
@@ -185,7 +185,7 @@ export default function PoradcaConversationItem({
             {c.running && (
               <span
                 className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--color-accent-primary)]"
-                title="Poradca odpovedá"
+                title={`${words.agent} odpovedá`}
               />
             )}
             <span className="truncate text-xs text-[var(--color-text-primary)]">{c.title}</span>
@@ -208,7 +208,7 @@ export default function PoradcaConversationItem({
           <button
             type="button"
             aria-label={words.remove}
-            title={busy ? DELETE_BUSY_REASON : "Vymazať"}
+            title={busy ? `Kým ${words.agent} odpovedá, rozhovor sa nedá vymazať — najprv odpoveď zastav.` : "Vymazať"}
             onClick={() => setMode("confirm")}
             disabled={busy}
             className="rounded p-0.5 text-[var(--color-text-muted)] enabled:hover:bg-[var(--color-surface-hover)] enabled:hover:text-[var(--color-state-error-fg)] disabled:cursor-not-allowed disabled:opacity-40"

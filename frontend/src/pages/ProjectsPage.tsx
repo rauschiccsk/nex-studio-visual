@@ -175,13 +175,13 @@ export default function ProjectsPage() {
           <HardDriveDownload className="w-4 h-4" aria-hidden="true" />
           Prevziať existujúci
         </button>
-        {/* DEV-318: a new idea is talked over with Poradca first — the brief it writes prefills Nový projekt. */}
+        {/* DEV-318: a new idea is talked over with the Projektant first (DEV-343) — its brief prefills Nový projekt. */}
         <button
           onClick={() => navigate("/napady")}
           className="flex items-center gap-1.5 border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
         >
           <Lightbulb className="w-4 h-4" aria-hidden="true" />
-          Navrhnúť s Poradcom
+          Navrhnúť s Projektantom
         </button>
         <button
           onClick={() => navigate("/projects/new")}
@@ -235,7 +235,7 @@ export default function ProjectsPage() {
             className="mt-4 mr-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] border border-[var(--color-border-strong)] rounded-lg transition-colors"
           >
             <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
-            Navrhnúť s Poradcom
+            Navrhnúť s Projektantom
           </button>
           <button
             onClick={() => navigate("/projects/new")}
