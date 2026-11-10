@@ -611,14 +611,16 @@ def test_board_route_v2_contract(db_session, fake_claude):
 
 
 def test_board_route_v2_before_start(db_session, fake_claude):
-    """A version whose pipeline never started → ``state`` None + empty offerable actions, no crash from the
+    """A version whose pipeline never started → ``state`` None + only its start on offer, no crash from the
     dropped v1 helpers (the route no longer calls coordinator_triage / autonomous_decisions_summary)."""
     from backend.api.routes.pipeline import _board
 
     version, _ = _make_version(db_session)
     board = _board(db_session, version.id)
     assert board.state is None
-    assert board.available_actions == []
+    # DEV-351: a version that has not started offers its start — the one action the engine takes without a state;
+    # Riadiace centrum showed an empty window and the Director could not find where to begin.
+    assert board.available_actions == ["start"]
     assert board.agent_sessions == []
 
 

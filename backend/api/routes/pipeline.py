@@ -107,7 +107,11 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # still EMPTY (a per-feat pass crashed past its retries → 0 tasks) — advancing then would build nothing.
     # apply_action enforces the same rule authoritatively; this just hides the dead button (the state-only
     # determine_available_actions can't see the DB-derived plan presence).
-    available_actions: list[str] = sorted(orchestrator.determine_available_actions(state)) if state is not None else []
+    # DEV-351: a version that has not started offers its start — the engine takes ``start`` exactly then; Riadiace
+    # centrum showed an empty window without it (NEX Knowledge 1.1.0, 10.11.2026).
+    available_actions: list[str] = (
+        sorted(orchestrator.determine_available_actions(state)) if state is not None else ["start"]
+    )
     # Durable spec-approval signal (STEP 2 follow-up) — the SINGLE shared probe (orchestrator.spec_approved,
     # step3-plan-design.md FIX2): drives both the FE Špecifikácia badge below AND the STEP-3 zostav_plan
     # post-filter here. One indexed exists query; correct for conversation + legacy builds alike.

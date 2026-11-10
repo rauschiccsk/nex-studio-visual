@@ -3,8 +3,8 @@
  *
  * A freshly-created version has NO pipeline yet (``board.state`` is null), so nothing has ever called
  * ``start`` — a plain relay would raise "Pipeline not started". The page's send handler therefore branches:
- *   - null state    → the FIRST message STARTS the conversation via ``postPipelineActionApi(start,
- *                      {mode: 'conversation', directive: text})`` and adopts the returned board.
+ *   - null state    → DEV-351: a message never starts the version (it used to start it as a conversation,
+ *                      without the five phases); „Spustiť tvorbu špecifikácie“ (StartBuildBar) does.
  *   - existing state → the message goes through the single-writer relay (Model B) unchanged.
  *
  * The heavy children are stubbed; the ConversationComposer stub exposes the page's ``onRelay`` prop through a
@@ -37,6 +37,7 @@ const { wsMock, setBoardMock, authMock, contextMock } = vi.hoisted(() => ({
       | null,
   },
 }));
+const refused = vi.hoisted(() => ({ message: "" }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
@@ -64,7 +65,7 @@ vi.mock("@/services/api/pipeline", () => ({
 const SEND_TEXT = "Ahoj, poďme spolu navrhnúť aplikáciu.";
 vi.mock("@/components/controlCenter/ConversationComposer", () => ({
   default: ({ onRelay }: { onRelay: (t: string) => Promise<{ deferred: boolean }> }) => (
-    <button onClick={() => void onRelay(SEND_TEXT)}>send</button>
+    <button onClick={() => void onRelay(SEND_TEXT).catch((e: Error) => (refused.message = e.message))}>send</button>
   ),
 }));
 vi.mock("@/components/controlCenter/ConversationThread", () => ({ default: () => <div /> }));
@@ -81,24 +82,19 @@ describe("ControlCenterPage — conversation cold-start send handler (STEP 1)", 
     vi.mocked(relayPipelineMessageApi).mockReset();
     setBoardMock.mockReset();
     wsMock.board = null;
+    refused.message = "";
   });
 
-  it("null pipeline state → the FIRST message STARTS the conversation (start, mode=conversation, the text)", async () => {
-    const nextBoard = { state: { status: "agent_working" }, recent_messages: [] } as unknown as PipelineBoard;
-    vi.mocked(postPipelineActionApi).mockResolvedValue(nextBoard);
-    wsMock.board = null; // no pipeline yet — the cold-start precondition
+  it("null pipeline state → a message never starts the version; it is refused with where to start (DEV-351)", async () => {
+    wsMock.board = null; // no pipeline yet
 
     render(<ControlCenterPage />);
     fireEvent.click(screen.getByRole("button", { name: "send" }));
 
     await waitFor(() =>
-      expect(postPipelineActionApi).toHaveBeenCalledWith("v-1", {
-        action: "start",
-        payload: { mode: "conversation", directive: SEND_TEXT },
-      }),
+      expect(refused.message).toBe("Verzia ešte nebeží — spusti tvorbu špecifikácie tlačidlom vyššie."),
     );
-    // The returned board is adopted; the relay is NEVER used on a cold-start.
-    await waitFor(() => expect(setBoardMock).toHaveBeenCalledWith(nextBoard));
+    expect(postPipelineActionApi).not.toHaveBeenCalled();
     expect(relayPipelineMessageApi).not.toHaveBeenCalled();
   });
 

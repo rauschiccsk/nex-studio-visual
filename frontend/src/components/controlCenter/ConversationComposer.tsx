@@ -102,6 +102,9 @@ interface Props {
   offersUprav?: boolean;
   /** Send the text as „Uprav“ (``uprav`` with the text as its comment). */
   onUprav?: (comment: string) => Promise<void>;
+  /** DEV-351: the version has not started — the box is locked until „Spustiť tvorbu špecifikácie“ above is pressed;
+   *  a message never starts it (it used to start it as a conversation, without the five phases). */
+  notStarted?: boolean;
 }
 
 function ConversationComposer({
@@ -115,6 +118,7 @@ function ConversationComposer({
   owner = "rozhovor",
   offersUprav = false,
   onUprav,
+  notStarted = false,
 }: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
   const { text, setText, clear: clearDraft, restored } = useDraft(draftKey("rozhovor", versionId));
@@ -125,7 +129,7 @@ function ConversationComposer({
   const growRef = useAutoGrowTextarea(text);
 
   // A framework_issue escalation hard-disables the whole composer (Manažér has no recovery move here).
-  const locked = disabled || frameworkBlocked;
+  const locked = disabled || frameworkBlocked || notStarted;
   // Category I: a recovery bar above owns the input — COLLAPSE the composer to a pointer (framework_issue keeps
   // its own locked banner below, so it is excluded here).
   const collapsed = !!blockedAbove && !frameworkBlocked;
@@ -285,9 +289,11 @@ function ConversationComposer({
           placeholder={
             frameworkBlocked
               ? "Zablokované — túto chybu rieši náš technický tím."
-              : atVizual
-                ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok)"
-                : "Napíš Staviteľovi… (Enter odošle, Shift+Enter nový riadok)"
+              : notStarted
+                ? "Verzia ešte nebeží — spusti tvorbu špecifikácie tlačidlom vyššie."
+                : atVizual
+                  ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok)"
+                  : "Napíš Staviteľovi… (Enter odošle, Shift+Enter nový riadok)"
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />

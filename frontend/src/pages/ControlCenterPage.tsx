@@ -48,6 +48,7 @@ import DedoProposalBar from "@/components/controlCenter/DedoProposalBar";
 import ReverifyBar from "@/components/controlCenter/ReverifyBar";
 import MoveToRegularVersionBar from "@/components/controlCenter/MoveToRegularVersionBar";
 import ReverifyNoFixBar from "@/components/controlCenter/ReverifyNoFixBar";
+import StartBuildBar from "@/components/controlCenter/StartBuildBar";
 import CiGateBar from "@/components/controlCenter/CiGateBar";
 import AskPoradcaBar from "@/components/controlCenter/AskPoradcaBar";
 import PhaseBar from "@/components/controlCenter/PhaseBar";
@@ -103,19 +104,10 @@ export default function ControlCenterPage() {
 
   async function handleSend(text: string): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
-    // COLD-START (spine STEP 1 HOT-FIX): a freshly-created version has NO pipeline yet (``board.state`` is
-    // null), so nothing has ever called ``start`` — a plain relay would raise "Pipeline not started". The
-    // Manažér's FIRST message STARTS the conversation: route it through the ``start`` action (mode=conversation,
-    // the message itself as the kickoff directive) and adopt the returned board. The start dispatches the first
-    // turn immediately (no in-flight turn to queue behind), so it is never ``deferred``.
-    if (!board?.state) {
-      const nextBoard = await postPipelineActionApi(versionId, {
-        action: "start",
-        payload: { mode: "conversation", directive: text },
-      });
-      setBoard(nextBoard);
-      return { deferred: false };
-    }
+    // DEV-351: a version that has not started is started by „Spustiť tvorbu špecifikácie“ (StartBuildBar) — never by a
+    // message. The first message used to start it as a conversation, without the five phases (a mode no build ever
+    // used); the box is locked until the start is pressed, and this guard keeps it so.
+    if (!board?.state) throw new Error("Verzia ešte nebeží — spusti tvorbu špecifikácie tlačidlom vyššie.");
     // Pipeline already exists → the SOLE mutating call is the single-writer relay (Model B): the engine, not
     // this page, writes the turn (enqueued behind an in-flight turn when ``deferred``).
     const res = await relayPipelineMessageApi(versionId, text);
@@ -376,6 +368,8 @@ export default function ControlCenterPage() {
             (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
           }
         />
+        {/* DEV-351: a version that has not started — its start, where the work happens. */}
+        <StartBuildBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* DEV-261: after Programovanie the step to Verifikácia waits for the CI of the pushed commit — the reason, or the
             fix of a red one, stands where „Prejsť na overenie" would. */}
         <CiGateBar board={board} versionId={versionId} onBoard={setBoard} />
@@ -410,6 +404,7 @@ export default function ControlCenterPage() {
             atVizual={board?.state?.current_stage === "vizual"}
             offersUprav={composerOffersRevise(board)}
             onUprav={handleUprav}
+            notStarted={!!board && !board.state}
           />
         )}
       </div>
