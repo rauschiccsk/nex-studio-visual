@@ -9,8 +9,16 @@ export function listIdeasApi(): Promise<Idea[]> {
   return api.get<Idea[]>("/poradca/ideas");
 }
 
-export function createIdeaApi(question: string, attachments: PoradcaImageUpload[] = []): Promise<IdeaDetail> {
-  return api.post<IdeaDetail>("/poradca/ideas", { question, attachments });
+/** A new idea; ``title`` names it when the screen means a name of its own (DEV-350: a follow-up idea). */
+export function createIdeaApi(
+  question: string,
+  attachments: PoradcaImageUpload[] = [],
+  title?: string,
+): Promise<IdeaDetail> {
+  return api.post<IdeaDetail>(
+    "/poradca/ideas",
+    title ? { question, attachments, title } : { question, attachments },
+  );
 }
 
 export function getIdeaApi(id: string): Promise<IdeaDetail> {
@@ -22,11 +30,23 @@ export function throwAwayIdeaApi(id: string): Promise<void> {
 }
 
 /** The person founded `projectId` from the brief of `messageId` — its 0.1.0 gets the brief, the project its ticket. */
-export function ideaFoundedApi(id: string, messageId: string, projectId: string): Promise<IdeaOutcome> {
-  return api.post<IdeaOutcome>(`/poradca/ideas/${id}/founded`, { message_id: messageId, project_id: projectId });
+export function ideaFoundedApi(
+  id: string,
+  messageId: string,
+  projectId: string,
+): Promise<IdeaOutcome> {
+  return api.post<IdeaOutcome>(`/poradca/ideas/${id}/founded`, {
+    message_id: messageId,
+    project_id: projectId,
+  });
 }
 
 /** The brief of `messageId` goes to the Zásobník of the existing project it names. */
-export function ideaAddedApi(id: string, messageId: string): Promise<IdeaOutcome> {
-  return api.post<IdeaOutcome>(`/poradca/ideas/${id}/added`, { message_id: messageId });
+export function ideaAddedApi(
+  id: string,
+  messageId: string,
+): Promise<IdeaOutcome> {
+  return api.post<IdeaOutcome>(`/poradca/ideas/${id}/added`, {
+    message_id: messageId,
+  });
 }

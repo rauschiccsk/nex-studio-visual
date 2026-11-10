@@ -316,7 +316,9 @@ async def create_idea(
     """A new idea: its conversation with Poradca starts with the rough idea. Whoever may found a project may start
     one (the same role as Nový projekt)."""
     images = _accept_images(payload.attachments)
-    idea, conversation = ideas.create(db, author=current_user, title=_title(payload.question))
+    idea, conversation = ideas.create(
+        db, author=current_user, title=_title((payload.title or "").strip() or payload.question)
+    )
     db.commit()
     _ask(db, conversation, payload.question, current_user, images)
     return IdeaDetail(**_idea_read(db, idea, conversation).model_dump(), conversation=_detail(db, conversation))

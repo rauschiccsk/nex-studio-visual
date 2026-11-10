@@ -24,7 +24,7 @@ import QuestionImages from "@/components/poradca/QuestionImages";
 import { draftKey } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
-import { followUpStart, ideaStateLabel } from "@/lib/ideas";
+import { followUpStart, followUpTitle, ideaStateLabel } from "@/lib/ideas";
 import { formatCost } from "@/lib/poradcaAnswer";
 import { toUpload } from "@/lib/poradcaImages";
 import {
@@ -433,7 +433,11 @@ export default function IdeasPage() {
             if (conversationId) {
               setDetail(await askPoradcaApi(conversationId, question, uploads));
             } else {
-              const created = await createIdeaApi(question, uploads);
+              // DEV-350: a follow-up idea is named by what the person wants, not by the cockpit's first sentence.
+              const title = followUpTitle(question);
+              const created = title
+                ? await createIdeaApi(question, uploads, title)
+                : await createIdeaApi(question, uploads);
               navigate(`/napady/${created.id}`);
             }
             void refreshList();

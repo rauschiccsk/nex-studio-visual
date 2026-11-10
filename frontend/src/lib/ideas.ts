@@ -35,14 +35,36 @@ export interface FromIdea {
   problem: string | null;
 }
 
+/** DEV-350 — the cockpit's own words in a follow-up idea: its first sentence and the place the person finishes it. */
+const FOLLOW_UP_HEAD = "Nadväzuje na projekt ";
+const FOLLOW_UP_ASK = "Čo potrebujem:";
+
 /** DEV-350 — how a new idea that follows a founded project starts: the cockpit says which project and where its brief
  *  is, the person says what he needs; the Projektant reads the rest itself. */
 export function followUpStart(
   idea: Pick<Idea, "title" | "outcome_project_name" | "outcome_project_slug">,
 ): string {
   return (
-    `Nadväzuje na projekt ${idea.outcome_project_name} (${idea.outcome_project_slug}), ktorý vznikol z nápadu ` +
+    `${FOLLOW_UP_HEAD}${idea.outcome_project_name} (${idea.outcome_project_slug}), ktorý vznikol z nápadu ` +
     `„${idea.title}“. Jeho zadanie je v dokumentácii projektu: docs/specs/versions/v0.1.0/customer-requirements.md.` +
-    "\n\nČo potrebujem:"
+    `\n\n${FOLLOW_UP_ASK}`
   );
+}
+
+/** DEV-350 — the name of a follow-up idea: the first line the person wrote after „Čo potrebujem:“, or the project it
+ *  follows when he wrote nothing; ``null`` for an idea that follows no project (named by its first words). */
+export function followUpTitle(text: string): string | null {
+  if (!text.startsWith(FOLLOW_UP_HEAD)) return null;
+  const ask = text.indexOf(FOLLOW_UP_ASK);
+  const wanted =
+    ask >= 0
+      ? (
+          text
+            .slice(ask + FOLLOW_UP_ASK.length)
+            .trim()
+            .split("\n")[0] ?? ""
+        ).trim()
+      : "";
+  if (wanted) return wanted;
+  return `Nadväzuje na ${text.slice(FOLLOW_UP_HEAD.length).split(" (")[0]}`;
 }

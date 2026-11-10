@@ -316,6 +316,9 @@ class IdeaCreate(BaseModel):
 
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
     attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
+    #: DEV-350 — the name the screen means (a follow-up idea: what the person wants, not the cockpit's own first
+    #: sentence); without it the idea is named by the first words of its question.
+    title: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("question")
     @classmethod

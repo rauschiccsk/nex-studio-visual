@@ -5684,6 +5684,8 @@ export interface components {
             attachments?: components["schemas"]["PoradcaAttachmentUpload"][];
             /** Question */
             question: string;
+            /** Title */
+            title?: string | null;
         };
         /** IdeaDetail */
         IdeaDetail: {
