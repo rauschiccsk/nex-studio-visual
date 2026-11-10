@@ -6507,6 +6507,49 @@ async def throw_away_rehearsal_images(reference: str, env: Optional[dict[str, st
         logger.warning("deploy rehearsal: images %s were not removed: %s", reference, exc)
 
 
+def project_images(compose_path: Path) -> list[str]:
+    """DEV-342 — the images the cockpit builds for a project from its own compose: ``<compose name>-<service>`` of each
+    service with a ``build`` (or the ``image`` it names). Never an image the project only pulls (``postgres:16`` is
+    every project's), never a name by prefix (deleting ``nex`` must not touch ``nex-inbox``)."""
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    name = str(data.get("name") or compose_path.parent.name).lower()
+    images = []
+    for service, svc in (data.get("services") or {}).items():
+        if isinstance(svc, dict) and svc.get("build") is not None:
+            images.append(str(svc.get("image") or f"{name}-{service}").split(":", 1)[0])
+    return sorted(set(images))
+
+
+def throw_away_project_images(repositories: list[str]) -> Optional[str]:
+    """DEV-342 — a deleted project's images, every tag of each repository (:func:`project_images`). A sentence for the
+    Manažér when they stayed, or ``None``. 10.11.2026 deleting Liturgikon would have left four images on ANDROS."""
+    if not repositories:
+        return None
+    try:
+        tags: list[str] = []
+        for repository in repositories:
+            listed = subprocess.run(
+                ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}", "--filter", f"reference={repository}"],
+                capture_output=True, text=True, timeout=CLEANUP_TIMEOUT, check=True,
+            )  # fmt: skip
+            tags += [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+        if tags:
+            subprocess.run(
+                ["docker", "image", "rm", "-f", *tags],
+                capture_output=True,
+                text=True,
+                timeout=CLEANUP_TIMEOUT,
+                check=True,
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("images of a deleted project %s were not removed: %s", repositories, exc)
+        return f"Obrazy projektu ostali na disku ({', '.join(repositories)}): {exc.__class__.__name__}."
+    return None
+
+
 async def _docker_out(cmd: list[str], env: Optional[dict[str, str]]) -> str:
     """Output of one docker call within :data:`CLEANUP_TIMEOUT`; :class:`RuntimeError` when it fails or hangs."""
     try:

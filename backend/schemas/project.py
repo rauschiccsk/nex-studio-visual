@@ -414,6 +414,14 @@ class ProjectUpdate(BaseModel):
     )
 
 
+class ProjectDeleted(BaseModel):
+    """DEV-342 — what deleting a project did beyond the project itself, in sentences for the Manažér: ``notes`` what was
+    done (the ideas back in Nápady, the GitHub repository), ``left_behind`` what stayed and needs a hand."""
+
+    notes: list[str] = Field(default_factory=list)
+    left_behind: list[str] = Field(default_factory=list)
+
+
 class ProjectRead(BaseModel):
     """Serialised representation of a project row.
 

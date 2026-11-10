@@ -160,8 +160,17 @@ export function discardGitApi(projectId: string): Promise<{ ok: boolean }> {
  * has had a PROD deploy — both enforced by the backend. When `deleteGithub` is true the backing
  * GitHub repository is removed too; otherwise it is left in place.
  */
-export function deleteProjectApi(projectId: string, deleteGithub: boolean): Promise<void> {
-  return api.delete<void>(`/projects/${projectId}?delete_github=${deleteGithub}`);
+export function deleteProjectApi(projectId: string, deleteGithub: boolean): Promise<ProjectDeleted> {
+  return api.delete<ProjectDeleted>(`/projects/${projectId}?delete_github=${deleteGithub}`);
+}
+
+/**
+ * DEV-342 — what the delete did beyond the project itself, in sentences for the Manažér: `notes` what was done (the
+ * ideas back in Nápady, the GitHub repository), `left_behind` what stayed and needs a hand.
+ */
+export interface ProjectDeleted {
+  notes: string[];
+  left_behind: string[];
 }
 
 export interface PortBlockSuggestion {

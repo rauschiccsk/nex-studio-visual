@@ -35,7 +35,7 @@ def test_deleting_a_project_removes_its_preview(router_client, creator, monkeypa
     monkeypatch.setattr(vizual_sandbox, "_inspect_state", lambda name: {"running": False})
     project = _create(router_client, creator)
 
-    assert router_client.delete(f"/api/v1/projects/{project['id']}").status_code == 204
+    assert router_client.delete(f"/api/v1/projects/{project['id']}").status_code == 200
 
     assert removed == [f"vizual-{project['slug']}"]
 
@@ -50,7 +50,7 @@ def test_a_preview_that_survives_the_removal_is_written_to_the_log(router_client
     with caplog.at_level(logging.WARNING):
         response = router_client.delete(f"/api/v1/projects/{project['id']}")
 
-    assert response.status_code == 204, "a cleanup that failed must not undo the delete"
+    assert response.status_code == 200, "a cleanup that failed must not undo the delete"
     said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(f"vizual-{project['slug']}" in line and "still runs" in line for line in said), said
 

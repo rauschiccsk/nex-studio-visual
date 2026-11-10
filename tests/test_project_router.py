@@ -416,13 +416,13 @@ class TestProjectRouter:
         )
         assert resp.status_code == 404
 
-    def test_delete_returns_204(self, router_client, creator):
+    def test_delete_returns_200_with_what_it_did(self, router_client, creator):
         created = router_client.post(
             "/api/v1/projects",
             json=_payload(creator.id),
         ).json()
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         # Second read confirms removal.
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
@@ -447,7 +447,7 @@ class TestProjectRouter:
         )
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert calls == ["tear-slug"]  # teardown invoked with the project's uat_slug
 
     def test_delete_without_uat_slug_skips_teardown(self, router_client, creator, db_session, monkeypatch):
@@ -469,7 +469,7 @@ class TestProjectRouter:
         )
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert calls == []
 
     # ----------------------------------------------- RAG cleanup (KB ghost Fix 2)
@@ -488,7 +488,7 @@ class TestProjectRouter:
         router_client.app.dependency_overrides[get_rag_indexer] = lambda: spy
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         spy.delete_project_documents.assert_called_once_with("rag-del-proj")
 
     def test_delete_best_effort_when_rag_delete_raises(self, router_client, creator):
@@ -502,7 +502,7 @@ class TestProjectRouter:
         router_client.app.dependency_overrides[get_rag_indexer] = lambda: boom
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204  # delete stands despite the RAG failure
+        assert resp.status_code == 200  # delete stands despite the RAG failure
         boom.delete_project_documents.assert_called_once()
         # DB row is gone — the committed delete was not undone.
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
@@ -800,7 +800,7 @@ class TestProjectRouter:
         assert project_dir.is_dir()
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert not project_dir.exists()
 
     def test_delete_without_flag_does_not_touch_github(self, router_client, creator, tmp_path, monkeypatch):
@@ -817,7 +817,7 @@ class TestProjectRouter:
         created = router_client.post("/api/v1/projects", json=payload).json()
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
 
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert github_delete_calls == []
 
     def test_delete_with_flag_invokes_github_delete(self, router_client, creator, tmp_path, monkeypatch):
@@ -834,11 +834,11 @@ class TestProjectRouter:
         created = router_client.post("/api/v1/projects", json=payload).json()
         resp = router_client.delete(f"/api/v1/projects/{created['id']}?delete_github=true")
 
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert github_delete_calls == ["rauschiccsk/also-delete-repo"]
 
     def test_delete_github_failure_does_not_block_response(self, router_client, creator, tmp_path, monkeypatch):
-        """If the GitHub delete fails, the endpoint still returns 204 — DB is gone."""
+        """If the GitHub delete fails, the endpoint still returns 200 — DB is gone."""
 
         def _raise_runtime(repo, **kwargs):
             raise RuntimeError("simulated GitHub outage")
@@ -850,7 +850,7 @@ class TestProjectRouter:
         resp = router_client.delete(f"/api/v1/projects/{created['id']}?delete_github=true")
 
         # Project and KB gone; only the repo is left stranded.
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
     def test_create_github_value_error_returns_422(self, db_session, creator, tmp_path, monkeypatch):
@@ -992,10 +992,10 @@ class TestProjectDeletionGuards:
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 200
 
     def test_delete_allowed_without_prod_deploy(self, router_client, creator):
-        """No PROD deploy → admin delete still succeeds (204) with the new guards in place."""
+        """No PROD deploy → admin delete still succeeds (200) with the new guards in place."""
         created = router_client.post("/api/v1/projects", json=_payload(creator.id)).json()
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
     def test_get_project_exposes_has_prod_deploy_flag(self, router_client, creator, db_session):
@@ -1096,7 +1096,7 @@ class TestUatDataDeletionGuard:
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
 
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert no_teardown == ["never-came-up"]  # the (no-op) teardown still runs
 
     def test_delete_allowed_when_the_uat_was_never_deployed(self, router_client, creator, db_session, no_teardown):
@@ -1106,7 +1106,7 @@ class TestUatDataDeletionGuard:
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
 
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert no_teardown == ["just-a-name"]
         assert router_client.get(f"/api/v1/projects/{created['id']}").status_code == 404
 
@@ -1125,7 +1125,7 @@ class TestUatDataDeletionGuard:
 
         resp = router_client.delete(f"/api/v1/projects/{created['id']}")
 
-        assert resp.status_code == 204
+        assert resp.status_code == 200
         assert no_teardown == []
 
     def test_guard_reads_the_uat_root_at_call_time(self, db_session, uat_root):

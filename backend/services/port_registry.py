@@ -937,6 +937,46 @@ def record_allocation(
     return _commit_block(slug=slug, base=base, block_size=block_size, entry=entry)
 
 
+def release_allocation(slug: str) -> str | None:
+    """A deleted project's block leaves the registry — on disk and, like :func:`record_allocation`, in the Knowledge
+    Base's git and on GitHub. A sentence for the Manažér when it could not, or ``None``.
+
+    DEV-342: 10.11.2026 deleting Liturgikon would have left 10280-10289 reserved against every next project; nothing
+    took the block back. Only the cockpit's own entry goes (:func:`_drop_block_for`); a registry without it is fine."""
+    stayed = f"Blok portov projektu {slug} ostal v evidencii portov"
+    try:
+        text = PORT_REGISTRY_FILE.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"{stayed} ({PORT_REGISTRY_FILE}): {exc}. Odstráň ho ručne, inak ho žiadny projekt nedostane."
+    updated = _drop_block_for(text, slug)
+    if updated != text:
+        try:
+            kb_owner.write_text(Path(settings.knowledge_base_path), PORT_REGISTRY_FILE, updated)
+        except OSError as exc:
+            return f"{stayed} ({PORT_REGISTRY_FILE}): {exc}. Odstráň ho ručne, inak ho žiadny projekt nedostane."
+        logger.info("Port block of deleted project %s released in %s", slug, PORT_REGISTRY_FILE)
+    root = kb_git.repo_of(PORT_REGISTRY_FILE.parent)
+    if root is None:
+        return None
+    rel = PORT_REGISTRY_FILE.resolve().relative_to(root.resolve()).as_posix()
+    try:
+        committed = kb_git.committed(root, rel)
+        released = _drop_block_for(committed, slug) if committed else None
+        if released is None or released == committed:
+            return None
+        kb_git.commit_files(
+            root, {rel: released}, f"chore(porty): blok projektu {slug} uvoľnený — projekt zmazaný v kokpite"
+        )
+    except kb_git.Refused as exc:
+        return f"{stayed} v gite Znalostnej bázy: {exc}"
+    unpublished = kb_git.publish(root)
+    return (
+        f"Blok portov projektu {slug} je uvoľnený na ANDROSe, ale na GitHub sa nedostal: {unpublished}"
+        if unpublished
+        else None
+    )
+
+
 def _with_block(text: str, *, slug: str, base: int, block_size: int, entry: str) -> str | None:
     """*text* with the block written in: unchanged when it is already there, ``None`` when there is no anchor.
 

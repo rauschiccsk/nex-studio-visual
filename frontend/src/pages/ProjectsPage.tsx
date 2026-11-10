@@ -7,6 +7,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
 import AdoptProjectDialog from "@/components/project/AdoptProjectDialog";
+import DeletedProjectNotice from "@/components/project/DeletedProjectNotice";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -157,6 +158,8 @@ export default function ProjectsPage() {
 
   return (
     <div className="p-6">
+      {/* DEV-342: what deleting a project did — the idea back in Nápady, the GitHub repository, what stayed. */}
+      <DeletedProjectNotice />
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
         <h1 className="text-lg font-bold text-[var(--color-text-primary)]">Projekty</h1>

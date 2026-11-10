@@ -349,3 +349,15 @@ def _no_real_version_question(monkeypatch):
         return None
 
     monkeypatch.setattr(orchestrator, "instance_version", unread)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_image_removal(monkeypatch):
+    """DEV-342 — deleting a project throws its images away on the machine's Docker.
+
+    By DEFAULT no test reaches a real Docker for it: nothing is removed and nothing is said. The tests about it call the
+    real ``throw_away_project_images`` they import before this fixture runs.
+    """
+    from backend.services import orchestrator
+
+    monkeypatch.setattr(orchestrator, "throw_away_project_images", lambda repositories: None)

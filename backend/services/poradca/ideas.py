@@ -283,6 +283,46 @@ def add(db: Session, idea: Idea, conversation: PoradcaConversation, *, message_i
     return idea
 
 
+def back_to_ideas(db: Session, project_id: UUID) -> list[str]:
+    """A project is deleted: every idea that ended in it goes back to Nápady, open, with its whole talk. The names of
+    the ideas that went back — the delete tells the Manažér.
+
+    DEV-342: founding moves the idea's talk to the project (``_conclude``) and a deleted project takes its
+    conversations with it (``ON DELETE CASCADE``) — 10.11.2026 deleting Liturgikon, which Nazar founded too early,
+    would have wiped the 22 messages of his idea „Orthodox Typikon“ and left the idea founded in nothing. Director:
+    „nápady nesmieme mazať“. So this undoes ``_conclude`` before the delete: as if the project had never been founded
+    — also the ticket it filed (a new founding files a new one) and a removal from the list (the talk would have no
+    place to be seen). A talk that belongs to an idea is never deleted with a project."""
+    ideas = db.execute(select(Idea).where(Idea.outcome_project_id == project_id).with_for_update()).scalars().all()
+    for idea in ideas:
+        idea.outcome = None
+        idea.outcome_project_id = None
+        idea.outcome_message_id = None
+        idea.outcome_backlog_item_id = None
+        idea.concluded_at = None
+        idea.plane_issue_id = idea.plane_identifier = idea.plane_url = None
+        idea.deleted_at = None
+    talks = (
+        db.execute(
+            select(PoradcaConversation).where(
+                PoradcaConversation.project_id == project_id, PoradcaConversation.idea_id.is_not(None)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for talk in talks:
+        talk.project_id = None
+        talk.version_id = None
+    db.flush()
+    return sorted({talk.title for talk in talks} | {_title_of(db, idea) for idea in ideas} - {""})
+
+
+def _title_of(db: Session, idea: Idea) -> str:
+    talk = db.execute(select(PoradcaConversation).where(PoradcaConversation.idea_id == idea.id)).scalars().first()
+    return talk.title if talk is not None and talk.title else ""
+
+
 async def throw_away(db: Session, idea: Idea, conversation: PoradcaConversation) -> None:
     """The author deletes the idea from Nápady. One that ended nowhere is thrown away whole — its talk is wiped as a
     deleted conversation's is, the cost stays. One that ended in a project only leaves the list: its talk stays in the

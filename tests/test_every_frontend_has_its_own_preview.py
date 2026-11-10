@@ -270,6 +270,6 @@ def test_deleting_a_web_project_removes_the_preview_of_both_frontends(router_cli
     row.type, row.backend_port, row.frontend_port, row.db_port, row.web_port = "web", 14940, 14941, 14942, 14945
     db_session.flush()
 
-    assert router_client.delete(f"/api/v1/projects/{project['id']}").status_code == 204
+    assert router_client.delete(f"/api/v1/projects/{project['id']}").status_code == 200
 
     assert removed == [f"vizual-{project['slug']}", f"vizualweb-{project['slug']}"]

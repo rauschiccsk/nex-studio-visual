@@ -30,7 +30,7 @@ from typing import Optional
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -64,6 +64,7 @@ from backend.schemas.project import (
     PortConflictError,
     ProjectCreate,
     ProjectCreatePresets,
+    ProjectDeleted,
     ProjectRead,
     ProjectStatus,
     ProjectType,
@@ -95,6 +96,7 @@ from backend.services import system_setting as system_setting_service
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 from backend.services.pipeline_ws import registry
+from backend.services.poradca import ideas as ideas_service
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
     TemplateBootstrapError,
@@ -1416,11 +1418,7 @@ def update_project(
     return result
 
 
-@router.delete(
-    "/{project_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_class=Response,
-)
+@router.delete("/{project_id}", response_model=ProjectDeleted)
 def delete_project(
     project_id: UUID,
     db: Session = Depends(get_db),
@@ -1435,7 +1433,7 @@ def delete_project(
             "only the DB row and KB folder are removed, repo stays."
         ),
     ),
-) -> Response:
+) -> ProjectDeleted:
     """Hard-delete a project by primary key.
 
     Guards (CR-V2-027, v4.0.35): **owner or privileged** (the project's creator, or an ``ri``/``ha`` lead;
@@ -1491,6 +1489,10 @@ def delete_project(
     uat_slug = project.uat_slug  # capture before delete for UAT teardown (v0.9.0 Phase 3 CR-2)
     # DEV-162: every frontend has its own Vizuál preview — captured before the row is gone.
     preview_directories = tuple(s.directory for s in project_surfaces_service.surfaces_of(project))
+    # DEV-342: the images the cockpit built for it — read from its compose before the workspace goes.
+    images = orchestrator.project_images(Path(source_path) / "docker-compose.yml") if source_path else []
+    notes: list[str] = []
+    left_behind: list[str] = []
 
     # CR-V2-027: a project graduates to PROD on its first successful prod deploy; from then on it can
     # only be archived, never hard-deleted (the deploy audit trail + any live customers must survive).
@@ -1519,6 +1521,8 @@ def delete_project(
         )
 
     try:
+        # DEV-342: an idea is never deleted with its project — it goes back to Nápady with its talk, in this commit.
+        returned = ideas_service.back_to_ideas(db, project_id)
         project_service.delete(db, project_id)
         db.commit()
     except ValueError as exc:
@@ -1540,6 +1544,9 @@ def delete_project(
     from backend.services import ci_runner
 
     ci_runner.deprovision(slug)
+    notes += [f"Nápad „{title}“ je späť v Nápadoch aj s celým rozhovorom." for title in returned]
+    stayed = (port_registry_service.release_allocation(slug), orchestrator.throw_away_project_images(images))
+    left_behind += [sentence for sentence in stayed if sentence]
 
     # DEV-109: the project's preview — container vizual-<slug> and the route its labels give Traefik — would
     # otherwise keep serving a deleted project's frontend. Best-effort and logged, like every cleanup around it.
@@ -1600,17 +1607,35 @@ def delete_project(
                 PROJECTS_ROOT,
             )
 
-    # GitHub repo cleanup — opt-in.
-    if delete_github and repo_url:
-        gh_timeout = float(system_setting_service.get_int(db, "github_api_timeout_seconds"))
-        try:
-            github_validation_service.delete_github_repo(repo_url, timeout=gh_timeout)
-        except (ValueError, RuntimeError) as exc:
-            logger.warning("GitHub repo delete failed for %r: %s", repo_url, exc)
-        except httpx.HTTPError as exc:
-            logger.warning("GitHub API unreachable during delete of %r: %s", repo_url, exc)
+    # GitHub repo cleanup — opt-in; DEV-342: and the Manažér is told how it ended, not only the server's log.
+    if repo_url:
+        sentence, done = _github_outcome(db, repo_url, delete_github)
+        (notes if done else left_behind).append(sentence)
+    return ProjectDeleted(notes=notes, left_behind=left_behind)
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+def _github_outcome(db: Session, repo_url: str, delete_github: bool) -> tuple[str, bool]:
+    """One sentence on the project's GitHub repository after the delete, and whether it went as the Manažér chose —
+    gone, or kept on purpose; kept against his choice is left behind, with why."""
+    if not delete_github:
+        return f"Repozitár {repo_url} na GitHube ostal — jeho zmazanie nebolo zaškrtnuté.", True
+    gh_timeout = float(system_setting_service.get_int(db, "github_api_timeout_seconds"))
+    try:
+        deleted = github_validation_service.delete_github_repo(repo_url, timeout=gh_timeout)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("GitHub repo delete failed for %r: %s", repo_url, exc)
+        return (
+            f"Repozitár {repo_url} na GitHube ostal — GitHub zmazanie odmietol (kľúč kokpitu na to nemá oprávnenie "
+            "alebo repozitár nemá správny tvar). Zmaž ho na GitHube ručne."
+        ), False
+    except httpx.HTTPError as exc:
+        logger.warning("GitHub API unreachable during delete of %r: %s", repo_url, exc)
+        return f"Repozitár {repo_url} na GitHube ostal — GitHub nebol dostupný. Zmaž ho na GitHube ručne.", False
+    return (
+        f"Repozitár {repo_url} na GitHube je zmazaný."
+        if deleted
+        else f"Repozitár {repo_url} na GitHube už neexistoval."
+    ), True
 
 
 class _ReassignRequest(BaseModel):

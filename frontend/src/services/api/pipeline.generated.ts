@@ -7285,6 +7285,17 @@ export interface components {
             /** Web Note */
             web_note?: string | null;
         };
+        /**
+         * ProjectDeleted
+         * @description DEV-342 — what deleting a project did beyond the project itself, in sentences for the Manažér: ``notes`` what was
+         *     done (the ideas back in Nápady, the GitHub repository), ``left_behind`` what stayed and needs a hand.
+         */
+        ProjectDeleted: {
+            /** Left Behind */
+            left_behind?: string[];
+            /** Notes */
+            notes?: string[];
+        };
         /** ProjectPlaneTicketsRead */
         ProjectPlaneTicketsRead: {
             /**
@@ -12084,11 +12095,13 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProjectDeleted"];
+                };
             };
             /** @description Validation Error */
             422: {

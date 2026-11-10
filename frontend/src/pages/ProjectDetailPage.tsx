@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import type { DeletedProjectState } from "@/components/project/DeletedProjectNotice";
 import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
 import {
   deleteProjectApi,
@@ -219,8 +220,12 @@ export default function ProjectDetailPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteProjectApi(project.id, deleteGithub);
-      navigate("/projects");
+      const deleted = await deleteProjectApi(project.id, deleteGithub);
+      // DEV-342: the list of projects says what the delete did — the idea back in Nápady, the GitHub repository.
+      const state: DeletedProjectState = {
+        deletedProject: { name: project.name, notes: deleted?.notes ?? [], leftBehind: deleted?.left_behind ?? [] },
+      };
+      navigate("/projects", { state });
     } catch (e: unknown) {
       setDeleteError(humanizeApiError(e, "Zmazanie projektu zlyhalo"));
       setDeleting(false);

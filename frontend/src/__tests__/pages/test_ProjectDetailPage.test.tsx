@@ -366,7 +366,36 @@ describe("ProjectDetailPage — guarded delete (CR-V2-027)", () => {
     await userEvent.click(confirm);
 
     await waitFor(() => expect(deleteProjectApiMock).toHaveBeenCalledWith("p1", true));
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects"));
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith("/projects", {
+        state: { deletedProject: expect.objectContaining({ notes: [], leftBehind: [] }) },
+      }),
+    );
+  });
+
+  it("hands what the delete did to the list of projects (DEV-342)", async () => {
+    deleteProjectApiMock.mockResolvedValue({
+      notes: ["Nápad „Orthodox Typikon“ je späť v Nápadoch aj s celým rozhovorom."],
+      left_behind: ["Repozitár rauschiccsk/x na GitHube ostal — GitHub zmazanie odmietol."],
+    });
+    const ProjectDetailPage = await importPage();
+    render(<ProjectDetailPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /^zmazať projekt$/i }));
+    await userEvent.type(screen.getByLabelText(/na potvrdenie napíš/i), "ZMAZAŤ");
+    await userEvent.click(screen.getByRole("button", { name: /zmazať natrvalo/i }));
+
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith("/projects", {
+        state: {
+          deletedProject: {
+            name: expect.any(String),
+            notes: ["Nápad „Orthodox Typikon“ je späť v Nápadoch aj s celým rozhovorom."],
+            leftBehind: ["Repozitár rauschiccsk/x na GitHube ostal — GitHub zmazanie odmietol."],
+          },
+        },
+      }),
+    );
   });
 
   it("does not delete on a wrong confirmation word", async () => {
