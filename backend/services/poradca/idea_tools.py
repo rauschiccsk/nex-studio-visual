@@ -1,9 +1,13 @@
-"""Poradca's tools in a new idea (Nápady, DEV-318, ``docs/specs/ideas.md`` §4.3).
+"""The Projektant's tools in a new idea (Nápady, DEV-318, ``docs/specs/ideas.md`` §4.3).
 
-An idea belongs to no project, so none of the project's tools fit it. Poradca reads here what helps shape a new
-project: the Knowledge Base, the projects the person asking may open, their documentation (not code, not data),
-what the cockpit can found and a project's Zásobník — every one checked for the person asking, by the same rule as
-the screens (the admin account every project, anyone else their own), and read from the sources the screens read.
+An idea belongs to no project, so none of the project's tools fit it. The Projektant reads here what helps shape a new
+project: the Knowledge Base (by the rights of the person asking), every project of the cockpit, their documentation
+(not code, not data), what the cockpit can found and a project's Zásobník — read from the sources the screens read.
+
+DEV-345: every project, whoever it belongs to — until 10.11.2026 only the projects of the person asking. Director: „Pri
+návrhu často potrebujem odkázať sa na riešenie, ktoré sme robili v inom projekte, a kvôli tomu, aby projektant to
+pozrel nechcem zbytočne presúvať projekty medzi manažérmi.“ For everyone in Nápady: „Áno“. Reading only; the screens
+and the project's Poradca keep the owner rule (``authz``).
 """
 
 from __future__ import annotations
@@ -13,7 +17,6 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from backend.core import authz
@@ -49,30 +52,25 @@ class IdeaTools:
         return user
 
     def _project(self, db, slug: object) -> Project:
-        """The project by its slug — only one the person may open, as on the screens."""
+        """The project by its slug — any project of the cockpit, whoever it belongs to (DEV-345)."""
         if not isinstance(slug, str) or not slug.strip():
             raise ToolError("Zadaj slug projektu, ako ho vrátil nástroj projekty.")
         project = db.execute(select(Project).where(Project.slug == slug.strip())).scalar_one_or_none()
         if project is None:
             raise ToolError(f"Projekt „{slug}“ v kokpite nie je.")
-        try:
-            authz.authorize_project(self._user(db), project)
-        except HTTPException as exc:
-            raise ToolError(f"Projekt „{slug}“ nie je v právach človeka, ktorý sa pýta.") from exc
+        self._user(db)  # the person asking is still in the cockpit
         return project
 
     async def projekty(self, args: dict) -> str:
-        """The projects the person may open, with what a new idea is compared with."""
+        """Every project of the cockpit, with what a new idea is compared with and who manages it (DEV-345)."""
         from backend.services import project as project_service
 
         with SessionLocal() as db:
-            user = self._user(db)
-            rows = project_service.list_projects(
-                db, created_by=None if authz.is_admin(user) else user.id, limit=_PROJECTS_MAX, offset=0
-            )
+            self._user(db)
+            rows = project_service.list_projects(db, created_by=None, limit=_PROJECTS_MAX, offset=0)
             if not rows:
-                return "Človek, ktorý sa pýta, nemá v kokpite žiadny projekt."
-            lines = [f"Projekty, ku ktorým má človek prístup ({len(rows)}):"]
+                return "V kokpite nie je žiadny projekt."
+            lines = [f"Projekty kokpitu ({len(rows)}):"]
             for p in rows:
                 customers = db.execute(
                     select(Customer.name).where(Customer.project_id == p.id).order_by(Customer.name)
@@ -80,8 +78,9 @@ class IdeaTools:
                 versions = db.execute(
                     select(Version.version_number).where(Version.project_id == p.id).order_by(Version.created_at)
                 ).scalars()
+                manager = db.get(User, authz.project_owner_id(p))
                 lines.append(
-                    f"- {p.name} ({p.slug}) — typ {p.type}, prihlásenie {p.auth_mode}, "
+                    f"- {p.name} ({p.slug}) — manažér: {_person(manager)}; typ {p.type}, prihlásenie {p.auth_mode}, "
                     f"šablóna {p.template or 'žiadna'}, stav {p.status}; "
                     f"zákazníci: {', '.join(customers) or 'žiadny'}; verzie: {', '.join(versions) or 'žiadna'}; "
                     f"opis: {' '.join((p.description or '').split()) or '—'}"
@@ -130,6 +129,12 @@ class IdeaTools:
         return await PoradcaTools(project_id=project_id, version_id=None, user_id=self.user_id).zasobnik({})
 
 
+def _person(user: Optional[User]) -> str:
+    if user is None:
+        return "—"
+    return " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
+
+
 def _list_docs(root: str, slug: str) -> str:
     found: list[str] = [name for name in _ROOT_DOCS if os.path.isfile(os.path.join(root, name))]
     base = os.path.join(root, _DOCS_DIR)
@@ -173,11 +178,11 @@ def build_idea_tools(*, user_id: UUID) -> list[Tool]:
         *knowledge_tools(PoradcaTools(project_id=None, version_id=None, user_id=user_id)),
         Tool(
             "projekty",
-            "Projekty kokpitu, ku ktorým má človek prístup: meno, slug, typ, prihlásenie, šablóna, stav, zákazníci, "
-            "verzie a opis — aby si nový nápad porovnal s tým, čo už máme.",
+            "Všetky projekty kokpitu, bez ohľadu na to, komu patria: meno, slug, manažér, typ, prihlásenie, šablóna, "
+            "stav, zákazníci, verzie a opis — aby si nový nápad porovnal s tým, čo už máme.",
             _schema(),
             t.projekty,
-            lambda a: "projekty s prístupom",
+            lambda a: "projekty kokpitu",
         ),
         Tool(
             "dokumentacia_projektu",

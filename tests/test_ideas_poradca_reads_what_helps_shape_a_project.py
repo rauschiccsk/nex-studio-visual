@@ -1,6 +1,10 @@
-"""DEV-318 — what Poradca reads in a new idea: the projects the person may open, their documentation (not code), what
-the cockpit can found and a project's Zásobník — each for the person asking, by the rule of the screens (the admin
-account every project, anyone else their own). Its rules name every tool it has.
+"""DEV-318 — what the Projektant reads in a new idea: the projects of the cockpit, their documentation (not code), what
+the cockpit can found and a project's Zásobník. Its rules name every tool it has.
+
+DEV-345 — every project of the cockpit, whoever it belongs to. Until 10.11.2026 it read only the projects of the person
+asking (by the rule of the screens); Director: „Pri návrhu často potrebujem odkázať sa na riešenie, ktoré sme robili
+v inom projekte, a kvôli tomu, aby projektant to pozrel nechcem zbytočne presúvať projekty medzi manažérmi.“ — and for
+everyone who works in Nápady: „Áno“. Only reading, as before; the screens and the project's Poradca keep the owner rule.
 """
 
 from __future__ import annotations
@@ -84,13 +88,19 @@ def _call(user: User, name: str, **args) -> str:
     return asyncio.run(_tool(user, name).handler(args))
 
 
-def test_the_projects_are_the_ones_the_person_may_open(world, db_session):
-    mine = _call(world["me"], "projekty")
-    assert world["mine"].slug in mine and "opis Moja matrika" in mine
-    assert world["theirs"].slug not in mine
-    admin = _user(db_session, username="admin", role="ri")
-    everything = _call(admin, "projekty")
-    assert world["mine"].slug in everything and world["theirs"].slug in everything
+def test_every_project_of_the_cockpit_is_listed_whoever_it_belongs_to(world, db_session):
+    nobody = _user(db_session)  # owns no project at all
+    for person in (world["me"], nobody):
+        listed = _call(person, "projekty")
+        assert world["mine"].slug in listed and world["theirs"].slug in listed and "opis Moja matrika" in listed
+    assert listed.startswith("Projekty kokpitu (")
+
+
+def test_each_project_names_its_manager(world):
+    listed = _call(world["me"], "projekty")
+    line = next(line for line in listed.splitlines() if world["theirs"].slug in line)
+    other = world["other"]
+    assert f"manažér: {' '.join(p for p in (other.first_name, other.last_name) if p) or other.username}" in line
 
 
 def test_documentation_is_read_never_code(world):
@@ -104,10 +114,22 @@ def test_documentation_is_read_never_code(world):
             _call(world["me"], "dokumentacia_projektu", projekt=world["mine"].slug, cesta=wanted)
 
 
-def test_another_persons_project_is_not_read(world):
-    for name, args in (("dokumentacia_projektu", {}), ("zasobnik_projektu", {})):
-        with pytest.raises(ToolError, match="nie je v právach"):
-            _call(world["me"], name, projekt=world["theirs"].slug, **args)
+def test_another_persons_project_is_read_too(world):
+    (world["root"].parent / world["theirs"].slug / "docs").mkdir(parents=True)
+    (world["root"].parent / world["theirs"].slug / "docs" / "riesenie.md").write_text("# Riešenie", encoding="utf-8")
+
+    assert _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug).splitlines()[1:] == [
+        "- docs/riesenie.md"
+    ]
+    assert _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug, cesta="docs/riesenie.md") == (
+        "# Riešenie"
+    )
+    assert "Zásobník projektu" in _call(world["me"], "zasobnik_projektu", projekt=world["theirs"].slug)
+
+
+def test_a_project_that_is_not_in_the_cockpit_is_said(world):
+    with pytest.raises(ToolError, match="v kokpite nie je"):
+        _call(world["me"], "dokumentacia_projektu", projekt="nikde")
 
 
 def test_the_founding_options_are_the_forms(world, db_session):

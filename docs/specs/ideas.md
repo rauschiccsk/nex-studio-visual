@@ -4,6 +4,11 @@
 > v kokpite máme už agenta Poradca, a keď rozprávame s chlapcami medzi sebou pojem Poradca je chaotická“. Text nižšie
 > vznikol pred premenovaním — kde hovorí o Poradcovi v nápade, myslí Projektanta; po založení projektu rozhovor
 > pokračuje s Poradcom projektu. Meno určuje `runner.agent_of` (rozhovor bez projektu = Projektant).
+>
+> **DEV-345 (10.11.2026):** Projektant číta **všetky projekty kokpitu** — zoznam s manažérom, dokumentáciu a Zásobník —
+> bez ohľadu na to, komu patria (doteraz len projekty človeka, ktorý sa pýta). Director: „Pri návrhu často potrebujem
+> odkázať sa na riešenie, ktoré sme robili v inom projekte“; platí pre každého v Nápadoch („Áno“). Zápis (pridať nápad do
+> Zásobníka projektu), obrazovky projektov a Poradca projektu ostávajú podľa vlastníka.
 
 Stav: **schválené Directorom 06.11.2026** („Súhlasím, priprav to a môžeš začať to robiť.“), postavené vo v4.117.0.
 
