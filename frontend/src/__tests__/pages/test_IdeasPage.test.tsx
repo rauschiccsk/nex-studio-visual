@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -393,5 +394,170 @@ describe("a follow-up idea is named by what the person wants (DEV-350)", () => {
         "Čítanie pre inú aplikáciu",
       ),
     );
+  });
+});
+
+describe("an answer about an idea the page no longer shows is dropped (DEV-352)", () => {
+  it("the late answer about a founded idea does not lock the follow-up opened from it", async () => {
+    const founded = idea("founded", {
+      title: "NEX Legal Watch",
+      talk_in_project: true,
+      outcome_project_slug: "nex-legal-watch",
+      outcome_project_name: "NEX Legal Watch",
+    });
+    let late: (value: unknown) => void = () => {};
+    ideasApi.listIdeasApi.mockResolvedValue([founded]);
+    ideasApi.getIdeaApi
+      .mockResolvedValueOnce(founded)
+      .mockImplementation(() => new Promise((resolve) => (late = resolve)));
+    ideasApi.createIdeaApi.mockResolvedValue({
+      ...idea("open"),
+      id: "i9",
+      conversation: { messages: [] },
+    });
+    // The founded idea's talk loads once and nothing reloads it later: the page cannot heal itself and hide a lock.
+    poradcaApi.getPoradcaConversationApi
+      .mockResolvedValueOnce({
+        id: "c1",
+        messages: [brief("m-new", "NEX Legal Watch")],
+      })
+      .mockImplementation(() => new Promise(() => {}));
+    renderAt("/napady/i1");
+
+    const follow = await screen.findByRole("button", {
+      name: "Nový nápad nadväzujúci na tento projekt",
+    });
+    // After the Projektant's finished answer the page asks about the founded idea again — that answer is still out.
+    await waitFor(() => expect(ideasApi.getIdeaApi).toHaveBeenCalledTimes(2));
+    fireEvent.click(follow);
+    const box = (await screen.findByPlaceholderText(
+      /Opíš svoj nápad/,
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toContain("Čo potrebujem:"));
+
+    await act(async () => {
+      late(founded); // it lands once the follow-up is open
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.queryByText(/Nápad skončil v projekte/)).toBeNull();
+    fireEvent.change(box, {
+      target: { value: `${box.value} Čítanie pre inú aplikáciu` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Opýtať sa/ }));
+    await waitFor(() =>
+      expect(ideasApi.createIdeaApi).toHaveBeenCalledWith(
+        expect.stringContaining("Nadväzuje na projekt"),
+        [],
+        "Čítanie pre inú aplikáciu",
+      ),
+    );
+  });
+
+  it("switching to another idea keeps the one in the address when the first answers late", async () => {
+    const first = idea("open", { id: "i1", title: "Matrika", conversation_id: "c1" });
+    const second = idea("open", { id: "i2", title: "Sklad", conversation_id: "c2" });
+    let late: (value: unknown) => void = () => {};
+    ideasApi.listIdeasApi.mockResolvedValue([first, second]);
+    ideasApi.getIdeaApi.mockImplementation((id: string) =>
+      id === "i1"
+        ? new Promise((resolve) => (late = resolve))
+        : Promise.resolve(second),
+    );
+    // Neither talk has a finished answer: nothing reloads the idea and heals a wrong one.
+    poradcaApi.getPoradcaConversationApi.mockImplementation((id: string) =>
+      Promise.resolve({ id, messages: [] }),
+    );
+    renderAt("/napady/i1");
+
+    const list = await screen.findByRole("list", { name: "Moje nápady" });
+    fireEvent.click(await within(list).findByText("Sklad"));
+    expect(
+      await screen.findByRole("heading", { name: "Sklad" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      late(first); // the idea he left answers after the one he opened
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.getByRole("heading", { name: "Sklad" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Matrika" })).toBeNull();
+  });
+
+  it("an idea added to a project after he moved on does not replace the idea he opened", async () => {
+    const first = idea("brief_ready", { id: "i1", title: "Matrika", conversation_id: "c1" });
+    const second = idea("open", { id: "i2", title: "Sklad", conversation_id: "c2" });
+    let added: (value: unknown) => void = () => {};
+    ideasApi.listIdeasApi.mockResolvedValue([first, second]);
+    ideasApi.getIdeaApi.mockImplementation((id: string) =>
+      Promise.resolve(id === "i1" ? first : second),
+    );
+    ideasApi.ideaAddedApi.mockImplementation(
+      () => new Promise((resolve) => (added = resolve)),
+    );
+    // The first talk loads once, the second has no finished answer: nothing reloads the idea and heals a wrong one.
+    poradcaApi.getPoradcaConversationApi
+      .mockResolvedValueOnce({
+        id: "c1",
+        messages: [
+          {
+            ...brief("m-1", "Matrika"),
+            idea_project: null,
+            idea_addition: { project_slug: "nex-manager", title: "Doplnok" },
+          },
+        ],
+      })
+      .mockImplementation((id: string) =>
+        id === "c2" ? Promise.resolve({ id, messages: [] }) : new Promise(() => {}),
+      );
+    renderAt("/napady/i1");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Pridať do projektu/ }),
+    );
+    const list = screen.getByRole("list", { name: "Moje nápady" });
+    fireEvent.click(within(list).getByText("Sklad"));
+    expect(
+      await screen.findByRole("heading", { name: "Sklad" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      added({ ...first, state: "added", outcome_project_slug: "nex-manager" }); // the add he left behind ends now
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.getByRole("heading", { name: "Sklad" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Matrika" })).toBeNull();
+  });
+
+  it("a late failure about the idea he left neither blanks nor blames the one he opened", async () => {
+    const first = idea("open", { id: "i1", title: "Matrika", conversation_id: "c1" });
+    const second = idea("open", { id: "i2", title: "Sklad", conversation_id: "c2" });
+    let failed: (reason: unknown) => void = () => {};
+    ideasApi.listIdeasApi.mockResolvedValue([first, second]);
+    ideasApi.getIdeaApi.mockImplementation((id: string) =>
+      id === "i1"
+        ? new Promise((_, reject) => (failed = reject))
+        : Promise.resolve(second),
+    );
+    poradcaApi.getPoradcaConversationApi.mockImplementation((id: string) =>
+      Promise.resolve({ id, messages: [] }),
+    );
+    renderAt("/napady/i1");
+
+    const list = await screen.findByRole("list", { name: "Moje nápady" });
+    fireEvent.click(await within(list).findByText("Sklad"));
+    expect(
+      await screen.findByRole("heading", { name: "Sklad" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      failed(new Error("network")); // the idea he left fails after the one he opened arrived
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.getByRole("heading", { name: "Sklad" })).toBeInTheDocument();
+    expect(screen.queryByText(/Nápad sa nepodarilo načítať/)).toBeNull();
   });
 });

@@ -7,7 +7,7 @@
 // brief, the two ways it ends: a new project, or the brief added to an existing one. The address carries the idea
 // (`/napady/<id>`); bare `/napady` starts a new one. Director 06.11.2026 on the name: „Súhlasím, nazveme to Nápady“.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lightbulb } from "lucide-react";
 
@@ -94,14 +94,21 @@ export default function IdeasPage() {
     }
   }, []);
 
+  // DEV-352: the idea the page shows now. An answer about one it has left is dropped (as usePoradcaConversation does
+  // with a talk): it came late and would lock a follow-up opened from it, or show an idea the address does not name.
+  const shownIdea = useRef(ideaId);
+  shownIdea.current = ideaId;
+
   const refreshCurrent = useCallback(async () => {
     if (!ideaId) {
       setCurrent(null);
       return;
     }
     try {
-      setCurrent(await getIdeaApi(ideaId));
+      const fresh = await getIdeaApi(ideaId);
+      if (shownIdea.current === ideaId) setCurrent(fresh);
     } catch (e: unknown) {
+      if (shownIdea.current !== ideaId) return;
       setCurrent(null);
       setLoadError(humanizeApiError(e, "Nápad sa nepodarilo načítať"));
     }
@@ -400,7 +407,7 @@ export default function IdeasPage() {
                     message={m}
                     onEnded={(outcome) => {
                       setCurrent((prev) =>
-                        prev ? { ...prev, ...outcome } : prev,
+                        prev?.id === outcome.id ? { ...prev, ...outcome } : prev,
                       );
                       void refreshList();
                     }}
