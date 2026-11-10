@@ -8,23 +8,36 @@
 // (`/napady/<id>`); bare `/napady` starts a new one. Director 06.11.2026 on the name: „Súhlasím, nazveme to Nápady“.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Lightbulb } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import IdeaOutcomeActions from "@/components/poradca/IdeaOutcomeActions";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
-import PoradcaComposer from "@/components/poradca/PoradcaComposer";
-import PoradcaConversationItem, { type Removal } from "@/components/poradca/PoradcaConversationItem";
+import PoradcaComposer, {
+  type IncomingQuestion,
+} from "@/components/poradca/PoradcaComposer";
+import PoradcaConversationItem, {
+  type Removal,
+} from "@/components/poradca/PoradcaConversationItem";
 import QuestionImages from "@/components/poradca/QuestionImages";
 import { draftKey } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
-import { ideaStateLabel } from "@/lib/ideas";
+import { followUpStart, ideaStateLabel } from "@/lib/ideas";
 import { formatCost } from "@/lib/poradcaAnswer";
 import { toUpload } from "@/lib/poradcaImages";
-import { createIdeaApi, getIdeaApi, listIdeasApi, throwAwayIdeaApi } from "@/services/api/ideas";
-import { askPoradcaApi, getPoradcaStatusApi, renamePoradcaConversationApi } from "@/services/api/poradca";
+import {
+  createIdeaApi,
+  getIdeaApi,
+  listIdeasApi,
+  throwAwayIdeaApi,
+} from "@/services/api/ideas";
+import {
+  askPoradcaApi,
+  getPoradcaStatusApi,
+  renamePoradcaConversationApi,
+} from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { Idea, PoradcaStatus } from "@/types/poradca";
@@ -35,10 +48,14 @@ const NEW_IDEA_DRAFT = "nove";
 /** DEV-331 — an idea that ended in a project leaves only the list; its talk stays with the project (Director 09.11.2026). */
 function ideaRemoval(idea: Idea): Removal | undefined {
   if (idea.state !== "founded" && idea.state !== "added") return undefined;
-  const where = idea.outcome_project_name ? `projektu ${idea.outcome_project_name}` : "projektu";
+  const where = idea.outcome_project_name
+    ? `projektu ${idea.outcome_project_name}`
+    : "projektu";
   return {
     question: `Odstrániť „${idea.title}“ zo zoznamu Nápadov?`,
-    note: `Rozhovor ostane v Poradcovi ${where}.`,
+    note: idea.talk_in_project
+      ? `Rozhovor ostane v Poradcovi ${where}.`
+      : `Požiadavka ostane v Zásobníku ${where}.`,
     action: "Odstrániť",
   };
 }
@@ -46,6 +63,15 @@ function ideaRemoval(idea: Idea): Removal | undefined {
 export default function IdeasPage() {
   const { ideaId } = useParams<{ ideaId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  // DEV-350: a new idea opened from a founded one starts with what the cockpit knows — read once, then wiped.
+  const [incoming, setIncoming] = useState<IncomingQuestion | null>(null);
+  useEffect(() => {
+    const followUp = (location.state as { followUp?: string } | null)?.followUp;
+    if (ideaId || !followUp) return;
+    setIncoming({ question: followUp, held: null, fill: true });
+    window.history.replaceState({}, "");
+  }, [ideaId, location.state]);
   const setSelectedProject = useActiveContextStore((s) => s.setSelectedProject);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [current, setCurrent] = useState<Idea | null>(null);
@@ -54,7 +80,11 @@ export default function IdeasPage() {
   // On a phone the list and the talk take turns, as in Poradca; from md up they stand side by side.
   const [pane, setPane] = useState<"list" | "talk">("talk");
   const conversationId = current?.conversation_id ?? null;
-  const { detail, error: convError, setDetail } = usePoradcaConversation(conversationId);
+  const {
+    detail,
+    error: convError,
+    setDetail,
+  } = usePoradcaConversation(conversationId);
 
   const refreshList = useCallback(async () => {
     try {
@@ -81,7 +111,11 @@ export default function IdeasPage() {
     void refreshList();
     getPoradcaStatusApi()
       .then(setStatus)
-      .catch((e: unknown) => setLoadError(humanizeApiError(e, "Stav Projektanta sa nepodarilo zistiť")));
+      .catch((e: unknown) =>
+        setLoadError(
+          humanizeApiError(e, "Stav Projektanta sa nepodarilo zistiť"),
+        ),
+      );
   }, [refreshList]);
 
   useEffect(() => {
@@ -91,7 +125,9 @@ export default function IdeasPage() {
 
   // A finished answer may have brought a brief: where the idea stands is read again with the conversation.
   const lastMessage = detail?.messages?.[detail.messages.length - 1];
-  const finishedAnswers = (detail?.messages ?? []).filter((m) => m.author === "poradca" && m.status !== "running").length;
+  const finishedAnswers = (detail?.messages ?? []).filter(
+    (m) => m.author === "poradca" && m.status !== "running",
+  ).length;
   useEffect(() => {
     if (finishedAnswers === 0) return;
     void refreshCurrent();
@@ -103,13 +139,19 @@ export default function IdeasPage() {
     conversationId,
   );
   const running = !!detail?.messages?.some((m) => m.status === "running");
-  const notReady = status && !status.ready ? (status.problems ?? []).join("; ") : null;
+  const notReady =
+    status && !status.ready ? (status.problems ?? []).join("; ") : null;
   const concluded = current?.state === "founded" || current?.state === "added";
   const latestBrief = useMemo(
     () =>
       [...(detail?.messages ?? [])]
         .reverse()
-        .find((m) => m.author === "poradca" && m.status === "done" && (m.idea_project || m.idea_addition)) ?? null,
+        .find(
+          (m) =>
+            m.author === "poradca" &&
+            m.status === "done" &&
+            (m.idea_project || m.idea_addition),
+        ) ?? null,
     [detail],
   );
 
@@ -119,7 +161,9 @@ export default function IdeasPage() {
       slug: current.outcome_project_slug,
       name: current.outcome_project_name ?? current.outcome_project_slug,
     });
-    navigate(`/poradca?${new URLSearchParams({ c: current.conversation_id }).toString()}`);
+    navigate(
+      `/poradca?${new URLSearchParams({ c: current.conversation_id }).toString()}`,
+    );
   }
 
   // DEV-331 — renamed and deleted in its row exactly as a Poradca conversation (Director 09.11.2026).
@@ -188,7 +232,9 @@ export default function IdeasPage() {
         }`}
       >
         <div className="flex items-center justify-between px-3 py-3">
-          <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">Nápady</h1>
+          <h1 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            Nápady
+          </h1>
           <button
             type="button"
             onClick={() => open("/napady")}
@@ -197,15 +243,25 @@ export default function IdeasPage() {
             <Lightbulb className="h-3.5 w-3.5" /> Nový nápad
           </button>
         </div>
-        <ul aria-label="Moje nápady" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3">
+        <ul
+          aria-label="Moje nápady"
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3"
+        >
           {ideas.length === 0 && (
-            <li className="px-2 text-xs text-[var(--color-text-muted)]">Zatiaľ žiadny nápad.</li>
+            <li className="px-2 text-xs text-[var(--color-text-muted)]">
+              Zatiaľ žiadny nápad.
+            </li>
           )}
           {ideas.map((i) => (
             <PoradcaConversationItem
               key={i.id}
               noun="nápad"
-              conversation={{ title: i.title, running: i.running, version_number: null, updated_at: i.updated_at }}
+              conversation={{
+                title: i.title,
+                running: i.running,
+                version_number: null,
+                updated_at: i.updated_at,
+              }}
               active={i.id === ideaId}
               busy={i.running}
               authorName={null}
@@ -227,7 +283,9 @@ export default function IdeasPage() {
         {current && (
           <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-[var(--color-border-default)] px-4 py-2">
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{current.title}</h2>
+              <h2 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                {current.title}
+              </h2>
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 {ideaStateLabel(current)} · {current.author_name}
               </p>
@@ -243,15 +301,46 @@ export default function IdeasPage() {
               {current.state === "founded"
                 ? `Z nápadu vznikol projekt ${current.outcome_project_name}; zadanie je vo verzii 0.1.0.`
                 : `Zadanie je v Zásobníku projektu ${current.outcome_project_name} ako REQ-${current.outcome_backlog_number}.`}
-              {current.plane_identifier ? ` Tiket v DEV: ${current.plane_identifier}.` : ""} Rozhovor pokračuje v
-              Poradcovi projektu.
+              {current.plane_identifier
+                ? ` Tiket v DEV: ${current.plane_identifier}.`
+                : ""}{" "}
+              {current.talk_in_project
+                ? "Rozhovor pokračuje v Poradcovi projektu."
+                : "Projekt vedie iný manažér — rozhovor ostáva tu v Nápadoch."}
             </span>
-            <button type="button" onClick={() => navigate(`/projects/${current.outcome_project_slug}`)} className="underline">
-              Otvoriť projekt
-            </button>
-            <button type="button" onClick={openProjectPoradca} className="underline">
-              Pokračovať v Poradcovi projektu
-            </button>
+            {current.talk_in_project && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(`/projects/${current.outcome_project_slug}`)
+                  }
+                  className="underline"
+                >
+                  Otvoriť projekt
+                </button>
+                <button
+                  type="button"
+                  onClick={openProjectPoradca}
+                  className="underline"
+                >
+                  Pokračovať v Poradcovi projektu
+                </button>
+              </>
+            )}
+            {current.state === "founded" && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/napady", {
+                    state: { followUp: followUpStart(current) },
+                  })
+                }
+                className="underline"
+              >
+                Nový nápad nadväzujúci na tento projekt
+              </button>
+            )}
           </div>
         )}
 
@@ -263,16 +352,23 @@ export default function IdeasPage() {
           className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
         >
           <ErrorNote error={loadError} />
-          {convError && <p className="text-xs text-[var(--color-state-error-fg)]">{convError}</p>}
+          {convError && (
+            <p className="text-xs text-[var(--color-state-error-fg)]">
+              {convError}
+            </p>
+          )}
           {!ideaId && (
             <div className="max-w-xl space-y-1 text-xs text-[var(--color-text-muted)]">
               <p>
-                Vlož svoj nápad na novú aplikáciu — pokojne celý text z Obsidianu, aj s náčrtmi obrazoviek.
-                Projektant pozrie, čo už máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie prvej verzie.
+                Vlož svoj nápad na novú aplikáciu — pokojne celý text z
+                Obsidianu, aj s náčrtmi obrazoviek. Projektant pozrie, čo už
+                máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie
+                prvej verzie.
               </p>
               <p>
-                Z hotového zadania založíš tlačidlom nový projekt, alebo ho pridáš do existujúceho projektu, keď sa
-                ukáže, že tam patrí. Projektant sám nič nezaloží a nič nezmení.
+                Z hotového zadania založíš tlačidlom nový projekt, alebo ho
+                pridáš do existujúceho projektu, keď sa ukáže, že tam patrí.
+                Projektant sám nič nezaloží a nič nezmení.
               </p>
             </div>
           )}
@@ -284,18 +380,28 @@ export default function IdeasPage() {
               >
                 {m.content}
                 {conversationId && (m.attachments ?? []).length > 0 && (
-                  <QuestionImages conversationId={conversationId} attachments={m.attachments ?? []} />
+                  <QuestionImages
+                    conversationId={conversationId}
+                    attachments={m.attachments ?? []}
+                  />
                 )}
               </div>
             ) : (
               <div key={m.id} className="space-y-2">
-                <PoradcaAnswer message={m} scopeVersion={null} projectVersions={[]} agentName="Projektant" />
+                <PoradcaAnswer
+                  message={m}
+                  scopeVersion={null}
+                  projectVersions={[]}
+                  agentName="Projektant"
+                />
                 {current && !concluded && latestBrief?.id === m.id && (
                   <IdeaOutcomeActions
                     idea={current}
                     message={m}
                     onEnded={(outcome) => {
-                      setCurrent((prev) => (prev ? { ...prev, ...outcome } : prev));
+                      setCurrent((prev) =>
+                        prev ? { ...prev, ...outcome } : prev,
+                      );
                       void refreshList();
                     }}
                   />
@@ -309,7 +415,9 @@ export default function IdeasPage() {
           draftKey={draftKey("ideas", ideaId ?? NEW_IDEA_DRAFT)}
           disabledReason={
             concluded
-              ? "Nápad skončil v projekte — rozhovor pokračuje v Poradcovi projektu."
+              ? current?.talk_in_project
+                ? "Nápad skončil v projekte — rozhovor pokračuje v Poradcovi projektu."
+                : "Nápad skončil — požiadavka je v Zásobníku projektu, ktorý vedie iný manažér."
               : notReady
                 ? `Projektant teraz nevie bežať: ${notReady}`
                 : running
@@ -317,7 +425,7 @@ export default function IdeasPage() {
                   : null
           }
           limits={status}
-          incoming={null}
+          incoming={ideaId ? null : incoming}
           placeholder={ideaId ? "Odpovedz Projektantovi…" : "Opíš svoj nápad…"}
           onAsk={async (question, images) => {
             thread.follow();

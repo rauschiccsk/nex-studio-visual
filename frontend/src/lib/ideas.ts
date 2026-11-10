@@ -34,3 +34,15 @@ export interface FromIdea {
   /** The brief did not reach the project (a refusal), or its ticket was not filed — the sentence why. */
   problem: string | null;
 }
+
+/** DEV-350 — how a new idea that follows a founded project starts: the cockpit says which project and where its brief
+ *  is, the person says what he needs; the Projektant reads the rest itself. */
+export function followUpStart(
+  idea: Pick<Idea, "title" | "outcome_project_name" | "outcome_project_slug">,
+): string {
+  return (
+    `Nadväzuje na projekt ${idea.outcome_project_name} (${idea.outcome_project_slug}), ktorý vznikol z nápadu ` +
+    `„${idea.title}“. Jeho zadanie je v dokumentácii projektu: docs/specs/versions/v0.1.0/customer-requirements.md.` +
+    "\n\nČo potrebujem:"
+  );
+}

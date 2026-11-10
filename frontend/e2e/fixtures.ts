@@ -8,7 +8,11 @@
 
 import type { components } from "../src/services/api/pipeline.generated";
 import type { AdoptionPreview } from "../src/services/api/deploy";
-import type { AdoptableCandidate, GitStatus, NexsharedStatus } from "../src/services/api/projects";
+import type {
+  AdoptableCandidate,
+  GitStatus,
+  NexsharedStatus,
+} from "../src/services/api/projects";
 import type { KnowledgeDoc } from "../src/types/knowledge";
 import type { TaskPlanResponse } from "../src/types/task-plan";
 import { answer, answerUntyped, override, type Override } from "./api";
@@ -53,7 +57,8 @@ export const PROJECT: S["ProjectRead"] = {
   slug: "nex-inbox",
   type: "standard",
   auth_mode: "token",
-  description: "Spracovanie dodávateľských faktúr z e-mailu do NEX Genesis ako validné Peppol BIS UBL XML",
+  description:
+    "Spracovanie dodávateľských faktúr z e-mailu do NEX Genesis ako validné Peppol BIS UBL XML",
   status: "active",
   backend_port: 9100,
   frontend_port: 9101,
@@ -77,7 +82,8 @@ export const VERSION: S["VersionRead"] = {
   project_id: PROJECT.id,
   version_number: "1.8.0",
   name: "Doručovanie do Genesisu a poznámky k vydaniu",
-  description: "Nová verzia so spoľahlivým doručovaním faktúr do zdieľaného priečinka NEX Genesis",
+  description:
+    "Nová verzia so spoľahlivým doručovaním faktúr do zdieľaného priečinka NEX Genesis",
   status: "active",
   epic_count: 6,
   epics_done: 4,
@@ -104,7 +110,10 @@ export const STORAGE: Record<string, unknown> = {
   [`nex-active-context:${USER.username}`]: {
     state: {
       selectedProject: { slug: PROJECT.slug, name: PROJECT.name },
-      selectedVersion: { versionId: VERSION.id, versionNumber: VERSION.version_number },
+      selectedVersion: {
+        versionId: VERSION.id,
+        versionNumber: VERSION.version_number,
+      },
     },
     version: 0,
   },
@@ -137,6 +146,7 @@ export const IDEA: S["IdeaRead"] = {
   outcome_project_slug: null,
   outcome_project_name: null,
   outcome_backlog_number: null,
+  talk_in_project: false,
   plane_identifier: null,
   plane_url: null,
   created_at: T1,
@@ -146,21 +156,37 @@ export const IDEA: S["IdeaRead"] = {
 const CONSULTATION = {
   consultation: {
     id: "konzultacia-1",
-    intro: "Pri návrhu doručovania do NEX Genesis som narazil na dve veci, o ktorých musíš rozhodnúť ty.",
+    intro:
+      "Pri návrhu doručovania do NEX Genesis som narazil na dve veci, o ktorých musíš rozhodnúť ty.",
     round: 1,
     round_max: 5,
     decisions: [
       {
         key: "opakovanie",
-        question: "Ako dlho má NEX Inbox skúšať doručiť faktúru, keď zdieľaný priečinok NEX Genesis neodpovedá?",
+        question:
+          "Ako dlho má NEX Inbox skúšať doručiť faktúru, keď zdieľaný priečinok NEX Genesis neodpovedá?",
         explanation:
           "Spojenie medzi Komárnom a Tonkovcami ide cez internet a krátke výpadky sú bežné. Faktúra môže čakať, kým sa spojenie vráti, alebo po čase skončiť v manuálnom rade.",
         origin: "objav",
-        technical_detail: "GenesisDeliverer: backoff 30 s → 15 min, strop pokusov podľa DELIVERY_GIVE_UP_HOURS.",
+        technical_detail:
+          "GenesisDeliverer: backoff 30 s → 15 min, strop pokusov podľa DELIVERY_GIVE_UP_HOURS.",
         options: [
-          { id: "a", label: "Skúšať 24 hodín, potom manuálny rad", recommended: true, detail: "Obsluha dostane jeden e-mail." },
-          { id: "b", label: "Skúšať bez obmedzenia", detail: "Faktúra nikdy neskončí v manuálnom rade." },
-          { id: "c", label: "Skúšať 1 hodinu", detail: "Pri dlhšom výpadku pribudne práca obsluhe." },
+          {
+            id: "a",
+            label: "Skúšať 24 hodín, potom manuálny rad",
+            recommended: true,
+            detail: "Obsluha dostane jeden e-mail.",
+          },
+          {
+            id: "b",
+            label: "Skúšať bez obmedzenia",
+            detail: "Faktúra nikdy neskončí v manuálnom rade.",
+          },
+          {
+            id: "c",
+            label: "Skúšať 1 hodinu",
+            detail: "Pri dlhšom výpadku pribudne práca obsluhe.",
+          },
         ],
       },
       {
@@ -240,8 +266,16 @@ const PIPELINE: S["PipelineBoardRead"] = {
       reopens_closed: 0,
     },
   },
-  consultation_direction: { blocking_by_round: [2], closed: 3, open: 2, last_round: null },
-  current_task: { number: 12, title: "Doručovateľ faktúr do zdieľaného priečinka NEX Genesis na pozadí" },
+  consultation_direction: {
+    blocking_by_round: [2],
+    closed: 3,
+    open: 2,
+    last_round: null,
+  },
+  current_task: {
+    number: 12,
+    title: "Doručovateľ faktúr do zdieľaného priečinka NEX Genesis na pozadí",
+  },
   recent_messages: MESSAGES,
   agent_sessions: [{ role: "ai_agent", status: "idle" }],
   vizual_checklists: [],
@@ -257,7 +291,11 @@ const STATE = PIPELINE.state!;
  * preview, the composer or the Poradca bar) — and a deploy running on the UAT and PROD pages. Measured as their own tests on
  * the pages they change.
  */
-export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[] }[] = [
+export const BUILD_STAGES: {
+  name: string;
+  pages: string[];
+  overrides: Override[];
+}[] = [
   {
     name: "in the visual stage",
     // DEV-120: the Vizuál page is gone — the live preview opens from the Riadiace centrum (LivePreviewBar).
@@ -277,7 +315,8 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
           ...STATE,
           current_stage: "vizual",
           block_reason: null,
-          next_action: "Prezri si živý náhľad aplikácie a napíš, čo zmeniť, alebo vizuál schváľ",
+          next_action:
+            "Prezri si živý náhľad aplikácie a napíš, čo zmeniť, alebo vizuál schváľ",
         },
         available_actions: ["schvalit", "pozastavit"],
         recent_messages: MESSAGES.slice(0, 1),
@@ -286,12 +325,16 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
           {
             round: "1",
             seq: 3,
-            not_verifiable: ["Odoslanie e-mailu obsluhe pri výpadku doručovania"],
+            not_verifiable: [
+              "Odoslanie e-mailu obsluhe pri výpadku doručovania",
+            ],
             items: [
               {
                 screen: "Prehľad",
-                action: "Otvor Prehľad a pozri dlaždicu Čaká na doručenie do NEX Genesis",
-                expected: "Dlaždica ukazuje počet faktúr, ktoré čakajú, a čas posledného pokusu",
+                action:
+                  "Otvor Prehľad a pozri dlaždicu Čaká na doručenie do NEX Genesis",
+                expected:
+                  "Dlaždica ukazuje počet faktúr, ktoré čakajú, a čas posledného pokusu",
                 url: null,
               },
             ],
@@ -325,7 +368,8 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
           status: "agent_working",
           block_reason: null,
           working_since: T2,
-          next_action: "Programujem úlohu 12 — doručovateľ faktúr do zdieľaného priečinka NEX Genesis na pozadí",
+          next_action:
+            "Programujem úlohu 12 — doručovateľ faktúr do zdieľaného priečinka NEX Genesis na pozadí",
         },
         available_actions: ["pozastavit"],
         agent_sessions: [{ role: "ai_agent", status: "active" }],
@@ -357,7 +401,10 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
             status: "open",
             content:
               "Kontrola zostavenia sa nedá spustiť: kontajner skúšok nemá prístup k databáze. Toto nie je chyba aplikácie, ale prostredia kokpitu.",
-            payload: { framework_issue: true, technical_detail: "docker: network nex-inbox-test not found" },
+            payload: {
+              framework_issue: true,
+              technical_detail: "docker: network nex-inbox-test not found",
+            },
           },
         ],
       }),
@@ -369,11 +416,18 @@ export const BUILD_STAGES: { name: string; pages: string[]; overrides: Override[
     overrides: [
       override("get", "/api/v1/pipeline/{version_id}", {
         ...PIPELINE,
-        state: { ...STATE, current_stage: "done", status: "done", block_reason: null, next_action: "Verzia je hotová" },
+        state: {
+          ...STATE,
+          current_stage: "done",
+          status: "done",
+          block_reason: null,
+          next_action: "Verzia je hotová",
+        },
         available_actions: [],
         all_tasks_done: true,
         verified: true,
-        verified_provenance: "Verifikácia prešla 11. 10. 2026 o 18:40 na stave kódu af97f37",
+        verified_provenance:
+          "Verifikácia prešla 11. 10. 2026 o 18:40 na stave kódu af97f37",
         recent_messages: MESSAGES.slice(0, 1),
       }),
     ],
@@ -389,9 +443,11 @@ const TASK_PLAN: TaskPlanResponse = {
     {
       id: "e1",
       number: 1,
-      title: "Doručovanie faktúr do NEX Genesis na pozadí s opakovaním pri výpadku spojenia",
+      title:
+        "Doručovanie faktúr do NEX Genesis na pozadí s opakovaním pri výpadku spojenia",
       status: "in_progress",
-      plain_description: "Faktúra počká, kým sa spojenie vráti, a obsluha dostane jeden e-mail.",
+      plain_description:
+        "Faktúra počká, kým sa spojenie vráti, a obsluha dostane jeden e-mail.",
       spend: null,
       feats: [
         {
@@ -400,19 +456,22 @@ const TASK_PLAN: TaskPlanResponse = {
           title: "Doručovateľ s časovým stropom každého dotyku zdieľania",
           status: "in_progress",
           description: "",
-          plain_description: "Aplikácia nezamrzne, keď zdieľaný priečinok mlčí.",
+          plain_description:
+            "Aplikácia nezamrzne, keď zdieľaný priečinok mlčí.",
           spend: null,
           tasks: [
             {
               id: "t1",
               number: 12,
-              title: "GenesisDeliverer — jeden pokus o doručenie faktúry z archívu",
+              title:
+                "GenesisDeliverer — jeden pokus o doručenie faktúry z archívu",
               task_type: "backend",
               status: "in_progress",
               priority: "high",
               checklist_type: null,
               description: "",
-              plain_description: "Jeden pokus o doručenie, výsledok sa zapíše k faktúre.",
+              plain_description:
+                "Jeden pokus o doručenie, výsledok sa zapíše k faktúre.",
               spend: null,
             },
             {
@@ -424,7 +483,8 @@ const TASK_PLAN: TaskPlanResponse = {
               priority: "medium",
               checklist_type: null,
               description: "",
-              plain_description: "Obsluha vidí, ktoré faktúry čakajú na doručenie.",
+              plain_description:
+                "Obsluha vidí, ktoré faktúry čakajú na doručenie.",
               spend: null,
               billing_category: "gift",
             },
@@ -628,9 +688,24 @@ const COSTS: S["ProjectCostsRead"] = {
   wages_configured: true,
   manager: { interventions: 23, wait_seconds: 5400 },
   price_list: [PRICE],
-  rows: [ROW, { ...ROW, key: "navrh", active_seconds: 7200, turns: 64, share_pct: 31.4, agent_cost: 12.97 }],
+  rows: [
+    ROW,
+    {
+      ...ROW,
+      key: "navrh",
+      active_seconds: 7200,
+      turns: 64,
+      share_pct: 31.4,
+      agent_cost: 12.97,
+    },
+  ],
   totals: ZERO_TOTALS,
-  usage: { duration_seconds: 28_800, input_tokens: 2_340_000, output_tokens: 412_000, messages: 368 },
+  usage: {
+    duration_seconds: 28_800,
+    input_tokens: 2_340_000,
+    output_tokens: 412_000,
+    messages: 368,
+  },
   by_version: [
     {
       version_id: RELEASED.id,
@@ -643,7 +718,12 @@ const COSTS: S["ProjectCostsRead"] = {
       price_list: [PRICE],
       rows: [ROW],
       totals: ZERO_TOTALS,
-      usage: { duration_seconds: 28_800, input_tokens: 2_340_000, output_tokens: 412_000, messages: 368 },
+      usage: {
+        duration_seconds: 28_800,
+        input_tokens: 2_340_000,
+        output_tokens: 412_000,
+        messages: 368,
+      },
     },
   ],
 };
@@ -662,9 +742,15 @@ const SETTING: S["SystemSettingRead"] = {
 };
 
 const DOCS: KnowledgeDoc[] = [
-  { relative_path: "icc/CLEAN_CODE.md", filename: "CLEAN_CODE.md", category: "icc", size_bytes: 18_230 },
   {
-    relative_path: "projects/nex-inbox/docs/ARCHITECTURE-dorucovanie-do-genesisu.md",
+    relative_path: "icc/CLEAN_CODE.md",
+    filename: "CLEAN_CODE.md",
+    category: "icc",
+    size_bytes: 18_230,
+  },
+  {
+    relative_path:
+      "projects/nex-inbox/docs/ARCHITECTURE-dorucovanie-do-genesisu.md",
     filename: "ARCHITECTURE-dorucovanie-do-genesisu.md",
     category: "projects",
     size_bytes: 42_100,
@@ -709,7 +795,8 @@ export const CI_RUNS: S["CiRunsRead"] = {
       created_at: T2,
       duration_seconds: 716,
       url: "https://github.com/rauschiccsk/nex-inbox/actions/runs/38305919265",
-      failed_step: "smb-blackhole › Skutočné zdieľanie zmĺkne a vráti sa (deploy/ci/smb_blackhole_check.sh)",
+      failed_step:
+        "smb-blackhole › Skutočné zdieľanie zmĺkne a vráti sa (deploy/ci/smb_blackhole_check.sh)",
       task: null,
       deployed: [],
     },
@@ -718,7 +805,8 @@ export const CI_RUNS: S["CiRunsRead"] = {
       number: 24,
       attempt: 1,
       workflow: "CI",
-      subject: "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
+      subject:
+        "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
       event: "push",
       event_label: "odoslanie",
       state: "success",
@@ -738,7 +826,11 @@ export const CI_RUNS: S["CiRunsRead"] = {
         version_number: VERSION.version_number,
       },
       deployed: [
-        { environment: "prod", customer: "MÁGERSTAV spol. s r.o.", version: "1.7.1" },
+        {
+          environment: "prod",
+          customer: "MÁGERSTAV spol. s r.o.",
+          version: "1.7.1",
+        },
         { environment: "uat", customer: "ICC s.r.o.", version: "1.7.1" },
       ],
     },
@@ -766,7 +858,9 @@ export const CI_RUNS: S["CiRunsRead"] = {
 };
 
 /** The messages of Poradca's conversation — an answer with marked choices and one proposing a ticket (DEV-119). */
-export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messages"]> = [
+export const PORADCA_MESSAGES: NonNullable<
+  S["PoradcaConversationDetail"]["messages"]
+> = [
   {
     id: "99999999-9999-4999-8999-999999999992",
     author: "human",
@@ -788,8 +882,18 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
     created_at: T1,
     finished_at: T2,
     choices: [
-      { card: 2, label: "Zhasnúť hneď, keď sa doručovanie obnoví", status: "on_card", question: "Kedy zhasne upozornenie?" },
-      { card: 1, label: "posielať po kúskoch", status: "not_on_card", question: "Čo s veľkou faktúrou?" },
+      {
+        card: 2,
+        label: "Zhasnúť hneď, keď sa doručovanie obnoví",
+        status: "on_card",
+        question: "Kedy zhasne upozornenie?",
+      },
+      {
+        card: 1,
+        label: "posielať po kúskoch",
+        status: "not_on_card",
+        question: "Čo s veľkou faktúrou?",
+      },
       { card: null, label: "Áno, súhlasím", status: "answer", question: null },
     ],
     held_for_answer: false,
@@ -804,7 +908,10 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
     duration_seconds: 12,
     created_at: T2,
     finished_at: T2,
-    ticket_proposal: { kind: "nsv", title: "Tlačidlo Nasadiť pri UAT nič nerobí" },
+    ticket_proposal: {
+      kind: "nsv",
+      title: "Tlačidlo Nasadiť pri UAT nič nerobí",
+    },
     held_for_answer: false,
   },
 ];
@@ -812,7 +919,16 @@ export const PORADCA_MESSAGES: NonNullable<S["PoradcaConversationDetail"]["messa
 export function registerFixtures(): void {
   answer("get", "/api/v1/auth/me", USER);
   // DEV-320 — the colours an account may take (Settings → Moje konto → Farba konta).
-  answer("get", "/api/v1/auth/accent-colors", ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#db2777", "#ca8a04"]);
+  answer("get", "/api/v1/auth/accent-colors", [
+    "#2563eb",
+    "#16a34a",
+    "#dc2626",
+    "#9333ea",
+    "#ea580c",
+    "#0891b2",
+    "#db2777",
+    "#ca8a04",
+  ]);
   answer("get", "/api/v1/user-layout", LAYOUT);
   answer("put", "/api/v1/user-layout", LAYOUT);
   // DEV-89 — an open note with a long first line, and one resolved into a request of the selected project.
@@ -820,7 +936,8 @@ export function registerFixtures(): void {
     {
       id: "aaaaaaaa-0000-4000-8000-000000000089",
       body: "Zavolať Tiborovi kvôli faktúram MÁGERSTAV, ktoré čakajú na doručenie do NEX Genesis od piatku\nA spýtať sa na dobropisy.",
-      title: "Zavolať Tiborovi kvôli faktúram MÁGERSTAV, ktoré čakajú na doručenie do NEX Genesis od piatku",
+      title:
+        "Zavolať Tiborovi kvôli faktúram MÁGERSTAV, ktoré čakajú na doručenie do NEX Genesis od piatku",
       revision: 3,
       created_at: T1,
       updated_at: T2,
@@ -845,7 +962,12 @@ export function registerFixtures(): void {
     },
   ]);
   answerUntyped("get", "/api/v1/version", { version: "4.43.26" });
-  answer("get", "/api/v1/projects", { items: [PROJECT], total: 1, skip: 0, limit: 50 });
+  answer("get", "/api/v1/projects", {
+    items: [PROJECT],
+    total: 1,
+    skip: 0,
+    limit: 50,
+  });
   // DEV-151 — „Kde sme skončili“ at the top of Riadiace centrum: a long note, so the guard measures it wrapped.
   answer("get", "/api/v1/versions/{version_id}/notes", [
     {
@@ -904,7 +1026,13 @@ export function registerFixtures(): void {
           },
         ],
       },
-      { project_id: "44444444-4444-4444-8444-444444444444", name: "NEX Genesis", slug: "nex-genesis", prod_version: "1.2.2", open_versions: [] },
+      {
+        project_id: "44444444-4444-4444-8444-444444444444",
+        name: "NEX Genesis",
+        slug: "nex-genesis",
+        prod_version: "1.2.2",
+        open_versions: [],
+      },
     ],
   });
   answer("get", "/api/v1/projects/{project_id}", PROJECT);
@@ -924,7 +1052,10 @@ export function registerFixtures(): void {
     dirty_count: 2,
     truncated: false,
     files: [
-      { code: " M", path: "backend/apps/smb_writer/deliverer_with_a_rather_long_module_name.py" },
+      {
+        code: " M",
+        path: "backend/apps/smb_writer/deliverer_with_a_rather_long_module_name.py",
+      },
       { code: "??", path: "docs/specs/versions/v1.8.0/RELEASE_NOTES.md" },
     ],
   });
@@ -936,19 +1067,31 @@ export function registerFixtures(): void {
       {
         id: "nsv-standard",
         label: "NSV štandard",
-        description: "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky aplikácie.",
+        description:
+          "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky aplikácie.",
       },
     ],
     default_template: "nsv-standard",
   });
-  answerUntyped<NexsharedStatus>("get", "/api/v1/projects/{project_id}/nexshared-status", {
-    current: "v0.19.0",
-    latest: "v0.20.0",
-    behind: 1,
-    up_to_date: false,
-    changelog: [{ version: "v0.20.0", body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu." }],
-    frontends: [{ directory: "frontend", label: "Aplikácia", current: "v0.19.0" }],
-  });
+  answerUntyped<NexsharedStatus>(
+    "get",
+    "/api/v1/projects/{project_id}/nexshared-status",
+    {
+      current: "v0.19.0",
+      latest: "v0.20.0",
+      behind: 1,
+      up_to_date: false,
+      changelog: [
+        {
+          version: "v0.20.0",
+          body: "[vzhľad] Kostra aplikácie sa prispôsobí mobilu a tabletu.",
+        },
+      ],
+      frontends: [
+        { directory: "frontend", label: "Aplikácia", current: "v0.19.0" },
+      ],
+    },
+  );
   // DEV-156: the panel „Nepoužívaný kód z minulých verzií“ — one thing the earlier versions left behind.
   answer("get", "/api/v1/projects/{slug}/dead-code", {
     findings: [
@@ -957,7 +1100,8 @@ export function registerFixtures(): void {
         path: "backend/app/core/security.py",
         name: "generate_temp_password",
         line: 45,
-        sentence: "funkciu generate_temp_password (backend/app/core/security.py:45) nikto nevolá",
+        sentence:
+          "funkciu generate_temp_password (backend/app/core/security.py:45) nikto nevolá",
       },
     ],
     not_run: [],
@@ -968,7 +1112,8 @@ export function registerFixtures(): void {
   // DEV-164: the panel „Projekt s webom“ — NEX Inbox signs in by token, so the cockpit names why it cannot switch.
   answer("get", "/api/v1/projects/{project_id}/web-switch", {
     allowed: false,
-    refusal: "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom.",
+    refusal:
+      "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom.",
     web_port: null,
     surfaces: [
       {
@@ -983,12 +1128,17 @@ export function registerFixtures(): void {
     ],
     warnings: [],
   });
-  answer("get", "/api/v1/projects/ports/suggest-block", { base: 9300, block_size: 3, warnings: [] });
+  answer("get", "/api/v1/projects/ports/suggest-block", {
+    base: 9300,
+    block_size: 3,
+    warnings: [],
+  });
   answer("get", "/api/v1/projects/create-presets", {
     enable_cicd: true,
     enable_branch_protection: false,
     branch_protection_available: false,
-    branch_protection_note: "Ochrana hlavnej vetvy potrebuje platený plán GitHubu pre súkromné repozitáre.",
+    branch_protection_note:
+      "Ochrana hlavnej vetvy potrebuje platený plán GitHubu pre súkromné repozitáre.",
     full_smoke: true,
     custom_development_enabled: false,
     private_network: false,
@@ -997,12 +1147,26 @@ export function registerFixtures(): void {
     web_note: null,
   });
   answerUntyped<AdoptableCandidate[]>("get", "/api/v1/projects/adoptable", [
-    { slug: "nex-ledger", source_path: "/opt/projects/nex-ledger", name: "NEX Ledger" },
-    { slug: "career-asistent-pre-uchadzacov-o-zamestnanie", source_path: "/opt/projects/career-asistent", name: null },
+    {
+      slug: "nex-ledger",
+      source_path: "/opt/projects/nex-ledger",
+      name: "NEX Ledger",
+    },
+    {
+      slug: "career-asistent-pre-uchadzacov-o-zamestnanie",
+      source_path: "/opt/projects/career-asistent",
+      name: null,
+    },
   ]);
   answer("get", "/api/v1/versions/{version_id}", VERSION);
-  answer("get", "/api/v1/versions/{version_id}/nastavenia", { version_number_lock_reason: null });
-  answerUntyped<TaskPlanResponse>("get", "/api/v1/versions/{version_id}/task-plan", TASK_PLAN);
+  answer("get", "/api/v1/versions/{version_id}/nastavenia", {
+    version_number_lock_reason: null,
+  });
+  answerUntyped<TaskPlanResponse>(
+    "get",
+    "/api/v1/versions/{version_id}/task-plan",
+    TASK_PLAN,
+  );
   answer("get", "/api/v1/versions/{version_id}/zadanie", {
     content:
       "# Zadanie NEX Inbox 1.8.0\n\nFaktúry sa doručujú do zdieľaného priečinka NEX Genesis na pozadí. Pri výpadku spojenia faktúra čaká a obsluha dostane jeden e-mail.\n",
@@ -1036,7 +1200,8 @@ export function registerFixtures(): void {
         number: 7,
         project_id: PROJECT.id,
         version_id: null,
-        title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
+        title:
+          "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
         description: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
         priority: "medium",
         status: "open",
@@ -1071,7 +1236,8 @@ export function registerFixtures(): void {
   });
   // DEV-121: the draft „Založiť tiket" opens with — the layout check opens the panel too.
   answer("get", "/api/v1/backlog/{item_id}/plane-ticket", {
-    title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
+    title:
+      "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
     description: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
     ticket_type: "Task",
     responsible_options: ["Andros Dedo", "Zoltán"],
@@ -1089,7 +1255,8 @@ export function registerFixtures(): void {
       {
         issue_id: "i130",
         identifier: "DEV-130",
-        title: "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
+        title:
+          "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
         state: "In Progress",
         closed: false,
         ticket_type: "Task",
@@ -1107,7 +1274,8 @@ export function registerFixtures(): void {
       {
         issue_id: "i114",
         identifier: "DEV-114",
-        title: "NEX Inbox: faktúra FLORASERVIS sa nespracuje z ISDOC — číslo faktúry je v ISDOC len vo variabilnom symbole",
+        title:
+          "NEX Inbox: faktúra FLORASERVIS sa nespracuje z ISDOC — číslo faktúry je v ISDOC len vo variabilnom symbole",
         state: "In Progress",
         closed: false,
         ticket_type: "Bug",
@@ -1131,16 +1299,36 @@ export function registerFixtures(): void {
   ]);
   answer("get", "/api/v1/projects/{slug}/customer-settings", {
     settings: [
-      { key: "APP_PUBLIC_URL", kind: "public_url", required: false, label: "APP_PUBLIC_URL" },
+      {
+        key: "APP_PUBLIC_URL",
+        kind: "public_url",
+        required: false,
+        label: "APP_PUBLIC_URL",
+      },
       {
         key: "BOOTSTRAP_ADMIN_EMAIL",
         kind: "customer",
         required: true,
         label: "E-mail prvého správcu — týmto e-mailom sa prvý raz prihlásiš",
       },
-      { key: "BOOTSTRAP_ADMIN_PASSWORD", kind: "customer_secret", required: true, label: "Heslo prvého správcu" },
-      { key: "INTAKE_IMAP_HOST", kind: "customer", required: false, label: "Server schránky, z ktorej sa čítajú faktúry" },
-      { key: "INTAKE_IMAP_PASSWORD", kind: "customer_secret", required: false, label: "Heslo k schránke s faktúrami" },
+      {
+        key: "BOOTSTRAP_ADMIN_PASSWORD",
+        kind: "customer_secret",
+        required: true,
+        label: "Heslo prvého správcu",
+      },
+      {
+        key: "INTAKE_IMAP_HOST",
+        kind: "customer",
+        required: false,
+        label: "Server schránky, z ktorej sa čítajú faktúry",
+      },
+      {
+        key: "INTAKE_IMAP_PASSWORD",
+        kind: "customer_secret",
+        required: false,
+        label: "Heslo k schránke s faktúrami",
+      },
     ],
     problems: [],
     legacy_admin: false,
@@ -1167,7 +1355,14 @@ export function registerFixtures(): void {
     action: "Spustiť vykonávač kontrol",
     note: "Vykonávač kontrol sa do 120 s neprihlásil na GitHube — prvá kontrola počká, kým sa prihlási.",
     jobs_elsewhere: [
-      ...["lint", "drift-check", "test", "build", "chrome109", "smb-blackhole"].map((job) => ({
+      ...[
+        "lint",
+        "drift-check",
+        "test",
+        "build",
+        "chrome109",
+        "smb-blackhole",
+      ].map((job) => ({
         workflow: "ci.yml",
         job,
         runs_on: "ubuntu-latest",
@@ -1191,7 +1386,10 @@ export function registerFixtures(): void {
       "package.json",
     ],
     // DEV-87 — the agent is changing main.py and has added a new page.
-    changes: { "backend/main.py": "M", "frontend/src/pages/InvoiceDetailPage.tsx": "U" },
+    changes: {
+      "backend/main.py": "M",
+      "frontend/src/pages/InvoiceDetailPage.tsx": "U",
+    },
     stamps: {
       ".env.example": "52-1",
       ".gitignore": "40-1",
@@ -1209,7 +1407,7 @@ export function registerFixtures(): void {
     size: 412,
     text:
       '"""NEX Inbox — the backend of the invoice inbox."""\n\nfrom fastapi import FastAPI\n\napp = FastAPI(title="NEX Inbox")\n\n\n' +
-      "@app.get(\"/api/v1/health\")\ndef health() -> dict[str, str]:\n    return {\"status\": \"ok\", \"database\": \"ok\", \"genesis_share\": \"reachable over SMB from srv-mager-w2012\"}\n",
+      '@app.get("/api/v1/health")\ndef health() -> dict[str, str]:\n    return {"status": "ok", "database": "ok", "genesis_share": "reachable over SMB from srv-mager-w2012"}\n',
     binary: false,
     too_big: false,
     max_bytes: 1000000,
@@ -1217,7 +1415,8 @@ export function registerFixtures(): void {
     last_commit: {
       sha: "1771419bb2f6c1f0e7d1c9b8a7f6e5d4c3b2a190",
       at: T1,
-      subject: "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
+      subject:
+        "test(1.8.0): release gate — three features and SP-21…SP-27 (TASK #32.2.1)",
       task: {
         label: "32.2.1",
         task_id: "33333333-3333-4333-8333-333333333321",
@@ -1239,8 +1438,16 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/projects/{slug}/code/search", {
     query: "SellersItemIdentification",
     hits: [
-      { path: "backend/apps/xml_exporter/ubl_builder.py", line: 214, text: "    seller_id = SubElement(item, cac('SellersItemIdentification'))" },
-      { path: "docs/specs/backend/BEHAVIOR.md", line: 88, text: "Kód položky dodávateľa ide do SellersItemIdentification (BT-155)." },
+      {
+        path: "backend/apps/xml_exporter/ubl_builder.py",
+        line: 214,
+        text: "    seller_id = SubElement(item, cac('SellersItemIdentification'))",
+      },
+      {
+        path: "docs/specs/backend/BEHAVIOR.md",
+        line: 88,
+        text: "Kód položky dodávateľa ide do SellersItemIdentification (BT-155).",
+      },
     ],
     truncated: false,
   });
@@ -1267,24 +1474,36 @@ export function registerFixtures(): void {
         title: "Detail faktúry sa otvorí aj v staršom prehliadači na serveri",
         screen: "Faktúry → detail faktúry",
         data: "faktúra EMOS SK s.r.o. 9084643319",
-        steps: ["Otvor NEX Inbox z NEX Genesis.", "V zozname faktúr klikni na faktúru EMOS.", "Prejdi na druhú stranu PDF."],
+        steps: [
+          "Otvor NEX Inbox z NEX Genesis.",
+          "V zozname faktúr klikni na faktúru EMOS.",
+          "Prejdi na druhú stranu PDF.",
+        ],
         expected: ["Detail sa otvorí, PDF je vidno a dá sa listovať."],
       },
       {
         title: "Objednávkový kód z ISDOC",
         screen: "Faktúry → detail faktúry → Položky",
         steps: ["Otvor faktúru od RMJ, s.r.o. prijatú ako ISDOC."],
-        expected: ["Pri každej položke je objednávkový kód (napr. S093276315)."],
+        expected: [
+          "Pri každej položke je objednávkový kód (napr. S093276315).",
+        ],
       },
     ],
     nothing_to_test: null,
     changes: [],
-    logins: [CUSTOMER.id, NEW_CUSTOMER.id].map((id) => ({ customer_id: id, login: "operator@priklad.sk" })),
+    logins: [CUSTOMER.id, NEW_CUSTOMER.id].map((id) => ({
+      customer_id: id,
+      login: "operator@priklad.sk",
+    })),
   });
   // DEV-91: what was tried — one change ticked off, so the guard measures the guide with its controls.
   answer("get", "/api/v1/customers/{customer_id}/uat-checks", {
     version_number: "1.7.1",
-    items: ["Detail faktúry sa otvorí aj v staršom prehliadači na serveri", "Objednávkový kód z ISDOC"],
+    items: [
+      "Detail faktúry sa otvorí aj v staršom prehliadači na serveri",
+      "Objednávkový kód z ISDOC",
+    ],
     checks: [
       {
         item: "Detail faktúry sa otvorí aj v staršom prehliadači na serveri",
@@ -1299,21 +1518,33 @@ export function registerFixtures(): void {
     untested: ["Objednávkový kód z ISDOC"],
     broken: [],
   });
-  answerUntyped<AdoptionPreview>("get", "/api/v1/customers/{customer_id}/adoption-preview", {
-    instance_dir: "/opt/uat/novak/nex-inbox",
-    exists: true,
-    already_ours: false,
-    set_aside: [
-      ["docker-compose.yml", "docker-compose.yml.pred-prevzatim"],
-      [".env", ".env.pred-prevzatim"],
-    ],
-    untouched: ["data/", "originals/", "backups/nex_inbox-2026-10-01.dump"],
-    running_containers: ["novak-inbox-backend", "novak-inbox-frontend", "novak-inbox-postgres"],
-    carried_over: ["POSTGRES_PASSWORD", "IMAP_PASSWORD", "MANAGER_LAUNCH_SIGNING_KEY"],
-    blocking: [],
-    confirmation_phrase: "prevziať novak",
-    can_adopt: true,
-  });
+  answerUntyped<AdoptionPreview>(
+    "get",
+    "/api/v1/customers/{customer_id}/adoption-preview",
+    {
+      instance_dir: "/opt/uat/novak/nex-inbox",
+      exists: true,
+      already_ours: false,
+      set_aside: [
+        ["docker-compose.yml", "docker-compose.yml.pred-prevzatim"],
+        [".env", ".env.pred-prevzatim"],
+      ],
+      untouched: ["data/", "originals/", "backups/nex_inbox-2026-10-01.dump"],
+      running_containers: [
+        "novak-inbox-backend",
+        "novak-inbox-frontend",
+        "novak-inbox-postgres",
+      ],
+      carried_over: [
+        "POSTGRES_PASSWORD",
+        "IMAP_PASSWORD",
+        "MANAGER_LAUNCH_SIGNING_KEY",
+      ],
+      blocking: [],
+      confirmation_phrase: "prevziať novak",
+      can_adopt: true,
+    },
+  );
   answer("get", "/api/v1/projects/{slug}/external-costs", [
     {
       id: "77777777-7777-4777-8777-777777777771",
@@ -1339,8 +1570,13 @@ export function registerFixtures(): void {
       updated_at: T1,
     },
   ]);
-  answerUntyped("get", "/api/v1/knowledge/categories", { categories: ["icc", "projects", "infrastructure"] });
-  answerUntyped("get", "/api/v1/knowledge/documents", { documents: DOCS, count: DOCS.length });
+  answerUntyped("get", "/api/v1/knowledge/categories", {
+    categories: ["icc", "projects", "infrastructure"],
+  });
+  answerUntyped("get", "/api/v1/knowledge/documents", {
+    documents: DOCS,
+    count: DOCS.length,
+  });
   answer("get", "/api/v1/rag/index-status", {
     indexed: 412,
     on_disk: 415,
@@ -1354,7 +1590,13 @@ export function registerFixtures(): void {
   answer("get", "/api/v1/project-specs/list", {
     count: 1,
     documents: [
-      { category: "backend", filename: "BEHAVIOR.md", relative_path: "backend/BEHAVIOR.md", size_bytes: 96_000, is_directory: false },
+      {
+        category: "backend",
+        filename: "BEHAVIOR.md",
+        relative_path: "backend/BEHAVIOR.md",
+        size_bytes: 96_000,
+        is_directory: false,
+      },
     ],
   });
   answer("get", "/api/v1/poradca/status", {
@@ -1373,7 +1615,13 @@ export function registerFixtures(): void {
     project_name: PROJECT.name,
     project_slug: PROJECT.slug,
     versions: [
-      { id: VERSION.id, version_number: VERSION.version_number, stage: "navrh", status: "awaiting_manazer", instruction_open: true },
+      {
+        id: VERSION.id,
+        version_number: VERSION.version_number,
+        stage: "navrh",
+        status: "awaiting_manazer",
+        instruction_open: true,
+      },
       {
         id: RELEASED.id,
         version_number: RELEASED.version_number,
@@ -1384,7 +1632,9 @@ export function registerFixtures(): void {
       },
     ],
   });
-  answer("get", "/api/v1/poradca/projects/{slug}/conversations", [PORADCA_CONVERSATION]);
+  answer("get", "/api/v1/poradca/projects/{slug}/conversations", [
+    PORADCA_CONVERSATION,
+  ]);
   answer("get", "/api/v1/poradca/conversations/{conversation_id}", {
     ...PORADCA_CONVERSATION,
     messages: PORADCA_MESSAGES,
@@ -1412,7 +1662,8 @@ export function registerFixtures(): void {
     similar: [
       {
         identifier: "DEV-40",
-        title: "Tlačidlo Nasadiť pri UAT zašedne bez dôvodu, keď verzia ešte nie je overená",
+        title:
+          "Tlačidlo Nasadiť pri UAT zašedne bez dôvodu, keď verzia ešte nie je overená",
         state: "Todo",
         url: "http://plane.test/icc/projects/p1/issues/i40",
       },
@@ -1435,11 +1686,26 @@ export function registerFixtures(): void {
     { id: "sonnet", last_run_at: null, last_run_model: null },
     { id: "haiku", last_run_at: null, last_run_model: null },
   ]);
-  answer("get", "/api/v1/users", { items: [USER, COLLEAGUE], total: 2, skip: 0, limit: 50 });
+  answer("get", "/api/v1/users", {
+    items: [USER, COLLEAGUE],
+    total: 2,
+    skip: 0,
+    limit: 50,
+  });
   answer("get", "/api/v1/user-agent-settings", [
-    { agent_role: "ai_agent", model: "opus", effort: "high", helper_model: "sonnet" },
+    {
+      agent_role: "ai_agent",
+      model: "opus",
+      effort: "high",
+      helper_model: "sonnet",
+    },
     { agent_role: "auditor", model: "opus", effort: "max", helper_model: null },
-    { agent_role: "poradca", model: "sonnet", effort: "medium", helper_model: null },
+    {
+      agent_role: "poradca",
+      model: "sonnet",
+      effort: "medium",
+      helper_model: null,
+    },
   ]);
   answer("get", "/api/v1/user-sessions", {
     items: [
@@ -1462,7 +1728,9 @@ export function registerFixtures(): void {
     relative_path: "docs/specs/versions/v1.8.0/ZADANIE.md",
   });
   // DEV-149: the new-version screen asks the cockpit for the number instead of computing it.
-  answer("get", "/api/v1/projects/{project_id}/versions/next-number", { version_number: "1.8.0" });
+  answer("get", "/api/v1/projects/{project_id}/versions/next-number", {
+    version_number: "1.8.0",
+  });
   // DEV-73: NEX Inbox as it stood 12.10.2026 — an issued fix, an issued version a newer rate would count higher, a
   // version to issue, a fast fix waiting for its work kind, a version still in build.
   const issued = (amount: string, kind: "fix" | "change") => ({
@@ -1521,10 +1789,48 @@ export function registerFixtures(): void {
   };
   answer("get", "/api/v1/projects/{slug}/billing", {
     rows: [
-      { ...billingRow, version_id: VERSION.id, version_number: "1.8.0", state: "not_done", reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.", delivered_sha: null, base_sha: null, preview_amount_eur: null, tokens_code: null, tokens_docs: null, estimate },
-      { ...billingRow, version_id: RELEASED.id, version_number: "1.7.1", flow_type: "fast_fix", work_kind: "fix", state: "issued", issued: issued("0.00", "fix"), preview_amount_eur: "0.00" },
-      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222170", version_number: "1.7.0", state: "issued", issued: issued("249.98", "change"), preview_amount_eur: "423.87", differs: true, estimate: { ...estimate, amount_eur: "230.00" } },
-      { ...billingRow, version_id: "22222222-2222-4222-8222-222222222160", version_number: "1.6.0", state: "ready", preview_amount_eur: "93.03", rate_code: "1.5", own_rates: true },
+      {
+        ...billingRow,
+        version_id: VERSION.id,
+        version_number: "1.8.0",
+        state: "not_done",
+        reason: "Verzia ešte nie je hotová — súpis sa robí z dodanej verzie.",
+        delivered_sha: null,
+        base_sha: null,
+        preview_amount_eur: null,
+        tokens_code: null,
+        tokens_docs: null,
+        estimate,
+      },
+      {
+        ...billingRow,
+        version_id: RELEASED.id,
+        version_number: "1.7.1",
+        flow_type: "fast_fix",
+        work_kind: "fix",
+        state: "issued",
+        issued: issued("0.00", "fix"),
+        preview_amount_eur: "0.00",
+      },
+      {
+        ...billingRow,
+        version_id: "22222222-2222-4222-8222-222222222170",
+        version_number: "1.7.0",
+        state: "issued",
+        issued: issued("249.98", "change"),
+        preview_amount_eur: "423.87",
+        differs: true,
+        estimate: { ...estimate, amount_eur: "230.00" },
+      },
+      {
+        ...billingRow,
+        version_id: "22222222-2222-4222-8222-222222222160",
+        version_number: "1.6.0",
+        state: "ready",
+        preview_amount_eur: "93.03",
+        rate_code: "1.5",
+        own_rates: true,
+      },
       {
         ...billingRow,
         version_id: "22222222-2222-4222-8222-222222222156",
@@ -1583,7 +1889,13 @@ export function registerFixtures(): void {
       amount_docs_eur: "246.00",
       amount_eur: "2370.00",
       cannot_issue: [],
-      calibration: { eur_code: 2208, eur_docs: 246, per_1k_code: 12, per_1k_docs: 6, complete: true },
+      calibration: {
+        eur_code: 2208,
+        eur_docs: 246,
+        per_1k_code: 12,
+        per_1k_docs: 6,
+        complete: true,
+      },
       // DEV-75 — the lines by the category of the task that wrote the code, a gift at 100 % and work without a task.
       version_category: "request",
       discounts: { request: "0", bug: "100", gift: "100" },
@@ -1607,7 +1919,13 @@ export function registerFixtures(): void {
           amount_eur: "2040.00",
           // DEV-265: a line naming as many tasks as NEX Knowledge 0.1.0 did (31) — the table must not break.
           tasks: [
-            { label: "28.1.1", title: "Doručovanie do NEX Genesis", lines: 8_900, tokens: 170_000, kilotokens: "170.0" },
+            {
+              label: "28.1.1",
+              title: "Doručovanie do NEX Genesis",
+              lines: 8_900,
+              tokens: 170_000,
+              kilotokens: "170.0",
+            },
             ...Array.from({ length: 30 }, (_, i) => ({
               label: `${1 + Math.floor(i / 6)}.${(i % 6) + 1}.1`,
               title: `Úloha ${i + 1}`,
@@ -1663,7 +1981,15 @@ export function registerFixtures(): void {
           discount_label: "pozornosť ICC",
           discount_eur: "84.00",
           amount_eur: "0.00",
-          tasks: [{ label: "28.2.1", title: "Tmavý režim", lines: 400, tokens: 7_000, kilotokens: "7.0" }],
+          tasks: [
+            {
+              label: "28.2.1",
+              title: "Tmavý režim",
+              lines: 400,
+              tokens: 7_000,
+              kilotokens: "7.0",
+            },
+          ],
         },
       ],
       tasks: [

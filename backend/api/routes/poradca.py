@@ -288,6 +288,7 @@ def _idea_read(db: Session, idea, conversation: PoradcaConversation) -> IdeaRead
         outcome_project_slug=project.slug if project else None,
         outcome_project_name=project.name if project else None,
         outcome_backlog_number=ideas.outcome_backlog_number(db, idea),
+        talk_in_project=conversation.project_id is not None,
         plane_identifier=idea.plane_identifier,
         plane_url=idea.plane_url,
         created_at=idea.created_at,
@@ -370,12 +371,16 @@ def idea_added(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> IdeaOutcome:
-    """The idea's brief goes to the Zásobník of the existing project it names; the talk moves to that project."""
+    """The idea's brief goes to the Zásobník of the existing project it names — any project of the cockpit (DEV-350);
+    the talk moves to that project when its author may open it, otherwise it stays with him in Nápady."""
     idea, conversation = _idea_for(db, current_user, idea_id)
     try:
         slug = ideas.addition_target(db, conversation, payload.message_id)
-        project = authz.assert_project_slug_access(db, current_user, slug)
-        idea = ideas.add(db, idea, conversation, message_id=payload.message_id, project=project)
+        project = db.execute(select(Project).where(Project.slug == slug)).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Projekt sa nenašiel.")
+        may_open = authz.is_owner_or_admin(current_user, authz.project_owner_id(project))
+        idea = ideas.add(db, idea, conversation, message_id=payload.message_id, project=project, talk_moves=may_open)
         db.commit()
     except ideas.OutcomeRefused as exc:
         db.rollback()

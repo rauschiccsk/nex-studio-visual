@@ -160,12 +160,44 @@ def test_the_brief_added_to_an_existing_project_is_a_requirement_of_its_zasobnik
     assert db.get(PoradcaConversation, uuid.UUID(idea["conversation_id"])).project_id == existing.id
 
 
-def test_a_brief_is_added_only_to_a_project_the_person_may_open(world, db_session):
+def test_a_brief_is_added_to_a_project_another_manager_leads_and_the_talk_stays_with_its_author(world, db_session):
+    """DEV-350: the Projektant reads every project (DEV-345), so an idea may end in any project's Zásobník — which
+    version takes the requirement, its manager decides. Until 10.11.2026 only the project's own manager could add,
+    and the Director, working as zoltan, could not add the change NEX Legal Watch needs to NEX Knowledge (rausch's).
+    The talk then stays in Nápady with its author: in a project he may not open he would lose his own talk."""
     other = _user(db_session)
-    _new_project(db_session, other, slug="nex-manager")
+    theirs = _new_project(db_session, other, slug="nex-manager")
+    idea, (answer,) = _idea_with(world, ADDITION)
+    c = _client(db_session, world["me"])
+
+    r = c.post(f"/api/v1/poradca/ideas/{idea['id']}/added", json={"message_id": answer})
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["state"], r.json()["outcome_project_slug"], r.json()["talk_in_project"]) == (
+        "added",
+        "nex-manager",
+        False,
+    )
+    (item,) = db_session.execute(select(BacklogItem).where(BacklogItem.project_id == theirs.id)).scalars()
+    assert item.title == "Skupiny podľa farností"
+    assert db_session.get(PoradcaConversation, uuid.UUID(idea["conversation_id"])).project_id is None
+    assert c.get(f"/api/v1/poradca/conversations/{idea['conversation_id']}").status_code == 200, "his own talk"
+
+
+def test_a_brief_added_to_a_project_of_the_author_moves_its_talk_there(world):
+    db = world["db"]
+    _new_project(db, world["me"], slug="nex-manager")
+    idea, (answer,) = _idea_with(world, ADDITION)
+
+    r = _client(db, world["me"]).post(f"/api/v1/poradca/ideas/{idea['id']}/added", json={"message_id": answer})
+
+    assert r.status_code == 200 and r.json()["talk_in_project"] is True
+
+
+def test_a_brief_for_a_project_that_is_not_in_the_cockpit_is_refused(world, db_session):
     idea, (answer,) = _idea_with(world, ADDITION)
     r = _client(db_session, world["me"]).post(f"/api/v1/poradca/ideas/{idea['id']}/added", json={"message_id": answer})
-    assert r.status_code in (403, 404)
+    assert r.status_code == 404
     assert db_session.execute(select(func.count()).select_from(BacklogItem)).scalar_one() == 0
 
 

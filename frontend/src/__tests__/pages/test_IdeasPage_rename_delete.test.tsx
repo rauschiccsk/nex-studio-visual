@@ -59,7 +59,11 @@ const idea = (id: string, title: string, state: string, extra = {}) => ({
 });
 
 const OPEN = idea("i1", "Matrika", "open");
-const ENDED = idea("i2", "Sklad", "founded", { outcome_project_slug: "nex-sklad", outcome_project_name: "NEX Sklad" });
+const ENDED = idea("i2", "Sklad", "founded", {
+  talk_in_project: true,
+  outcome_project_slug: "nex-sklad",
+  outcome_project_name: "NEX Sklad",
+});
 
 function page() {
   return render(

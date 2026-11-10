@@ -123,7 +123,7 @@ describe("Nápady (DEV-318)", () => {
   });
 
   it("an ended idea says where it went and takes no more messages here", async () => {
-    const ended = idea("founded", { outcome_project_slug: "orthodox-register", outcome_project_name: "Orthodox Register", plane_identifier: "DEV-400" });
+    const ended = idea("founded", { talk_in_project: true, outcome_project_slug: "orthodox-register", outcome_project_name: "Orthodox Register", plane_identifier: "DEV-400" });
     ideasApi.listIdeasApi.mockResolvedValue([ended]);
     ideasApi.getIdeaApi.mockResolvedValue(ended);
     poradcaApi.getPoradcaConversationApi.mockResolvedValue({ id: "c1", messages: [brief("m-new", "Orthodox Register")] });
@@ -169,7 +169,7 @@ describe("Nápady name their agent the Projektant (DEV-343)", () => {
   });
 
   it("an ended idea names the Poradca only as the project's", async () => {
-    const ended = idea("founded", { outcome_project_slug: "orthodox-register", outcome_project_name: "Orthodox Register" });
+    const ended = idea("founded", { talk_in_project: true, outcome_project_slug: "orthodox-register", outcome_project_name: "Orthodox Register" });
     ideasApi.listIdeasApi.mockResolvedValue([ended]);
     ideasApi.getIdeaApi.mockResolvedValue(ended);
     poradcaApi.getPoradcaConversationApi.mockResolvedValue({ id: "c1", messages: [brief("m-new", "Orthodox Register")] });
@@ -189,5 +189,50 @@ describe("a new idea starts with the Projektant (DEV-343)", () => {
     expect(await screen.findByText(/Projektant pozrie, čo už máme/)).toBeInTheDocument();
     expect(screen.getByText(/Projektant sám nič nezaloží/)).toBeInTheDocument();
     expect((document.body.textContent ?? "").match(/Poradc/g)).toBeNull();
+  });
+});
+
+describe("an idea that needs another project goes on in the cockpit (DEV-350)", () => {
+  const founded = idea("founded", {
+    title: "NEX Legal Watch",
+    talk_in_project: true,
+    outcome_project_slug: "nex-legal-watch",
+    outcome_project_name: "NEX Legal Watch",
+  });
+
+  it("a founded idea opens a new one that says which project it follows — the person finishes it, nothing is sent", async () => {
+    ideasApi.listIdeasApi.mockResolvedValue([founded]);
+    ideasApi.getIdeaApi.mockResolvedValue(founded);
+    poradcaApi.getPoradcaConversationApi.mockResolvedValue({ id: "c1", messages: [brief("m-new", "NEX Legal Watch")] });
+    renderAt("/napady/i1");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Nový nápad nadväzujúci na tento projekt" }));
+
+    const box = (await screen.findByPlaceholderText(/Opíš svoj nápad/)) as HTMLTextAreaElement;
+    await waitFor(() =>
+      expect(box.value).toBe(
+        "Nadväzuje na projekt NEX Legal Watch (nex-legal-watch), ktorý vznikol z nápadu „NEX Legal Watch“. Jeho zadanie " +
+          "je v dokumentácii projektu: docs/specs/versions/v0.1.0/customer-requirements.md.\n\nČo potrebujem:",
+      ),
+    );
+    expect(ideasApi.createIdeaApi).not.toHaveBeenCalled();
+  });
+
+  it("an idea added to a project another manager leads keeps its talk here and offers no door it cannot open", async () => {
+    const added = idea("added", {
+      talk_in_project: false,
+      outcome_project_slug: "nex-knowledge",
+      outcome_project_name: "NEX Knowledge",
+      outcome_backlog_number: 1,
+    });
+    ideasApi.listIdeasApi.mockResolvedValue([added]);
+    ideasApi.getIdeaApi.mockResolvedValue(added);
+    poradcaApi.getPoradcaConversationApi.mockResolvedValue({ id: "c1", messages: [] });
+    renderAt("/napady/i1");
+
+    expect(await screen.findByText(/Projekt vedie iný manažér — rozhovor ostáva tu v Nápadoch\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pokračovať v Poradcovi projektu" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Otvoriť projekt" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nový nápad nadväzujúci na tento projekt" })).toBeNull();
   });
 });

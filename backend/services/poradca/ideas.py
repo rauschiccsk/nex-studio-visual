@@ -168,14 +168,22 @@ def _ended_elsewhere(idea: Idea) -> OutcomeRefused:
 
 
 def _conclude(
-    idea: Idea, conversation: PoradcaConversation, outcome: str, project: Project, message: PoradcaMessage
+    idea: Idea,
+    conversation: PoradcaConversation,
+    outcome: str,
+    project: Project,
+    message: PoradcaMessage,
+    *,
+    talk_moves: bool = True,
 ) -> None:
     idea.outcome = outcome
     idea.outcome_project_id = project.id
     idea.outcome_message_id = message.id
     idea.concluded_at = datetime.now(timezone.utc)
-    # The talk moves to the project and goes on there, with the project's rules from its next question (DEV-30).
-    conversation.project_id = project.id
+    # The talk moves to the project and goes on there, with the project's rules from its next question (DEV-30) —
+    # unless the author may not open that project: then it stays with him in Nápady (DEV-350).
+    if talk_moves:
+        conversation.project_id = project.id
 
 
 def found(db: Session, idea: Idea, conversation: PoradcaConversation, *, message_id: UUID, project: Project) -> Idea:
@@ -257,9 +265,19 @@ def addition_target(db: Session, conversation: PoradcaConversation, message_id: 
     return addition.project_slug
 
 
-def add(db: Session, idea: Idea, conversation: PoradcaConversation, *, message_id: UUID, project: Project) -> Idea:
-    """The brief goes to ``project``'s Zásobník as a requirement — which version takes it, the Director decides
-    (DEV-29) — and the talk moves to the project. A second click returns what the first one did.
+def add(
+    db: Session,
+    idea: Idea,
+    conversation: PoradcaConversation,
+    *,
+    message_id: UUID,
+    project: Project,
+    talk_moves: bool = True,
+) -> Idea:
+    """The brief goes to ``project``'s Zásobník as a requirement — which version takes it, its manager decides
+    (DEV-29) — and the talk moves to the project when its author may open it; otherwise it stays with him in Nápady
+    (DEV-350: any project's Zásobník, since the Projektant reads every project). A second click returns what the
+    first one did.
 
     Raises:
         OutcomeRefused: no brief, a rewritten one, a new project's brief, or a brief for another project.
@@ -278,7 +296,7 @@ def add(db: Session, idea: Idea, conversation: PoradcaConversation, *, message_i
     item = backlog_service.create(
         db, BacklogItemCreate(project_id=project.id, title=addition.title, description=addition.brief)
     )
-    _conclude(idea, conversation, OUTCOME_ADDED, project, message)
+    _conclude(idea, conversation, OUTCOME_ADDED, project, message, talk_moves=talk_moves)
     idea.outcome_backlog_item_id = item.id
     db.flush()
     return idea

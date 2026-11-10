@@ -2,7 +2,14 @@
 // survives leaving the screen (DEV-24) and a question handed over from a decision card (DEV-103). Shared by Poradca of a
 // project and by Nápady (DEV-318), so a new idea is asked exactly as a project question is.
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { ImagePlus, Loader2, Send, X } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
@@ -23,6 +30,9 @@ import {
 export interface IncomingQuestion {
   question: string;
   held: string | null;
+  /** DEV-350 — text the cockpit puts into the box for the person to finish (a follow-up idea's start); never sent by
+   *  itself. */
+  fill?: boolean;
 }
 
 const DEFAULT_PLACEHOLDER = "Opýtaj sa Poradcu…";
@@ -121,6 +131,10 @@ export default function PoradcaComposer({
   // cannot run, the version is not this project's) it waits in the box under his draft, and the box says why.
   useEffect(() => {
     if (!incoming) return;
+    if (incoming.fill) {
+      setText(appendInstruction(text, incoming.question));
+      return;
+    }
     if (incoming.held || disabledReason) {
       setText(appendInstruction(text, incoming.question));
       if (incoming.held) setRefused(incoming.held);
@@ -146,7 +160,8 @@ export default function PoradcaComposer({
         void submit();
       }}
       onDragOver={(e) => {
-        if (canAttach && !locked && imagesIn(e.dataTransfer).length) e.preventDefault();
+        if (canAttach && !locked && imagesIn(e.dataTransfer).length)
+          e.preventDefault();
       }}
       onDrop={(e) => {
         const dropped = imagesIn(e.dataTransfer);
@@ -156,19 +171,37 @@ export default function PoradcaComposer({
       }}
       className="flex-shrink-0 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] p-3"
     >
-      {disabledReason && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{disabledReason}</p>}
-      {restored && <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>}
+      {disabledReason && (
+        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+          {disabledReason}
+        </p>
+      )}
+      {restored && (
+        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+          {RESTORED_DRAFT_LABEL}
+        </p>
+      )}
       <ErrorNote error={error} />
       {refused && (
-        <p role="status" className="mb-2 text-[11px] text-[var(--color-state-warning-fg)]">
+        <p
+          role="status"
+          className="mb-2 text-[11px] text-[var(--color-state-warning-fg)]"
+        >
           {refused}
         </p>
       )}
       {images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-images">
           {images.map((i) => (
-            <div key={i.key} className="relative overflow-hidden rounded border border-[var(--color-border-default)]">
-              <img src={i.url} alt={i.file.name} className="h-16 max-w-[8rem] object-cover" />
+            <div
+              key={i.key}
+              className="relative overflow-hidden rounded border border-[var(--color-border-default)]"
+            >
+              <img
+                src={i.url}
+                alt={i.file.name}
+                className="h-16 max-w-[8rem] object-cover"
+              />
               <button
                 type="button"
                 aria-label={`Odobrať ${i.file.name}`}
@@ -231,7 +264,12 @@ export default function PoradcaComposer({
           disabled={locked || !text.trim()}
           className="flex h-10 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Opýtať sa
+          {sending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}{" "}
+          Opýtať sa
         </button>
       </div>
     </form>

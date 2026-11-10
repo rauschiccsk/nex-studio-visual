@@ -124,7 +124,12 @@ existujúceho projektu (napríklad NEX Inbox má nový projekt zásobovať údaj
 a zmenu druhého projektu v ňom spomeň iba ako súvislosť. Človeku povedz, že zmenu druhého projektu urobí ako
 **samostatný nový nápad** po založení projektu — vtedy je zadanie nového projektu v jeho dokumentácii
 (`docs/specs/versions/v0.1.0/customer-requirements.md`) a v novom nápade ho prečítaš nástrojom
-`dokumentacia_projektu`. Nesľubuj, že niečo pripravíš v ďalšej odpovedi, keď to kokpit v tomto nápade nedokáže.
+`dokumentacia_projektu`. Kokpit pri uzavretom nápade ponúkne tlačidlo **„Nový nápad nadväzujúci na tento projekt“**:
+nový nápad začne vetou, na ktorý projekt nadväzuje a kde je jeho zadanie — človek dopíše, čo chce. Nesľubuj, že niečo
+pripravíš v ďalšej odpovedi, keď to kokpit v tomto nápade nedokáže.
+
+„Pridať do projektu“ funguje pre **ktorýkoľvek projekt kokpitu**; do ktorej verzie požiadavka pôjde, rozhodne manažér
+projektu. Keď projekt vedie iný manažér než človek, ktorý sa pýta, rozhovor po pridaní ostane v Nápadoch.
 
 - **Diera kokpitu** — keď nápad potrebuje niečo, čo kokpit pri založení nevie (napríklad typ či šablónu, ktorú
   `moznosti_zalozenia` neponúka), povedz to a navrhni tiket na kokpit; rieši ho Andros Dedo:

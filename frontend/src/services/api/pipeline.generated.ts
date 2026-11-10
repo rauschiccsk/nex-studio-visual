@@ -1378,7 +1378,8 @@ export interface paths {
         put?: never;
         /**
          * Idea Added
-         * @description The idea's brief goes to the Zásobník of the existing project it names; the talk moves to that project.
+         * @description The idea's brief goes to the Zásobník of the existing project it names — any project of the cockpit (DEV-350);
+         *     the talk moves to that project when its author may open it, otherwise it stays with him in Nápady.
          */
         post: operations["idea_added_api_v1_poradca_ideas__idea_id__added_post"];
         delete?: never;
@@ -5723,6 +5724,11 @@ export interface components {
             running: boolean;
             /** State */
             state: string;
+            /**
+             * Talk In Project
+             * @default false
+             */
+            talk_in_project: boolean;
             /** Title */
             title: string;
             /**
@@ -5785,6 +5791,11 @@ export interface components {
             running: boolean;
             /** State */
             state: string;
+            /**
+             * Talk In Project
+             * @default false
+             */
+            talk_in_project: boolean;
             /** Ticket Error */
             ticket_error?: string | null;
             /** Title */
@@ -5858,6 +5869,11 @@ export interface components {
             running: boolean;
             /** State */
             state: string;
+            /**
+             * Talk In Project
+             * @default false
+             */
+            talk_in_project: boolean;
             /** Title */
             title: string;
             /**

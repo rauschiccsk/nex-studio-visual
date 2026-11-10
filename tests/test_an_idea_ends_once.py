@@ -58,3 +58,16 @@ def test_an_idea_founded_cannot_also_be_added_to_another_project(world):  # noqa
         f"/api/v1/poradca/ideas/{idea['id']}/founded", json={"message_id": brief, "project_id": str(project.id)}
     )
     assert again.status_code == 409, "an idea that ended once does not end a second time"
+
+
+def test_the_rules_name_the_follow_up_button_as_the_screen_shows_it():
+    """DEV-350 — the Projektant tells the person which button opens the follow-up idea; the name it says is the name
+    on the screen, read from both, so neither can drift away from the other."""
+    screen = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "IdeasPage.tsx").read_text(
+        encoding="utf-8"
+    )
+    label = "Nový nápad nadväzujúci na tento projekt"
+    assert label in screen
+    rules = " ".join(RULES.read_text(encoding="utf-8").split())
+    assert f"„{label}“" in rules
+    assert "„Pridať do projektu“ funguje pre **ktorýkoľvek projekt kokpitu**" in rules
