@@ -651,38 +651,6 @@ def run_post_scaffold_steps(
     return warnings
 
 
-def _compose_backend_published_port(compose_file: Path) -> int | None:
-    """The HOST-published port of the ``backend`` service (first ``ports`` entry) — the target for
-    the host-side ``curl`` health probe (which hits the *published* port, not the container port).
-
-    Handles the short forms (``"host:container"`` / ``"ip:host:container"``, optional ``/proto``) and
-    the long form (``{published: …}``). Returns ``None`` when undeterminable (no ``backend`` service /
-    no ``ports`` / a bare ``"container"`` entry with no host publish / unparseable) so the caller
-    SKIPS the probe rather than hit a wrong hardcoded port (the K-004 ``localhost:8000`` bug — IPv6
-    localhost + a guessed port both false-fail; nginx/uvicorn bind IPv4 on the derived port)."""
-    try:
-        data = yaml.safe_load(compose_file.read_text()) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    backend = (data.get("services") or {}).get("backend") or {}
-    ports = backend.get("ports") or []
-    if not ports:
-        return None
-    entry = ports[0]
-    if isinstance(entry, dict):  # long syntax: {target: 8000, published: 9110}
-        published = entry.get("published")
-        if isinstance(published, int):
-            return published
-        return int(published) if isinstance(published, str) and published.isdigit() else None
-    # short syntax: "9110:8000" / "127.0.0.1:9110:8000" / "8000" — the host port is the
-    # second-to-last colon segment; a bare "8000" (no host publish) has no deterministic host port.
-    segments = str(entry).split("/", 1)[0].split(":")
-    if len(segments) < 2:
-        return None
-    host = segments[-2]
-    return int(host) if host.isdigit() else None
-
-
 def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
     """K-004: docker compose build (minimal) alebo build + up + health (full)."""
     compose_file = target / "docker-compose.yml"
@@ -744,43 +712,11 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
             logger.warning("K-004 full smoke 'up' FAIL (slug=%s): %s", slug, stderr_tail)
             return
 
-        # Best-effort health check against the DERIVED backend host port on 127.0.0.1 (IPv4) — never
-        # the hardcoded ``localhost:8000`` (IPv6 ``localhost`` + a guessed port both false-fail;
-        # nginx/uvicorn bind IPv4 on the published port). If the port is undeterminable, skip the
-        # probe (best-effort) rather than hit a wrong port.
-        backend_port = _compose_backend_published_port(compose_file)
-        if backend_port is None:
-            logger.info(
-                "K-004 full smoke /health probe SKIPPED — no derivable backend host port (slug=%s)",
-                slug,
-            )
-        else:
-            health_url = f"http://127.0.0.1:{backend_port}/health"
-            for _attempt in range(6):
-                health = subprocess.run(
-                    ["curl", "-sf", health_url],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False,
-                )
-                if health.returncode == 0:
-                    logger.info("K-004 full smoke /health endpoint OK (slug=%s, port=%d)", slug, backend_port)
-                    break
-                # ICCINT-82: bolo to `subprocess.run(["sleep", "5"])` — jediné volanie procesu v celom
-                # backende BEZ stropu. Rozbehnúť kvôli päťsekundovej pauze celý cudzí program je aj tak
-                # zbytočné; a keby sa ten program zasekol, čakalo by sa naveky, lebo ho nič neutne.
-                time.sleep(5)
-            else:
-                logger.warning(
-                    "K-004 full smoke /health endpoint not reachable in 30s (slug=%s, url=%s)",
-                    slug,
-                    health_url,
-                )
-                unhealthy = (
-                    "Projekt sa postavil a spustil, ale neodpovedal na kontrolu zdravia — aplikácia sa "
-                    "pravdepodobne nerozbehla. Treba sa na to pozrieť pred prvým nasadením."
-                )
+        # DEV-349: the health is asked INSIDE the app's own stack, with the Verifikácia's probe, on the backend's own
+        # port and health path. Until 10.11.2026 it was ``curl http://127.0.0.1:<published port>/health`` from inside
+        # the cockpit's container — its own network, its own loopback: no app could ever answer, every project founded
+        # on the template was told it "probably did not start" (Orthodox Register, NEX Legal Watch).
+        unhealthy = _ask_backend_health(target, compose_file, slug, compose_env)
     finally:
         # Cleanup — always run docker compose down -v even if up failed
         subprocess.run(
@@ -800,6 +736,34 @@ def _run_smoke_test(target: Path, slug: str, *, full: bool) -> str | None:
         return unhealthy
     logger.info("K-004 full smoke test PASS (slug=%s)", slug)
     return None
+
+
+def _ask_backend_health(target: Path, compose_file: Path, slug: str, env: dict[str, str]) -> str | None:
+    """DEV-349 — ask the running stack's backend for its health from inside the stack, the way the Verifikácia does
+    (``orchestrator._await_http_ready``: ``docker compose exec`` into the backend, its own port and health path). A
+    Slovak sentence with what was seen when it did not answer, ``None`` when it did or there is no backend to ask."""
+    import asyncio
+
+    from backend.services import orchestrator
+    from backend.services import uat_provisioner as provisioner
+
+    services = (yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}).get("services") or {}
+    backend = provisioner.identify_service_roles(services).get("backend")
+    if not backend:
+        logger.info("K-004 full smoke health probe SKIPPED — no backend service to ask (slug=%s)", slug)
+        return None
+    port = provisioner.detect_internal_port(services[backend], 8000)
+    path = provisioner.resolve_be_health_path(services[backend], target)
+    base = ["docker", "compose", "--project-directory", str(target), "-f", str(compose_file)]
+    ready, last = asyncio.run(orchestrator._await_http_ready(base, backend, port, path=path, env=env))
+    if ready:
+        logger.info("K-004 full smoke health OK (slug=%s, %s:%s%s)", slug, backend, port, path)
+        return None
+    logger.warning("K-004 full smoke health FAILED (slug=%s, %s:%s%s): %s", slug, backend, port, path, last)
+    return (
+        f"Projekt sa postavil a spustil, ale backend neodpovedal na kontrolu zdravia ({path}): {last}. "
+        "Treba sa na to pozrieť pred prvým nasadením."
+    )
 
 
 def _seed_release_smoke_test(target: Path, slug: str) -> None:

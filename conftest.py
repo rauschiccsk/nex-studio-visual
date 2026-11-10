@@ -361,3 +361,13 @@ def _no_real_image_removal(monkeypatch):
     from backend.services import orchestrator
 
     monkeypatch.setattr(orchestrator, "throw_away_project_images", lambda repositories: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_health_question_after_founding(monkeypatch):
+    """DEV-349 — after a project is founded, the smoke asks its backend for its health inside the stack (a real
+    ``docker compose exec``). By DEFAULT no test reaches a real Docker for it: the answer is "nothing to report". The
+    tests about it call the real ``_ask_backend_health`` they import before this fixture runs."""
+    from backend.services import create_project_postscaffold
+
+    monkeypatch.setattr(create_project_postscaffold, "_ask_backend_health", lambda *a, **k: None)

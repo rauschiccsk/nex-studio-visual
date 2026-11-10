@@ -16,6 +16,7 @@ import pytest
 
 from backend.services import create_project_postscaffold as mod
 from backend.services import git_push
+from backend.services.create_project_postscaffold import _ask_backend_health as real_ask_backend_health
 
 
 @pytest.fixture(autouse=True)
@@ -116,60 +117,79 @@ def test_smoke_full_runs_up_and_down(tmp_path: Path) -> None:
     assert ["docker", "compose", "down", "-v"] in cmds
 
 
-def test_compose_backend_published_port_extraction(tmp_path: Path) -> None:
-    """The host-side health probe targets the DERIVED published port (short + long syntax); ``None`` for a
-    missing backend / no ports / a bare container-only port (no deterministic host port)."""
-    short = tmp_path / "short.yml"
-    short.write_text("services:\n  backend:\n    ports:\n      - '9110:8000'\n")
-    assert mod._compose_backend_published_port(short) == 9110
-
-    ip = tmp_path / "ip.yml"
-    ip.write_text("services:\n  backend:\n    ports:\n      - '127.0.0.1:9110:8000'\n")
-    assert mod._compose_backend_published_port(ip) == 9110
-
-    longform = tmp_path / "long.yml"
-    longform.write_text("services:\n  backend:\n    ports:\n      - target: 8000\n        published: 9110\n")
-    assert mod._compose_backend_published_port(longform) == 9110
-
-    bare = tmp_path / "bare.yml"  # container-only port → no host publish → None
-    bare.write_text("services:\n  backend:\n    ports:\n      - '8000'\n")
-    assert mod._compose_backend_published_port(bare) is None
-
-    nobe = tmp_path / "nobe.yml"
-    nobe.write_text("services: {}\n")
-    assert mod._compose_backend_published_port(nobe) is None
+COMPOSE = (
+    "services:\n"
+    "  backend:\n    build: ./backend\n    ports:\n      - '10280:8000'\n"
+    "  frontend:\n    build: ./frontend\n    ports:\n      - '10281:80'\n"
+)
 
 
-def test_smoke_full_health_probe_uses_ipv4_and_derived_port(tmp_path: Path) -> None:
-    """K-004 §5.6 #3: the health probe hits ``127.0.0.1`` + the DERIVED backend port — NEVER the hardcoded
-    ``localhost:8000`` (IPv6 localhost + a guessed port both false-fail)."""
-    target = tmp_path / "project"
-    target.mkdir()
-    (target / "docker-compose.yml").write_text("services:\n  backend:\n    ports:\n      - '9110:8000'\n")
+@pytest.fixture()
+def asked(monkeypatch):
+    """DEV-349 — what the smoke asks the app's health with: the Verifikácia's own in-container probe, recorded."""
+    from backend.services import orchestrator
 
+    calls: list[dict] = []
+    answer = {"value": (True, "200")}
+
+    async def _ready(base, exec_service, port, *, path="/health", env=None, **_kw):
+        calls.append({"base": base, "service": exec_service, "port": port, "path": path})
+        return answer["value"]
+
+    monkeypatch.setattr(orchestrator, "_await_http_ready", _ready)
+    monkeypatch.setattr(mod, "_ask_backend_health", real_ask_backend_health)  # conftest stubs it by default
+    return {"calls": calls, "answer": answer}
+
+
+def _smoke(target: Path):
     with patch.object(mod, "subprocess") as ps:
         ps.run.return_value = subprocess.CompletedProcess(args=["x"], returncode=0, stdout="", stderr="")
-        mod._run_smoke_test(target, "test-proj", full=True)
-
-    curl_cmds = [c.args[0] for c in ps.run.call_args_list if c.args[0][0] == "curl"]
-    assert curl_cmds, "the full smoke must run a curl health probe"
-    assert curl_cmds[0] == ["curl", "-sf", "http://127.0.0.1:9110/health"]
-    assert all("localhost:8000" not in " ".join(cmd) for cmd in curl_cmds), "never the hardcoded localhost:8000"
+        said = mod._run_smoke_test(target, "nex-legal-watch", full=True)
+    return said, [c.args[0] for c in ps.run.call_args_list]
 
 
-def test_smoke_full_skips_health_probe_when_port_undeterminable(tmp_path: Path, caplog) -> None:
-    """No derivable backend host port → the probe is SKIPPED (best-effort), up + down still run."""
+def test_the_health_is_asked_inside_the_backend_container(tmp_path: Path, asked) -> None:
+    """DEV-349: 10.11.2026 the smoke asked ``http://127.0.0.1:10280/health`` from inside the cockpit's container —
+    its own network, its own loopback — and no app could ever answer it (NEX Legal Watch, Orthodox Register). It asks
+    the backend from inside the app's own stack now, with the Verifikácia's probe, on the backend's own port."""
+    target = tmp_path / "nex-legal-watch"
+    target.mkdir()
+    (target / "docker-compose.yml").write_text(COMPOSE)
+
+    said, cmds = _smoke(target)
+
+    assert said is None
+    assert [(c["service"], c["port"], c["path"]) for c in asked["calls"]] == [("backend", 8000, "/health")]
+    base = asked["calls"][0]["base"]
+    assert base[:2] == ["docker", "compose"] and str(target) in base
+    assert not any(cmd[0] == "curl" for cmd in cmds), "never a probe of the server's address from the cockpit"
+    assert ["docker", "compose", "up", "-d"] in cmds and ["docker", "compose", "down", "-v"] in cmds
+
+
+def test_an_app_that_does_not_answer_is_said_with_what_was_seen(tmp_path: Path, asked) -> None:
+    target = tmp_path / "nex-legal-watch"
+    target.mkdir()
+    (target / "docker-compose.yml").write_text(COMPOSE)
+    asked["answer"]["value"] = (False, "connection refused")
+
+    said, _ = _smoke(target)
+
+    assert said == (
+        "Projekt sa postavil a spustil, ale backend neodpovedal na kontrolu zdravia (/health): connection refused. "
+        "Treba sa na to pozrieť pred prvým nasadením."
+    )
+
+
+def test_smoke_full_skips_health_probe_without_a_backend(tmp_path: Path, caplog, asked) -> None:
+    """No backend service to ask → the probe is SKIPPED (best-effort), up + down still run."""
     target = tmp_path / "project"
     target.mkdir()
     (target / "docker-compose.yml").write_text("services: {}\n")
 
-    with patch.object(mod, "subprocess") as ps:
-        ps.run.return_value = subprocess.CompletedProcess(args=["x"], returncode=0, stdout="", stderr="")
-        with caplog.at_level("INFO", logger="backend.services.create_project_postscaffold"):
-            mod._run_smoke_test(target, "test-proj", full=True)
+    with caplog.at_level("INFO", logger="backend.services.create_project_postscaffold"):
+        said, cmds = _smoke(target)
 
-    cmds = [c.args[0] for c in ps.run.call_args_list]
-    assert not any(cmd[0] == "curl" for cmd in cmds), "no port → no curl probe"
+    assert said is None and asked["calls"] == []
     assert ["docker", "compose", "up", "-d"] in cmds and ["docker", "compose", "down", "-v"] in cmds
     assert any("probe SKIPPED" in r.message for r in caplog.records)
 
