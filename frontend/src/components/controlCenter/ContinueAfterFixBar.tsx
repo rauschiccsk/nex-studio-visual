@@ -94,7 +94,7 @@ export default function ContinueAfterFixBar({ board, versionId, onBoard }: Props
       <div className="flex flex-col gap-2 px-4 py-3">
         <p className="text-xs text-[var(--color-text-muted)]">
           {poOprave
-            ? "Náš technický tím opravil chybu, na ktorej sa stavba zastavila. Keď stlačíš „Pokračovať“, AI Agent nadviaže tam, kde prestal — nič sa nezačína odznova."
+            ? "Náš technický tím opravil chybu, na ktorej sa stavba zastavila. Keď stlačíš „Pokračovať“, Staviteľ nadviaže tam, kde prestal — nič sa nezačína odznova."
             : poRestarte
               ? "Reštart kokpitu prerušil prácu na tejto verzii. Keď stlačíš „Pokračovať“, prerušená fáza sa spustí znova; čo už je v kóde zapísané, ostáva."
               : "Tvoj pokyn je zapísaný a oprava pripravená. Zámerne sa nespustila sama — máš možnosť si pokyn ešte pozrieť. Kým nestlačíš „Pokračovať“, stavba stojí."}

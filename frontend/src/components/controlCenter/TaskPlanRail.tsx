@@ -768,7 +768,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
       ) : pausePending ? (
         <div className="flex-shrink-0 border-b border-[var(--color-border-default)] px-4 py-3">
           <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-            {board?.state?.next_action?.trim() || "Pozastavujem — AI Agent dokončí rozrobenú úlohu a potom zastane."}
+            {board?.state?.next_action?.trim() || "Pozastavujem — Staviteľ dokončí rozrobenú úlohu a potom zastane."}
           </p>
         </div>
       ) : canPause ? (
@@ -913,9 +913,9 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
             // DEV-210: the cockpit's forecast from the agent's measured work — never a human-developer estimate.
             <p
               className="mt-1.5 text-[11px] text-[var(--color-text-secondary)]"
-              title="Odhad kokpitu z času, ktorý agent naozaj pracoval na úlohách predošlých stavieb; s každou hotovou úlohou sa spresňuje."
+              title="Odhad kokpitu z času, ktorý Staviteľ naozaj pracoval na úlohách predošlých stavieb; s každou hotovou úlohou sa spresňuje."
             >
-              Práca agenta: {plan.forecast.text}
+              Práca Staviteľa: {plan.forecast.text}
               {plan.forecast.remaining_text && ` · ${plan.forecast.remaining_text}`}
             </p>
           )}

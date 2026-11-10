@@ -76,7 +76,7 @@ export default function CiGateBar({ board, versionId, onBoard }: Props) {
                 className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-                {submitting ? "Vraciam…" : "Vrátiť agentovi na opravu"}
+                {submitting ? "Vraciam…" : "Vrátiť Staviteľovi na opravu"}
               </button>
             )
           ) : (

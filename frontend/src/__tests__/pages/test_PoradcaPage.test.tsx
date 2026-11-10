@@ -153,7 +153,7 @@ describe("PoradcaPage", () => {
     );
     api.stopPoradcaApi.mockResolvedValue({ stopping: true });
     renderPage();
-    expect(await screen.findByText("Rozoberám kroky agenta stavby — posledných 80 krokov")).toBeInTheDocument();
+    expect(await screen.findByText("Rozoberám kroky Staviteľa — posledných 80 krokov")).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/Opýtaj sa Poradcu/)).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Zastaviť/ }));
     await waitFor(() => expect(api.stopPoradcaApi).toHaveBeenCalledWith("m2"));
@@ -330,7 +330,7 @@ describe("PoradcaPage", () => {
       ]),
     );
     renderPage();
-    await screen.findByText("Rozoberám kroky agenta stavby — posledných 80 krokov");
+    await screen.findByText("Rozoberám kroky Staviteľa — posledných 80 krokov");
     // The trash greys out only after the list is reconciled with the open conversation (effect after render) — without
     // waiting the test failed in half of the runs (CI 05.10.2026).
     await waitFor(() => expect(screen.getByRole("button", { name: "Vymazať rozhovor" })).toBeDisabled());

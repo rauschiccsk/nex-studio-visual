@@ -136,7 +136,7 @@ export function AgentTerminal({ sessionId, token, onEnded }: AgentTerminalProps)
           // CR-V2-015 single-writer guard: the engine is driving this session, so the raw keystroke was
           // dropped. Surface the design-mandated hint inline and point the Manažér at the engine relay.
           term.write(
-            "\r\n\x1b[33m[engine práve pracuje — správa sa pošle po dokončení ťahu; použi vstupné pole AI Agenta (relay)]\x1b[0m\r\n",
+            "\r\n\x1b[33m[engine práve pracuje — správa sa pošle po dokončení ťahu; použi vstupné pole Staviteľa (relay)]\x1b[0m\r\n",
           );
         }
       } catch {

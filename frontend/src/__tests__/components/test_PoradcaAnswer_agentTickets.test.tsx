@@ -68,7 +68,7 @@ function answer(over: Record<string, unknown> = {}, scopeVersion: unknown = VERS
   );
 }
 
-const button = () => screen.getByRole("button", { name: /Priložiť k odpovedi agentovi/ });
+const button = () => screen.getByRole("button", { name: /Priložiť k odpovedi Staviteľovi/ });
 
 afterEach(() => {
   attachApi.mockReset();
@@ -79,7 +79,7 @@ describe("tickets for the agent under Poradca's answer (DEV-218)", () => {
   it("names the tickets it attaches", () => {
     answer();
 
-    expect(button()).toHaveTextContent("Priložiť k odpovedi agentovi: DEV-186, DEV-187");
+    expect(button()).toHaveTextContent("Priložiť k odpovedi Staviteľovi: DEV-186, DEV-187");
     expect(button()).toBeEnabled();
   });
 
@@ -124,7 +124,7 @@ describe("tickets for the agent under Poradca's answer (DEV-218)", () => {
 
     expect(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ })).toBeInTheDocument();
 
-    expect(screen.queryByRole("button", { name: /Priložiť k odpovedi agentovi/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Priložiť k odpovedi Staviteľovi/ })).not.toBeInTheDocument();
   });
 
   it("a second click while the first runs attaches once", async () => {
@@ -145,7 +145,7 @@ describe("the block and the step read as words (DEV-218)", () => {
   it("shows the block as a quote under its heading, not as a tag", () => {
     const shown = answerForDisplay("Návrh je tiket DEV-186.\n<tiket-pre-agenta>DEV-186, DEV-187</tiket-pre-agenta>");
 
-    expect(shown).toContain("**Tiket pre agenta stavby:**\n\n> DEV-186, DEV-187");
+    expect(shown).toContain("**Tiket pre Staviteľa:**\n\n> DEV-186, DEV-187");
     expect(shown).not.toContain("<tiket-pre-agenta>");
   });
 

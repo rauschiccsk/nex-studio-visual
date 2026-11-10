@@ -37,7 +37,7 @@ describe("AskPoradcaBar", () => {
       </MemoryRouter>,
     );
     expect(
-      screen.getByText(/agent stavby na nej už nepracuje/),
+      screen.getByText(/Staviteľ na nej už nepracuje/),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Opýtaj sa Poradcu/ }));

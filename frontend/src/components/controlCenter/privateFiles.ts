@@ -5,12 +5,12 @@ import { formatShortDateTime } from "@/utils/format";
 export const ATTACH_LABEL = "Priložiť súbor";
 export const ATTACHING_LABEL = "Nahrávam…";
 export const ATTACH_HINT =
-  "Súbor sa uloží do projektu, do priečinka private/ — git ho nevidí. Do správy sa doplní, kde ho agent nájde.";
-export const FILES_TITLE = "Súbory pre agenta";
+  "Súbor sa uloží do projektu, do priečinka private/ — git ho nevidí. Do správy sa doplní, kde ho Staviteľ nájde.";
+export const FILES_TITLE = "Súbory pre Staviteľa";
 export const FILES_HINT = "Ležia v projekte v priečinku private/, mimo gitu. Agent ich nájde podľa cesty v správe.";
 export const DELETE_LABEL = "Zmazať";
 export const CONFIRM_DELETE_LABEL = "Naozaj zmazať";
-const BY_AGENT_LABEL = "vytvoril agent";
+const BY_AGENT_LABEL = "vytvoril Staviteľ";
 
 /** The text with the line for the attached file — on its own line after what is already written. */
 export function withAttachedLine(text: string, line: string): string {

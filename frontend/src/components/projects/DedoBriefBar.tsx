@@ -199,7 +199,7 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
         )}
 
         <p className="text-xs text-[var(--color-text-muted)]">
-          Text napísal Dedo — zatiaľ sa NIČ nezačalo a agent o ňom nevie. Môžeš ho upraviť alebo doplniť;
+          Text napísal Dedo — zatiaľ sa NIČ nezačalo a Staviteľ o ňom nevie. Môžeš ho upraviť alebo doplniť;
           spustiť ho môžeš len ty. {copy.effect}
         </p>
 

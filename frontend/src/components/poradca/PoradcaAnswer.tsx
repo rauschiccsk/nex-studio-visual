@@ -203,13 +203,13 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
               disabled={!!instructionBlocked || attaching}
               title={
                 instructionBlocked ??
-                "Kokpit vezme tiket priamo z Plane, priloží ho agentovi ako súbor a do odpovede doplní, kde leží — " +
+                "Kokpit vezme tiket priamo z Plane, priloží ho Staviteľovi ako súbor a do odpovede doplní, kde leží — " +
                   "odpoveď odošleš sám."
               }
               className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary-600"
             >
               {attaching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
-              {`Priložiť k odpovedi agentovi: ${agentTickets.join(", ")}`}
+              {`Priložiť k odpovedi Staviteľovi: ${agentTickets.join(", ")}`}
             </button>
           )}
           {instruction && (

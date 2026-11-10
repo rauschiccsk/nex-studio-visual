@@ -140,7 +140,7 @@ export function AutonomyDialPanel({
         Miera autonómie
       </h2>
       <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
-        Ako často sa AI Agent zastaví na <span className="font-medium">schvaľovacom bode</span> pre
+        Ako často sa Staviteľ zastaví na <span className="font-medium">schvaľovacom bode</span> pre
         Manažéra. Toto je <span className="font-medium">globálna predvolená</span> úroveň —
         prepísateľná per projekt aj per zostavenie (pri spustení); pri zostavení sa použije prvá nastavená
         vrstva (zostavenie → projekt → globál). Toto nastavenie zároveň škáluje hĺbku Audítora.

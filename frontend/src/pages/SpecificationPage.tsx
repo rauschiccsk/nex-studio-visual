@@ -387,7 +387,7 @@ export default function SpecificationPage() {
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
           <p className="max-w-md text-xs text-[var(--color-text-muted)]">
-            Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre — v rozhovore s AI Agentom sa dohodnete
+            Zatiaľ tu nie sú žiadne dokumenty. Vznikajú v Riadiacom centre — v rozhovore so Staviteľom sa dohodnete
             na zadaní a AI ich priebežne zapisuje.
           </p>
           <button

@@ -144,7 +144,7 @@ def test_a_steer_while_the_runner_still_works_is_refused_and_not_recorded(client
         _stop_runner_task(client, version.id, task)
 
     assert res.status_code == 400, res.text
-    assert "AI Agent ešte pracuje" in res.json()["detail"]
+    assert "Staviteľ ešte pracuje" in res.json()["detail"]
     assert _manazer_messages(db_session, version.id) == [], "a steer nobody will carry must not look sent"
     assert scheduled == []
 

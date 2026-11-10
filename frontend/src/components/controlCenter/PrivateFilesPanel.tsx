@@ -41,7 +41,7 @@ export default function PrivateFilesPanel({ board, versionId }: Props) {
         if (!cancelled) setFiles(listing.files);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(humanizeApiError(err, "Zoznam súborov pre agenta sa nepodarilo načítať"));
+        if (!cancelled) setError(humanizeApiError(err, "Zoznam súborov pre Staviteľa sa nepodarilo načítať"));
       });
     return () => {
       cancelled = true;

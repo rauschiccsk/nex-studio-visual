@@ -580,7 +580,7 @@ async def write_input(session_id: uuid.UUID, data: bytes) -> None:
         if orchestrator.is_session_engine_busy(runtime.claude_session_id):
             raise WriteRejectedError(
                 f"Engine is driving session {runtime.claude_session_id} — write refused "
-                "(use the engine relay to message the AI Agent during an active turn)"
+                "(use the engine relay to message the Staviteľ during an active turn)"
             )
     runtime.last_input_at = time.time()
     loop = asyncio.get_running_loop()

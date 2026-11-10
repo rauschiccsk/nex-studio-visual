@@ -117,7 +117,7 @@ function ConversationThread({ messages, activity, working, versionId }: Props) {
       {empty ? (
         <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-xs text-[var(--color-text-muted)]">
           <p>Zatiaľ žiadna konverzácia.</p>
-          <p>Napíš AI Agentovi nižšie — začnite rozhovor o projekte.</p>
+          <p>Napíš Staviteľovi nižšie — začnite rozhovor o projekte.</p>
         </div>
       ) : (
         <ul className="space-y-3">

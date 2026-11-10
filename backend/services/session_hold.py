@@ -50,7 +50,7 @@ def session_hold(db: Session, user: User, since: datetime) -> tuple[bool, str]:
         ).limit(1)
     ).first()
     if working is not None:
-        return True, f"AI Agent pracuje na {working.slug} v{working.version_number}."
+        return True, f"Staviteľ pracuje na {working.slug} v{working.version_number}."
 
     spoke = db.execute(
         _visible(

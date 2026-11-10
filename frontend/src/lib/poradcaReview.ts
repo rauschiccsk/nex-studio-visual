@@ -27,12 +27,12 @@ export const REVIEW_REQUEST = "Prekontroluj opodstatnenosť tohto nálezu a ako 
 /** DEV-106 — for a card the agent prepared: a choice between proposals, not a finding (Director 13.10.2026). @internal — exported for its test (DEV-155). */
 export const CHOICE_REQUEST = "Poraď mi, ktorú možnosť zvoliť a prečo.";
 /** DEV-135 — for the agent's question in Riadiace centrum. */
-const AGENT_QUESTION_REQUEST = "Poraď mi, ako agentovi odpovedať.";
+const AGENT_QUESTION_REQUEST = "Poraď mi, ako Staviteľovi odpovedať.";
 /** DEV-135 — what precedes the agent's own report under its question, and the change the build describes. */
-const AGENT_WROTE = "Pred otázkou agent napísal:";
+const AGENT_WROTE = "Pred otázkou Staviteľ napísal:";
 const BUILD_CHANGE = "Zmena, ktorú stavba navrhuje:";
 /** DEV-135 — for a database change the build waits to have approved (DEV-7): accepting it is the other answer. */
-const SCHEMA_QUESTION_REQUEST = "Poraď mi, či túto zmenu databázy prijať; ak nie, ako agentovi odpovedať.";
+const SCHEMA_QUESTION_REQUEST = "Poraď mi, či túto zmenu databázy prijať; ak nie, ako Staviteľovi odpovedať.";
 /** The consultations that carry the Auditor's findings; the engine writes the source on every card (DEV-106). */
 const FINDING_SOURCES = new Set(["verifikacia_fix", "verifikacia_fail", "auditor_upfront"]);
 /** Marks the one visit to Poradca that came from the button. */
@@ -110,7 +110,7 @@ function compose(card: ReviewCard, explanation: string, detail: string): string 
   if (card.kind === "agent_question") {
     // The agent writes its question as paragraphs with headings — it stands whole, under one line saying whose it is.
     const found = explanation ? `${card.explanationTitle ?? AGENT_WROTE}\n${explanation}` : "";
-    return [`Otázka agenta. ${card.origin}`, card.question, found, card.request].filter(Boolean).join("\n\n");
+    return [`Otázka Staviteľa. ${card.origin}`, card.question, found, card.request].filter(Boolean).join("\n\n");
   }
   const head = [`Rozhodnutie ${card.position} z ${card.total} — ${card.question}`];
   if (card.round != null) {

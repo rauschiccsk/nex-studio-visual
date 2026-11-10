@@ -94,9 +94,9 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
   });
 
   it.each([
-    ["uprav", /Vrátiť agentovi na doplnenie/, /vráti sa k rozrobenej práci/],
-    ["answer", /Odpovedať agentovi/, /odpoveď na otázku/],
-    ["ask", /Spýtať sa agenta/, /ako otázka/],
+    ["uprav", /Vrátiť Staviteľovi na doplnenie/, /vráti sa k rozrobenej práci/],
+    ["answer", /Odpovedať Staviteľovi/, /odpoveď na otázku/],
+    ["ask", /Spýtať sa Staviteľa/, /ako otázka/],
   ])("for %s it says in plain Slovak what the click will do", (action, button, effect) => {
     render(<DedoProposalBar board={board({ action })} versionId="v-1" onBoard={vi.fn()} />);
     expect(screen.getByRole("button", { name: button })).toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     const onBoard = vi.fn();
     render(<DedoProposalBar board={board()} versionId="v-42" onBoard={onBoard} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
     await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-42", "m-1", FINDING, null));
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
@@ -120,14 +120,14 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     fireEvent.change(screen.getByRole("textbox"), { target: { value: edited } });
     expect(screen.getByText(/odošle sa tvoje znenie/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
     await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", edited, null));
   });
 
   it("cannot send an empty box", () => {
     render(<DedoProposalBar board={board()} versionId="v-1" onBoard={vi.fn()} />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "   " } });
-    expect(screen.getByRole("button", { name: /Vrátiť agentovi/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ })).toBeDisabled();
     expect(sendDedoProposalApi).not.toHaveBeenCalled();
   });
 
@@ -148,11 +148,11 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     const onBoard = vi.fn();
     render(<DedoProposalBar board={board()} versionId="v-1" onBoard={onBoard} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
     await waitFor(() => expect(screen.getByText(/Odoslanie návrhu zlyhalo/)).toBeInTheDocument());
     expect(onBoard).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /Vrátiť agentovi/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ })).toBeEnabled();
   });
 
   // ── the finding changed under him (audit 2026-08-23, finding 1) ────────────
@@ -165,7 +165,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
   it("names the proposal on screen, so the server can never act on a different one", async () => {
     render(<DedoProposalBar board={board()} versionId="v-1" onBoard={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
     await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", FINDING, null));
   });
@@ -179,7 +179,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     const onBoard = vi.fn();
     render(<DedoProposalBar board={board()} versionId="v-1" onBoard={onBoard} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
     // The server's own sentence — not a canned "409" he cannot correlate with anything.
     await waitFor(() => expect(screen.getByText(/novší návrh/)).toBeInTheDocument());
@@ -247,7 +247,7 @@ describe("ICCINT-62 — a fast fix moves the cockpit onto the build it started",
     } as unknown as PipelineBoard);
 
     render(<DedoProposalBar board={board({ action: "uprav" })} versionId="v-old" onBoard={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /vrátiť agentovi/i }));
+    fireEvent.click(screen.getByRole("button", { name: /vrátiť Staviteľovi/i }));
 
     await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalled());
     expect(openVersionCockpit).not.toHaveBeenCalled();

@@ -130,10 +130,10 @@ describe("PrivateFilesPanel", () => {
     });
     render(<PrivateFilesPanel board={boardWith(1)} versionId="v1" />);
 
-    expect(await screen.findByText("Súbory pre agenta (2)")).toBeInTheDocument();
+    expect(await screen.findByText("Súbory pre Staviteľa (2)")).toBeInTheDocument();
     expect(screen.getByText("private/profesia.eml")).toBeInTheDocument();
     expect(screen.getByText(/12 kB · nahral alex/)).toBeInTheDocument();
-    expect(screen.getByText("1 kB · vytvoril agent")).toBeInTheDocument();
+    expect(screen.getByText("1 kB · vytvoril Staviteľ")).toBeInTheDocument();
   });
 
   it("deletes only after a second click that says what it does", async () => {

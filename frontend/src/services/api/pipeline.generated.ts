@@ -6291,7 +6291,7 @@ export interface components {
         PipelineRelayRequest: {
             /**
              * Text
-             * @description The Manažér's message to relay to the AI Agent.
+             * @description The Manažér's message to relay to the Staviteľ.
              */
             text: string;
         };

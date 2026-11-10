@@ -130,14 +130,14 @@ describe("the agent's question goes to Poradca", () => {
     ).toBeInTheDocument();
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
+      "Otázka Staviteľa. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
       "",
       QUESTION,
       "",
-      "Pred otázkou agent napísal:",
+      "Pred otázkou Staviteľ napísal:",
       "Našiel som dva zoznamy dodávateľov a líšia sa v troch firmách.",
       "",
-      "Poraď mi, ako agentovi odpovedať.",
+      "Poraď mi, ako Staviteľovi odpovedať.",
     ]);
   });
 
@@ -154,11 +154,11 @@ describe("the agent's question goes to Poradca", () => {
 
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
+      "Otázka Staviteľa. Stavba stojí vo fáze Príprava a čaká na moju odpoveď.",
       "",
       "AI partner sa pýta: Môžem pokračovať?",
       "",
-      "Poraď mi, ako agentovi odpovedať.",
+      "Poraď mi, ako Staviteľovi odpovedať.",
     ]);
   });
 
@@ -181,14 +181,14 @@ describe("the agent's question goes to Poradca", () => {
 
     const card = takeReview("v1");
     expect(card && reviewQuestion(card, 20_000).split("\n")).toEqual([
-      "Otázka agenta. Stavba stojí vo fáze Príprava a čaká na schválenie zmeny databázy.",
+      "Otázka Staviteľa. Stavba stojí vo fáze Príprava a čaká na schválenie zmeny databázy.",
       "",
       "Návrh mení štruktúru databázy. Schváliť ju smie len Ri.",
       "",
       "Zmena, ktorú stavba navrhuje:",
       "Návrh mení štruktúru databázy. Pribudne tabuľka suppliers.",
       "",
-      "Poraď mi, či túto zmenu databázy prijať; ak nie, ako agentovi odpovedať.",
+      "Poraď mi, či túto zmenu databázy prijať; ak nie, ako Staviteľovi odpovedať.",
     ]);
   });
 });
@@ -306,14 +306,14 @@ function renderContent(content: string, choices: PoradcaChoice[]) {
 }
 
 describe("DEV-224 — green is what to pick; a longer answer for the agent is an instruction with the purple button", () => {
-  it("a long answer is no green box — a block „Odpoveď pre agenta“ and „Vložiť do Riadiaceho centra“ that inserts it", () => {
+  it("a long answer is no green box — a block „Odpoveď pre Staviteľa“ and „Vložiť do Riadiaceho centra“ that inserts it", () => {
     const { container } = renderContent(`Odpovedz agentovi <volba>${LONG}</volba>`, [
       { card: null, label: LONG.trim(), status: "answer", question: null },
     ]);
 
     expect(container.querySelector("[data-choice]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Vložiť do odpovede" })).toBeNull();
-    expect(screen.getByText("Odpoveď pre agenta:")).toBeInTheDocument();
+    expect(screen.getByText("Odpoveď pre Staviteľa:")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Vložiť do Riadiaceho centra" }));
 
     expect(screen.getByText("na adrese /riadiace-centrum")).toBeInTheDocument();

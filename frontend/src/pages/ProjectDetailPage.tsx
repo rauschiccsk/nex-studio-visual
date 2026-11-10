@@ -859,7 +859,7 @@ export default function ProjectDetailPage() {
             <ul className="text-xs text-[var(--color-text-secondary)] list-disc pl-5 space-y-0.5 mb-3">
               <li>projekt a všetky jeho verzie, špecifikácie, návrhy, epiky, úlohy a chyby</li>
               <li>jeho priečinok v znalostnej báze</li>
-              <li>jeho pracovný adresár na disku (vrátane pamäte agenta)</li>
+              <li>jeho pracovný adresár na disku (vrátane pamäte Staviteľa)</li>
               {/* The delete path runs `docker compose down -v` on the UAT: the `-v` takes the volumes,
                   i.e. the DATABASE. Saying "kontajnery + port" understated it by everything that
                   matters — nobody can consent to losing data they were never told about. */}

@@ -165,7 +165,7 @@ def _require_a_build_that_asked_for_dedo(version_id: uuid.UUID, state: PipelineS
         status_code=status.HTTP_409_CONFLICT,
         detail=(
             f"Verzia {version_id} nečaká na Deda (stav={state.status!r}, dôvod bloku={state.block_reason!r}) — "
-            "písať do stavby, ktorá o nič nežiadala, by bol pokyn pre cudzieho AI Agenta."
+            "písať do stavby, ktorá o nič nežiadala, by bol pokyn pre cudzieho Staviteľa."
         ),
     )
 

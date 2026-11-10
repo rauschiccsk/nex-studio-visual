@@ -60,7 +60,7 @@ def test_provision_writes_both_v2_charters_concatenated(tmp_path: Path) -> None:
 
     # Each charter = shared base concatenated BEFORE the role charter (the engine reads the single file).
     assert "Bezpečnosť §4 — INVIOLABLE" in ai_charter  # from agent-shared-base.md
-    assert "Pravidlá agenta — AI Agent" in ai_charter  # from ai-agent-charter.md
+    assert "Pravidlá agenta — Staviteľ" in ai_charter  # from ai-agent-charter.md
     assert "Bezpečnosť §4 — INVIOLABLE" in auditor_charter
     assert "Pravidlá agenta — Auditor" in auditor_charter
     # The v1 auditor charter was overwritten with the v2 one.

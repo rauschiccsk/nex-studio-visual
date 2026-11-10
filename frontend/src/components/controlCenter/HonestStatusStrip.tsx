@@ -66,14 +66,14 @@ function statusText(
     return "Čaká na kontroly na GitHube — kokpit pokračuje sám";
   }
   if (state.status === "awaiting_manazer" && ciGate?.state === "red") {
-    return "Kontroly na GitHube zlyhali — vráť verziu agentovi na opravu";
+    return "Kontroly na GitHube zlyhali — vráť verziu Staviteľovi na opravu";
   }
   if (state.status === "awaiting_manazer") return "Čaká na súhlas";
   if (state.status === "paused") return "Pozastavené";
   // ICCINT-163: pauza je vyžiadaná, ale AI Agent ešte dorába úlohu — slučka zastane až na jej konci. Pruh tu
   // hlásil „Pozastavené“ a Director podľa toho poslal pokyn, ktorý sa stratil. Kým sa pracuje, povedz to.
   if (state.status === "agent_working" && state.pause_reason === "manazer") {
-    return "Pozastavujem — AI Agent dokončuje rozrobenú úlohu";
+    return "Pozastavujem — Staviteľ dokončuje rozrobenú úlohu";
   }
   // agent_working — name the project, version, and live phase. version_number is stored without a leading
   // "v" (e.g. "1.0.0"), so prefix it here.

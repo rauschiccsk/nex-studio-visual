@@ -321,14 +321,14 @@ function AgentsTab({
       <div className="px-6 pb-6 space-y-1 text-[11px] text-[var(--color-text-muted)]">
         <p>
           <strong>„Max"</strong> je najvyššia úroveň uvažovania — niet vyššej. „Ultracode" nie je vyššia
-          úroveň; je to len schopnosť spúšťať dynamických pomocníkov — a tú má AI Agent zabudovanú.
+          úroveň; je to len schopnosť spúšťať dynamických pomocníkov — a tú má Staviteľ zabudovanú.
         </p>
         <p>
           Model sa volí podľa <strong>rodiny</strong> — kokpit vždy spustí jej najnovšiu verziu, takže nová
           verzia modelu nepotrebuje zmenu aplikácie. Pri voľbe je vidno, ktorá verzia naposledy naozaj bežala.
         </p>
         <p>
-          AI Agent si <strong>dynamických pomocníkov spúšťa sám</strong> pre paralelnú/hromadnú prácu
+          Staviteľ si <strong>dynamických pomocníkov spúšťa sám</strong> pre paralelnú/hromadnú prácu
           (typicky Programovanie) — nie je to prepínač. „Model pomocníkov" určuje, na akom modeli bežia
           (predvolene lacný/rýchly; Opus len pre prioritný build). Auditor je nezávislý overovateľ a
           pomocníkov nespúšťa.

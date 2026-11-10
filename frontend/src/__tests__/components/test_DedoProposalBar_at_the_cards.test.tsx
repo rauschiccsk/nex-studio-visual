@@ -21,9 +21,9 @@ vi.mock("@/services/api/pipeline", () => ({
 vi.mock("@/hooks/useOpenVersionCockpit", () => ({ useOpenVersionCockpit: () => vi.fn() }));
 
 const AT_THE_CARDS =
-  "Otvorené karty rozhodnutia sa tým zrušia. Karty, ktoré si už rozhodol, dostane AI Agent spolu s týmto textom " +
+  "Otvorené karty rozhodnutia sa tým zrušia. Karty, ktoré si už rozhodol, dostane Staviteľ spolu s týmto textom " +
   "a znovu sa na ne nepýta; na ostatné sa ďalšie kolo spýta, len ak ešte platia.";
-const ORDINARY = "AI Agent dostane tento text ako pokyn a vráti sa k rozrobenej práci — nič sa nezačína odznova.";
+const ORDINARY = "Staviteľ dostane tento text ako pokyn a vráti sa k rozrobenej práci — nič sa nezačína odznova.";
 
 function board(blockReason: string | null, action = "uprav"): PipelineBoard {
   return {
@@ -42,7 +42,7 @@ describe("DEV-221 — the proposal bar at the Decision Cards", () => {
 
     expect(intro().endsWith(AT_THE_CARDS)).toBe(true);
     expect(intro()).not.toContain(ORDINARY);
-    expect(screen.getByRole("button", { name: "Vrátiť agentovi na doplnenie" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vrátiť Staviteľovi na doplnenie" })).toBeInTheDocument();
   });
 
   it.each([

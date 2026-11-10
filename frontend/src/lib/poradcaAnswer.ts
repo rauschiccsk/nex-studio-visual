@@ -4,7 +4,7 @@ import type { PoradcaVersionInfo } from "@/types/poradca";
 
 /** Blocks from the Poradca charter (part 4) and the heading under which a person sees them. Cockpit makes buttons. */
 const BLOCKS: { tag: string; heading: string }[] = [
-  { tag: "pokyn-pre-agenta", heading: "Pokyn pre agenta stavby" },
+  { tag: "pokyn-pre-agenta", heading: "Pokyn pre Staviteľa" },
   { tag: "poziadavka-do-zasobnika", heading: "Požiadavka do Zásobníka" },
   // DEV-29: answers from before the change carry the old block — it, too, only ever goes to the Zásobník.
   { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka do Zásobníka" },
@@ -12,7 +12,7 @@ const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "tiket-nsv", heading: "Návrh tiketu pre kokpit (NEX Studio Visual)" },
   { tag: "tiket-projektu", heading: "Návrh tiketu projektu" },
   // DEV-218: the tickets the agent asked for — the cockpit attaches their content from Plane.
-  { tag: "tiket-pre-agenta", heading: "Tiket pre agenta stavby" },
+  { tag: "tiket-pre-agenta", heading: "Tiket pre Staviteľa" },
 ];
 
 /** DEV-83 — the link a marked choice becomes in the rendered answer; `#volba-3` names card 3, `#volba` no card. */
@@ -28,7 +28,7 @@ const CHOICE_RE = /<volba(?:\s+karta="(\d{1,3})")?\s*>([\s\S]*?)<\/volba>/g;
  * @internal — exported for its test.
  */
 export const SHORT_ANSWER_MAX = 200;
-const LONG_ANSWER_HEADING = "Odpoveď pre agenta";
+const LONG_ANSWER_HEADING = "Odpoveď pre Staviteľa";
 
 function isLongAnswer(text: string): boolean {
   return text.length > SHORT_ANSWER_MAX || text.includes("\n");
@@ -98,7 +98,7 @@ const STEP_VERBS: Record<string, string> = {
   plan_uloh: "Pozerám plán úloh",
   git_historia: "Pozerám históriu zmien",
   git_zmena: "Pozerám zmenu",
-  zaznam_agenta: "Rozoberám kroky agenta stavby",
+  zaznam_agenta: "Rozoberám kroky Staviteľa",
   kontajnery: "Pozerám kontajnery projektu",
   logy: "Čítam log",
   ci: "Pozerám zostavenie (CI)",

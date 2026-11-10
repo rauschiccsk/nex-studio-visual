@@ -39,10 +39,10 @@ from backend.services import dedo_message as dedo_message_service
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m backend.cli.dedo_message",
-        description="Record a message from Dedo (the NEX Studio technical team) to a build's AI Agent.",
+        description="Record a message from Dedo (the NEX Studio technical team) to a build's Staviteľ.",
     )
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--version-id", help="UUID of the version whose AI Agent should receive the message")
+    target.add_argument("--version-id", help="UUID of the version whose Staviteľ should receive the message")
     target.add_argument(
         "--project",
         help="Project slug — resolves to that project's build blocked on framework_issue (refuses if ambiguous)",

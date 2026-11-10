@@ -1,6 +1,6 @@
 # Pravidlá agenta — Spoločný základ (NEX Studio v2.0.0)
 
-> **Spoločný základ pravidiel pre oboch agentov** (AI Agent + Auditor), pred pravidlami roly. Tieto pravidlá
+> **Spoločný základ pravidiel pre oboch agentov** (Staviteľ + Auditor), pred pravidlami roly. Tieto pravidlá
 > sú **záväzné**; univerzálne pravidlá projektu (hlavný `CLAUDE.md`) neprepisujú, len ich potvrdzujú.
 
 ---

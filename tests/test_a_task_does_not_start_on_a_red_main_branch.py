@@ -146,7 +146,7 @@ async def test_a_red_main_branch_of_this_version_is_fixed_before_the_task(db_ses
     assert red.url in prompt
     assert prompt.index("oprav hlavnú vetvu") < prompt.index("Úloha 35.2.2"), "the fix first, the task after it"
     assert _told(db_session, version_id) == [
-        "Hlavná vetva je červená po úlohe #35.2.1 — AI Agent ju opraví skôr, než pokračuje úlohou #35.2.2."
+        "Hlavná vetva je červená po úlohe #35.2.1 — Staviteľ ju opraví skôr, než pokračuje úlohou #35.2.2."
     ]
 
 

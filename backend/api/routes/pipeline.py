@@ -592,7 +592,7 @@ async def _apply_and_publish(
     if action != "pause" and not await pipeline_runner.idle_within(version_id, pipeline_runner.SETTLE_GRACE_SECONDS):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="AI Agent ešte pracuje — počkaj, kým dokončí rozrobenú úlohu a zastane. Nič sa neodoslalo.",
+            detail="Staviteľ ešte pracuje — počkaj, kým dokončí rozrobenú úlohu a zastane. Nič sa neodoslalo.",
         )
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()

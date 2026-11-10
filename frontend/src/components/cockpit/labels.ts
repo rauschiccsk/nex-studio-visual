@@ -57,7 +57,7 @@ export const PHASE_ORDER: BuildPhase[] = [
 // system author). ``manazer`` is the human operator; ``system`` authors notices. (No Coordinator / Designer
 // / Customer / Implementer — those v1 roles collapsed into the single AI Agent, CR-V2-001/007.)
 export const ROLE_LABELS: Record<PipelineParticipant, string> = {
-  ai_agent: "AI Agent",
+  ai_agent: "Staviteľ",
   auditor: "Audítor",
   manazer: "Manažér",
   system: "Systém",

@@ -440,7 +440,7 @@ export default function PoradcaPage() {
           {!conversationId && (
             <div className="max-w-xl space-y-1 text-xs text-[var(--color-text-muted)]">
               <p>
-                Opýtaj sa na čokoľvek k projektu — čomu v stavbe nerozumieš, prečo agent stojí, čo je v logoch, čo je
+                Opýtaj sa na čokoľvek k projektu — čomu v stavbe nerozumieš, prečo Staviteľ stojí, čo je v logoch, čo je
                 v databáze UAT, prečo zlyhalo zostavenie.
               </p>
               <p>

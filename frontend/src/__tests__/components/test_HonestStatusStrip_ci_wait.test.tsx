@@ -15,7 +15,7 @@ import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
 import type { CiGate, PipelineState } from "@/services/api/pipeline";
 
 const WAITING = "Čaká na kontroly na GitHube — kokpit pokračuje sám";
-const FAILED = "Kontroly na GitHube zlyhali — vráť verziu agentovi na opravu";
+const FAILED = "Kontroly na GitHube zlyhali — vráť verziu Staviteľovi na opravu";
 
 function strip(stage: string, ciGate: CiGate | null) {
   return (

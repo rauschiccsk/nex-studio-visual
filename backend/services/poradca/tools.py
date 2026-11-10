@@ -49,7 +49,7 @@ ACTION_LABELS: dict[str, str] = {
     "uprav": "Uprav",
     "pokracovat": "Pokračovať",
     "verdict": "verdikt Audítora (PASS / FAIL)",
-    "ask": "otázka pre AI Agenta",
+    "ask": "otázka pre Staviteľa",
     "answer": "Odpovedať (agent sa pýta)",
     "schvalit_schemu": "Schváliť štruktúru databázy (len Ri)",
     "pause": "Pozastaviť",
@@ -940,8 +940,8 @@ def _agent_steps(transcripts: Path, count: int, project_dir: str) -> str:
                             content = " ".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
                         steps.append(f"    ✗ chyba: {str(content or '').strip()[:300]}")
     if not steps:
-        return "V zázname agenta stavby nie sú žiadne kroky."
-    return f"Posledných {len(steps)} krokov agenta stavby (najstarší prvý):\n" + "\n".join(steps)
+        return "V zázname Staviteľa nie sú žiadne kroky."
+    return f"Posledných {len(steps)} krokov Staviteľa (najstarší prvý):\n" + "\n".join(steps)
 
 
 def _step_target(args: dict, project_dir: str) -> str:
@@ -975,7 +975,7 @@ def _project_containers(docker_ps_json: str, slug: str, installations: list[UatI
         elif name.startswith(f"nex-build-db-{slug}-"):
             kind = "databáza stavby"
         elif name.startswith(f"nex-build-{slug}-"):
-            kind = "ťah agenta stavby"
+            kind = "ťah Staviteľa"
         else:
             for part in labels.split(","):
                 key, _, value = part.partition("=")
@@ -1065,7 +1065,7 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
         ),
         Tool(
             "zaznam_agenta",
-            "Čo robil agent stavby: posledné kroky z jeho záznamu — nástroj, súbor alebo príkaz, a chyby. "
+            "Čo robil Staviteľ: posledné kroky z jeho záznamu — nástroj, súbor alebo príkaz, a chyby. "
             "Obsah súborov ani výstupy príkazov tu nie sú.",
             _schema({"pocet": {"type": "integer", "description": f"Koľko krokov (najviac {_AGENT_STEPS_MAX})."}}),
             t.zaznam_agenta,

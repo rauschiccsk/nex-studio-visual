@@ -249,7 +249,7 @@ export default function VersionDetailPage() {
               {!zadanieUnreadable && (
                 <div className="text-xs text-[var(--color-text-muted)] mb-3">
                   Voľný text — hlavný vstup pre Prípravu. Opíš, čo má aplikácia robiť (ciele, funkcie,
-                  hraničné prípady). Po „Spustiť tvorbu špecifikácie" AI Agent prečíta Zadanie, doplní
+                  hraničné prípady). Po „Spustiť tvorbu špecifikácie" Staviteľ prečíta Zadanie, doplní
                   objasňujúce otázky a vytvorí Špecifikáciu. Zadanie je nepovinné — ak ho necháš prázdne,
                   dohodnete sa priamo v rozhovore.
                 </div>
@@ -347,7 +347,7 @@ export default function VersionDetailPage() {
               </div>
               <div className="text-xs text-[var(--color-text-muted)]">
                 {epicCount} celkov · {epicsDone} hotových.
-                Špecifikáciu, návrh a kód tejto verzie pripravuje AI Agent; výsledok overuje Audítor.
+                Špecifikáciu, návrh a kód tejto verzie pripravuje Staviteľ; výsledok overuje Audítor.
                 Fázy (Príprava → Návrh → Vizuál → Programovanie → Verifikácia) sleduješ v Riadiacom centre.
               </div>
               <button

@@ -35,7 +35,7 @@ export function nextWords(v: OpenVersionStanding): string {
   }
   if (v.status === "awaiting_manazer") return `Čaká na tvoje schválenie fázy ${phase(v.stage)} v Riadiacom centre.`;
   if (v.status === "paused") return "Stavbu si pozastavil — pokračuje sa v Riadiacom centre.";
-  return "Netreba nič — agent pracuje.";
+  return "Netreba nič — Staviteľ pracuje.";
 }
 
 /**

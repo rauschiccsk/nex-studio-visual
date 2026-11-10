@@ -77,9 +77,9 @@ def _seed_skeleton(project_name: str) -> str:
     starting page so a first build reads a well-formed file, not a 404.
     """
     return (
-        f"# {project_name} — AI Agent pamäť\n"
+        f"# {project_name} — pamäť Staviteľa\n"
         "\n"
-        "> Perzistentná per-project pamäť AI Agenta (CR-V2-016). Čítam ju na začiatku\n"
+        "> Perzistentná per-project pamäť Staviteľa (CR-V2-016). Čítam ju na začiatku\n"
         "> každého buildu a **píšem do nej voľne** — rozhodnutia, lekcie, kontext a\n"
         "> feedback Manažéra. Jediný zdroj pravdy pre status/históriu projektu\n"
         "> (STATUS.md/HISTORY.md sú retired — viď Vývoj fázové taby).\n"
@@ -116,5 +116,5 @@ def seed_memory(project_slug: str, project_name: str) -> Path | None:
         # Never clobber the agent's accumulated memory.
         return None
     target.write_text(_seed_skeleton(project_name), encoding="utf-8")
-    logger.info("Seeded AI-Agent memory for project=%s at %s", project_slug, target)
+    logger.info("Seeded Staviteľ memory for project=%s at %s", project_slug, target)
     return target

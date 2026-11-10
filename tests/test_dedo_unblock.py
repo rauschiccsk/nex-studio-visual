@@ -300,7 +300,7 @@ class TestTheGuard:
         version, _ = _make_version(db_session)
         state = _seed_blocked(db_session, version.id, current_stage=stage)
 
-        with pytest.raises(DedoMessageError, match="no AI Agent turn"):
+        with pytest.raises(DedoMessageError, match="no Staviteľ turn"):
             dedo_unblock.unblock_framework_issue(db_session, version_id=version.id, reason=_REASON)
 
         assert state.status == "blocked" and state.resume_after_framework_fix is False

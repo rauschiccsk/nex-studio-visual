@@ -184,7 +184,7 @@ FRAMEWORK_RESUME_DIRECTIVE = (
 #: in a new version. Refusing is more honest than saving the message: the build agent does not work on a finished one
 #: and the message would stay unanswered (exactly the bug that Konzultácia once fixed).
 DONE_RELAY_REFUSAL = (
-    "Verzia je hotová — agent stavby na nej už nepracuje. Otázku k nej polož Poradcovi, zmenu založ ako novú verziu."
+    "Verzia je hotová — Staviteľ na nej už nepracuje. Otázku k nej polož Poradcovi, zmenu založ ako novú verziu."
 )
 
 #: Default model for BOTH v2 agents when the project owner has no explicit per-role pick in Nastavenia
@@ -689,7 +689,7 @@ VERIF_STALL_BLOCK_REASONS = ("agent_error", "parse_exhaustion", "system_error")
 
 
 #: ICCINT-163: what the board says between "Pozastaviť" and the loop's next task boundary, and after it.
-PAUSE_PENDING_NEXT_ACTION = "Pozastavujem — AI Agent dokončí rozrobenú úlohu a potom zastane."
+PAUSE_PENDING_NEXT_ACTION = "Pozastavujem — Staviteľ dokončí rozrobenú úlohu a potom zastane."
 PAUSED_BY_MANAZER_NEXT_ACTION = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
 
 
@@ -2220,7 +2220,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "si jediné nezávislé oči, kompenzuješ menej ľudských kontrol."
         if level in ("plna", "len_na_konci")
         else "Miera autonómie je nižšia (Manažér kontroluje často) — rob ZAMERANÚ, ľahšiu previerku na "
-        "rizikové miesta; ťažšiu kontrolu nesie Manažér + self-check AI Agenta."
+        "rizikové miesta; ťažšiu kontrolu nesie Manažér + self-check Staviteľa."
     )
     # Dispute-aware RE-review (Director 2026-07-17): if a prior verdict + the agent's reaction exist, thread
     # them in so the Auditor RE-CHECKS the disputed findings against the CURRENT docs and CONVERGES, instead of
@@ -2231,10 +2231,10 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         prior_findings, agent_latest = prior_ctx
         findings_list = "\n".join(f"   - {f}" for f in prior_findings) or "   - (žiadne explicitné)"
         reverify_block = (
-            "\n\nRE-PREVIERKA — už si raz posudzoval a AI Agent na tvoje nálezy reagoval; teraz KONVERGUJ, "
+            "\n\nRE-PREVIERKA — už si raz posudzoval a Staviteľ na tvoje nálezy reagoval; teraz KONVERGUJ, "
             "neopakuj identicky to isté.\n"
             f"Tvoje predošlé nálezy:\n{findings_list}\n"
-            + (f"Reakcia AI Agenta: {agent_latest}\n" if agent_latest else "")
+            + (f"Reakcia Staviteľa: {agent_latest}\n" if agent_latest else "")
             + "Každý predošlý nález ZNOVA over proti AKTUÁLNYM dokumentom (prečítaj konkrétnu sekciu). ZAHOĎ "
             "ho, ak je v aktuálnych dokumentoch naozaj vyriešený. PONECHAJ len tie, čo sú STÁLE naozaj "
             "chýbajúce/nesprávne — a cituj presné miesto. Neopakuj identický nález bez nového overenia."
@@ -2258,7 +2258,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
     return (
         "UPFRONT PREVIERKA (nezávislý Auditor, po fáze Návrh, pred začatím programovania).\n"
         f"1. NAČÍTAJ schválenú Špecifikáciu (`{spec_rel}`) + návrhový dokument (`{design_rel}`) + Zadanie a "
-        "existujúci kód/KB. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — kontroluj z VONKU (žiadny agent "
+        "existujúci kód/KB. Si NEZÁVISLÝ overovateľ MIMO tímu Staviteľa — kontroluj z VONKU (žiadny agent "
         "nedokáže auditovať sám seba).\n"
         "2. Hľadaj MEDZERY / nejednoznačnosti / protirečenia v Špecifikácii a Návrhu: chýbajúce detaily, "
         "rozpory medzi zadaním a návrhom, nepokryté hraničné prípady, rizikové predpoklady (bezpečnosť, "
@@ -2273,10 +2273,10 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "NIE je blokujúca medzera; neoznačuj ju za chýbajúcu.\n"
         f"3. {depth}\n"
         "4. SI READ + RUN-ONLY: smieš ČÍTAŤ (a prípadne spustiť aplikáciu na overenie), ale NIKDY neupravuj "
-        "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
+        "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje Staviteľ (zachovaná nezávislosť).\n"
         "5. Vráť `kind=verdict`:\n"
         "   - ak je Špecifikácia + Návrh bez blokujúcej medzery → `verdict=true` (PASS); do `findings` daj "
-        "prípadné neblokujúce poznámky (alebo prázdne). Tieto poznámky dostane AI Agent na začiatku "
+        "prípadné neblokujúce poznámky (alebo prázdne). Tieto poznámky dostane Staviteľ na začiatku "
         "Programovania a zaradí ich do plánu úloh — každú napíš tak, aby sa podľa nej dalo konať.\n"
         "   - ak nájdeš medzeru (HOLE) → `verdict=false` (FAIL); konkrétne diery vymenuj v `findings` a do "
         "`proposed_fix` napíš ZAMERANÝ rozsah vyjasnenia/úpravy pre Manažéra (NEvykonávaj ho). Medzera sa "
@@ -2286,7 +2286,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "`summary`/`findings` = 1–2 vety / krátke odrážky po slovensky (čo treba rozhodnúť z pohľadu POUŽÍVATEĽA), "
         "BEZ ciest k súborom, názvov premenných/endpointov, kódov, čísel riadkov, počtov testov a žargónu. VŠETOK "
         "technický rozbor daj do `technical_detail` — Manažérovi sa zobrazí ZBALENÝ v „Technický detail“, takže "
-        "sa nič nestratí a manažérsky text ostane čistý. (`proposed_fix` = rozsah pre AI Agenta, smie byť technický.)\n"
+        "sa nič nestratí a manažérsky text ostane čistý. (`proposed_fix` = rozsah pre Staviteľa, smie byť technický.)\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
         + reverify_block
         + narrowing
@@ -2808,12 +2808,12 @@ def _verifikacia_directive(
         rychle_pokrytie = _release_coverage_brief(db, version_id)
         return (
             "VERIFIKÁCIA — RÝCHLA OPRAVA (nezávislý Auditor, ĽAHKÁ koncová kontrola; NIE plný release oracle).\n"
-            "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ aplikáciu, "
-            "NIKDY neupravuj/necommituj. TY NÁJDEŠ — opravuje AI Agent.\n"
+            "1. Si NEZÁVISLÝ overovateľ MIMO tímu Staviteľa, READ + RUN-ONLY — smieš ČÍTAŤ a SPUSTIŤ aplikáciu, "
+            "NIKDY neupravuj/necommituj. TY NÁJDEŠ — opravuje Staviteľ.\n"
             + _audit_docker_rule(browser)
             + "2. ZAMERAJ sa na DVE veci (oprava je malá a jednoznačná, nerob plný adverzariálny audit):\n"
             "   a) OPRAVA FUNGUJE — robí aplikácia to, čo smernica (pokyn Manažéra) žiadala? Over to oproti "
-            "bežiacej aplikácii / artefaktom, nie oproti slovu AI Agenta.\n"
+            "bežiacej aplikácii / artefaktom, nie oproti slovu Staviteľa.\n"
             "   b) ŽIADNA REGRESIA — nerozbila oprava nič susedné? Engine spustil release smoke (interné "
             "fixtúry) — výsledok je nižšie; zohľadni ho.\n"
             + smoke_block
@@ -2823,7 +2823,7 @@ def _verifikacia_directive(
             "4. Vráť `kind=verdict`:\n"
             "   - oprava funguje + bez regresie + §4 čisté → `verdict=true` (PASS).\n"
             "   - inak → `verdict=false` (FAIL); konkrétne zlyhania do `findings`, zameraný rozsah opravy do "
-            "`proposed_fix` (NEvykonávaj — opravuje AI Agent, ty re-verifikuješ). FAIL sa vráti do "
+            "`proposed_fix` (NEvykonávaj — opravuje Staviteľ, ty re-verifikuješ). FAIL sa vráti do "
             "ohraničenej slučky.\n"
             "   - " + FINDINGS_AS_DATA_RULE + "\n"
             "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
@@ -2854,9 +2854,9 @@ def _verifikacia_directive(
     )
     return (
         "VERIFIKÁCIA (nezávislý Auditor, koncová kontrola po Programovaní, pred Hotovo).\n"
-        "1. Si NEZÁVISLÝ overovateľ MIMO tímu AI Agenta — over z VONKU (žiadny agent sa nevie auditovať sám). "
+        "1. Si NEZÁVISLÝ overovateľ MIMO tímu Staviteľa — over z VONKU (žiadny agent sa nevie auditovať sám). "
         "SI READ + RUN-ONLY: smieš ČÍTAŤ a SPUSTIŤ aplikáciu na overenie, ale NIKDY neupravuj súbor, nepíš kód "
-        "ani necommituj. TY NÁJDEŠ — opravuje AI Agent (zachovaná nezávislosť).\n"
+        "ani necommituj. TY NÁJDEŠ — opravuje Staviteľ (zachovaná nezávislosť).\n"
         + _audit_docker_rule(browser)
         + "2. RELEASE-ACCEPTANCE (behaviorálny pilier): over, že aplikácia robí to, čo brief sľúbil. Engine už "
         "spustil aplikáciu proti INTERNÝM FIXTÚRAM (nie zákazníckej inštancii — deploy je mimo pipeline; "
@@ -2864,9 +2864,9 @@ def _verifikacia_directive(
         + smoke_block
         + vizual_block
         + "3. REFUTUJ, NEPOTVRDZUJ (rovnaká PLNÁ hĺbka VŽDY — nezávisle od Miery autonómie): predpokladaj, že "
-        "build je CHYBNÝ, kým sám nedokážeš opak. NEDÔVERUJ zeleným testom AI Agenta — over ich SÁM oproti "
+        "build je CHYBNÝ, kým sám nedokážeš opak. NEDÔVERUJ zeleným testom Staviteľa — over ich SÁM oproti "
         "bežiacej aplikácii. Aktívne LOV diery v RIZIKOVÝCH častiach (bezpečnosť, peniaze/výpočty, hlavný "
-        "kontrakt); verify-don't-trust oproti artefaktom a bežiacej aplikácii, NIE oproti slovu AI Agenta.\n"
+        "kontrakt); verify-don't-trust oproti artefaktom a bežiacej aplikácii, NIE oproti slovu Staviteľa.\n"
         "4. NEGATÍVNE / BEZPEČNOSTNÉ OVERENIE (POVINNÉ, bez ohľadu na dial): pre KAŽDÝ deklarovaný bezpečnostný "
         "invariant SÁM SPUSTI zakázanú operáciu a over, že je SKUTOČNE ODMIETNUTÁ (červený-keď-zneužitá test). "
         "Zelený „funguje to“ test bezpečnostný invariant NEDOKÁŽE — len negatívny. Nepokrytý invariant = FAIL. "
@@ -2886,8 +2886,8 @@ def _verifikacia_directive(
         "   - ak je verzia overená (acceptance + negatívne bezpečnostné testy + spot-checky + §4 čisté) → "
         "`verdict=true` (PASS); do `findings` daj prípadné neblokujúce poznámky.\n"
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "
-        "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre AI Agenta (NEvykonávaj ho — opravuje AI Agent, ty "
-        "re-verifikuješ). FAIL sa vráti AI Agentovi do ohraničenej slučky.\n"
+        "`proposed_fix` napíš ZAMERANÝ rozsah opravy pre Staviteľa (NEvykonávaj ho — opravuje Staviteľ, ty "
+        "re-verifikuješ). FAIL sa vráti Staviteľovi do ohraničenej slučky.\n"
         "   - " + FINDINGS_AS_DATA_RULE + "\n"
         "7. MANAŽÉRSKY TEXT vs. TECHNICKÝ DETAIL — POVINNÉ rozdelenie (Manažér aj junior je NEŠPECIALISTA):\n"
         "   • `summary` = JEDNA–DVE vety po slovensky: ČO nefunguje z pohľadu POUŽÍVATEĽA + čo treba rozhodnúť. "
@@ -2896,7 +2896,7 @@ def _verifikacia_directive(
         "(MissingGreenlet, ASSERTIONS_RUN, boot-floor, HMAC/JWT/exp, §…).\n"
         "   • `technical_detail` = SEM daj VŠETOK technický rozbor (cesty, kódy, verzie, čísla riadkov, repro, "
         "počty). Manažérovi sa zobrazí ZBALENÝ v „Technický detail“, takže sa nič nestratí — a práve preto "
-        "`summary`/`findings` môžu byť úplne bez žargónu. `proposed_fix` je zameraný rozsah pre AI Agenta (smie "
+        "`summary`/`findings` môžu byť úplne bez žargónu. `proposed_fix` je zameraný rozsah pre Staviteľa (smie "
         "byť technický).\n"
         "   • PRÍKLAD — ZLE `summary`: „Verifikácia FAIL — MissingGreenlet v catalog_import.py:93…”. "
         "DOBRE `summary`: „Aplikácia je v poriadku, ale záverečná automatická skúška občas zlyhá a jeden test sa nedá "
@@ -4550,7 +4550,7 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
     # refused (the paused guard in apply_action); the pending pause is the same intent and gets the same answer.
     if pause_pending(state):
         raise OrchestratorError(
-            "Stavba sa pozastavuje — AI Agent dokončuje rozrobenú úlohu. Napíš mu, keď zastane, "
+            "Stavba sa pozastavuje — Staviteľ dokončuje rozrobenú úlohu. Napíš mu, keď zastane, "
             "cez „Vrátiť agentovi na doplnenie“ alebo po „Pokračovať“."
         )
 
@@ -5970,7 +5970,7 @@ def _tell_manager_the_note_is_not_committed(db: Session, version_id: uuid.UUID, 
         content=(
             f"Poznámky k vydaniu v{version_number} sú zapísané, ale nie v gite: generátor projektu (npm run "
             f"{RELEASE_NOTES_GENERATOR}) neprešiel — {why}. Bez neho by kontrola projektu zlyhala na súbore, ktorý si "
-            "z poznámok robí aplikácia; AI Agent ho musí pregenerovať a zapísať spolu s poznámkami."
+            "z poznámok robí aplikácia; Staviteľ ho musí pregenerovať a zapísať spolu s poznámkami."
         ),
         payload={"phase": stage, "release_note_generator_failed": why},
     )
@@ -11990,7 +11990,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     else:
         explanation_parts.append(
             "Navrhnutá oprava nebola nezávisle preverená (kritik nebol dostupný alebo išlo o mechanické "
-            "engine-červené zlyhanie). Môžeš ju napriek tomu nechať opraviť — AI Agent opraví podľa nálezov "
+            "engine-červené zlyhanie). Môžeš ju napriek tomu nechať opraviť — Staviteľ opraví podľa nálezov "
             "Auditora a Auditor to znova preverí; nič nemusíš písať."
         )
     # ICCINT-97: povedz, koľké kolo to je. Manažér pri tých kartách sedí a odpovedá — bez čísla nemá ako
@@ -11999,13 +11999,13 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     if kolo >= _FIX_ROUNDS_SAY_ALOUD and not stuck:
         explanation_parts.append(
             f"Toto je {kolo}. kolo opráv po Verifikácii. Kým na tieto karty odpovedáš ty, kolá sa nepočítajú "
-            "do žiadneho stropu a môžu prísť ďalšie — ale každé stojí jeden beh AI Agenta a jeden beh "
+            "do žiadneho stropu a môžu prísť ďalšie — ale každé stojí jeden beh Staviteľa a jeden beh "
             "Auditora. Ak sa to ani teraz netrafí, zváž radšej 'Zastaviť a odovzdať vývojárovi'."
         )
     if stuck:
         explanation_parts.append(
             "⚠️ To isté zlyhanie sa opakuje už niekoľko kôl po sebe a automatická oprava ho NEODSTRÁNILA — "
-            "AI Agent nekonverguje (zvyčajne sa zasekol na nesprávnej príčine). Ďalší pokus pravdepodobne "
+            "Staviteľ nekonverguje (zvyčajne sa zasekol na nesprávnej príčine). Ďalší pokus pravdepodobne "
             "nepomôže; odporúčam build zastaviť a nechať sa naň pozrieť vývojára (technický tím / Dedo), "
             "ktorý to vyrieši priamo."
         )
@@ -12018,7 +12018,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             ConsultOption(
                 id="accept_fix",
                 label="Spustiť pripravenú opravu",
-                detail="Spustí už pripravenú cielenú opravu (AI Agent ju vykoná v Programovaní a Auditor ju "
+                detail="Spustí už pripravenú cielenú opravu (Staviteľ ju vykoná v Programovaní a Auditor ju "
                 "znova overí). Navrhnutá oprava prešla nezávislým preverením kritika.",
                 recommended=not stuck,  # v4.0.16: not the default once the loop is non-convergent
             )
@@ -12037,9 +12037,9 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
                 label=("Skúsiť opraviť ešte raz" if stuck else "Nechaj to opraviť"),
                 detail=(
                     f"Pravdepodobne nepomôže — {repeat_phrase} a automatická oprava nekonverguje. "
-                    "Ak to chceš aj tak skúsiť, AI Agent opraví podľa nálezov Auditora."
+                    "Ak to chceš aj tak skúsiť, Staviteľ opraví podľa nálezov Auditora."
                     if stuck
-                    else "Jedným klikom — AI Agent opraví podľa nálezov Auditora a Auditor to znova preverí. "
+                    else "Jedným klikom — Staviteľ opraví podľa nálezov Auditora a Auditor to znova preverí. "
                     "Nemusíš nič písať."
                 ),
                 # v4.0.16: stop recommending another fix once the loop is non-convergent.
@@ -12073,7 +12073,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
             id="guide",
             label="Usmerniť opravu (napíš vlastný pokyn)",
             # DEV-100: the guidance travels with the findings it answers — the card must not promise otherwise.
-            detail="NEPOVINNÉ — ak chceš opravu nasmerovať sám, napíš pokyn (pole nižšie); AI Agent ho dostane "
+            detail="NEPOVINNÉ — ak chceš opravu nasmerovať sám, napíš pokyn (pole nižšie); Staviteľ ho dostane "
             "spolu s nálezmi Auditora (kde sa rozchádzajú, platí tvoj pokyn) a Auditor opravu znova overí.",
             recommended=False,
         )
@@ -12122,7 +12122,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
         rationale = "Odporúčam spustiť pripravenú opravu — nezávislý kritik ju preveril (je vynútená konštrukciou)."
     else:
         rationale = (
-            "Odporúčam nechať to opraviť — Auditor presne vie, čo je zle; AI Agent to opraví podľa jeho nálezov "
+            "Odporúčam nechať to opraviť — Auditor presne vie, čo je zle; Staviteľ to opraví podľa jeho nálezov "
             "a Auditor to znova preverí. Nemusíš nič písať. (Ak chceš, môžeš opravu nasmerovať sám cez "
             "'Usmerniť opravu'.)"
         )
@@ -12180,7 +12180,7 @@ async def _floor_preview_decisions(
         content=(
             "Kód aplikácie rozhoduje o živom náhľade mimo prepínača zo šablóny "
             f"({preview_switch.places(len(found))}) — aplikácia zostavená s vypnutým náhľadom by sa mohla "
-            "správať ako náhľad. Opraví to AI Agent."
+            "správať ako náhľad. Opraví to Staviteľ."
         ),
         payload={
             "phase": "verifikacia",
@@ -12340,8 +12340,8 @@ async def _settle_verifikacia_verdict(
                         *([_RERUN_CI_OPTION] if rerun else []),
                         ConsultOption(
                             id="guide_fix",
-                            label="Usmerniť opravu pre AI Agenta",
-                            detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa AI Agentovi ako cielená "
+                            label="Usmerniť opravu pre Staviteľa",
+                            detail="Napíš konkrétny pokyn (pole nižšie) — pošle sa Staviteľovi ako cielená "
                             "oprava a Auditor ju znova overí.",
                             recommended=not rerun,
                         ),
@@ -12355,7 +12355,7 @@ async def _settle_verifikacia_verdict(
                     rationale=_RERUN_CI_RATIONALE
                     if rerun
                     else "Odporúčam usmerniť opravu — Auditor zvyčajne uviazol na konkrétnej veci, ktorú "
-                    "vieš adresne opísať; pokyn dostane AI Agent (opravár), nie Auditor (nálezca).",
+                    "vieš adresne opísať; pokyn dostane Staviteľ (opravár), nie Auditor (nálezca).",
                 )
             ],
         )
@@ -13367,7 +13367,7 @@ def _fix_plain_description(scope: str) -> str:
         line = raw.strip().lstrip("-• ").strip()
         if line and not line.startswith("`") and len(line) > 12:
             return f"Verifikácia našla chybu: {line[:180]}"
-    return "Verifikácia našla blokujúcu chybu — AI Agent ju opravuje a Auditor to potom znova preverí."
+    return "Verifikácia našla blokujúcu chybu — Staviteľ ju opravuje a Auditor to potom znova preverí."
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -14046,7 +14046,7 @@ def _directive_for_build_task(
     ``flow_type='fast_fix'`` (design §2.4): the Manažér's directive (the task description) IS the authority —
     there is no spec section to study, and the AI Agent must EXECUTE it directly rather than debate it on
     semantic/opinion grounds (the live v1 run blocked asking "naozaj to chceš premenovať?")."""
-    parts = [f"AI Agent, postav JEDNU úlohu (TASK #{task_label or task.number}): {task.title}"]
+    parts = [f"Staviteľ, postav JEDNU úlohu (TASK #{task_label or task.number}): {task.title}"]
     if task.description:
         parts.append(f"Popis úlohy: {task.description}")
     if flow_type == "fast_fix":
@@ -15331,7 +15331,7 @@ async def _run_build_round(
             author="system",
             recipient="manazer",
             kind="notification",
-            content=f"▶ Úloha #{_task_full_number(db, task)}: {task.title} — AI Agent začal.",
+            content=f"▶ Úloha #{_task_full_number(db, task)}: {task.title} — Staviteľ začal.",
             payload={"task_id": str(task.id), "task_number": task.number, "phase": "programovanie"},
         )
         if on_message is not None:
@@ -15354,7 +15354,7 @@ async def _run_build_round(
                     content=(
                         "Hlavná vetva je červená po úlohe "
                         + ", ".join(f"#{link.label}" for _run, link in reds)
-                        + f" — AI Agent ju opraví skôr, než pokračuje úlohou #{_task_full_number(db, task)}."
+                        + f" — Staviteľ ju opraví skôr, než pokračuje úlohou #{_task_full_number(db, task)}."
                     ),
                     payload={"phase": "programovanie", "red_main_branch": [run.url for run, _link in reds]},
                 )
@@ -15493,7 +15493,7 @@ async def _run_build_round(
                         return _block_for_schema_approval(
                             db,
                             state,
-                            f"AI Agent (úloha #{task.number}) potrebuje zmeniť štruktúru databázy: "
+                            f"Staviteľ (úloha #{task.number}) potrebuje zmeniť štruktúru databázy: "
                             f"{result.database_schema_change.strip()}",
                         )
                 # The AI Agent cannot proceed → it asks the Manažér DIRECTLY (no Coordinator relay — design
@@ -15501,7 +15501,7 @@ async def _run_build_round(
                 # answer threads back into the resumed task on the next dispatch.
                 state.status = "blocked"
                 state.block_reason = "agent_question"
-                state.next_action = f"AI Agent (úloha #{task.number}) sa pýta: {result.question}"
+                state.next_action = f"Staviteľ (úloha #{task.number}) sa pýta: {result.question}"
                 db.flush()
                 return state
             else:
@@ -15644,7 +15644,7 @@ async def _run_build_round(
             state.status = "awaiting_manazer"
             state.next_action = (
                 f"Úloha #{_task_full_number(db, task)} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "
-                "Manažér: usmerni AI Agenta (Uprav) alebo rozhodni o ďalšom kroku."
+                "Manažér: usmerni Staviteľa (Uprav) alebo rozhodni o ďalšom kroku."
             )
             db.flush()
             return state
@@ -15760,7 +15760,7 @@ async def apply_action(
             next_action=(
                 "AI partner načítava kontext a začína rozhovor."
                 if mode == "conversation"
-                else "AI Agent pripravuje špecifikáciu."
+                else "Staviteľ pripravuje špecifikáciu."
             ),
             miera_autonomie=per_build_dial,
             mode=mode,

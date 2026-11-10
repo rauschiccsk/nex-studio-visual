@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 #: What the board tells the Manažér once the build is released. Plain Slovak, no "framework"/"Dedo" jargon
 #: (the cockpit's reader is a non-expert): what happened, and the one thing to do about it.
-UNBLOCK_NEXT_ACTION = "Chybu v NEX Studiu sme opravili. Stlač „Pokračovať“ — AI Agent bude pokračovať tam, kde prestal."
+UNBLOCK_NEXT_ACTION = "Chybu v NEX Studiu sme opravili. Stlač „Pokračovať“ — Staviteľ bude pokračovať tam, kde prestal."
 
 
 def unblock_framework_issue(
@@ -112,7 +112,7 @@ def unblock_framework_issue(
 
     if STAGE_ACTOR.get(state.current_stage) != AI_AGENT_ROLE:
         raise DedoMessageError(
-            f"Version {version_id} is in phase {state.current_stage!r}, which has no AI Agent turn to resume "
+            f"Version {version_id} is in phase {state.current_stage!r}, which has no Staviteľ turn to resume "
             f"(actor={STAGE_ACTOR.get(state.current_stage)!r}) — unblocking it would leave the Manažér with a "
             "button that does nothing for Dedo's answer"
         )

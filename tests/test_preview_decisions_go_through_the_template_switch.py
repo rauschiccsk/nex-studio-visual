@@ -361,7 +361,7 @@ async def test_a_pass_on_an_app_that_decides_outside_the_switch_is_floored_to_fa
     assert last.payload["verdict"] == "FAIL" and last.payload["engine_override"] == "preview_switch"
     assert last.content == (
         "Kód aplikácie rozhoduje o živom náhľade mimo prepínača zo šablóny (1 miesto) — aplikácia zostavená "
-        "s vypnutým náhľadom by sa mohla správať ako náhľad. Opraví to AI Agent."
+        "s vypnutým náhľadom by sa mohla správať ako náhľad. Opraví to Staviteľ."
     )
     assert "frontend/src/services/api.ts:7 — `if (import.meta.env.VITE_PREVIEW) return;`" in last.payload["findings"]
     assert orchestrator._verifikacia_passed(db_session, version.id) is False

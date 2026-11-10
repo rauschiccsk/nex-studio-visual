@@ -78,7 +78,7 @@ describe("Plán úloh — how long the agent will work (DEV-210)", () => {
     );
     rail();
 
-    expect(await screen.findByText("Práca agenta: asi 40 min ± 10 % · zostáva asi 25 min")).toBeInTheDocument();
+    expect(await screen.findByText("Práca Staviteľa: asi 40 min ± 10 % · zostáva asi 25 min")).toBeInTheDocument();
   });
 
   it("says no figure at all when there is nothing measured to go by", async () => {

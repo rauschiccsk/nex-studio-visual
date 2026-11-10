@@ -20,7 +20,7 @@ import AttachFileButton from "@/components/controlCenter/AttachFileButton";
 import { withAttachedLine } from "@/components/controlCenter/privateFiles";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
-const ENGINE_BUSY_HINT = "AI Agent práve pracuje — správa sa pošle, keď dokončí.";
+const ENGINE_BUSY_HINT = "Staviteľ práve pracuje — správa sa pošle, keď dokončí.";
 // A framework_issue block means the bug is in NEX Studio itself — the Manažér cannot chat their way out of a
 // NEX-Studio bug (correct to keep the composer locked). Plain Slovak, no "Dedo"/"framework" jargon: our
 // technical team resolves it.
@@ -38,7 +38,7 @@ const CONSULTATION_HINT =
 /** DEV-297: where the box also carries „Uprav“, the two buttons do different things — say which is which.
  * @internal — exported for its test. */
 export const UPRAV_HINT =
-  "„Poslať“ pošle text AI Agentovi ako správu. „Uprav“ mu vráti prácu na úpravu podľa tohto textu — pri pláne úloh plán.";
+  "„Poslať“ pošle text Staviteľovi ako správu. „Uprav“ mu vráti prácu na úpravu podľa tohto textu — pri pláne úloh plán.";
 
 // DEV-298: Poradca's instruction is work, never a question — while the box holds it, „Uprav“ is the main button and
 // Enter sends it so. Remembered per build until the text goes out or the box is emptied, edits and reloads included.
@@ -287,7 +287,7 @@ function ConversationComposer({
               ? "Zablokované — túto chybu rieši náš technický tím."
               : atVizual
                 ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok)"
-                : "Napíš AI Agentovi… (Enter odošle, Shift+Enter nový riadok)"
+                : "Napíš Staviteľovi… (Enter odošle, Shift+Enter nový riadok)"
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
@@ -316,7 +316,7 @@ function ConversationComposer({
             type="button"
             onClick={() => void uprav()}
             disabled={locked || sending || !text.trim()}
-            title="Vráti prácu AI Agentovi na úpravu podľa tohto textu"
+            title="Vráti prácu Staviteľovi na úpravu podľa tohto textu"
             data-primary={primaryUprav ? "true" : "false"}
             className={primaryUprav ? MAIN_BUTTON : OTHER_BUTTON}
           >

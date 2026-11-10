@@ -247,7 +247,7 @@ async def test_ai_agent_question_blocks_directly(db_session, monkeypatch):
     state = await orchestrator.run_dispatch(db_session, version.id)
     assert state.status == "blocked" and state.block_reason == "agent_question"
     assert state.current_stage == "programovanie"
-    assert "AI Agent (úloha #1) sa pýta" in state.next_action
+    assert "Staviteľ (úloha #1) sa pýta" in state.next_action
     assert not [m for m in _msgs(db_session, version.id) if m.author in ("auditor", "coordinator")]
 
 

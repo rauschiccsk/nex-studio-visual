@@ -59,17 +59,17 @@ import { WARNING_CHROME } from "@/components/common/WarningActionBar";
 // an action — Dedo's proposal carries it and this only tells him, in his own words, what pressing it means.
 const ACTION_COPY: Record<string, { button: string; effect: string }> = {
   uprav: {
-    button: "Vrátiť agentovi na doplnenie",
+    button: "Vrátiť Staviteľovi na doplnenie",
     effect:
-      "AI Agent dostane tento text ako pokyn a vráti sa k rozrobenej práci — nič sa nezačína odznova.",
+      "Staviteľ dostane tento text ako pokyn a vráti sa k rozrobenej práci — nič sa nezačína odznova.",
   },
   answer: {
-    button: "Odpovedať agentovi",
-    effect: "Text sa odošle ako odpoveď na otázku, na ktorej sa AI Agent zastavil, a on pokračuje ďalej.",
+    button: "Odpovedať Staviteľovi",
+    effect: "Text sa odošle ako odpoveď na otázku, na ktorej sa Staviteľ zastavil, a on pokračuje ďalej.",
   },
   ask: {
-    button: "Spýtať sa agenta",
-    effect: "Text sa odošle AI Agentovi ako otázka a on na ňu v ďalšom ťahu odpovie.",
+    button: "Spýtať sa Staviteľa",
+    effect: "Text sa odošle Staviteľovi ako otázka a on na ňu v ďalšom ťahu odpovie.",
   },
   // ICCINT-54: jediné sloveso, ktoré nepokračuje v TEJTO stavbe, ale zakladá novú záplatovú verziu.
   // Text to hovorí nahlas — Manažér musí vedieť, že klikom nevzniká správa, ale nová stavba.
@@ -85,7 +85,7 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
   decide: {
     button: "Odpovedať na kartu rozhodnutia",
     effect:
-      "Text sa odošle ako tvoja vlastná odpoveď na otvorenú otázku — AI Agent ju dostane ako cielenú " +
+      "Text sa odošle ako tvoja vlastná odpoveď na otvorenú otázku — Staviteľ ju dostane ako cielenú " +
       "opravu a Auditor ju znova overí. Karta sa tým vyrieši.",
   },
 };
@@ -93,12 +93,12 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
 // DEV-221: sent while the Decision Cards wait, „Uprav“ cancels them — and the engine takes the decided ones along
 // (24.10.2026 Author Asistent: 12 decided cards never reached the agent, the next round asked them again).
 const UPRAV_AT_THE_CARDS =
-  "Otvorené karty rozhodnutia sa tým zrušia. Karty, ktoré si už rozhodol, dostane AI Agent spolu s týmto textom " +
+  "Otvorené karty rozhodnutia sa tým zrušia. Karty, ktoré si už rozhodol, dostane Staviteľ spolu s týmto textom " +
   "a znovu sa na ne nepýta; na ostatné sa ďalšie kolo spýta, len ak ešte platia.";
 
 const FALLBACK_COPY = {
-  button: "Odoslať agentovi",
-  effect: "Text sa odošle AI Agentovi.",
+  button: "Odoslať Staviteľovi",
+  effect: "Text sa odošle Staviteľovi.",
 };
 
 interface Props {
@@ -233,7 +233,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
         className={`flex items-center gap-2 ${WARNING_CHROME} px-4 py-2.5 text-sm font-semibold text-[var(--color-state-warning-fg)]`}
       >
         <Lightbulb className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span>Dedo (náš technický tím) našiel niečo, čo navrhuje poslať AI Agentovi</span>
+        <span>Dedo (náš technický tím) našiel niečo, čo navrhuje poslať Staviteľovi</span>
       </div>
 
       <div className="flex flex-col gap-2 px-4 py-3">
@@ -249,7 +249,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
         )}
 
         <p className="text-xs text-[var(--color-text-muted)]">
-          Text napísal Dedo — agentovi zatiaľ NEODIŠIEL a agent o ňom nevie. Môžeš ho upraviť alebo doplniť;
+          Text napísal Dedo — Staviteľovi zatiaľ NEODIŠIEL a Staviteľ o ňom nevie. Môžeš ho upraviť alebo doplniť;
           odoslať ho môžeš len ty. {effect}
         </p>
 
@@ -262,7 +262,7 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={busy !== null}
-          aria-label="Návrh od Deda — text pre AI Agenta"
+          aria-label="Návrh od Deda — text pre Staviteľa"
           className="w-full resize-none rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-primary-500 focus:outline-none disabled:opacity-60"
         />
 

@@ -48,7 +48,7 @@ describe("CiGateBar — the step to Verifikácia waits for CI (DEV-261)", () => 
     expect(step).toBeDisabled();
     fireEvent.click(step);
     expect(postPipelineActionApi).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /Vrátiť agentovi na opravu/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Vrátiť Staviteľovi na opravu/ })).not.toBeInTheDocument();
   });
 
   it("after Verifikácia the step that waits is the sign-off, not the step to Verifikácia (DEV-308)", () => {
@@ -78,7 +78,7 @@ describe("CiGateBar — the step to Verifikácia waits for CI (DEV-261)", () => 
     expect(screen.getByText("Kontroly na GitHube zlyhali")).toBeInTheDocument();
     expect(screen.getByText(RED)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Prejsť na overenie" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Vrátiť agentovi na opravu/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi na opravu/ }));
     await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalledWith("v-1", { action: "opravit_podla_ci" }));
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
   });

@@ -73,7 +73,7 @@ def build_channel_file(
         "type: flag\n"
         "---\n\n"
         "## Téma\n\n"
-        f"AI Agent projektu **{project_slug}** (v{version_number}) narazil na problém, ktorý NEVIE opraviť, "
+        f"Staviteľ projektu **{project_slug}** (v{version_number}) narazil na problém, ktorý NEVIE opraviť, "
         "lebo si vyžaduje zmenu NEX Studia samotného (framework/tooling, §15). Build je zablokovaný "
         "(`block_reason=framework_issue`), Manažér s tým nevie nič urobiť — čaká sa na Deda.\n\n"
         "## Správa od agenta\n\n"
@@ -125,7 +125,7 @@ def _telegram_summary(*, project_slug: str, version_number: str, dedo_message: s
         preview = preview[:397] + "…"
     return (
         f"🛠️ NEX Studio potrebuje opravu (Dedo) — projekt {project_slug} v{version_number}.\n"
-        f"AI Agent narazil na problém, ktorý si vyžaduje zmenu NEX Studia (framework). Build je "
+        f"Staviteľ narazil na problém, ktorý si vyžaduje zmenu NEX Studia (framework). Build je "
         f"zablokovaný, Manažér to nevie opraviť.\n\n{preview}"
     )
 

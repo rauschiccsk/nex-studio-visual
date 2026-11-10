@@ -126,7 +126,7 @@ DEFAULT_SETTINGS: dict[str, _Default] = {
         label="Miera autonómie",
         unit="",
         description=(
-            "Ako často sa AI agent zastaví a počká na tvoje schválenie: plná / len na konci / "
+            "Ako často sa Staviteľ zastaví a počká na tvoje schválenie: plná / len na konci / "
             "pri kľúčových bodoch / po každej fáze. Dá sa prepísať pre jednotlivý projekt aj "
             "konkrétnu stavbu."
         ),

@@ -106,7 +106,7 @@ def ensure_ignored(project_root: Path, rel: str) -> None:
     if not git_dir.exists():
         return
     exclude_locally(
-        project_root, EXCLUDE_LINE, "NEX Studio (DEV-44): files the Manažér hands the AI Agent — never committed."
+        project_root, EXCLUDE_LINE, "NEX Studio (DEV-44): files the Manažér hands the Staviteľ — never committed."
     )
     if not git_ignores(Path(project_root), rel):
         raise PrivateFileRefused(

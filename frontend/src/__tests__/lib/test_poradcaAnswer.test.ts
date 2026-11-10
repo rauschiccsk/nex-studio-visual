@@ -15,7 +15,7 @@ import {
 describe("answerForDisplay", () => {
   it("turns the instruction block into a headed quote instead of dropping it", () => {
     const out = answerForDisplay("Agent stojí.\n<pokyn-pre-agenta>\nOprav test_login.\nPotom spusti testy.\n</pokyn-pre-agenta>");
-    expect(out).toContain("**Pokyn pre agenta stavby:**");
+    expect(out).toContain("**Pokyn pre Staviteľa:**");
     expect(out).toContain("> Oprav test_login.\n> Potom spusti testy.");
     expect(out).not.toContain("<pokyn-pre-agenta>");
   });
@@ -82,7 +82,7 @@ describe("longAnswer (DEV-224)", () => {
 
   it("shows a long answer as a quoted block, a short one as a choice", () => {
     const long = "b".repeat(SHORT_ANSWER_MAX + 1);
-    expect(answerForDisplay(`Odpovedz <volba>${long}</volba>`)).toBe(`Odpovedz \n**Odpoveď pre agenta:**\n\n> ${long}`);
+    expect(answerForDisplay(`Odpovedz <volba>${long}</volba>`)).toBe(`Odpovedz \n**Odpoveď pre Staviteľa:**\n\n> ${long}`);
     expect(answerForDisplay("Odpovedz <volba>Áno</volba>")).toBe("Odpovedz [Áno](#volba)");
   });
 });

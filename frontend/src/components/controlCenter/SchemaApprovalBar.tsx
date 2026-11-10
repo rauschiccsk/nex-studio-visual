@@ -52,7 +52,7 @@ export default function SchemaApprovalBar({ board, versionId, onBoard }: Props) 
     <div className="flex flex-col gap-2 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-3">
       <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-accent-primary)]">
         <Database className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-        <span>AI Agent potrebuje zmeniť štruktúru databázy</span>
+        <span>Staviteľ potrebuje zmeniť štruktúru databázy</span>
       </div>
       {board.state?.next_action && (
         <p className="text-xs text-[var(--color-text-secondary)]">{board.state.next_action}</p>

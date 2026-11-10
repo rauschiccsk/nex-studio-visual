@@ -395,7 +395,7 @@ class PipelineRelayRequest(BaseModel):
     flight the message is enqueued behind it; when settled it dispatches immediately as an ``ask``/``answer``.
     """
 
-    text: str = Field(..., min_length=1, description="The Manažér's message to relay to the AI Agent.")
+    text: str = Field(..., min_length=1, description="The Manažér's message to relay to the Staviteľ.")
 
 
 class PipelineRelayResponse(BaseModel):

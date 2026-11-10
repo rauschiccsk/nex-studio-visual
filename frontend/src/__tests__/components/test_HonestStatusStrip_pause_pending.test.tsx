@@ -28,7 +28,7 @@ function strip(state: Partial<PipelineState>) {
 describe("HonestStatusStrip — vyžiadaná pauza", () => {
   it("povie, že sa pozastavuje a agent ešte dorába úlohu — nie že je pozastavené", () => {
     render(strip({ current_stage: "programovanie", status: "agent_working", pause_reason: "manazer" }));
-    expect(screen.getByText(/Pozastavujem — AI Agent dokončuje rozrobenú úlohu/)).toBeInTheDocument();
+    expect(screen.getByText(/Pozastavujem — Staviteľ dokončuje rozrobenú úlohu/)).toBeInTheDocument();
     expect(screen.queryByText(/^Pozastavené$/)).not.toBeInTheDocument();
   });
 

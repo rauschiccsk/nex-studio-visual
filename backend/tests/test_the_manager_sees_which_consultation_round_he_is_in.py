@@ -247,7 +247,7 @@ def test_from_the_third_round_it_says_out_loud_how_many_there_have_been(db_sessi
 
     assert karta.round == 3
     assert "3. kolo opráv" in vysvetlenie, f"tretie kolo sa nikde nepovie: {vysvetlenie!r}"
-    assert "beh AI Agenta" in vysvetlenie, "nepovie sa, že kolo niečo stojí"
+    assert "beh Staviteľa" in vysvetlenie, "nepovie sa, že kolo niečo stojí"
 
 
 def test_the_first_two_rounds_stay_short(db_session) -> None:

@@ -47,7 +47,7 @@ export default function AskPoradcaBar({
   return (
     <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
       <p className="text-[11px] text-[var(--color-text-muted)]">
-        Verzia je hotová — agent stavby na nej už nepracuje. Poradca ti zhrnie,
+        Verzia je hotová — Staviteľ na nej už nepracuje. Poradca ti zhrnie,
         čo priniesla, čo vyskúšať v UAT a na čo si dať pozor pred nasadením na
         PROD; zmenu z jeho odpovede založíš ako novú verziu.
       </p>

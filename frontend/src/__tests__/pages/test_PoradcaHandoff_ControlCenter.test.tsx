@@ -61,7 +61,7 @@ import ControlCenterPage from "@/pages/ControlCenterPage";
 const VERSION = "v170";
 const INSTRUCTION = "Odpovedz agentovi: NIB-046 rieši obsluha v detaile faktúry.";
 const ANSWER_PLACEHOLDER = /Tvoja odpoveď/;
-const CHAT_PLACEHOLDER = /Napíš AI Agentovi/;
+const CHAT_PLACEHOLDER = /Napíš Staviteľovi/;
 
 function board(status: string, blockReason: string | null = null): PipelineBoard {
   return {

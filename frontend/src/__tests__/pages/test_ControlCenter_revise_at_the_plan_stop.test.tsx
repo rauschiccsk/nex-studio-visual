@@ -115,7 +115,7 @@ describe("Riadiace centrum at the plan stop — „Uprav“ (DEV-297)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
 
-    const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
+    const box = await screen.findByPlaceholderText(/Napíš Staviteľovi/);
     await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
     // DEV-298: the line says which button sends Poradca's instruction.
     expect(screen.getByText(UPRAV_INSTRUCTION_HINT)).toBeInTheDocument();
@@ -172,7 +172,7 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
   async function boxWithInstruction() {
     insertFromPoradca();
     fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
-    const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
+    const box = await screen.findByPlaceholderText(/Napíš Staviteľovi/);
     await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
     return box;
   }
@@ -214,7 +214,7 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
   it("…and after the page is opened again", async () => {
     const first = insertFromPoradca();
     fireEvent.click(screen.getByRole("button", { name: /Vložiť do Riadiaceho centra/ }));
-    const box = await screen.findByPlaceholderText(/Napíš AI Agentovi/);
+    const box = await screen.findByPlaceholderText(/Napíš Staviteľovi/);
     await waitFor(() => expect(box).toHaveValue(INSTRUCTION));
     fireEvent.change(box, { target: { value: `${INSTRUCTION} Doplnené.` } });
     first.unmount();
@@ -224,7 +224,7 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
         <ControlCenterPage />
       </MemoryRouter>,
     );
-    const again = screen.getByPlaceholderText(/Napíš AI Agentovi/);
+    const again = screen.getByPlaceholderText(/Napíš Staviteľovi/);
     await waitFor(() => expect(again).toHaveValue(`${INSTRUCTION} Doplnené.`));
 
     expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "true");
@@ -238,7 +238,7 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
         <ControlCenterPage />
       </MemoryRouter>,
     );
-    const box = screen.getByPlaceholderText(/Napíš AI Agentovi/);
+    const box = screen.getByPlaceholderText(/Napíš Staviteľovi/);
 
     fireEvent.change(box, { target: { value: "Koľko úloh má plán?" } });
     expect(screen.getByRole("button", { name: "Poslať" })).toHaveAttribute("data-primary", "true");

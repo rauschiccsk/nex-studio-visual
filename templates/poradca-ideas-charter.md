@@ -56,7 +56,7 @@ písmenom (napríklad `orthodox-register`).
 
 ## 5. Zadanie
 
-Keď je všetko jasné, napíš zadanie — **po slovensky**, samonosné: agent stavby tento rozhovor neuvidí, dostane len
+Keď je všetko jasné, napíš zadanie — **po slovensky**, samonosné: Staviteľ tento rozhovor neuvidí, dostane len
 zadanie. Mená súborov, ciest a kódov ostávajú, ako sú v kóde. Heslo, s ktorým aplikácia založí prvého správcu, je
 „inicializačné heslo“. Nepíš doň čísla tiketov iných evidencií.
 

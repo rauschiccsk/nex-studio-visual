@@ -46,7 +46,7 @@ const STEPS: Step[] = [
     body: (
       <>
         V projekte klikni na <strong>Nová verzia</strong>. Do políčka <strong>Zadanie</strong> vlastnými slovami
-        opíš, čo má aplikácia robiť — ciele, hlavné funkcie, pre koho to je. Nemusí byť dokonalé; AI Agent sa na
+        opíš, čo má aplikácia robiť — ciele, hlavné funkcie, pre koho to je. Nemusí byť dokonalé; Staviteľ sa na
         nejasnosti sám doptá. Klikni <strong>Uložiť Zadanie</strong> a potom <strong>Spustiť tvorbu
         špecifikácie</strong>.
       </>
@@ -57,10 +57,10 @@ const STEPS: Step[] = [
     title: "Sleduj päť fáz",
     body: (
       <>
-        Prácu vidíš v <strong>Riadiacom centre</strong> ako rozhovor s AI Agentom. Postup má päť fáz:
+        Prácu vidíš v <strong>Riadiacom centre</strong> ako rozhovor so Staviteľom. Postup má päť fáz:
         <ul className="mt-2 space-y-1.5">
           <li>
-            <strong>Príprava</strong> — AI Agent z tvojho Zadania spíše presnú špecifikáciu a doptá sa na
+            <strong>Príprava</strong> — Staviteľ z tvojho Zadania spíše presnú špecifikáciu a doptá sa na
             nejasnosti.
           </li>
           <li>
@@ -88,7 +88,7 @@ const STEPS: Step[] = [
     title: "Schvaľuj a odpovedaj na otázky",
     body: (
       <>
-        Na konci každej fázy sa AI Agent zastaví a počká na teba. Keď je všetko v poriadku, klikni na
+        Na konci každej fázy sa Staviteľ zastaví a počká na teba. Keď je všetko v poriadku, klikni na
         <strong> Schváliť</strong> a pokračuje ďalej. Keď sa niečo spýta, zobrazí sa otázka alebo tlačidlá na
         výber — stačí odpovedať do políčka alebo kliknúť na možnosť. Nič sa nedeje bez tvojho súhlasu.
       </>
@@ -117,7 +117,7 @@ export default function GettingStartedPage() {
         <h1 className="text-xl font-bold text-[var(--color-text-primary)]">Ako začať</h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
           Krátky sprievodca pre úplný začiatok. Vedie ťa krok za krokom od prihlásenia až po nasadenie aplikácie
-          zákazníkovi. Nepotrebuješ žiadne technické znalosti — všetko podstatné robí AI Agent, ty rozhoduješ a
+          zákazníkovi. Nepotrebuješ žiadne technické znalosti — všetko podstatné robí Staviteľ, ty rozhoduješ a
           schvaľuješ.
         </p>
       </header>

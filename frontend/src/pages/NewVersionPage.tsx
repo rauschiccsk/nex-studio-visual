@@ -123,7 +123,7 @@ export default function NewVersionPage() {
     if (!project) return;
     setProject({ ...project, template });
     setConverted(
-      `Projekt je na šablóne aplikácie (nex-app-kit v${kitVersion}). Obrazovky do rámu šablóny presunie agent ` +
+      `Projekt je na šablóne aplikácie (nex-app-kit v${kitVersion}). Obrazovky do rámu šablóny presunie Staviteľ ` +
         "v tejto verzii — Príprava to dostane ako riadnu položku rozsahu.",
     );
     // The conversion moved nex-shared and added the kit — re-read both, and the tree it committed to.
@@ -617,7 +617,7 @@ export default function NewVersionPage() {
                 lang="sk"
                 spellCheck={true}
                 rows={8}
-                placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (AI Agent zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
+                placeholder="Opíš, čo má verzia priniesť. Napr.: Pridať platobný modul cez Tatra banku. Zákazník potrebuje automatické párovanie platieb s faktúrami a emailové notifikácie. Cieľ: funkčné platby pre pilotného zákazníka do konca mája. (Staviteľ zadanie systematizuje a v Príprave sa doptá na nejasnosti.)"
                 value={zadanie}
                 disabled={!!savedVersion}
                 onChange={(e) => {

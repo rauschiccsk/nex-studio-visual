@@ -89,7 +89,7 @@ export function AppTemplateConversionPrompt({
           </span>
         </label>
         <p className="text-[12px] text-[var(--color-text-muted)] border-l-2 border-[var(--color-status-success)] pl-2.5">
-          Kokpit pridá šablónu jedným zápisom a obrazovky projektu nechá. Do rámu ich presunie agent vo verzii, ktorú
+          Kokpit pridá šablónu jedným zápisom a obrazovky projektu nechá. Do rámu ich presunie Staviteľ vo verzii, ktorú
           teraz zakladáš — kokpit pred Overením skontroluje, že je rám celý.
         </p>
         {!offer.available && offer.reason && (

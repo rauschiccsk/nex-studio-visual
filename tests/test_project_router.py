@@ -548,7 +548,7 @@ class TestProjectRouter:
         memory = workspace_root / "mem-seed" / "MEMORY.md"
         assert memory.is_file()
         body = memory.read_text(encoding="utf-8")
-        assert "# Mem Seed — AI Agent pamäť" in body
+        assert "# Mem Seed — pamäť Staviteľa" in body
         assert "## Rozhodnutia" in body
 
     def test_create_auto_creates_v0_1_0_version(self, router_client, creator, db_session):

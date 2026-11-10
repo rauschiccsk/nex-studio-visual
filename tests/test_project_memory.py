@@ -50,7 +50,7 @@ def test_seed_writes_skeleton(workspace: Path) -> None:
     path = project_memory.seed_memory("demo", "Demo Project")
     assert path == workspace / "MEMORY.md"
     body = path.read_text(encoding="utf-8")
-    assert "# Demo Project — AI Agent pamäť" in body
+    assert "# Demo Project — pamäť Staviteľa" in body
     assert "## Rozhodnutia" in body
     assert "## Lekcie" in body
     assert "## Feedback Manažéra" in body

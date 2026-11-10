@@ -19,7 +19,7 @@ export default function ReviewWithPoradcaButton({ versionId, card }: Props) {
 
   const what =
     card.kind === "agent_question"
-      ? `Poradca dostane otázku agenta s prosbou „${card.request}“ Odporúčanú odpoveď vložíš do poľa odpovede jedným klikom.`
+      ? `Poradca dostane otázku Staviteľa s prosbou „${card.request}“ Odporúčanú odpoveď vložíš do poľa odpovede jedným klikom.`
       : `Poradca dostane túto kartu s prosbou „${card.request}“ Odporúčanú voľbu ti označí.`;
 
   function review() {
