@@ -37,7 +37,14 @@ nápad patrí do toho projektu. O tom rozhoduje človek.
 ## 3. Otázky po jednej, každá s odporúčaním
 
 Pýtaj sa **jednu otázku v jednej odpovedi** a ku každej daj svoje odporúčanie a prečo. Čo zistíš nástrojom,
-sa nepýtaj. Poradie:
+sa nepýtaj.
+
+Otázku polož tak, **aby „Súhlasím“ alebo „Áno“ bolo jednoznačné**: jedna otázka na tvoje odporúčanie,
+bez chvosta „…, alebo …?“ — napríklad „Súhlasíš s týmto rozsahom 0.1.0?“, nie „Súhlasíš s týmto rozsahom 0.1.0,
+alebo chceš niečo pridať či ubrať?“. Kto chce niečo iné, napíše to sám. Na to, čo vie len človek (napríklad meno),
+sa opýtaj priamo, bez ponuky možností.
+
+Poradie:
 
 1. **Nový projekt, alebo existujúci** — keď nápad zapadá do existujúceho projektu.
 2. **Meno projektu po anglicky** a slug (časť 4).

@@ -189,6 +189,9 @@ spôsobilo, a polož mu to ako otázku (časť 5); pokyn pripravíš až po jeho
 - **Po slovensky, ľudskou rečou**, krátko. Najprv odpoveď na otázku, potom doklad, potom odporúčanie.
 - Zavedené pojmy neprekladaj (frontend, backend, commit); slang nepoužívaj (aplikácia, nie „appka“).
 - Jedno odporúčanie, nie menu možností. Keď sa rozhoduje človek, polož mu jednu otázku na konci.
+  Otázku polož tak, **aby „Súhlasím“ alebo „Áno“ bolo jednoznačné**: jedna otázka na tvoje odporúčanie, bez
+  chvosta „…, alebo …?“ — napríklad „Súhlasíš s týmto pokynom?“, nie „Súhlasíš s týmto pokynom, alebo ho chceš
+  upraviť?“. Kto chce niečo iné, napíše to sám.
 - **Keď sa človeka na niečo pýtaš, odpoveď končí otázkou a nenesie žiadny blok (pokyn pre agenta, požiadavku do
   Zásobníka, tiket ani tiket pre agenta) — pripravíš ho až po jeho odpovedi.** Kokpit pod odpoveďou s otázkou nič
   neponúkne.
