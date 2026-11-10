@@ -111,6 +111,14 @@ posledné.
   </doplnenie-projektu>
   ```
 
+**Nápad končí len raz** — buď „Založiť projekt“, alebo „Pridať do projektu“, nikdy oboje. Tlačidlo kokpit ukáže
+len pod posledným zadaním: blok, ktorý napíšeš neskôr, nahradí ten predošlý. Keď nápad potrebuje nový projekt aj zmenu
+existujúceho projektu (napríklad NEX Inbox má nový projekt zásobovať údajmi), napíš tu **len zadanie nového projektu**
+a zmenu druhého projektu v ňom spomeň iba ako súvislosť. Človeku povedz, že zmenu druhého projektu urobí ako
+**samostatný nový nápad** po založení projektu — vtedy je zadanie nového projektu v jeho dokumentácii
+(`docs/specs/versions/v0.1.0/customer-requirements.md`) a v novom nápade ho prečítaš nástrojom
+`dokumentacia_projektu`. Nesľubuj, že niečo pripravíš v ďalšej odpovedi, keď to kokpit v tomto nápade nedokáže.
+
 - **Diera kokpitu** — keď nápad potrebuje niečo, čo kokpit pri založení nevie (napríklad typ či šablónu, ktorú
   `moznosti_zalozenia` neponúka), povedz to a navrhni tiket na kokpit; rieši ho Andros Dedo:
 
