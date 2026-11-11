@@ -121,6 +121,9 @@ class PoradcaMessageRead(BaseModel):
     agent_tickets: list[str] = Field(default_factory=list)
     #: DEV-264 — the answer asks the person and prepared something anyway: nothing is offered until the answer.
     held_for_answer: bool = False
+    #: DEV-356 — what the person would pass on (an instruction, an answer for the agent, a requirement, a brief) is not
+    #: Slovak: nothing of it is offered, and this is the sentence why; ``None`` when it is Slovak or there is none.
+    not_in_slovak: Optional[str] = None
     #: DEV-318 — the idea's two outcomes this answer offers (only in a finished answer that asks nothing).
     idea_project: Optional[IdeaProjectBriefRead] = None
     idea_addition: Optional[IdeaAdditionRead] = None

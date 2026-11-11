@@ -75,8 +75,11 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
 
   // DEV-264: an answer that asks the person offers nothing it prepared — that waits for the answer.
   const held = !!message.held_for_answer;
+  // DEV-356: what the person would pass on is not Slovak — the server offers nothing of it and says why; the screen
+  // inserts nothing either, not even a long answer or a choice it would read from the text itself.
+  const notInSlovak = message.not_in_slovak ?? null;
   // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
-  const instruction = held ? null : (message.instruction ?? longAnswer(message.content ?? ""));
+  const instruction = held || notInSlovak ? null : (message.instruction ?? longAnswer(message.content ?? ""));
 
   function insert() {
     // DEV-333 — the green choice of a card goes with the instruction, and the card has it picked.
@@ -170,7 +173,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
             a({ href, children, ...props }) {
               if (href?.startsWith(CHOICE_HREF)) {
                 return (
-                  <InlineChoice href={href} choices={choices} answer={answerInsert}>
+                  <InlineChoice href={href} choices={choices} answer={notInSlovak ? undefined : answerInsert}>
                     {children}
                   </InlineChoice>
                 );
@@ -192,6 +195,11 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
       {!running && held && (
         <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">
           Poradca čaká na tvoju odpoveď — čo pripravil, ponúkne až po nej.
+        </p>
+      )}
+      {!running && notInSlovak && (
+        <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">
+          {notInSlovak}
         </p>
       )}
       {!running && hasActions && (

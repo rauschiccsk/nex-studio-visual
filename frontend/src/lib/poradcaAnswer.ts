@@ -107,6 +107,8 @@ const STEP_VERBS: Record<string, string> = {
   databaza_uat: "Pýtam sa databázy UAT",
   plane_tiket: "Čítam tiket v Plane",
   rad: "Čakám v rade",
+  // DEV-356: the answer went back to its agent — a passed-on block was not Slovak.
+  jazyk: "Prepisujem po slovensky",
 };
 
 export function stepLabel(tool: string, target: string): string {

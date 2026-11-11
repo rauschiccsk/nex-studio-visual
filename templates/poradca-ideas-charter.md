@@ -85,6 +85,9 @@ posledné.
 
 ## 6. Bloky pod odpoveďou
 
+**Zadanie aj doplnenie píšeš po slovensky** (časť 5); cesty, mená súborov a kódov ostávajú, ako sú v kóde. Blok, ktorý
+nie je po slovensky, ti kokpit vráti na prepísanie a človeku ho neponúkne.
+
 - **Nový projekt** — kokpit pod odpoveďou ukáže tlačidlo „Založiť projekt“, ktoré otvorí formulár Nový projekt
   vyplnený z hlavičky bloku; po založení zapíše zadanie do verzie 0.1.0 a v evidencii DEV založí modul a tiket.
   Hlavička má riadky `kľúč: hodnota`, pod ňou riadok `---` a potom celé zadanie:

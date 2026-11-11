@@ -54,7 +54,7 @@ from backend.db.session import SessionLocal
 from backend.services import build_db, build_sandbox, project_surfaces, system_setting, usage_ledger
 from backend.services import create_project_postscaffold as postscaffold
 from backend.services.claude_agent import UsageMetadata, _usage_from
-from backend.services.poradca import attachments, sandbox
+from backend.services.poradca import attachments, block_language, sandbox
 from backend.services.poradca.context import known_secret_values
 from backend.services.poradca.mcp_server import McpServer
 from backend.services.poradca.secrets_filter import SecretFilter
@@ -190,6 +190,9 @@ def agent_of(conversation: PoradcaConversation) -> Agent:
 
 #: Running answers by message id — for stopping.
 _running: dict[UUID, _Running] = {}
+
+#: DEV-356 — the step the person sees while the answer goes back to its agent to be rewritten in Slovak.
+REWRITE_STEP = "jazyk"
 
 
 def max_concurrent(db: Session) -> int:
@@ -515,9 +518,36 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                 templates=templates,
             )
             entry.container = sandbox.container_name(label, token)
+            deadline = time.monotonic() + settings.poradca_question_timeout
             content, usage = await asyncio.wait_for(
                 _stream(argv, entry, message_id, container_dir), timeout=settings.poradca_question_timeout
             )
+            # DEV-356: what the person passes on is Slovak — an answer whose block is not goes back once, in the same
+            # session, before anyone sees it. Out of time, it is kept: then the read offers nothing of it and says why.
+            foreign = block_language.not_in_slovak(content)
+            if foreign and deadline - time.monotonic() > 0:
+                await _record_step(entry, message_id, REWRITE_STEP, block_language.step_target(foreign))
+                await build_sandbox.reap_container(entry.container)
+                argv = sandbox.run_argv(
+                    project_slug=slug,
+                    idea_id=idea_id,
+                    conversation_id=conversation_id,
+                    token=token,
+                    network=network,
+                    call=sandbox.ClaudeCall(
+                        prompt=block_language.rewrite_directive(foreign),
+                        claude_session_id=session_id,
+                        charter_text=None,  # the session exists now — the rewrite resumes it
+                        model=model,
+                        effort=effort,
+                        attachments=await asyncio.to_thread(sandbox.attachments_dir(conversation_id).is_dir),
+                    ),
+                    overlays=overlays,
+                    templates=templates,
+                )
+                content, usage = await asyncio.wait_for(
+                    _stream(argv, entry, message_id, container_dir), timeout=deadline - time.monotonic()
+                )
             status = DONE
         finally:
             await server.close()

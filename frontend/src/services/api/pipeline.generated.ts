@@ -6693,6 +6693,8 @@ export interface components {
             instruction?: string | null;
             /** Model */
             model?: string | null;
+            /** Not In Slovak */
+            not_in_slovak?: string | null;
             /** Output Tokens */
             output_tokens?: number | null;
             /** Plane Identifier */

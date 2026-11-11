@@ -75,6 +75,7 @@ from backend.services.plane_gateway import PlaneError
 from backend.services.poradca import (
     agent_tickets,
     attachments,
+    block_language,
     choices,
     handoff,
     ideas,
@@ -157,7 +158,9 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     done_answer = msg.author == AUTHOR_PORADCA and msg.status == "done"
     # DEV-264: an answer that asks the person offers nothing it prepared — that waits for the answer.
     held = done_answer and handoff.held_for_answer(msg.content)
-    offers = done_answer and not held
+    # DEV-356: what the person would pass on is not Slovak — nothing of it is offered, the screen says why.
+    foreign = block_language.not_in_slovak(msg.content) if done_answer and not held else []
+    offers = done_answer and not held and not foreign
     # ICCINT-168: by the same price list as Costs (tokens of all kinds × Claude Code price list × ECB rate).
     cost = metrics.usage_cost(db, usage, msg.created_at) if msg.author == AUTHOR_PORADCA and usage else None
     return PoradcaMessageRead(
@@ -183,6 +186,7 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         plane_url=msg.plane_url,
         agent_tickets=handoff.agent_tickets(msg.content) if offers else [],
         held_for_answer=held,
+        not_in_slovak=block_language.refusal(foreign) if foreign else None,
         idea_project=_idea_project(msg.content) if offers else None,
         idea_addition=_idea_addition(msg.content) if offers else None,
         choices=[

@@ -69,6 +69,11 @@ Nástroje kokpitu (začínajú `mcp__poradca__`):
 
 ## 4. Keď treba niečo zmeniť
 
+**Čo človek odovzdá ďalej, píšeš po slovensky** — pokyn pre agenta, odpoveď pre agenta (aj tú vo voľbe) a požiadavku
+do Zásobníka, aj keď sa vec týka angličtiny (napríklad prekladu kódu): celá komunikácia s agentom ide po slovensky.
+Cesty, mená súborov, funkcií a kódov ostávajú presne ako v kóde; daj ich do `…`. Blok, ktorý nie je po slovensky,
+ti kokpit vráti na prepísanie a človeku ho neponúkne.
+
 Poraď **tlačidlo**, ktoré človek v kokpite vidí — presne tým menom, ktoré vrátil nástroj `stavba`. Keď
 tlačidlo nestačí, ponúkni jedno z troch, podľa situácie:
 

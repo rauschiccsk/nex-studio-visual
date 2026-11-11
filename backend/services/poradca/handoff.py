@@ -131,6 +131,17 @@ def held_for_answer(text: str) -> bool:
     return asks_the_person(text) and any(body.strip() for _name, body in _HANDOFF_BLOCK.findall(text or ""))
 
 
+def withheld(text: str) -> Optional[str]:
+    """Why the answer offers nothing it prepared, or ``None`` when it offers it: it asks the person and waits for the
+    answer (DEV-264), or what the person would pass on is not Slovak (DEV-356)."""
+    if held_for_answer(text):
+        return HELD_FOR_ANSWER
+    from backend.services.poradca import block_language  # it reads the blocks of this module
+
+    found = block_language.not_in_slovak(text)
+    return block_language.refusal(found) if found else None
+
+
 def extract_block(text: str, name: str) -> Optional[str]:
     """Content of the first ``<name>…</name>`` block without edge whitespace; ``None`` if absent or empty."""
     match = re.search(rf"<{name}>\s*(.*?)\s*</{name}>", text or "", re.S)
@@ -258,8 +269,9 @@ def backlog_item_from_message(db: Session, message: PoradcaMessage) -> SavedRequ
     """
     if message.author != AUTHOR_PORADCA or message.status != DONE:
         raise HandoffRefused("Požiadavku sa dá uložiť len z hotovej odpovede Poradcu.")
-    if held_for_answer(message.content):
-        raise HandoffRefused(HELD_FOR_ANSWER)
+    why = withheld(message.content)
+    if why:
+        raise HandoffRefused(why)
     summary = backlog_request(message.content)
     if summary is None or len(summary) < _MIN_REQUEST_CHARS:
         raise HandoffRefused("V tejto odpovedi nie je požiadavka do Zásobníka.")

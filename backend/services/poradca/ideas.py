@@ -113,8 +113,9 @@ def _answers(db: Session, conversation_id: UUID) -> list[PoradcaMessage]:
 
 
 def offers_outcome(message: PoradcaMessage) -> bool:
-    """A finished answer whose brief the person can act on — not one that is still asking them (DEV-264)."""
-    if message.author != AUTHOR_PORADCA or message.status != DONE or handoff.held_for_answer(message.content):
+    """A finished answer whose brief the person can act on — not one that is still asking them (DEV-264), nor one
+    whose brief or other passed-on text is not Slovak (DEV-356)."""
+    if message.author != AUTHOR_PORADCA or message.status != DONE or handoff.withheld(message.content):
         return False
     return handoff.project_brief(message.content) is not None or handoff.project_addition(message.content) is not None
 
