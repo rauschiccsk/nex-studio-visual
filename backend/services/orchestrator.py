@@ -2119,6 +2119,10 @@ def _prior_auditor_review_context(db: Session, version_id: uuid.UUID) -> Optiona
 #: something already written in the Špecifikácia. The agent never resolves it — a contradiction means two
 #: decisions were taken at two different times, and which one holds is a question of INTENT, not of code.
 _VIZUAL_CONFLICT_MARKER = "ROZPOR"
+#: DEV-357 — the answer that REPORTS a contradiction opens with the marker and a dash or a colon, as every real one
+#: since 09.09.2026 did („ROZPOR —“, „ROZPOR:“, „## ROZPOR —“, „**ROZPOR** —“). „Rozpor som nenašiel“, „ROZPOR
+#: žiadny“ and „**Žiadny ROZPOR.**“ do not — read as a word anywhere, they were a conflict nobody named 20 times.
+_VIZUAL_CONFLICT_OPENER = re.compile(rf"[\s#>*_]*{_VIZUAL_CONFLICT_MARKER}[*_]*[ \t]*(?:[—–:\-]|\n|$)")
 #: ``consultation.source`` for a Vizuál/dokumentácia contradiction — the Manažér answers it with real Decision
 #: Cards, exactly like an Auditor finding. Reusing that path (rather than a bespoke block) is what makes the
 #: card actually RENDER: ``DecisionCardsBar`` draws nothing without a ``consultation.decisions[]`` queue, so a
@@ -2166,8 +2170,8 @@ def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
         "— to je jeho účel: **z neho sa stavia a podľa neho sa overuje.**\n"
         "• Na obrazovky nesiahaj. Vizuál je schválený; ty upravuješ IBA dokumenty.\n\n"
         f"⚠️ KEĎ NARAZÍŠ NA ROZPOR — Špecifikácia hovorí X a schválená obrazovka robí nie-X — **NEROZHODUJ**. "
-        f"Zapíš do `summary` slovo `{_VIZUAL_CONFLICT_MARKER}` a do `findings` každý rozpor ako JEDNU položku "
-        "s `blocking: true` a s `text` v tvare:\n"
+        f"Začni `summary` slovom `{_VIZUAL_CONFLICT_MARKER}` a pomlčkou („{_VIZUAL_CONFLICT_MARKER} — …“) "
+        "a do `findings` daj každý rozpor ako JEDNU položku s `blocking: true` a s `text` v tvare:\n"
         "  `<čoho sa týka> — Špecifikácia: <čo hovorí ona> | Obrazovka: <čo robí ona>`\n" + FINDINGS_AS_DATA_RULE + "\n"
         "Obe strany doslova, aby sa Manažér vedel rozhodnúť z faktov, nie z nálepky. Rozpor znamená, že sa "
         "v dvoch časoch rozhodlo dvakrát inak — či si Manažér názor zmenil, alebo obrazovkou prekĺzla chyba, "
@@ -11332,43 +11336,43 @@ async def _writeback_vizual_to_docs(
         logger.warning("vizual write-back produced no parseable block for version %s", version_id)
         await _report_writeback_failure(db, version_id, "agent neodpovedal v očakávanom tvare", on_message)
         return None
-    # The agent was told to answer with ONE word when it found a contradiction; anything else means it folded.
-    if _VIZUAL_CONFLICT_MARKER not in (result.summary or "").upper():
+    # DEV-357: a contradiction is a BLOCKING finding — data, not a word in a sentence. Read as a word anywhere,
+    # „Rozpor som nenašiel“ was a conflict nobody named 20 times since 07.09.2026, and 23.10.2026 a non-blocking note
+    # under „Žiadny rozpor“ became a Decision Card. ICCINT-122: the finding goes on as a SENTENCE — the card's text.
+    named = [str(one) for one in (result.findings or []) if getattr(one, "blocking", True) and str(one).strip()]
+    if named:
+        return named
+    if not _VIZUAL_CONFLICT_OPENER.match(result.summary or ""):
         return []
-    # ICCINT-122: ``findings`` je odteraz údaj, ale rozpor z Vizuálu ide ďalej ako VETA — je to
-    # text do rozhodovacej karty, nie nález Audítora so závažnosťou. Prechod je tu, jednorazovo.
-    named = [str(one) for one in (result.findings or []) if str(one).strip()]
-    if not named:
-        # ICCINT-79: the marker said "contradiction", the list named none. This used to become
-        # ``["(rozpor bez popisu)"]`` — an invented conflict, so the approval always took the conflict branch,
-        # and the consultation turn then refused (rightly) to make Decision Cards out of nothing. The build
-        # settled back at Vizuál and every further click repeated it. Measured 07.09.2026 on
-        # nex-productcatalogs v0.2.0: four rounds, three hours, no way forward.
-        #
-        # A marker with nothing behind it is an answer in the WRONG SHAPE, not a contradiction — the same
-        # class as a ParseFailure above, and it gets the same treatment: say so out loud and let the approval
-        # through. Blocking on it cannot help, because there is nothing anyone could decide.
-        logger.warning("vizual write-back claimed a conflict but named none, version %s", version_id)
-        # NOT _report_writeback_failure: that one says the documents did not get written, and here they DID —
-        # only the conflict claim was empty. A message that describes the wrong failure sends the Manažér
-        # looking in the wrong place, which is the whole reason this evening cost three hours.
-        note = _record_message(
-            db,
-            version_id=version_id,
-            stage="vizual",
-            author="system",
-            recipient="manazer",
-            kind="notification",
-            content=(
-                "Dokumenty sú premietnuté, ale agent označil rozpor a žiadny nevymenoval. Rozhodnúť sa o ňom "
-                "nedá, tak schválenie pokračuje — prezri si Špecifikáciu a Návrh, či sedia s obrazovkami."
-            ),
-            payload={"phase": "vizual", "vizual_conflict": "unnamed"},
-        )
-        if on_message is not None:
-            await on_message(note)
-        return None
-    return named
+    # ICCINT-79: the marker said "contradiction", the list named none. This used to become
+    # ``["(rozpor bez popisu)"]`` — an invented conflict, so the approval always took the conflict branch,
+    # and the consultation turn then refused (rightly) to make Decision Cards out of nothing. The build
+    # settled back at Vizuál and every further click repeated it. Measured 07.09.2026 on
+    # nex-productcatalogs v0.2.0: four rounds, three hours, no way forward.
+    #
+    # A marker with nothing behind it is an answer in the WRONG SHAPE, not a contradiction — the same
+    # class as a ParseFailure above, and it gets the same treatment: say so out loud and let the approval
+    # through. Blocking on it cannot help, because there is nothing anyone could decide.
+    logger.warning("vizual write-back claimed a conflict but named none, version %s", version_id)
+    # NOT _report_writeback_failure: that one says the documents did not get written, and here they DID —
+    # only the conflict claim was empty. A message that describes the wrong failure sends the Manažér
+    # looking in the wrong place, which is the whole reason this evening cost three hours.
+    note = _record_message(
+        db,
+        version_id=version_id,
+        stage="vizual",
+        author="system",
+        recipient="manazer",
+        kind="notification",
+        content=(
+            "Dokumenty sú premietnuté, ale agent označil rozpor a žiadny nevymenoval. Rozhodnúť sa o ňom "
+            "nedá, tak schválenie pokračuje — prezri si Špecifikáciu a Návrh, či sedia s obrazovkami."
+        ),
+        payload={"phase": "vizual", "vizual_conflict": "unnamed"},
+    )
+    if on_message is not None:
+        await on_message(note)
+    return None
 
 
 async def _report_writeback_failure(

@@ -358,3 +358,95 @@ def test_a_project_without_a_docs_directory_still_gets_its_commit(tmp_path) -> N
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
     assert head != base, "the screens were never committed"
+
+
+# ── DEV-357: a contradiction is a blocking finding, not a word in a sentence ──────────────────────────────────
+
+#: What the Staviteľ wrote after an approved Vizuál with nothing to decide — read as a word anywhere, each was
+#: a conflict nobody named (20 times since 07.09.2026, in eight projects).
+_NO_CONFLICT = [
+    # NEX Knowledge 1.1.0, 10.11.2026
+    "Schválený vizuál som premietol do Špecifikácie aj Návrhu. Rozpor som nenašiel, išlo len o medzery a "
+    "spresnenie viet.",
+    "Dokumenty zosúladené so schválenými obrazovkami. ROZPOR žiadny.",  # 10.09.2026
+    "**Žiadny ROZPOR.** Overené porovnaním doslovných textov, farieb a nastavení s postaveným stavom.",  # 09.09.2026
+    "Špecifikácia aj Návrh sú dorovnané so schválenými obrazovkami; ROZPOR som nenašiel ani jeden.",  # 26.09.2026
+]
+
+
+def _conflict_notes(db, version_id):
+    return [m for m in _messages(db, version_id) if (m.payload or {}).get("vizual_conflict")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("summary", _NO_CONFLICT)
+async def test_a_sentence_saying_there_is_no_conflict_reports_none(db_session, monkeypatch, summary) -> None:
+    version, state = _seed(db_session)
+
+    async def _folded(*a, **k):
+        return _block(summary)
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _folded)
+
+    assert await orchestrator._writeback_vizual_to_docs(db_session, state) == []
+    assert _conflict_notes(db_session, version.id) == [], "a sentence saying „no conflict“ was told as one"
+
+
+@pytest.mark.asyncio
+async def test_a_note_that_does_not_block_is_no_conflict(db_session, monkeypatch) -> None:
+    """23.10.2026: „Žiadny rozpor … som nenašiel“ with one non-blocking note became a Decision Card."""
+    from backend.services.pipeline_status import Finding
+
+    version, state = _seed(db_session)
+    note = Finding(text="Zoznam osobných pridelení už nečíta žiadna obrazovka, volá ho len kontrola.", blocking=False)
+
+    async def _folded(*a, **k):
+        return _block("Doplnené. Žiadny rozpor medzi dokumentmi a obrazovkami som nenašiel.", [note])
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _folded)
+
+    assert await orchestrator._writeback_vizual_to_docs(db_session, state) == []
+    assert _conflict_notes(db_session, version.id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_blocking_finding_is_a_conflict_whatever_the_summary_says(db_session, monkeypatch) -> None:
+    """The finding is the data; a summary that forgot the marker must not lose the contradiction."""
+    _version, state = _seed(db_session)
+    both = "Zoznam faktúr — Špecifikácia: podľa dátumu | Obrazovka: podľa sumy"
+
+    async def _conflict(*a, **k):
+        return _block("Dokumenty sú doplnené.", [both])
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _conflict)
+
+    assert await orchestrator._writeback_vizual_to_docs(db_session, state) == [both]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "opening",
+    ["ROZPOR — dve veci ostávajú", "ROZPOR: dve veci", "## ROZPOR — dve veci", "**ROZPOR** — dve veci", "ROZPOR"],
+)
+async def test_an_answer_that_opens_with_a_conflict_and_names_none_is_still_told(
+    db_session, monkeypatch, opening
+) -> None:
+    """Every real conflict since 09.09.2026 opened this way — without its findings it stays the wrong shape of
+    ICCINT-79: said out loud, the approval goes on."""
+    version, state = _seed(db_session)
+
+    async def _bare(*a, **k):
+        return _block(opening, [])
+
+    monkeypatch.setattr(orchestrator, "invoke_agent_with_parse_retry", _bare)
+
+    assert await orchestrator._writeback_vizual_to_docs(db_session, state) is None
+    assert "nevymenoval" in " ".join(m.content or "" for m in _conflict_notes(db_session, version.id))
+
+
+def test_the_brief_says_the_summary_opens_with_the_marker(db_session) -> None:
+    version, _state = _seed(db_session)
+    brief = orchestrator._vizual_writeback_directive(db_session, version.id)
+
+    assert "Začni `summary` slovom `ROZPOR` a pomlčkou („ROZPOR — …“)" in brief
+    assert "do `findings` daj každý rozpor ako JEDNU položku s `blocking: true`" in brief
