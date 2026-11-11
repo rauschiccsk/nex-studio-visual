@@ -1409,6 +1409,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/ideas/{idea_id}/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idea Ticket
+         * @description DEV-360 — „Založiť tiket projektu v DEV“: the ticket of the project founded from the idea, when founding it
+         *     failed. A second click returns the ticket that exists.
+         */
+        post: operations["idea_ticket_api_v1_poradca_ideas__idea_id__ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/agent-tickets": {
         parameters: {
             query?: never;
@@ -3019,6 +3040,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/plane-responsible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plane Responsible
+         * @description DEV-360 — each active account with the person of the „Zodpovedný“ group who answers for its tickets.
+         */
+        get: operations["list_plane_responsible_api_v1_users_plane_responsible_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{user_id}": {
         parameters: {
             query?: never;
@@ -3082,6 +3123,26 @@ export interface paths {
          *     ``token_version`` to invalidate all existing JWTs, and manages the ``must_change_password`` flag.
          */
         post: operations["change_password_api_v1_users__user_id__change_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{user_id}/plane-responsible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Plane Responsible
+         * @description DEV-360 — the person who answers for the account's tickets, by the group's own spelling; ``None`` clears it.
+         */
+        put: operations["set_plane_responsible_api_v1_users__user_id__plane_responsible_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6392,6 +6453,40 @@ export interface components {
             version_id: string;
             /** Working Since */
             working_since?: string | null;
+        };
+        /**
+         * PlaneResponsibleAccount
+         * @description DEV-360 — an account and the person of the „Zodpovedný“ group who answers for its tickets.
+         */
+        PlaneResponsibleAccount: {
+            /** By Name */
+            by_name?: string | null;
+            /** Chosen */
+            chosen?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            /** Username */
+            username: string;
+        };
+        /** PlaneResponsibleRead */
+        PlaneResponsibleRead: {
+            /** Accounts */
+            accounts: components["schemas"]["PlaneResponsibleAccount"][];
+            /** People */
+            people: string[];
+        };
+        /**
+         * PlaneResponsibleSet
+         * @description The person of the group for the account; ``None`` clears it and the account's names decide again.
+         */
+        PlaneResponsibleSet: {
+            /** Name */
+            name?: string | null;
         };
         /** PlaneTicketRead */
         PlaneTicketRead: {
@@ -11509,6 +11604,37 @@ export interface operations {
             };
         };
     };
+    idea_ticket_api_v1_poradca_ideas__idea_id__ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idea_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdeaOutcome"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     attach_agent_tickets_api_v1_poradca_messages__message_id__agent_tickets_post: {
         parameters: {
             query?: never;
@@ -14023,6 +14149,26 @@ export interface operations {
             };
         };
     };
+    list_plane_responsible_api_v1_users_plane_responsible_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaneResponsibleRead"];
+                };
+            };
+        };
+    };
     delete_user_api_v1_users__user_id__delete: {
         parameters: {
             query?: never;
@@ -14109,6 +14255,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_plane_responsible_api_v1_users__user_id__plane_responsible_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaneResponsibleSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaneResponsibleAccount"];
                 };
             };
             /** @description Validation Error */

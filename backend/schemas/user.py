@@ -219,3 +219,30 @@ class UserRead(BaseModel):
     accent_color: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class PlaneResponsibleAccount(BaseModel):
+    """DEV-360 — an account and the person of the „Zodpovedný“ group who answers for its tickets."""
+
+    id: UUID
+    username: str
+    #: The account's full name, as the users panel shows it; ``None`` when it has none.
+    name: Optional[str] = None
+    #: The person the Manažér set at the account; ``None`` — the account is matched by its names.
+    chosen: Optional[str] = None
+    #: The person the account's names find; ``None`` when they find nobody.
+    by_name: Optional[str] = None
+
+
+class PlaneResponsibleRead(BaseModel):
+    #: The people of the „Zodpovedný“ group of the DEV register.
+    people: list[str]
+    accounts: list[PlaneResponsibleAccount]
+
+
+class PlaneResponsibleSet(BaseModel):
+    """The person of the group for the account; ``None`` clears it and the account's names decide again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, max_length=100)

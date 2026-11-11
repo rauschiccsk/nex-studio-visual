@@ -1692,6 +1692,24 @@ export function registerFixtures(): void {
     skip: 0,
     limit: 50,
   });
+  // DEV-360: who answers for each account's tickets in Plane — one chosen, one found by its names, one by nobody.
+  const PLANE_PEOPLE = ["Andros Dedo", "Mária Manažérová", "Tibor"];
+  const PLANE_ACCOUNT: S["PlaneResponsibleAccount"] = {
+    id: "00000000-0000-4000-8000-000000000003",
+    username: "archivar",
+    name: "Alexander Honest-Dlhoprezývkový",
+    chosen: "Mária Manažérová",
+    by_name: null,
+  };
+  answer("get", "/api/v1/users/plane-responsible", {
+    people: PLANE_PEOPLE,
+    accounts: [
+      PLANE_ACCOUNT,
+      { id: USER.id, username: USER.username, name: "Mária Manažérová", chosen: null, by_name: "Mária Manažérová" },
+      { id: COLLEAGUE.id, username: COLLEAGUE.username, name: "Tibor Technický", chosen: null, by_name: null },
+    ],
+  });
+  answer("put", "/api/v1/users/{user_id}/plane-responsible", PLANE_ACCOUNT);
   answer("get", "/api/v1/user-agent-settings", [
     {
       agent_role: "ai_agent",

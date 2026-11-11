@@ -13,6 +13,7 @@ import { Lightbulb } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import IdeaOutcomeActions from "@/components/poradca/IdeaOutcomeActions";
+import IdeaProjectTicket from "@/components/poradca/IdeaProjectTicket";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaComposer, {
   type IncomingQuestion,
@@ -349,6 +350,17 @@ export default function IdeasPage() {
               </button>
             )}
           </div>
+        )}
+        {current && (
+          <IdeaProjectTicket
+            key={current.id}
+            idea={current}
+            onFiled={(outcome) =>
+              setCurrent((prev) =>
+                prev?.id === outcome.id ? { ...prev, ...outcome } : prev,
+              )
+            }
+          />
         )}
 
         <div

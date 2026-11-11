@@ -135,7 +135,7 @@ def test_a_ticket_plane_refuses_leaves_the_project_founded_and_a_second_click_fi
 
     first = c.post(f"/api/v1/poradca/ideas/{idea['id']}/founded", json=payload).json()
     assert first["state"] == "founded" and first["plane_identifier"] is None
-    assert "v skupine „Zodpovedný“ nemá" in first["ticket_error"]
+    assert "nemá zodpovedného v Plane" in first["ticket_error"]  # DEV-360: the whole sentence is guarded there
 
     plane.labels.append({"id": "l-eva", "name": "Zodpovedný: Eva"})
     second = c.post(f"/api/v1/poradca/ideas/{idea['id']}/founded", json=payload).json()

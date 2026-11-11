@@ -52,6 +52,12 @@ NOT_NEW = (
     "založil."
 )
 
+NOT_FOUNDED = "Z nápadu nevznikol projekt — tiket projektu v DEV sa zakladá len pre projekt založený z nápadu."
+NO_RESPONSIBLE = (
+    "Konto {username} nemá zodpovedného v Plane. Manažér ho nastaví v Nastaveniach, karta Používatelia, časť "
+    "„Zodpovedný v Plane“; potom pri nápade stlač „Založiť tiket projektu v DEV“."
+)
+
 
 class IdeaGone(LookupError):
     """No such idea for this person (or it was thrown away)."""
@@ -222,11 +228,14 @@ def file_project_ticket(
     db: Session, plane: PlaneGateway, user: User, idea: Idea, conversation: PoradcaConversation, project: Project
 ) -> None:
     """The founded project's ticket in the DEV register, with the brief — once. The cockpit founds the project's
-    module with it (``plane_tickets.module_for``). A failure leaves the idea founded and the ticket for a second try.
+    module with it (``plane_tickets.module_for``). A failure leaves the idea founded and the ticket for a second try
+    (the button „Založiť tiket projektu v DEV“, DEV-360); the idea's row stays locked meanwhile, so a second click
+    waits and then finds the ticket.
 
     Raises:
-        PlaneError: Plane refused, or the person is not in the „Zodpovedný“ group of the DEV register.
+        PlaneError: Plane refused, or the account has no person of the „Zodpovedný“ group of the DEV register.
     """
+    idea = _locked(db, idea)
     if idea.plane_issue_id:
         return
     message = db.get(PoradcaMessage, idea.outcome_message_id) if idea.outcome_message_id else None
@@ -235,10 +244,7 @@ def file_project_ticket(
         raise PlaneError("Zadanie, z ktorého projekt vznikol, sa nenašlo — tiket sa nedá založiť.")
     responsible = backlog_tickets.responsible_of(user, backlog_tickets.responsible_people(plane))
     if responsible is None:
-        raise PlaneError(
-            f"Teba evidencia DEV v skupine „{backlog_tickets.RESPONSIBLE_GROUP}“ nemá — tiket projektu založí Andros "
-            "Dedo, keď ťa do nej pridá."
-        )
+        raise PlaneError(NO_RESPONSIBLE.format(username=user.username))
     ref = plane_tickets.file_ticket(
         db,
         plane,
@@ -256,6 +262,18 @@ def file_project_ticket(
     )
     idea.plane_issue_id, idea.plane_identifier, idea.plane_url = ref.id, ref.identifier, ref.url
     db.flush()
+
+
+def founded_project(db: Session, idea: Idea) -> Project:
+    """The project founded from the idea — the one its ticket belongs to.
+
+    Raises:
+        OutcomeRefused: The idea founded no project.
+    """
+    project = outcome_project(db, idea) if idea.outcome == OUTCOME_FOUNDED else None
+    if project is None:
+        raise OutcomeRefused(NOT_FOUNDED)
+    return project
 
 
 def addition_target(db: Session, conversation: PoradcaConversation, message_id: UUID) -> str:

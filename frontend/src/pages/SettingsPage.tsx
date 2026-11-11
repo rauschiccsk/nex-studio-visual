@@ -43,6 +43,7 @@ import {
 import { buildUsernameIndex } from "@/components/settings/sessionUsernames";
 import { useAuthStore } from "@/store/authStore";
 import AccountColorPicker from "@/components/settings/AccountColorPicker";
+import PlaneResponsiblePanel from "@/components/settings/PlaneResponsiblePanel";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
 import { modelOptionLabel } from "@/utils/modelLabel";
@@ -701,17 +702,25 @@ export default function SettingsPage() {
           // canManage is unconditionally true: the old Users tab had no FE role
           // gate (the backend enforces authz), so to keep zero behaviour change
           // the management UI stays visible to every role.
-          <UsersTab
-            users={users}
-            loadError={usersLoadError}
-            canManage
-            onLoad={loadUsers}
-            onCreate={handleCreateUser}
-            onUpdate={handleUpdateUser}
-            onDelete={handleDeleteUser}
-            onChangePassword={handleChangePassword}
-            onToggleActive={handleToggleActive}
-          />
+          <>
+            <UsersTab
+              users={users}
+              loadError={usersLoadError}
+              canManage
+              onLoad={loadUsers}
+              onCreate={handleCreateUser}
+              onUpdate={handleUpdateUser}
+              onDelete={handleDeleteUser}
+              onChangePassword={handleChangePassword}
+              onToggleActive={handleToggleActive}
+            />
+            {/* DEV-360: who answers for each account's tickets in Plane — read again when the accounts change. */}
+            <PlaneResponsiblePanel
+              key={users
+                .map((u) => `${u.id}:${u.is_active}:${u.first_name}:${u.last_name}`)
+                .join("|")}
+            />
+          </>
         ),
         sessions: (
           <SessionsTab

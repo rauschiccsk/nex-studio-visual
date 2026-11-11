@@ -33,8 +33,19 @@ from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.pagination import PaginatedResponse
-from backend.schemas.user import ChangePasswordRequest, UserCreate, UserRead, UserRole, UserUpdate
+from backend.schemas.user import (
+    ChangePasswordRequest,
+    PlaneResponsibleAccount,
+    PlaneResponsibleRead,
+    PlaneResponsibleSet,
+    UserCreate,
+    UserRead,
+    UserRole,
+    UserUpdate,
+)
+from backend.services import backlog_tickets, plane_tickets
 from backend.services import user as user_service
+from backend.services.plane_gateway import PlaneError, name_key
 
 router = APIRouter(tags=["Users"])
 
@@ -94,6 +105,65 @@ def list_users(
         skip=skip,
         limit=limit,
     )
+
+
+def _plane_people() -> list[str]:
+    try:
+        return backlog_tickets.responsible_people(plane_tickets.gateway())
+    except PlaneError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+def _plane_account(user: User, people: list[str]) -> PlaneResponsibleAccount:
+    by_key = {name_key(name): name for name in people}
+    return PlaneResponsibleAccount(
+        id=user.id,
+        username=user.username,
+        name=" ".join(part for part in (user.first_name, user.last_name) if part) or None,
+        chosen=user.plane_responsible,
+        by_name=backlog_tickets.responsible_by_name(user, by_key),
+    )
+
+
+@router.get("/plane-responsible", response_model=PlaneResponsibleRead)
+def list_plane_responsible(
+    db: Session = Depends(get_db), current_user: User = Depends(require_ri_role)
+) -> PlaneResponsibleRead:
+    """DEV-360 — each active account with the person of the „Zodpovedný“ group who answers for its tickets."""
+    people = _plane_people()
+    accounts = user_service.list_users(db, is_active=True, limit=1000, offset=0)
+    return PlaneResponsibleRead(
+        people=people, accounts=[_plane_account(user, people) for user in sorted(accounts, key=lambda u: u.username)]
+    )
+
+
+@router.put("/{user_id}/plane-responsible", response_model=PlaneResponsibleAccount)
+def set_plane_responsible(
+    user_id: UUID,
+    payload: PlaneResponsibleSet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+) -> PlaneResponsibleAccount:
+    """DEV-360 — the person who answers for the account's tickets, by the group's own spelling; ``None`` clears it."""
+    people = _plane_people()
+    try:
+        user = user_service.get_by_id(db, user_id)
+    except ValueError as exc:
+        raise _map_value_error(exc) from exc
+    name = (payload.name or "").strip()
+    if name:
+        chosen = {name_key(person): person for person in people}.get(name_key(name))
+        if chosen is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"„{name}“ v skupine „{backlog_tickets.RESPONSIBLE_GROUP}“ evidencie DEV nie je.",
+            )
+        user.plane_responsible = chosen
+    else:
+        user.plane_responsible = None
+    db.commit()
+    db.refresh(user)
+    return _plane_account(user, people)
 
 
 @router.post(

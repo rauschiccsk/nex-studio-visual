@@ -8,9 +8,12 @@
  *   - ``PATCH  /users/{id}``                  -> updateUserApi
  *   - ``DELETE /users/{id}``                  -> deleteUserApi
  *   - ``POST   /users/{id}/change-password``  -> changePasswordApi
+ *   - ``GET    /users/plane-responsible``     -> listPlaneResponsibleApi (DEV-360)
+ *   - ``PUT    /users/{id}/plane-responsible`` -> setPlaneResponsibleApi (DEV-360)
  */
 
 import api from "../api";
+import type { components } from "./pipeline.generated";
 import type {
   PaginatedResponse,
   UserCreate,
@@ -97,4 +100,21 @@ export function changePasswordApi(
     new_password: newPassword,
     ...(currentPassword !== undefined ? { current_password: currentPassword } : {}),
   });
+}
+
+/** DEV-360 — an account and the person of the „Zodpovedný“ group who answers for its tickets. */
+export type PlaneResponsibleAccount = components["schemas"]["PlaneResponsibleAccount"];
+export type PlaneResponsibleRead = components["schemas"]["PlaneResponsibleRead"];
+
+/** Each active account with its person in Plane, and the people of the group (ri only). */
+export function listPlaneResponsibleApi(): Promise<PlaneResponsibleRead> {
+  return api.get<PlaneResponsibleRead>("/users/plane-responsible");
+}
+
+/** The person of the group for the account; ``null`` — the account's names decide again. */
+export function setPlaneResponsibleApi(
+  userId: string,
+  name: string | null,
+): Promise<PlaneResponsibleAccount> {
+  return api.put<PlaneResponsibleAccount>(`/users/${userId}/plane-responsible`, { name });
 }

@@ -370,6 +370,29 @@ def idea_founded(
     return IdeaOutcome(**_idea_read(db, idea, conversation).model_dump(), ticket_error=ticket_error)
 
 
+@router.post("/ideas/{idea_id}/ticket", response_model=IdeaOutcome)
+def idea_ticket(
+    idea_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(require_shu_or_above)
+) -> IdeaOutcome:
+    """DEV-360 — „Založiť tiket projektu v DEV“: the ticket of the project founded from the idea, when founding it
+    failed. A second click returns the ticket that exists."""
+    idea, conversation = _idea_for(db, current_user, idea_id)
+    try:
+        project = ideas.founded_project(db, idea)
+    except ideas.OutcomeRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    authz.assert_project_id_access(db, current_user, project.id)
+    ticket_error = None
+    try:
+        ideas.file_project_ticket(db, plane_tickets.gateway(), current_user, idea, conversation, project)
+        db.commit()
+    except PlaneError as exc:
+        db.rollback()
+        ticket_error = str(exc)
+    db.refresh(idea)
+    return IdeaOutcome(**_idea_read(db, idea, conversation).model_dump(), ticket_error=ticket_error)
+
+
 @router.post("/ideas/{idea_id}/added", response_model=IdeaOutcome)
 def idea_added(
     idea_id: uuid.UUID,

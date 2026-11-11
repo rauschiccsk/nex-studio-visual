@@ -61,10 +61,19 @@ def responsible_people(plane: PlaneGateway) -> list[str]:
 
 
 def responsible_of(user: Optional[User], people: list[str]) -> Optional[str]:
-    """The person who clicked, when the register knows them — by full name, else by first name."""
+    """Who answers for the account's tickets: the person the Manažér set at the account (DEV-360), else the person
+    the account's names find — full name, first name, username. A person set and no longer in the group is nobody:
+    a name would quietly pick someone else."""
     if user is None:
         return None
     by_key = {name_key(name): name for name in people}
+    if user.plane_responsible:
+        return by_key.get(name_key(user.plane_responsible))
+    return responsible_by_name(user, by_key)
+
+
+def responsible_by_name(user: User, by_key: dict[str, str]) -> Optional[str]:
+    """The person of the group the account's names find, by :func:`name_key` of each name; ``None`` when none."""
     full = " ".join(part for part in (user.first_name, user.last_name) if part)
     for candidate in (full, user.first_name or "", user.username or ""):
         if candidate and name_key(candidate) in by_key:

@@ -41,6 +41,11 @@ export function ideaFoundedApi(
   });
 }
 
+/** DEV-360 — the ticket of the project founded from the idea, when founding it failed; a second click returns it. */
+export function ideaTicketApi(id: string): Promise<IdeaOutcome> {
+  return api.post<IdeaOutcome>(`/poradca/ideas/${id}/ticket`);
+}
+
 /** The brief of `messageId` goes to the Zásobník of the existing project it names. */
 export function ideaAddedApi(
   id: string,
