@@ -263,6 +263,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backlog/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Versions For Assignment
+         * @description DEV-361 — each version of the project with why a requirement can no longer be included in it.
+         */
+        get: operations["versions_for_assignment_api_v1_backlog_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backlog/{item_id}": {
         parameters: {
             query?: never;
@@ -3894,6 +3914,26 @@ export interface components {
             ticket_type: "Bug" | "Task";
             /** Title */
             title: string;
+        };
+        /**
+         * BacklogVersionRead
+         * @description DEV-361 — a version of the project and why a requirement can no longer be included in it.
+         */
+        BacklogVersionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Refusal */
+            refusal?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "planned" | "active" | "done" | "released";
+            /** Version Number */
+            version_number: string;
         };
         /**
          * BillingOverviewRead
@@ -9502,6 +9542,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BacklogItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    versions_for_assignment_api_v1_backlog_versions_get: {
+        parameters: {
+            query: {
+                /** @description The project whose versions a requirement may be included in. */
+                project_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacklogVersionRead"][];
                 };
             };
             /** @description Validation Error */

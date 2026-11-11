@@ -6,6 +6,7 @@ import type {
   BacklogItemUpdate,
   BacklogTicketCreate,
   BacklogTicketDraft,
+  BacklogVersionRead,
 } from "../../types/backlog";
 
 export interface ListBacklogParams {
@@ -20,6 +21,11 @@ export function listBacklogApi(
   params: ListBacklogParams = {},
 ): Promise<PaginatedResponse<BacklogItemRead>> {
   return api.get<PaginatedResponse<BacklogItemRead>>("/backlog", { params });
+}
+
+/** DEV-361 — the project's versions and why a requirement can no longer be included in some of them. */
+export function listBacklogVersionsApi(projectId: string): Promise<BacklogVersionRead[]> {
+  return api.get<BacklogVersionRead[]>("/backlog/versions", { params: { project_id: projectId } });
 }
 
 export function createBacklogApi(data: BacklogItemCreate): Promise<BacklogItemRead> {

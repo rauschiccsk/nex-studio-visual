@@ -20,6 +20,7 @@ const { list, update, draft, create } = vi.hoisted(() => ({
 
 vi.mock("@/services/api/backlog", () => ({
   listBacklogApi: list,
+  listBacklogVersionsApi: vi.fn().mockResolvedValue([]),
   updateBacklogApi: update,
   getBacklogTicketDraftApi: draft,
   createBacklogTicketApi: create,

@@ -14,6 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.schemas.delivery_statement import WorkKind
+from backend.schemas.version import VersionStatus
 
 # Mirror the DB CHECK constraints on the ``backlog_items`` table.
 BacklogPriority = Literal["low", "medium", "high", "critical"]
@@ -98,3 +99,13 @@ class BacklogTicketCreate(BaseModel):
     work_kind: WorkKind
     ticket_type: TicketType
     responsible: str = Field(..., min_length=1, max_length=100)
+
+
+class BacklogVersionRead(BaseModel):
+    """DEV-361 — a version of the project and why a requirement can no longer be included in it."""
+
+    id: UUID
+    version_number: str
+    status: VersionStatus
+    #: ``None`` — the Zásobník offers it; otherwise the sentence the screen shows instead.
+    refusal: Optional[str] = None

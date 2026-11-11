@@ -16,6 +16,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from backend.db.models.backlog import BacklogItem
+from backend.db.models.pipeline import PipelineState
 from backend.db.models.versions import Version
 from backend.schemas.backlog import BacklogItemCreate, BacklogItemUpdate, BacklogStatus
 from backend.services.patch import apply_changes
@@ -123,11 +124,48 @@ def update(db: Session, item_id: UUID, data: BacklogItemUpdate) -> BacklogItem:
     return item
 
 
+#: Versions that are built no more — a requirement included in one would never be built.
+FINISHED_STATUSES = ("done", "released")
+
+
+def assign_refusal(db: Session, version: Version) -> Optional[str]:
+    """Why a requirement can no longer be included in ``version`` — ``None`` when it can (DEV-361).
+
+    The Staviteľ takes the Zásobník's requirements into the Špecifikácia, and only in Príprava: in its opening brief
+    (DEV-134) or with its next round (``orchestrator._requirements_not_yet_delivered``). A version past Príprava has
+    an approved Špecifikácia, a fast fix has none, a finished version builds no more — a requirement included there
+    would be „realized“ at release without anyone building it.
+    """
+    if version.status in FINISHED_STATUSES:
+        return f"Verzia {version.version_number} je hotová — požiadavka by sa do nej už nedostala."
+    state = db.execute(select(PipelineState).where(PipelineState.version_id == version.id)).scalar_one_or_none()
+    if state is None:
+        return None
+    if state.flow_type == "fast_fix":
+        return (
+            f"Verzia {version.version_number} je rýchla oprava — nemá Špecifikáciu, do ktorej by sa požiadavka "
+            "dostala. Zaraď ju do novej verzie."
+        )
+    if state.current_stage != "priprava":
+        return (
+            f"Verzia {version.version_number} má schválenú Špecifikáciu — požiadavka by sa do nej už nedostala. "
+            "Zaraď ju do ďalšej verzie."
+        )
+    return None
+
+
+def versions_for_assignment(db: Session, project_id: UUID) -> list[tuple[Version, Optional[str]]]:
+    """Each version of the project with why a requirement can no longer be included in it (``None`` — it can)."""
+    versions = db.execute(select(Version).where(Version.project_id == project_id)).scalars().all()
+    return [(version, assign_refusal(db, version)) for version in versions]
+
+
 def assign_to_version(db: Session, item_id: UUID, version_id: UUID) -> BacklogItem:
     """Assign the requirement to a version → ``version_id`` set + ``status='included'``.
 
-    Validates the version exists and belongs to the SAME project (a requirement is included only in its
-    own project's versions). Raises ``ValueError`` (→ 404/422) otherwise.
+    Validates the version exists, belongs to the SAME project (a requirement is included only in its own project's
+    versions) and can still take it (:func:`assign_refusal`). Raises ``ValueError`` (→ 404/422) otherwise. Moved to
+    another version, the requirement is handed over again — that version's Staviteľ has not got it.
     """
     item = get_by_id(db, item_id)
     version = db.get(Version, version_id)
@@ -135,6 +173,11 @@ def assign_to_version(db: Session, item_id: UUID, version_id: UUID) -> BacklogIt
         raise ValueError(f"Version {version_id} not found")
     if version.project_id != item.project_id:
         raise ValueError(f"Version {version_id} belongs to a different project")
+    refusal = assign_refusal(db, version)
+    if refusal is not None:
+        raise ValueError(refusal)
+    if item.version_id != version_id:
+        item.delivered_at = None
     item.version_id = version_id
     item.status = "included"
     db.flush()

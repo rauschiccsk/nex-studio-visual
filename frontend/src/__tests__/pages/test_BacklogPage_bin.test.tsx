@@ -15,6 +15,7 @@ const { list, remove } = vi.hoisted(() => ({ list: vi.fn(), remove: vi.fn() }));
 
 vi.mock("@/services/api/backlog", () => ({
   listBacklogApi: list,
+  listBacklogVersionsApi: vi.fn().mockResolvedValue([]),
   deleteBacklogApi: remove,
   createBacklogApi: vi.fn(),
   updateBacklogApi: vi.fn(),

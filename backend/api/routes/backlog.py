@@ -39,6 +39,7 @@ from backend.schemas.backlog import (
     BacklogStatus,
     BacklogTicketCreate,
     BacklogTicketDraft,
+    BacklogVersionRead,
 )
 from backend.schemas.pagination import PaginatedResponse
 from backend.services import backlog as backlog_service
@@ -90,6 +91,20 @@ def list_backlog(
         skip=skip,
         limit=limit,
     )
+
+
+@router.get("/versions", response_model=list[BacklogVersionRead])
+def versions_for_assignment(
+    project_id: UUID = Query(..., description="The project whose versions a requirement may be included in."),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[BacklogVersionRead]:
+    """DEV-361 — each version of the project with why a requirement can no longer be included in it."""
+    authz.assert_project_id_access(db, current_user, project_id)
+    return [
+        BacklogVersionRead(id=v.id, version_number=v.version_number, status=v.status, refusal=refusal)
+        for v, refusal in backlog_service.versions_for_assignment(db, project_id)
+    ]
 
 
 @router.post(

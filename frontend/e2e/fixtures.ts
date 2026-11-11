@@ -1193,6 +1193,23 @@ export function registerFixtures(): void {
       },
     ],
   });
+  // DEV-361: which versions take a requirement — one past Príprava says why it is not offered.
+  answer("get", "/api/v1/backlog/versions", [
+    { id: VERSION.id, version_number: VERSION.version_number, status: "active", refusal: null },
+    {
+      id: "22222222-2222-4222-8222-222222222229",
+      version_number: "1.8.5",
+      status: "active",
+      refusal:
+        "Verzia 1.8.5 má schválenú Špecifikáciu — požiadavka by sa do nej už nedostala. Zaraď ju do ďalšej verzie.",
+    },
+    {
+      id: RELEASED.id,
+      version_number: RELEASED.version_number,
+      status: "released",
+      refusal: `Verzia ${RELEASED.version_number} je hotová — požiadavka by sa do nej už nedostala.`,
+    },
+  ]);
   answer("get", "/api/v1/backlog", {
     items: [
       {

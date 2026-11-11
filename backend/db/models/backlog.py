@@ -49,6 +49,8 @@ class BacklogItem(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
     realized_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # DEV-361: when the Staviteľ got the requirement in a round of Príprava; NULL — the next round carries it.
+    delivered_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # DEV-121: the requirement's ticket in Plane's DEV register — id for the API, identifier (DEV-n) and address
     # for people. Set once by the first „Založiť tiket"; a second click returns this ticket.
     plane_issue_id = Column(String(64), nullable=True)

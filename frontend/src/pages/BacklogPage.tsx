@@ -6,6 +6,7 @@ import { listProjectsApi } from "@/services/api/projects";
 import { listVersions } from "@/services/api/versions";
 import {
   listBacklogApi,
+  listBacklogVersionsApi,
   createBacklogApi,
   updateBacklogApi,
   deleteBacklogApi,
@@ -19,6 +20,7 @@ import type {
   BacklogItemRead,
   BacklogPriority,
   BacklogStatus,
+  BacklogVersionRead,
 } from "@/types/backlog";
 
 type View = "backlog" | "history";
@@ -46,9 +48,10 @@ const STATUS_LABEL: Record<BacklogStatus, string> = {
   rejected: "Zamietnuté",
 };
 
-// DEV-134: a requirement can be assigned only to a version that has not been built yet — a finished („done“) or
-// released version never builds again, so a requirement assigned to it would be stranded.
-const ASSIGNABLE_STATUSES: readonly VersionStatus[] = ["planned", "active"];
+// DEV-134 / DEV-361: which versions take a requirement the backend says (`/backlog/versions`) — only one whose
+// Príprava has not passed, where the Staviteľ still takes it into the Špecifikácia. A finished version needs no word;
+// for a running one past Príprava (or a fast fix) the screen says why it is not offered.
+const FINISHED_STATUSES: readonly VersionStatus[] = ["done", "released"];
 
 // Audit Theme 6: priority rendered raw English ("low"/"high"); localise it like STATUS_LABEL.
 const PRIORITY_LABEL: Record<BacklogPriority, string> = {
@@ -64,6 +67,7 @@ export default function BacklogPage() {
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [items, setItems] = useState<BacklogItemRead[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
+  const [assignment, setAssignment] = useState<BacklogVersionRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("backlog");
@@ -132,10 +136,12 @@ export default function BacklogPage() {
         return Promise.all([
           listBacklogApi({ project_id: found.id, limit: 200 }),
           listVersions(found.id),
-        ]).then(([backlogRes, vers]) => {
+          listBacklogVersionsApi(found.id),
+        ]).then(([backlogRes, vers, forAssignment]) => {
           if (cancelled) return;
           setItems(backlogRes.items);
           setVersions(vers);
+          setAssignment(forAssignment);
         });
       })
       .catch(() => {
@@ -155,10 +161,17 @@ export default function BacklogPage() {
     return m;
   }, [versions]);
 
-  // Assignable = versions not built yet (DEV-134) — realize fires AT release.
+  // Assignable = versions whose Príprava has not passed (DEV-134, DEV-361) — realize fires AT release.
   const assignableVersions = useMemo(
-    () => versions.filter((v) => ASSIGNABLE_STATUSES.includes(v.status)),
-    [versions],
+    () => assignment.filter((v) => v.refusal == null),
+    [assignment],
+  );
+  const closedVersions = useMemo(
+    () =>
+      assignment.filter(
+        (v) => v.refusal != null && !FINISHED_STATUSES.includes(v.status),
+      ),
+    [assignment],
   );
 
   // "rejected" is included on purpose. It used to appear in NEITHER view — not the backlog, not the
@@ -583,6 +596,13 @@ export default function BacklogPage() {
                           <Check size={13} /> Priradiť
                         </button>
                       </div>
+                    )}
+                    {assigningId === it.id && closedVersions.length > 0 && (
+                      <ul aria-label="Verzie, ktoré sa nedajú vybrať" className="mt-1 space-y-0.5 text-[11px] text-[var(--color-text-muted)]">
+                        {closedVersions.map((v) => (
+                          <li key={v.id}>{v.refusal}</li>
+                        ))}
+                      </ul>
                     )}
                     {rejectingId === it.id && (
                       <div className="flex flex-col gap-2 mt-2 sm:flex-row sm:items-center">

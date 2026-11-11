@@ -2,6 +2,10 @@
 // Mirrors backend/schemas/backlog.py.
 
 import type { WorkKind } from "@/lib/workKind";
+import type { components } from "@/services/api/pipeline.generated";
+
+/** DEV-361 — a version of the project and why a requirement can no longer be included in it (`refusal`). */
+export type BacklogVersionRead = components["schemas"]["BacklogVersionRead"];
 
 export type BacklogPriority = "low" | "medium" | "high" | "critical";
 export type BacklogStatus = "open" | "included" | "realized" | "rejected";

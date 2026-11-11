@@ -1652,7 +1652,13 @@ def _icc_standards_scope_block(project_slug: str, *, installed: bool = False) ->
     )
 
 
-def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = "new_version") -> str:
+def _priprava_directive(
+    db: Session,
+    version_id: uuid.UUID,
+    *,
+    flow_type: str = "new_version",
+    requirements: Optional[list[BacklogItem]] = None,
+) -> str:
     """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
 
     DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the AI Agent's Príprava behaviour —
@@ -1738,7 +1744,7 @@ def _priprava_directive(db: Session, version_id: uuid.UUID, *, flow_type: str = 
         "Schválenie Špecifikácie Manažérom (`Schváliť špecifikáciu`) je VŽDY povinné a nezávislé od Miery "
         "autonómie — Návrh sa nezačne, kým ju Manažér neschváli.\n"
         "Ukonči odpoveď štruktúrovaným stavovým výstupom (F-007-orchestration-cockpit.md §5.3)."
-        + _backlog_scope_block(db, version_id)
+        + _backlog_scope_block(db, version_id, requirements)
         # ICCINT-125: povinné celoICC štandardy vstupujú do stavby ZADANÍM, nie padnutou bránou. Bez
         # tohto odseku ich Príprava nezahrnie, Vizuál nemá odkiaľ vziať obrazovku, Návrh napíše opak
         # a brána vydania ich vymáha vo fáze, kde sa už nestavia — presne ako 14.09.2026 na NEX
@@ -3209,31 +3215,17 @@ def _review_notes_gap(skeleton: TaskPlanSkeleton, note_count: int) -> Optional[s
 BACKLOG_HEADING = "POŽIADAVKY ZO ZÁSOBNÍKA"
 
 
-def _backlog_scope_block(db: Session, version_id: uuid.UUID) -> str:
-    """The requirements the Manažér assigned to this version from the Zásobník, for the Príprava brief (DEV-134).
+def _included_requirements(db: Session, version_id: uuid.UUID, *, not_yet_delivered: bool = False) -> list[BacklogItem]:
+    """The requirements the Manažér assigned to this version from the Zásobník — with ``not_yet_delivered`` only those
+    no round of Príprava has carried to the Staviteľ yet (DEV-361)."""
+    query = select(BacklogItem).where(BacklogItem.version_id == version_id, BacklogItem.status == "included")
+    if not_yet_delivered:
+        query = query.where(BacklogItem.delivered_at.is_(None))
+    return list(db.execute(query.order_by(BacklogItem.number.asc())).scalars().all())
 
-    They were put in front of the agent only at the stage „gate_a“ of the retired v1 pipeline; today's Príprava never
-    read them, so a requirement assigned to a version was never built (16.10.2026, NEX Inbox 1.9.0). Empty when the
-    version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be assigned to it
-    before its Príprava — the block belongs to a new version only.
-    """
-    items = (
-        db.execute(
-            select(BacklogItem)
-            .where(BacklogItem.version_id == version_id, BacklogItem.status == "included")
-            .order_by(BacklogItem.number.asc())
-        )
-        .scalars()
-        .all()
-    )
-    if not items:
-        return ""
-    lines = [
-        "",
-        "",
-        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii; sú súčasťou zadania, "
-        "zapracuj ich rovnako ako Zadanie:",
-    ]
+
+def _requirement_lines(items: list[BacklogItem]) -> list[str]:
+    lines = []
     for it in items:
         line = f"- REQ-{it.number}: {it.title}"
         if it.description:
@@ -3241,7 +3233,55 @@ def _backlog_scope_block(db: Session, version_id: uuid.UUID) -> str:
         if it.plane_identifier:
             line += f" (tiket {it.plane_identifier})"
         lines.append(line)
+    return lines
+
+
+def _backlog_scope_block(db: Session, version_id: uuid.UUID, items: Optional[list[BacklogItem]] = None) -> str:
+    """The requirements the Manažér assigned to this version from the Zásobník, for the Príprava brief (DEV-134).
+
+    They were put in front of the agent only at the stage „gate_a“ of the retired v1 pipeline; today's Príprava never
+    read them, so a requirement assigned to a version was never built (16.10.2026, NEX Inbox 1.9.0). Empty when the
+    version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be assigned to it
+    before its Príprava — the block belongs to a new version only. ``items`` — the ones the caller hands over and
+    then marks delivered; ``None`` reads them here.
+    """
+    items = _included_requirements(db, version_id) if items is None else items
+    if not items:
+        return ""
+    lines = [
+        "",
+        "",
+        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii; sú súčasťou zadania, "
+        "zapracuj ich rovnako ako Zadanie:",
+        *_requirement_lines(items),
+    ]
     return "\n".join(lines) + "\n"
+
+
+def _new_requirements_block(items: list[BacklogItem]) -> str:
+    """DEV-361 — the requirements included while Príprava already runs, for its next round (answer, question,
+    return, decision). Before, only the opening brief carried the Zásobník: 11.11.2026 a requirement included in
+    orthodox-register 0.1.0 during Príprava would never have reached the Staviteľ. Empty when there is none."""
+    if not items:
+        return ""
+    lines = [
+        "",
+        "",
+        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii počas Prípravy; sú súčasťou zadania, zapracuj ich "
+        "do Špecifikácie rovnako ako Zadanie. Keď menia bod, ktorý ste už dohodli, povedz to Manažérovi:",
+        *_requirement_lines(items),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _mark_delivered(db: Session, items: list[BacklogItem]) -> None:
+    """The requirements the round carried reached the Staviteľ — the next round does not carry them again."""
+    now = datetime.now(timezone.utc)
+    for it in items:
+        if it.delivered_at is None:
+            it.delivered_at = now
+    if items:
+        db.flush()
 
 
 def _latest_schema_approval(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -10253,13 +10293,21 @@ async def run_dispatch(
     # uprav/ask/answer ``directive`` re-dispatch of any phase (the framed message IS the prompt; direct comms).
     # The v1 ``_run_gate_e_round`` per-question machinery is REMOVED wholesale (CR-V2-013) — there is no Gate-E
     # routing anywhere in this 4-phase dispatch.
+    # DEV-361: the Zásobník's requirements this round carries to the Staviteľ — marked delivered once it ran.
+    handed: list[BacklogItem] = []
+    takes_requirements = stage == "priprava" and state.flow_type != "fast_fix"
     if directive is not None:
         prompt = directive  # the Manažér's framed uprav/ask/answer message IS the prompt (direct comms)
+        if takes_requirements:
+            # Included while Príprava already runs — the opening brief is behind; they ride with this round.
+            handed = _included_requirements(db, state.version_id, not_yet_delivered=True)
+            prompt += _new_requirements_block(handed)
     elif stage == "priprava":
         # Príprava round (CR-V2-010): the init prompt + the interactive spec-dialogue brief (read Zadanie →
         # systematize → ask until understood → propose → write the Špecifikácia .md). DESIGN-BEARING prompt.
         # Fast-fix (CR-V2-028) takes a lightweight directive-IS-the-brief variant (no spec dialogue).
-        prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type)
+        handed = _included_requirements(db, state.version_id) if takes_requirements else []
+        prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type, requirements=handed)
     else:
         prompt = _directive_for(stage, state.flow_type)
     result = await invoke_agent_with_parse_retry(
@@ -10271,6 +10319,7 @@ async def run_dispatch(
         on_event=on_event,
         on_message=on_message,
     )
+    _mark_delivered(db, handed)
 
     if isinstance(result, ParseFailure):
         if result.lost_work is not None:
