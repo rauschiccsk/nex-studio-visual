@@ -18,6 +18,9 @@ a `docker-compose.yml` ostáva v tvare z kostry.
    názov do 22 znakov, `adminOnly: true` pre obrazovku len pre správcu. Cesty `/`, `/getting-started`, `/updates`,
    `/settings` patria šablóne. Zlý manifest zastaví štart a každú chybu povie vetou — oprav všetky naraz.
 4. Počet pri položke: `defineApp(data, { counts: { "/areas": useAreaCount } })` vo `frontend/src/app.ts`.
+   Kto položku vidí: `visible: { "/statutory": useIsStatutory }` — ukáže sa, len keď háčik povie áno. `"/"` je Prehľad
+   (nex-app-kit od v0.12.0): kto ho nevidí, nemá ho v ľavom paneli a začína na prvej položke, ktorú vidí. Údaje
+   skrytej obrazovky chráni aj tak server.
 5. Stránka volá server klientom z `nex-shared`:
    `createApiClient({ baseUrl: "", apiPrefix: "/api/v1", getToken: () => null })` — relácia je cookie, ide sama.
 
