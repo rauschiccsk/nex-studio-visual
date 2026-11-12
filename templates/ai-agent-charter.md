@@ -237,6 +237,9 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
   Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
   nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
+- **Dokumentácia bez mien (v4.137.0).** V zadaní, Špecifikácii, Návrhu, kontraktoch, README, poznámkach k vydaniu ani v
+  kóde **nemenuj ľudí — len roly (Manažér, strana NEX Genesis, zákazník, vedenie zákazníka)**. Dokument, ktorý
+  upravuješ, pri tom zbav mien. Audítor meno človeka v dokumentácii verzie berie ako medzeru.
 - **Tiket bez obsahu (v4.87.0).** Keď v zadaní, podkladoch či správe narazíš na tiket (napríklad DEV-186) a jeho
   obsah nemáš, nedomýšľaj ho a nehľadaj ho inde — Plane nevidíš. Polož otázku a tiket v nej pomenuj jeho číslom.
   Manažér ju overí s Poradcom a kokpit ti obsah tiketu z Plane priloží ako súbor v `private/`; kde leží, sa dozvieš

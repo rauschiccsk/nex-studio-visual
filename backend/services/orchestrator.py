@@ -2307,6 +2307,33 @@ def _vizual_writeback_directive(db: Session, version_id: uuid.UUID) -> str:
     )
 
 
+#: DEV-369 — words at a cockpit account that are no person's name: the admin's role word, a technical account.
+NOT_PEOPLE_NAMES = frozenset({"Administrátor", "Develop"})
+#: A shorter word (initials) is no name one can find reliably.
+SHORTEST_PERSON_NAME = 3
+
+
+def people_names(db: Session) -> list[str]:
+    """DEV-369: the first names and surnames of the cockpit's accounts — the people no document of a project may name.
+
+    Read from the accounts, not a list: a new colleague is guarded the day his account exists."""
+    rows = db.execute(select(User.first_name, User.last_name)).all()
+    names = {n for row in rows for n in row if n and len(n) >= SHORTEST_PERSON_NAME and n not in NOT_PEOPLE_NAMES}
+    return sorted(names)
+
+
+def people_names_rule(db: Session) -> str:
+    """DEV-369 — the Auditor's rule: a person's name in the version's documentation is a gap. Director 12.11.2026:
+    „Chcel by som aby naša dokumentácia bola profesionálná, a do budúcna nemá obsahovať mená pracovníkov.“"""
+    names = people_names(db)
+    listed = f" Mená ľudí z kont kokpitu (aj skloňované): {', '.join(names)}." if names else ""
+    return (
+        "MENÁ ĽUDÍ: dokumentácia verzie (zadanie, Špecifikácia, Návrh, kontrakty, README, poznámky k vydaniu) ani kód "
+        "nemenuje ľudí, len roly (Manažér, strana NEX Genesis, zákazník, vedenie zákazníka)." + listed + " Výskyt mena "
+        "v dokumentácii tejto verzie je MEDZERA (FAIL) — cituj miesto; Staviteľ ho nahradí rolou."
+    )
+
+
 def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_to: Optional[str] = None) -> str:
     """The Auditor's UPFRONT spec/design review brief (CR-V2-013; AUD-1(a), AUD-5, NAVRH-4, AUTON-5).
 
@@ -2402,6 +2429,7 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
         "(fail-safe), EXPLICITNE odložená mimo rozsah rozhodnutím Manažéra zapísaným v Špecifikácii, alebo HEDGE "
         "„re-overiť pri builde“ — NIE je blokujúca medzera; neoznačuj ju za chýbajúcu. Časť zadania, ktorú Staviteľ "
         "odložil sám, JE medzera.\n"
+        f"2c. {people_names_rule(db)}\n"
         f"3. {depth}\n"
         "4. SI READ + RUN-ONLY: smieš ČÍTAŤ (a prípadne spustiť aplikáciu na overenie), ale NIKDY neupravuj "
         "súbor, nepíš kód ani necommituj. TY NÁJDEŠ — opravuje Staviteľ (zachovaná nezávislosť).\n"
@@ -3015,8 +3043,7 @@ def _verifikacia_directive(
         + "\n"
         + "5. §4 HARD-SECURITY (explicitne): over, že P0 pravidlá držia v KÓDE aj v LOGOCH — žiadny credential "
         "v zdrojáku / commitnutý / v logoch; secrets len v `.env`/runtime env; `VITE_*` len public hodnoty. "
-        "Únik credentialu je FAIL.\n"
-        "6. Vráť `kind=verdict`:\n"
+        "Únik credentialu je FAIL.\n" + f"5b. {people_names_rule(db)}\n" + "6. Vráť `kind=verdict`:\n"
         "   - ak je verzia overená (acceptance + negatívne bezpečnostné testy + spot-checky + §4 čisté) → "
         "`verdict=true` (PASS); do `findings` daj prípadné neblokujúce poznámky.\n"
         "   - ak nájdeš zlyhanie → `verdict=false` (FAIL); konkrétne zlyhania vymenuj v `findings` a do "

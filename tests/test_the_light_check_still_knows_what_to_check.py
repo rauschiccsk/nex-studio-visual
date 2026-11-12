@@ -52,6 +52,10 @@ class _PrazdnaDb:
     def scalar_one_or_none(self):
         return None
 
+    def all(self):
+        """DEV-369: the people of the cockpit's accounts — none here."""
+        return []
+
 
 def _smernica(flow_type: str) -> str:
     return orchestrator._verifikacia_directive(_PrazdnaDb(), None, smoke_block="", flow_type=flow_type)
