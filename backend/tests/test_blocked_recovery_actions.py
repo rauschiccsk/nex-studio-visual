@@ -46,7 +46,8 @@ def test_blocked_error_at_priprava_offers_only_recovery() -> None:
 def test_blocked_error_at_navrh_does_not_offer_schvalit() -> None:
     actions = orchestrator.determine_available_actions(_state("navrh", "blocked", "agent_error"))
     assert "schvalit" not in actions
-    assert {"ask", "uprav", "answer"} == actions
+    # DEV-367: „Vrátiť do Prípravy" is a retreat, not an advance — the Návrh may go back after an error too.
+    assert {"ask", "uprav", "answer", "vratit_do_pripravy"} == actions
 
 
 def test_blocked_question_offers_answer_and_retry() -> None:

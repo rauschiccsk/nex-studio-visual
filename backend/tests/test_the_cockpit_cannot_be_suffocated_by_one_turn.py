@@ -33,6 +33,7 @@ from backend.core.offload import BlockingWorkTimedOut, run_blocking
 #: písaní bol ručný a hneď mu chýbali dva moduly.
 SHELLING_MODULES = {
     "app_template",
+    "back_to_priprava",
     "backend_reach",
     "build_db",
     "build_leftovers",

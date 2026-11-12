@@ -63,6 +63,7 @@ from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
     app_template,
+    back_to_priprava,
     build_db,
     build_forecast,
     build_leftovers,
@@ -646,6 +647,11 @@ _ACTIONS = frozenset(
         # ``_ADVANCING_ACTIONS`` below); the board post-filters it to conversation + spec-approved +
         # kontrola-done + NOT already-done.
         "hotovo",
+        # DEV-367: „Vrátiť do Prípravy" — a regular version settled in Návrh or Vizuál goes back to Príprava: the
+        # Návrh, the task plan and the Vizuál are thrown away (they stay in git's history), the Špecifikácia is open
+        # again. NEX Finance 0.1.0 reached Vizuál with the whole design wrong and had no way back. Advancing: it acts
+        # on the agent's output, so only a settled agent may be sent back; it starts no turn itself.
+        "vratit_do_pripravy",
     }
 )
 # Actions that act on / advance past an agent's output — only valid once the agent has SETTLED
@@ -660,6 +666,7 @@ _ADVANCING_ACTIONS = frozenset(
         "uprav",
         "verdict",
         "pokracovat",
+        "vratit_do_pripravy",
     }
 )
 
@@ -692,6 +699,65 @@ VERIF_STALL_BLOCK_REASONS = ("agent_error", "parse_exhaustion", "system_error")
 PAUSE_PENDING_NEXT_ACTION = "Pozastavujem — Staviteľ dokončí rozrobenú úlohu a potom zastane."
 PAUSED_BY_MANAZER_NEXT_ACTION = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
 
+#: DEV-367 — „Vrátiť do Prípravy": the phases a version goes back from, by the name the Manažér knows them.
+BACK_TO_PRIPRAVA = "vratit_do_pripravy"
+BACK_TO_PRIPRAVA_FROM = {"navrh": "Návrh", "vizual": "Vizuál"}
+#: The marker the action records — the start of the version's new record (:func:`back_to_priprava_seq`).
+BACK_TO_PRIPRAVA_MARKER = "Manažér vrátil verziu z fázy {phase} do Prípravy — Návrh, plán úloh a Vizuál sú zahodené."
+BACK_TO_PRIPRAVA_NEXT_ACTION = (
+    "Verzia je späť v Príprave — Návrh a Vizuál sú zahodené. Zaraď požiadavky zo Zásobníka a v Riadiacom centre "
+    "napíš Staviteľovi, čo má prepracovať, a stlač „Uprav“."
+)
+#: What the first round of Príprava after the return tells the Staviteľ, ahead of everything else.
+BACK_TO_PRIPRAVA_NOTICE = (
+    "VRÁTENÉ DO PRÍPRAVY: Manažér vrátil verziu z fázy {phase} do Prípravy. Návrh, plán úloh a Vizuál sú zahodené "
+    "(ostali v histórii gitu); Špecifikácia nie je schválená. Prepracuj ju podľa toho, čo Manažér píše nižšie, a "
+    "podľa požiadaviek zo Zásobníka; potom ju Manažér znova schváli."
+)
+BACK_TO_PRIPRAVA_ONLY_FROM = "Do Prípravy sa dá vrátiť len verzia vo fáze Návrh alebo Vizuál."
+BACK_TO_PRIPRAVA_FAST_FIX = "Rýchla oprava nemá Návrh ani Vizuál — do Prípravy sa nevracia."
+#: A conversation build's turns run outside the rounds that carry the notice (:func:`_back_to_priprava_notice`).
+BACK_TO_PRIPRAVA_CONVERSATION = "Stavba vedená rozhovorom sa do Prípravy týmto tlačidlom nevracia."
+BACK_TO_PRIPRAVA_NOT_SETTLED = "Do Prípravy sa dá verzia vrátiť, až keď Staviteľ dokončí svoj ťah."
+BACK_TO_PRIPRAVA_AFTER_FIX = (
+    "Stavba čaká na pokračovanie po oprave chyby NEX Studia — najprv ju pusti ďalej („Pokračovať“)."
+)
+BACK_TO_PRIPRAVA_AFTER_RESTART = (
+    "Reštart kokpitu prerušil fázu — najprv ju dokonči („Pokračovať“) alebo usmerni („Uprav“), potom sa dá verzia "
+    "vrátiť do Prípravy."
+)
+BACK_TO_PRIPRAVA_BUILD_STARTED = "Programovanie už začalo — verzia sa do Prípravy vrátiť nedá."
+#: What the Manažér reads when the project's git did not take the return (the version is back in Príprava anyway).
+BACK_TO_PRIPRAVA_GIT_FAILED = (
+    "Verzia je späť v Príprave, ale v gite projektu sa to nepodarilo dokončiť — {why}. Staviteľ môže v projekte ešte "
+    "vidieť súbory zahodeného Návrhu či Vizuálu."
+)
+
+
+def _back_to_priprava_refusal(state: PipelineState) -> Optional[str]:
+    """DEV-367: why the version cannot go back to Príprava now, by its state — ``None`` when it can.
+
+    ONE rule for the button (:func:`determine_available_actions`) and the engine (:func:`apply_action`): a regular
+    version, settled in Návrh or Vizuál — waiting for the Manažér, or stopped on a question, an error or the Decision
+    Cards. Not on a NEX Studio bug nor right after Dedo released one (the Manažér's one move there is the resume), nor
+    on a phase a restart cut off (DEV-204 offers exactly „Pokračovať“ and „Uprav“ there). That Programovanie has not
+    started is a database question — the board's post-filter and the engine ask it."""
+    if state.current_stage not in BACK_TO_PRIPRAVA_FROM:
+        return BACK_TO_PRIPRAVA_ONLY_FROM
+    if state.flow_type == "fast_fix":
+        return BACK_TO_PRIPRAVA_FAST_FIX
+    if state.mode == "conversation":
+        return BACK_TO_PRIPRAVA_CONVERSATION
+    if state.status not in ("awaiting_manazer", "blocked"):
+        return BACK_TO_PRIPRAVA_NOT_SETTLED
+    if state.status == "blocked" and state.block_reason == "framework_issue":
+        return FRAMEWORK_BLOCK_REFUSAL
+    if state.resume_after_framework_fix:
+        return BACK_TO_PRIPRAVA_AFTER_FIX
+    if state.resume_after_restart:
+        return BACK_TO_PRIPRAVA_AFTER_RESTART
+    return None
+
 
 def pause_pending(state: PipelineState) -> bool:
     """The Manažér asked for a pause the running loop has not landed yet (ICCINT-163).
@@ -720,6 +786,8 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     # Uprostred ťahu agenta nie — založiť vedľa druhú verziu z toho istého zadania, kým prvá pracuje,
     # by znamenalo dve stavby na tej istej práci.
     prenos = {"na_riadnu_verziu"} if state.flow_type == "fast_fix" and status != "agent_working" else set()
+    # DEV-367: „Vrátiť do Prípravy" on a settled Návrh / Vizuál of a regular version — the rule is the engine's own.
+    back = {BACK_TO_PRIPRAVA} if _back_to_priprava_refusal(state) is None else set()
 
     if status == "agent_working":
         # Nothing to ratify while the agent works; only the Programovanie loop has a cooperative pause boundary.
@@ -765,12 +833,12 @@ def determine_available_actions(state: PipelineState) -> set[str]:
     # answer/uprav box (a non-expert must not face a blank box). ``ask`` stays so the Manažér can probe a
     # card before deciding; the card owns the action.
     if status == "blocked" and state.block_reason == "decision_needed":
-        return {"decide", "ask"} | prenos
+        return {"decide", "ask"} | prenos | back
 
     # Settled (awaiting_manazer / blocked): ask + uprav are universally valid — ``uprav`` doubles as the
     # error-block "Skús znova" / re-work recovery at any phase, and ``ask`` opens a direct AI-Agent
     # consult. A blocked state is an agent QUESTION → the Manažér can ``answer`` it.
-    actions: set[str] = {"ask", "uprav"} | prenos
+    actions: set[str] = {"ask", "uprav"} | prenos | back
     if status == "blocked":
         # A blocked state (agent_question / agent_error / system_error / parse_exhaustion — framework_issue and
         # decision_needed already returned above) is a QUESTION or an ERROR the Manažér must answer / recover
@@ -1107,6 +1175,24 @@ def reverify_in_flight(db: Session, version_id: uuid.UUID, *, current_stage: str
     return bool(latest and latest.get("auto_hotovo"))
 
 
+def back_to_priprava_seq(db: Session, version_id: uuid.UUID) -> int:
+    """DEV-367: the ``seq`` of the version's latest „Vrátiť do Prípravy" marker — ``0`` when it never went back.
+
+    The version's record starts anew there. Everything that reads the WHOLE record of the version — the Špecifikácia
+    approval, the Vizuál drafts, the consultations and their cap, the Auditor's notes — counts only what is newer: the
+    approval of a Špecifikácia that went back is history, not an approval of the one being reworked."""
+    return (
+        db.execute(
+            select(func.max(PipelineMessage.seq)).where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.kind == "return",
+                PipelineMessage.payload["back_to_priprava"].astext == "true",
+            )
+        ).scalar()
+        or 0
+    )
+
+
 def spec_approved(db: Session, version_id: uuid.UUID) -> bool:
     """True iff the Manažér has approved the Špecifikácia for this version — ≥1 ``kind='approval'``
     :class:`PipelineMessage` exists (STEP 2 durable freeze signal; STEP 3 gating).
@@ -1114,11 +1200,16 @@ def spec_approved(db: Session, version_id: uuid.UUID) -> bool:
     DRY (step3-plan-design.md FIX2): the SINGLE spec-approval probe — one indexed exists query on the
     ``(version_id, kind)`` columns (``version_id`` is indexed), correct for both conversation + legacy
     builds. Shared by the board route (the Špecifikácia badge + the ``zostav_plan`` post-filter) AND the
-    STEP-3 conversation plan gating (:func:`apply_action`) so there is no second inline ``exists`` query."""
+    STEP-3 conversation plan gating (:func:`apply_action`) so there is no second inline ``exists`` query.
+    DEV-367: only an approval after the version's latest return to Príprava counts (:func:`back_to_priprava_seq`)."""
     return (
         db.execute(
             select(PipelineMessage.id)
-            .where(PipelineMessage.version_id == version_id, PipelineMessage.kind == "approval")
+            .where(
+                PipelineMessage.version_id == version_id,
+                PipelineMessage.kind == "approval",
+                PipelineMessage.seq > back_to_priprava_seq(db, version_id),
+            )
             .limit(1)
         ).scalar_one_or_none()
         is not None
@@ -1529,6 +1620,27 @@ def _navrh_design_doc_rel(version_number: str) -> str:
 #: (:mod:`backend.services.database_schema`). Same name as the Knowledge Base document it becomes.
 def _database_schema_rel(version_number: str) -> str:
     return f"{_version_spec_rel(version_number)}/{database_schema.SCHEMA_FILENAME}"
+
+
+#: Relative repo path of the reviewable task plan (:func:`_write_task_plan_doc`).
+def _task_plan_doc_rel(version_number: str) -> str:
+    return f"{_version_spec_rel(version_number)}/spec/task-plan.md"
+
+
+#: Relative repo path of the AI's self-contained Vizuál mock-up folder (:func:`_vizual_mockup_rel`).
+def _vizual_mockup_dir_rel(version_number: str) -> str:
+    return f"{_version_spec_rel(version_number)}/visual"
+
+
+def _thrown_away_with_navrh(version_number: str) -> tuple[str, ...]:
+    """DEV-367: what of the version's documents goes when it returns to Príprava — the Návrh, its database
+    structure, the task plan and the Vizuál mock-up. The Špecifikácia stays: it is what Príprava reworks."""
+    return (
+        _navrh_design_doc_rel(version_number),
+        _database_schema_rel(version_number),
+        _task_plan_doc_rel(version_number),
+        _vizual_mockup_dir_rel(version_number),
+    )
 
 
 class IccStandard(NamedTuple):
@@ -2095,13 +2207,15 @@ def _prior_auditor_review_context(db: Session, version_id: uuid.UUID) -> Optiona
     return ``(prior_findings, agent_latest)`` so the upfront directive can turn a STATELESS re-run into a
     dispute-aware RE-review that CONVERGES. Director 2026-07-17: the nex-shopify 3×-identical-verdict loop —
     each review re-derived the SAME findings without re-checking the agent's rebuttal against the CURRENT
-    docs. ``None`` on the FIRST review (no prior verdict) → the review runs fresh, unchanged."""
+    docs. ``None`` on the FIRST review (no prior verdict) → the review runs fresh, unchanged. DEV-367: a review of a
+    Návrh that went back to Príprava is not prior to the new one."""
     prior = db.execute(
         select(PipelineMessage)
         .where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.author == "auditor",
             PipelineMessage.kind == "verdict",
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
@@ -2433,6 +2547,8 @@ def _consult_rounds_used(db: Session, version_id: uuid.UUID, source: str) -> int
     Jedno miesto, ktoré vie odpovedať na otázku „koľké kolo to je“ — používa ho aj strop, aj vety, ktoré
     to hovoria Manažérovi. Dve nezávislé počítania toho istého by sa raz rozišli a on by čítal číslo,
     ktoré neplatí.
+
+    DEV-367: counts from the version's latest return to Príprava — the rounds over a thrown-away Návrh are not spent.
     """
     return db.execute(
         select(func.count())
@@ -2441,6 +2557,7 @@ def _consult_rounds_used(db: Session, version_id: uuid.UUID, source: str) -> int
             PipelineMessage.version_id == version_id,
             _carries_decision_queue(),
             PipelineMessage.payload["consultation"]["source"].astext == source,
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
     ).scalar_one()
 
@@ -3144,11 +3261,13 @@ def _unhandled_review_notes(db: Session, version_id: uuid.UUID) -> list[str]:
     and are not handed over again. A PASSED review has no such note, and nothing else ever read its findings:
     NEX Inbox 1.7.0 passed its fifth review with four notes the Auditor said „AI Agent opraví pri
     programovaní", while the plan passes got ``directive=None``. This collects what nobody handled — the
-    Návrh review AND the narrowed review at Vizuál approval (both carry ``upfront_review``)."""
+    Návrh review AND the narrowed review at Vizuál approval (both carry ``upfront_review``). DEV-367: only reviews
+    after the version's latest return to Príprava — notes on a thrown-away Návrh are no one's to handle."""
     rows = db.execute(
         select(PipelineMessage.kind, PipelineMessage.payload)
         .where(
             PipelineMessage.version_id == version_id,
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
             or_(
                 and_(PipelineMessage.kind == "verdict", PipelineMessage.payload["upfront_review"].astext == "true"),
                 and_(
@@ -3279,6 +3398,32 @@ def _new_requirements_block(items: list[BacklogItem]) -> str:
         *_requirement_lines(items),
     ]
     return "\n".join(lines) + "\n"
+
+
+def _back_to_priprava_notice(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-367: what the first round of Príprava after a return tells the Staviteľ — ``None`` otherwise.
+
+    „First" is read from the record: the latest „Vrátiť do Prípravy" marker is newer than anything the Staviteľ said
+    since. Once he answered a round after it, he knows — the notice rides once."""
+    since = back_to_priprava_seq(db, version_id)
+    if not since:
+        return None
+    spoke_since = db.execute(
+        select(PipelineMessage.id)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.author == AI_AGENT_ROLE,
+            PipelineMessage.seq > since,
+        )
+        .limit(1)
+    ).first()
+    if spoke_since is not None:
+        return None
+    payload = db.execute(
+        select(PipelineMessage.payload).where(PipelineMessage.version_id == version_id, PipelineMessage.seq == since)
+    ).scalar_one()
+    from_stage = (payload or {}).get("from_stage")
+    return BACK_TO_PRIPRAVA_NOTICE.format(phase=BACK_TO_PRIPRAVA_FROM.get(from_stage, BACK_TO_PRIPRAVA_FROM["navrh"]))
 
 
 def _mark_delivered(db: Session, items: list[BacklogItem]) -> None:
@@ -3629,15 +3774,7 @@ def _write_task_plan_doc(db: Session, version: Version, stage: str = "navrh") ->
     project = db.get(Project, version.project_id)
     if project is None or not project.source_path:
         return None
-    doc_path = (
-        Path(project.source_path)
-        / "docs"
-        / "specs"
-        / "versions"
-        / f"v{version.version_number}"
-        / "spec"
-        / "task-plan.md"
-    )
+    doc_path = Path(project.source_path) / _task_plan_doc_rel(version.version_number)
     try:
         md = _render_task_plan_md(db, version, project, stage)
         doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4109,10 +4246,15 @@ def _latest_consultation(db: Session, version_id: uuid.UUID) -> Optional[tuple[d
 
     Returns the seq so answers are SEQ-scoped (decide-records with a higher seq belong to THIS consultation):
     a re-consultation gets a new, higher-seq message, so correctness never depends on the agent-supplied
-    ``consultation.id`` being unique (verify-round blocker fix)."""
+    ``consultation.id`` being unique (verify-round blocker fix). DEV-367: none before the version's latest return to
+    Príprava — the cards of a thrown-away Návrh are not open."""
     row = db.execute(
         select(PipelineMessage.payload, PipelineMessage.seq)
-        .where(PipelineMessage.version_id == version_id, _carries_decision_queue())
+        .where(
+            PipelineMessage.version_id == version_id,
+            _carries_decision_queue(),
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
+        )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
     ).first()
@@ -4241,12 +4383,16 @@ def consultation_retry_pending(db: Session, version_id: uuid.UUID) -> Optional[t
 
     Deliberately NOT capped. ``AUDITOR_LOOP_MAX`` bounds consultations that SUCCEED, which is a loop the
     engine drives; this is a button a person presses after being told the answer did not arrive, and it
-    matches the unbounded "Skús znova" the cockpit already offers on every other failed turn."""
+    matches the unbounded "Skús znova" the cockpit already offers on every other failed turn.
+
+    DEV-367: a fallback before the version's latest return to Príprava is not worth a retry — its findings were on a
+    thrown-away Návrh."""
     row = db.execute(
         select(PipelineMessage.payload, PipelineMessage.seq)
         .where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.payload["consult_retry"].astext == "true",
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
@@ -4321,12 +4467,13 @@ def decision_card_context(db: Session, version_id: uuid.UUID) -> dict[str, dict[
       moves neither the order of the options nor the "odporúčané" mark (the ticket's most important sentence).
 
     Each decision counts once, in its latest asking: a key asked again in a later round is the same decision.
-    ``{}`` when no consultation is on record."""
+    ``{}`` when no consultation is on record. DEV-367: the record starts at the version's latest return to Príprava."""
     rows = db.execute(
         select(PipelineMessage.seq, PipelineMessage.kind, PipelineMessage.payload)
         .where(
             PipelineMessage.version_id == version_id,
             or_(_carries_decision_queue(), PipelineMessage.kind == "answer"),
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
         .order_by(PipelineMessage.seq.asc())
     ).all()
@@ -10317,6 +10464,11 @@ async def run_dispatch(
         prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type, requirements=handed)
     else:
         prompt = _directive_for(stage, state.flow_type)
+    if stage == "priprava":
+        # DEV-367: the version came back from Návrh / Vizuál — said first, before the Manažér's words.
+        notice = _back_to_priprava_notice(db, state.version_id)
+        if notice is not None:
+            prompt = f"{notice}\n\n{prompt}"
     result = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
@@ -14333,13 +14485,15 @@ def _vizual_url_recorded(db: Session, version_id: uuid.UUID) -> bool:
     round is re-entered on every Manažér change-request (the HMR loop) and ``vizual_sandbox.spin_up`` is
     idempotent, so re-announcing the URL each turn would SPAM the board. Detect a first entry by the ABSENCE
     of any prior ``vizual`` ∧ ``notification`` ∧ ``payload.vizual_url`` message (the same ``.astext`` JSONB
-    probe style used by :func:`_latest_programming_complete_seq` / the kontrola probes)."""
+    probe style used by :func:`_latest_programming_complete_seq` / the kontrola probes). DEV-367: from the version's
+    latest return to Príprava on — a Vizuál that went back is a first entry again."""
     seq = db.execute(
         select(func.max(PipelineMessage.seq)).where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.stage == "vizual",
             PipelineMessage.kind == "notification",
             PipelineMessage.payload["vizual_url"].astext.isnot(None),
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
     ).scalar()
     return seq is not None
@@ -14360,12 +14514,13 @@ def _vizual_draft_attempted(db: Session, version_id: uuid.UUID) -> bool:
     first draft (parse exhaustion / a question) counts as attempted on purpose: the build settles blocked or
     awaiting with a next_action that names the recovery, and ``uprav`` re-enters through the ordinary
     change-request path — re-running the unasked-for draft under the Manažér instead would ignore what he
-    just said."""
+    just said. DEV-367: a draft before the version's latest return to Príprava is not one — those screens are gone."""
     seq = db.execute(
         select(func.max(PipelineMessage.seq)).where(
             PipelineMessage.version_id == version_id,
             PipelineMessage.stage == "vizual",
             PipelineMessage.author == AI_AGENT_ROLE,
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
     ).scalar()
     return seq is not None
@@ -14378,7 +14533,8 @@ def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
     carries one — the URL announced by :func:`_run_vizual_round` on entry into the stage. ``None`` when the
     version never entered ``vizual`` (or no URL was recorded). The board route surfaces this on
     ``PipelineBoardRead.vizual_url``; the FE embeds the running dev-server so the Manažér can walk it live.
-    Same ``.astext`` JSONB probe as :func:`_vizual_url_recorded`, ordered newest-first."""
+    Same ``.astext`` JSONB probe as :func:`_vizual_url_recorded`, ordered newest-first. DEV-367: none from before
+    the version's latest return to Príprava."""
     return db.execute(
         select(PipelineMessage.payload["vizual_url"].astext)
         .where(
@@ -14386,6 +14542,7 @@ def latest_vizual_url(db: Session, version_id: uuid.UUID) -> Optional[str]:
             PipelineMessage.stage == "vizual",
             PipelineMessage.kind == "notification",
             PipelineMessage.payload["vizual_url"].astext.isnot(None),
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
         .order_by(PipelineMessage.seq.desc())
         .limit(1)
@@ -14452,7 +14609,8 @@ def vizual_checklists(db: Session, version_id: uuid.UUID) -> list[dict[str, Any]
     """Every list of what to check in the Vizuál for the version, oldest first, each with its message ``seq``.
 
     DEV-36. Read from the database, not from the board's message tail: the count by „Schváliť vizuál" covers
-    every list, and a long Vizuál pushes the first one out of the last 50 messages."""
+    every list, and a long Vizuál pushes the first one out of the last 50 messages. DEV-367: from the version's
+    latest return to Príprava on."""
     rows = db.execute(
         select(PipelineMessage.seq, PipelineMessage.payload["vizual_checklist"])
         .where(
@@ -14460,6 +14618,7 @@ def vizual_checklists(db: Session, version_id: uuid.UUID) -> list[dict[str, Any]
             PipelineMessage.stage == "vizual",
             PipelineMessage.kind == "notification",
             PipelineMessage.payload["vizual_checklist"].astext.isnot(None),
+            PipelineMessage.seq > back_to_priprava_seq(db, version_id),
         )
         .order_by(PipelineMessage.seq.asc())
     ).all()
@@ -14474,7 +14633,7 @@ def _vizual_mockup_rel(project_root: Path, version_number: str) -> Optional[str]
     Vite scaffold — a new project's FE is behind ``ProtectedRoute`` → login, and the sandbox has no backend /
     user / token, so the live scaffold is a dead login screen (nex-shopify 2026-07-17). Prefers ``index.html``;
     else the newest ``*.html`` in the dir."""
-    vis_dir = project_root / _version_spec_rel(version_number) / "visual"
+    vis_dir = project_root / _vizual_mockup_dir_rel(version_number)
     if not vis_dir.is_dir():
         return None
     index = vis_dir / "index.html"
@@ -14510,7 +14669,7 @@ def read_vizual_mockup(db: Session, version_id: uuid.UUID) -> Optional[str]:
     if rel is None:
         return None
     path = (project_root / rel).resolve()
-    vis_dir = (project_root / _version_spec_rel(version_number) / "visual").resolve()
+    vis_dir = (project_root / _vizual_mockup_dir_rel(version_number)).resolve()
     try:
         path.relative_to(vis_dir)
     except ValueError:
@@ -15748,6 +15907,86 @@ def _found_the_regular_version(db: Session, project_id: uuid.UUID, brief: str) -
     )
 
 
+async def _go_back_to_priprava(db: Session, state: PipelineState) -> PipelineState:
+    """DEV-367: the version goes back from Návrh or Vizuál to Príprava — the guards are the caller's.
+
+    NEX Finance 0.1.0 reached Vizuál and the whole design was wrong; nothing took it back. Director 12.11.2026:
+    „Súhlasím, vrátime sa do prípravy, pretože celý projekt je zlý.“
+
+    One marker starts the version's new record (:func:`back_to_priprava_seq` — the old Špecifikácia approval, the
+    drafts and the consultations stay on record but count no more). The build waits for the Manažér in Príprava: he
+    includes requirements from the Zásobník (it offers a version in Príprava again) and sends the Staviteľ what to
+    rework; the first round tells the Staviteľ the version came back (:func:`_back_to_priprava_notice`). No agent turn
+    starts here. The task plan goes from the database; in the project's git the unsaved work is kept in one commit and
+    reverted in the next, which removes the Návrh, the database structure, the task plan and the Vizuál mock-up
+    (:mod:`back_to_priprava`). The preview is torn down best-effort. A failure in git or Docker is said, never fatal:
+    the cockpit's own trouble must not stop the Manažér."""
+    version_id = state.version_id
+    from_stage = state.current_stage
+    version = db.get(Version, version_id)
+    if version is None:
+        raise OrchestratorError(f"Version not found: {version_id}")
+    project = db.get(Project, version.project_id)
+    _record_message(
+        db,
+        version_id=version_id,
+        stage="priprava",
+        author="manazer",
+        recipient="ai_agent",
+        kind="return",
+        content=BACK_TO_PRIPRAVA_MARKER.format(phase=BACK_TO_PRIPRAVA_FROM[from_stage]),
+        payload={"phase": "priprava", "back_to_priprava": True, "from_stage": from_stage},
+    )
+    state.current_stage = "priprava"
+    state.current_actor = AI_AGENT_ROLE
+    state.status = "awaiting_manazer"
+    state.next_action = BACK_TO_PRIPRAVA_NEXT_ACTION
+    state.pending_vizual_signoff = False
+    state.retry_consultation = False
+    version.vizual_approved_sha = None
+    db.execute(delete(Epic).where(Epic.version_id == version_id))  # Feats and Tasks go with it (FK cascade)
+    db.flush()
+
+    root = Path(project.source_path) if project is not None and project.source_path else None
+    if root is not None and root.is_dir():
+        try:
+            why = await run_blocking(
+                back_to_priprava.discard,
+                root,
+                version.version_number,
+                _thrown_away_with_navrh(version.version_number),
+                cap=back_to_priprava.CAP,
+            )
+        except BlockingWorkTimedOut:
+            why = f"zápis do gitu neskončil do {back_to_priprava.CAP} s"
+        if why:
+            _record_message(
+                db,
+                version_id=version_id,
+                stage="priprava",
+                author="system",
+                recipient="manazer",
+                kind="notification",
+                content=BACK_TO_PRIPRAVA_GIT_FAILED.format(why=why),
+                payload={"phase": "priprava", "back_to_priprava_git_failed": why},
+            )
+        try:  # a checkout without git, or a plan file git never tracked
+            (root / _task_plan_doc_rel(version.version_number)).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("back to Príprava: the task plan file of %s stayed on disk", root, exc_info=True)
+
+    from backend.services import vizual_sandbox
+
+    slug = project.slug if project is not None else None
+    for surface in _surfaces_for_version(db, version_id) if slug else ():
+        try:
+            await run_blocking(vizual_sandbox.teardown, slug, **_preview_of(surface), cap=VIZUAL_PREVIEW_STATE_CAP)
+        except Exception:  # noqa: BLE001 — a preview left running must not undo the return to Príprava
+            logger.warning("back to Príprava: the preview of %s (%s) was not torn down", slug, surface.directory)
+    db.flush()
+    return state
+
+
 async def apply_action(
     db: Session,
     *,
@@ -15962,6 +16201,16 @@ async def apply_action(
         db.flush()
         _begin_dispatch(db, state)
         return state
+
+    if action == BACK_TO_PRIPRAVA:
+        # DEV-367: „Vrátiť do Prípravy" — the same rule the button is drawn by, and that Programovanie has not begun
+        # (the board's post-filter); a stale screen or a forged call is refused with the reason.
+        refused = _back_to_priprava_refusal(state)
+        if refused is None and _build_started(db, version_id):
+            refused = BACK_TO_PRIPRAVA_BUILD_STARTED
+        if refused is not None:
+            raise OrchestratorError(refused)
+        return await _go_back_to_priprava(db, state)
 
     if action == "zostav_plan":
         # STEP 3 (step3-plan-design.md MD-1=A): "Zostaviť plán" — the conversation build composes the task

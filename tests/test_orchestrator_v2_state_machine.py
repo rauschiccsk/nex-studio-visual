@@ -545,6 +545,12 @@ def test_apply_action_is_sole_mutator_grep_guard():
             "spustit_vizual",
             "skontrolovat",
             "hotovo",
+            # DEV-367: + "vratit_do_pripravy" („Vrátiť do Prípravy" — a regular version settled in Návrh or
+            # Vizuál goes back to Príprava; the Návrh, the task plan and the Vizuál are thrown away, the
+            # Špecifikácia is open again). NEX Finance 0.1.0 reached Vizuál with the whole design wrong. Director
+            # 12.11.2026: „Súhlasím, vrátime sa do prípravy, pretože celý projekt je zlý.“ Advancing; it starts no
+            # agent turn itself.
+            "vratit_do_pripravy",
         }
     )
     # apply_coordinator_recommendation is REMOVED.

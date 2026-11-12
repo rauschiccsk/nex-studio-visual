@@ -144,7 +144,8 @@ def test_decision_needed_offers_only_decide_and_ask(db_session):
     state = db_session.execute(
         orchestrator.select(PipelineState).where(PipelineState.version_id == version.id)
     ).scalar_one()
-    assert orchestrator.determine_available_actions(state) == {"decide", "ask"}
+    # DEV-367: „Vrátiť do Prípravy" stays — a retreat with its own confirmation, no box to write in.
+    assert orchestrator.determine_available_actions(state) == {"decide", "ask", "vratit_do_pripravy"}
 
 
 async def test_reconsultation_reusing_id_and_keys_does_not_inherit_old_answers(db_session):

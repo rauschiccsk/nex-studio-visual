@@ -181,6 +181,15 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         and orchestrator.consultation_retry_pending(db, version_id) is None
     ):
         available_actions = [a for a in available_actions if a != "zopakovat_konzultaciu"]
+    # DEV-367: POST-FILTER „Vrátiť do Prípravy" — the state-only set offers it on a settled Návrh / Vizuál; once
+    # Programovanie has begun (a task moved past ``todo``) the version is no longer one to send back. ``apply_action``
+    # refuses it the same way; this hides the dead button.
+    if (
+        state is not None
+        and orchestrator.BACK_TO_PRIPRAVA in available_actions
+        and orchestrator._build_started(db, version_id)
+    ):
+        available_actions = [a for a in available_actions if a != orchestrator.BACK_TO_PRIPRAVA]
     # STEP 5 (step5-kontrola-design.md K-1): POST-FILTER ``skontrolovat`` (mirror of the spustit_stavbu filter
     # above) — the state-only ``determine_available_actions`` offers it unconditionally at ``priprava``; drop it
     # here unless this is a conversation build whose Špecifikácia is approved, whose Programovanie has COMPLETED,

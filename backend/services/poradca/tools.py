@@ -62,6 +62,7 @@ ACTION_LABELS: dict[str, str] = {
     "na_riadnu_verziu": "Preniesť do riadnej verzie",
     "nahlasit_znova": "Nahlásiť znova",
     "zopakovat_konzultaciu": "Zopakovať konzultáciu",
+    "vratit_do_pripravy": "Vrátiť do Prípravy",
 }
 
 _MESSAGES_LIMIT = 50

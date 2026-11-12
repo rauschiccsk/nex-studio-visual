@@ -273,7 +273,8 @@ export type PipelineActionName =
   | "na_riadnu_verziu" // ICCINT-139: „Preniesť do riadnej verzie" — rýchla oprava, do ktorej práca nepatrí,
   //                      sa zastaví a založí sa riadna verzia s tým istým zadaním. Dráha sa NEPREPÍNA za behu.
   | "nahlasit_znova" // framework_issue recovery: re-report the NEX-Studio bug to the technical team — the Manažér's ONE concrete move on a framework_issue block. Hand-written union — no codegen regen for the verb.
-  | "zopakovat_konzultaciu"; // ICCINT-25: ask for the Decision Cards again after the turn that was to build them never came back (outage / unparseable answer) — the way back from a fail-open that used to be one-way.
+  | "zopakovat_konzultaciu" // ICCINT-25: ask for the Decision Cards again after the turn that was to build them never came back (outage / unparseable answer) — the way back from a fail-open that used to be one-way.
+  | "vratit_do_pripravy"; // DEV-367: „Vrátiť do Prípravy" — a regular version settled in Návrh / Vizuál goes back to Príprava (the Návrh, the task plan and the Vizuál are thrown away, the Špecifikácia opens again); never once Programovanie has begun
 
 export interface PipelineActionRequest {
   action: PipelineActionName;

@@ -202,6 +202,7 @@
    "ask",
    "schvalit",
    "uprav",
+   "vratit_do_pripravy",
    "zopakovat_konzultaciu"
   ]
  },
@@ -238,7 +239,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -250,7 +252,8 @@
   "pause_reason": null,
   "available_actions": [
    "ask",
-   "decide"
+   "decide",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -263,7 +266,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -276,7 +280,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -289,7 +294,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -313,7 +319,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -327,7 +334,8 @@
    "answer",
    "ask",
    "schvalit_schemu",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -373,6 +381,7 @@
    "spustit_stavbu",
    "spustit_vizual",
    "uprav",
+   "vratit_do_pripravy",
    "zopakovat_konzultaciu"
   ]
  },
@@ -409,7 +418,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -421,7 +431,8 @@
   "pause_reason": null,
   "available_actions": [
    "ask",
-   "decide"
+   "decide",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -434,7 +445,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -447,7 +459,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -460,7 +473,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -484,7 +498,8 @@
   "available_actions": [
    "answer",
    "ask",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {
@@ -498,7 +513,8 @@
    "answer",
    "ask",
    "schvalit_schemu",
-   "uprav"
+   "uprav",
+   "vratit_do_pripravy"
   ]
  },
  {

@@ -47,6 +47,7 @@ import ContinueAfterFixBar from "@/components/controlCenter/ContinueAfterFixBar"
 import DedoProposalBar from "@/components/controlCenter/DedoProposalBar";
 import ReverifyBar from "@/components/controlCenter/ReverifyBar";
 import MoveToRegularVersionBar from "@/components/controlCenter/MoveToRegularVersionBar";
+import ReturnToPripravaBar from "@/components/controlCenter/ReturnToPripravaBar";
 import ReverifyNoFixBar from "@/components/controlCenter/ReverifyNoFixBar";
 import StartBuildBar from "@/components/controlCenter/StartBuildBar";
 import CiGateBar from "@/components/controlCenter/CiGateBar";
@@ -368,6 +369,8 @@ export default function ControlCenterPage() {
             (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
           }
         />
+        {/* DEV-367: the whole Návrh / Vizuál is wrong — the version goes back to Príprava, after a second question. */}
+        <ReturnToPripravaBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* DEV-351: a version that has not started — its start, where the work happens. */}
         <StartBuildBar board={board} versionId={versionId} onBoard={setBoard} />
         {/* DEV-261: after Programovanie the step to Verifikácia waits for the CI of the pushed commit — the reason, or the
