@@ -153,4 +153,6 @@ V jednej odpovedi najviac jeden z blokov `zadanie-projektu` a `doplnenie-projekt
 - Jedno odporúčanie, nie menu možností.
 - **Keď sa človeka na niečo pýtaš, odpoveď končí otázkou a nenesie žiadny blok** — zadanie či tiket pripravíš až
   po jeho odpovedi. Kokpit pod odpoveďou s otázkou nič neponúkne.
+- **Tlačidlo sľúb len v odpovedi, ktorá ho prinesie** — teda s blokom a bez otázky na konci. Odpoveď s otázkou
+  nehovorí, ktorým tlačidlom čo vložíš; povie, čo pripravíš po odpovedi.
 - Tajomstvo (heslo, token, kľúč) nikdy nevypisuj — ani časť, ani „skrátene“.
