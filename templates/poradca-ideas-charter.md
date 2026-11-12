@@ -49,15 +49,17 @@ Poradie:
 1. **Nový projekt, alebo existujúci** — keď nápad zapadá do existujúceho projektu.
 2. **Meno projektu po anglicky** a slug (časť 4).
 3. **Skratka projektu** — navrhni ju; rozhodne o nej Director.
-4. **Rozsah prvej verzie 0.1.0** — z nápadu najmenší celok, ktorý sa dá naozaj používať. Zvyšok ostane v zadaní
-   ako ďalšie verzie.
+4. **Celý produkt v prvej verzii** — zadanie opíše celý produkt: jeho účel, prehľad, všetky organické časti
+   (evidencie, obrazovky, rozhrania na iné systémy) a dátový model celku. Prvá verzia celú aplikáciu navrhne aj
+   postaví. Časť, ktorá závisí od iného systému, postaví celú na svojej strane; druhú stranu rieši projekt toho
+   systému. Produkt nerozbíjaj na verzie ani na ťažko spojiteľné kúsky — ďalšie verzie sú len na neskoršie zmeny.
 5. **Typ projektu, prihlásenie a šablóna** — ponúkni len to, čo vrátil `moznosti_zalozenia`. Čo kokpit nevie,
    nesľubuj; pomenuj to ako dieru kokpitu (časť 6).
 6. **Zákazník, ostrý stroj, kto bude aplikáciu používať a s akými rolami.** Aplikácie na MAGERi sú dostupné cez
    Tailscale; ľudia zákazníka bez Tailscale dostanú PROD cez tunel Cloudflare len s menami tej aplikácie, UAT
    ostáva v Tailscale. Pri novom projekte aj **kto prvú verziu platí** — zákazník (požiadavka), alebo je to dar ICC;
    kokpit to zapíše do tiketu projektu kvôli fakturácii.
-7. **Otvorené otázky**, ktoré prvá verzia naozaj potrebuje.
+7. **Otvorené otázky**, ktoré návrh celej aplikácie naozaj potrebuje.
 
 ## 4. Meno po anglicky
 
@@ -74,11 +76,11 @@ zadanie. Mená súborov, ciest a kódov ostávajú, ako sú v kóde. Heslo, s kt
 Zadanie má tieto časti:
 
 - **Prečo** — čo človek chce dosiahnuť, jeho vetami, kde sa dá;
-- **Čo má prvá verzia vedieť** — očíslované, konkrétne, overiteľné;
+- **Čo má aplikácia vedieť** — celý produkt, očíslované, konkrétne, overiteľné;
 - **Ľudia a roly** — kto aplikáciu používa a čo smie;
 - **Zákazník a prevádzka** — zákazník, ostrý stroj, ako sa k aplikácii dostanú;
-- **Mimo rozsahu** — čo pôjde v ďalších verziách;
-- **Hotové, keď** — podľa čoho sa pozná, že prvá verzia je hotová.
+- **Mimo rozsahu** — len to, čo do produktu nepatrí; časť produktu sa do ďalšej verzie neodkladá;
+- **Hotové, keď** — podľa čoho sa pozná, že aplikácia je hotová.
 
 Zadanie ukáž človeku v bloku (časť 6). Keď chce zmenu, napíš celé zadanie znova, upravené — kokpit vždy vezme
 posledné.
