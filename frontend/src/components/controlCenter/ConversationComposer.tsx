@@ -102,6 +102,9 @@ interface Props {
   offersUprav?: boolean;
   /** Send the text as „Uprav“ (``uprav`` with the text as its comment). */
   onUprav?: (comment: string) => Promise<void>;
+  /** DEV-373: the button's name as the cockpit names it for this state (the board's ``action_labels.uprav``) — the
+   *  page passes it with ``offersUprav``; the box has no word of its own for it. */
+  upravLabel?: string;
   /** DEV-351: the version has not started — the box is locked until „Spustiť tvorbu špecifikácie“ above is pressed;
    *  a message never starts it (it used to start it as a conversation, without the five phases). */
   notStarted?: boolean;
@@ -118,6 +121,7 @@ function ConversationComposer({
   owner = "rozhovor",
   offersUprav = false,
   onUprav,
+  upravLabel,
   notStarted = false,
 }: Props) {
   // ICCINT-30: the box the Director lost a message from. Persisted per build, cleared on a real send.
@@ -327,7 +331,7 @@ function ConversationComposer({
             className={primaryUprav ? MAIN_BUTTON : OTHER_BUTTON}
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            Uprav
+            {upravLabel}
           </button>
         )}
       </div>

@@ -370,7 +370,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         spec_approved=spec_approved,
         vizual_url=vizual_url,
         # DEV-373: the buttons' names for this state — the screen and Poradca read the same words.
-        action_labels=action_labels_service.action_labels(db, state) if state is not None else {},
+        action_labels=action_labels_service.action_labels(db, state, available_actions) if state is not None else {},
         # DEV-371: only while the build stands blocked on that check — the screen's „Skús znova“ reads it.
         check_failed_on_download=(
             state is not None

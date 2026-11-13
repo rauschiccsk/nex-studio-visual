@@ -41,6 +41,7 @@ import SchemaApprovalBar from "@/components/controlCenter/SchemaApprovalBar";
 import PrivateFilesPanel from "@/components/controlCenter/PrivateFilesPanel";
 import { blockRecoveryOwnsInput, inputOwner } from "@/components/controlCenter/blockRecovery";
 import { composerOffersRevise } from "@/components/controlCenter/reviseControl";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import ReportAgainBar from "@/components/controlCenter/ReportAgainBar";
 import RepeatConsultationBar from "@/components/controlCenter/RepeatConsultationBar";
 import ContinueAfterFixBar from "@/components/controlCenter/ContinueAfterFixBar";
@@ -407,6 +408,7 @@ export default function ControlCenterPage() {
             atVizual={board?.state?.current_stage === "vizual"}
             offersUprav={composerOffersRevise(board)}
             onUprav={handleUprav}
+            upravLabel={actionLabel(board, "uprav")}
             notStarted={!!board && !board.state}
           />
         )}

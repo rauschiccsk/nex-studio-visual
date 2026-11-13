@@ -27,8 +27,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SCREEN = ROOT / "frontend" / "src"
 GENERATED = SCREEN / "services" / "api" / "actionLabels.generated.json"
 
-#: A component that sends a build action draws its button — its name must come from the board.
+#: A component that sends a build action draws its button — its name must come from the board. Riadiace centrum
+#: draws them also through a callback (the conversation box's „Uprav“, DEV-297), so all of it is watched.
 _SENDS_A_BUILD_ACTION = re.compile(r"postPipelineActionApi|runTrigger\(")
+CONTROL_CENTRE = SCREEN / "components" / "controlCenter"
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _LINE_COMMENT = re.compile(r"(?m)(^|[\s;{}(),])//.*$")
 
@@ -54,7 +56,8 @@ def test_every_name_counts_the_variants_too():
 
 
 def _screen_files() -> list[Path]:
-    """The components that send a build action — the word „Upraviť“ on a project's settings is no build button."""
+    """Riadiace centrum and every component that sends a build action — „Upraviť“ on a project's settings is no build
+    button."""
     return [
         p
         for p in sorted(SCREEN.rglob("*.ts*"))
@@ -62,7 +65,7 @@ def _screen_files() -> list[Path]:
         and ".test." not in p.name
         and not p.name.endswith(".generated.ts")
         and p.name != "pipeline.ts"
-        and _SENDS_A_BUILD_ACTION.search(p.read_text(encoding="utf-8"))
+        and (CONTROL_CENTRE in p.parents or _SENDS_A_BUILD_ACTION.search(p.read_text(encoding="utf-8")))
     ]
 
 
@@ -110,7 +113,7 @@ def test_approve_is_named_by_the_gate_it_passes(db_session, state, stage, name):
     state.current_stage, state.status, state.block_reason = stage, "awaiting_manazer", None
     db_session.flush()
 
-    assert action_labels.action_labels(db_session, state)["schvalit"] == name
+    assert action_labels.action_labels(db_session, state, [])["schvalit"] == name
 
 
 @pytest.mark.parametrize("reason", sorted(action_labels.RETRY_REASONS))
@@ -118,14 +121,38 @@ def test_rework_on_an_error_or_a_failed_check_is_a_retry(db_session, state, reas
     state.status, state.block_reason = "blocked", reason
     db_session.flush()
 
-    assert action_labels.action_labels(db_session, state)["uprav"] == "Skús znova"
+    assert action_labels.action_labels(db_session, state, ["uprav"])["uprav"] == "Skús znova"
 
 
-def test_rework_of_a_phase_is_named_as_before(db_session, state):
-    state.status, state.block_reason = "awaiting_manazer", None
+def test_rework_beside_the_approval_is_the_approve_bars(db_session, state):
+    state.current_stage, state.status, state.block_reason = "programovanie", "awaiting_manazer", None
     db_session.flush()
 
-    assert action_labels.action_labels(db_session, state)["uprav"] == "Upraviť"
+    assert action_labels.action_labels(db_session, state, ["schvalit", "uprav"])["uprav"] == "Upraviť"
+
+
+def test_rework_without_the_approval_is_the_conversation_boxs(db_session, state):
+    """The box beside „Poslať“ carries it then (DEV-297) — and says „Uprav“, not the approve bar's „Upraviť“."""
+    state.current_stage, state.status, state.block_reason = "programovanie", "awaiting_manazer", None
+    db_session.flush()
+
+    assert action_labels.action_labels(db_session, state, ["ask", "uprav"])["uprav"] == "Uprav"
+
+
+@pytest.mark.parametrize(
+    ("stage", "status", "reason"),
+    [
+        ("priprava", "blocked", "agent_question"),
+        ("navrh", "blocked", "schema_approval"),
+        ("vizual", "awaiting_manazer", None),
+    ],
+)
+def test_rework_no_control_draws_has_no_name(db_session, state, stage, status, reason):
+    """A question's bar takes only the answer and the box folds away; the Vizuál's box is its change channel."""
+    state.current_stage, state.status, state.block_reason = stage, status, reason
+    db_session.flush()
+
+    assert "uprav" not in action_labels.action_labels(db_session, state, ["ask", "uprav", "schvalit"])
 
 
 @pytest.mark.parametrize(
@@ -142,7 +169,7 @@ def test_continue_after_a_release_is_one_word(db_session, state, released):
         setattr(state, key, value)
     db_session.flush()
 
-    assert action_labels.action_labels(db_session, state)["pokracovat"] == "Pokračovať"
+    assert action_labels.action_labels(db_session, state, [])["pokracovat"] == "Pokračovať"
 
 
 def test_continue_at_the_stop_after_the_plan_starts_the_coding(db_session, state, monkeypatch):
@@ -151,10 +178,10 @@ def test_continue_at_the_stop_after_the_plan_starts_the_coding(db_session, state
     state.current_stage, state.status, state.pause_reason = "programovanie", "paused", None
     db_session.flush()
     monkeypatch.setattr(orchestrator, "plan_awaits_start", lambda db, vid: vid == state.version_id)
-    assert action_labels.action_labels(db_session, state)["pokracovat"] == "Spustiť programovanie"
+    assert action_labels.action_labels(db_session, state, [])["pokracovat"] == "Spustiť programovanie"
 
     monkeypatch.setattr(orchestrator, "plan_awaits_start", lambda db, vid: False)
-    assert action_labels.action_labels(db_session, state)["pokracovat"] == "Pokračovať v stavbe"
+    assert action_labels.action_labels(db_session, state, [])["pokracovat"] == "Pokračovať v stavbe"
 
 
 @pytest.mark.parametrize(
@@ -169,7 +196,7 @@ def test_verify_without_a_fix_says_whether_it_reruns_a_stalled_verification(db_s
     state.current_stage, state.status, state.block_reason = stage, "blocked", reason
     db_session.flush()
 
-    assert action_labels.action_labels(db_session, state)["overit_bez_opravy"] == name
+    assert action_labels.action_labels(db_session, state, [])["overit_bez_opravy"] == name
 
 
 def test_the_board_hands_out_every_buttons_name_for_its_state(db_session, state):

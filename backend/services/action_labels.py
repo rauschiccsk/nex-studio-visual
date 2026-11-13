@@ -57,9 +57,13 @@ APPROVE_BY_STAGE: dict[str, str] = {
     "programovanie": "Prejsť na overenie",
     "verifikacia": "Schváliť na Hotovo",
 }
-#: An error or a negative check stands on ``uprav`` — offered as a retry, not as a rework of an approved phase.
+#: ``uprav`` is drawn by whichever control carries it, each with its own word: the bar of an error or a negative check
+#: offers a retry, the approve bar „Upraviť“ beside the approval, the conversation box „Uprav“ beside „Poslať“.
 RETRY_LABEL = "Skús znova"
 RETRY_REASONS: frozenset[str] = frozenset({"agent_error", "system_error", "parse_exhaustion", "check_failed"})
+COMPOSER_REVISE_LABEL = "Uprav"
+#: A question of the agent's: its bar takes the answer only and the conversation box folds away — no ``uprav``.
+ANSWER_ONLY_REASONS: frozenset[str] = frozenset({"agent_question", "schema_approval"})
 #: ``pokracovat`` after our technical team's fix, after a restart or with a fix ready — its own bar, one word.
 CONTINUE_LABEL = "Pokračovať"
 #: ``pokracovat`` at the stop after the task plan STARTS the coding (DEV-214).
@@ -76,15 +80,30 @@ def _released(state: PipelineState) -> bool:
     )
 
 
-def action_labels(db: Session, state: Optional[PipelineState]) -> dict[str, str]:
-    """The name of every build button in this state — also of one not offered right now (the CI gate draws the
-    step it holds back, greyed)."""
+def _revise_label(state: PipelineState, actions: list[str]) -> Optional[str]:
+    """The word ``uprav`` carries on screen in this state — ``None`` where no control draws it (mirrors the screen's
+    ``composerOffersRevise`` / ``approveBarCarriesRevise`` and the block bar's ``blockRecoveryOwnsInput``)."""
+    if state.status == "blocked" and state.block_reason in RETRY_REASONS:
+        return RETRY_LABEL
+    if state.status == "blocked" and state.block_reason in ANSWER_ONLY_REASONS:
+        return None
+    if state.current_stage == "vizual":
+        return None  # the conversation box is the Vizuál's change channel; neither bar draws „uprav“ there
+    return BASE["uprav"] if "schvalit" in actions else COMPOSER_REVISE_LABEL
+
+
+def action_labels(db: Session, state: Optional[PipelineState], actions: list[str]) -> dict[str, str]:
+    """The name of every build button the screen can draw in this state — also of one not offered right now (the CI
+    gate draws the step it holds back, greyed). ``actions`` are the board's offered actions, final."""
     labels = dict(BASE)
     if state is None:
         return labels
     labels["schvalit"] = APPROVE_BY_STAGE.get(state.current_stage, BASE["schvalit"])
-    if state.status == "blocked" and state.block_reason in RETRY_REASONS:
-        labels["uprav"] = RETRY_LABEL
+    revise = _revise_label(state, actions)
+    if revise is None:
+        del labels["uprav"]
+    else:
+        labels["uprav"] = revise
     if _released(state):
         labels["pokracovat"] = CONTINUE_LABEL
     elif orchestrator.plan_awaits_start(db, state.version_id):

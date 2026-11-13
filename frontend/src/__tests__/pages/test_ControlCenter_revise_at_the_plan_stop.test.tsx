@@ -66,6 +66,8 @@ const PLAN_STOP = {
     next_action: "Manažér: pozri plán úloh a spusti programovanie (Spustiť programovanie), alebo plán vráť na úpravu (Uprav).",
   },
   available_actions: ["ask", "pokracovat", "uprav", "zopakovat_konzultaciu"],
+  // DEV-373: the names the route sends at the plan stop — the box carries „Uprav“.
+  action_labels: { uprav: "Uprav", pokracovat: "Spustiť programovanie" },
   recent_messages: [],
 } as unknown as PipelineBoard;
 const SCOPE = {
@@ -134,6 +136,7 @@ describe("Riadiace centrum at the plan stop — „Uprav“ (DEV-297)", () => {
       ...PLAN_STOP,
       state: { ...PLAN_STOP.state, current_stage: "navrh" },
       available_actions: ["ask", "schvalit", "uprav", "zopakovat_konzultaciu"],
+      action_labels: { uprav: "Upraviť" }, // DEV-373: beside the approval the approve bar's word
     } as unknown as PipelineBoard;
     h.ctx.selectedVersion = { versionId: VERSION, versionNumber: "1.5.0" };
     render(
