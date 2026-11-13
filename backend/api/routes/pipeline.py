@@ -368,6 +368,13 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
         vizual_url=vizual_url,
+        # DEV-371: only while the build stands blocked on that check — the screen's „Skús znova“ reads it.
+        check_failed_on_download=(
+            state is not None
+            and state.status == "blocked"
+            and state.block_reason == "check_failed"
+            and orchestrator.check_failed_on_download(db, version_id)
+        ),
         vizual_checklists=orchestrator.vizual_checklists(db, version_id),
         database_schema=orchestrator.database_schema_status(db, version_id),
         dedo_proposal=(

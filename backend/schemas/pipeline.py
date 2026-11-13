@@ -320,6 +320,9 @@ class PipelineBoardRead(BaseModel):
     #: iframe so the Manažér can walk the running app while the AI edits it. Additive, no migration; ``None``
     #: whenever the version never entered the ``vizual`` stage (or no URL was recorded yet).
     vizual_url: Optional[str] = None
+    #: DEV-371: the build stands blocked because the start check after a fix failed twice on a download (the
+    #: network, not the code) — the screen's „Skús znova“ then sends a plain retry, not „find the cause and fix it“.
+    check_failed_on_download: bool = False
     #: DEV-36: every list of what to check in the Vizuál, oldest first — read from the database, so the count at
     #: „Schváliť vizuál" covers them all even when the first one fell out of ``recent_messages``.
     vizual_checklists: list[VizualChecklistRead] = []

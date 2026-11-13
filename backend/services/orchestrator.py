@@ -9896,6 +9896,51 @@ def _boot_pass_detail(stack: _SmokeStack, states: dict[str, tuple[str, int]]) ->
     return " ".join(parts)
 
 
+#: DEV-371 — the lines of a failed build that carry its cause (pip, npm, docker), not the noise around them.
+_BUILD_ERROR_LINE = re.compile(
+    r"\berror\b|\bERR!|failed to solve|could not|no matching distribution|timed out|temporary failure|"
+    r"connection|unable to|not found",
+    re.I,
+)
+#: DEV-371 — a download that failed for the network, not for the code: what pip, npm and docker say then.
+_DOWNLOAD_FAILURE = re.compile(
+    r"temporary failure in name resolution|failed to establish a new connection|connection (?:reset|refused|aborted)|"
+    r"connection broken|read timed out|connecttimeout|max retries exceeded|could not fetch url|tls handshake timeout|"
+    r"i/o timeout|net/http: request canceled|\bECONNRESET\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|\bENOTFOUND\b|"
+    r"toomanyrequests|50[234] (?:bad gateway|service unavailable|gateway time-?out)|unexpected eof",
+    re.I,
+)
+#: How many cause lines and how much of the end a failed build keeps — enough to read, short enough for a screen.
+BUILD_ERROR_LINES_MAX = 15
+BUILD_ERROR_LINE_CHARS = 300
+BUILD_TAIL_CHARS = 400
+
+
+def _build_failure_excerpt(output: str) -> str:
+    """DEV-371: what a failed ``docker compose up`` said — the lines that carry the cause, then the end.
+
+    Until 13.11.2026 only the last 400 characters were kept; NEX Legal Watch's start check ended with „target
+    migrate: failed to solve … exit code: 1“ and why pip failed — the line above — was cut off."""
+    text = (output or "").strip()
+    tail = text[-BUILD_TAIL_CHARS:]
+    head = text[:-BUILD_TAIL_CHARS] if len(text) > BUILD_TAIL_CHARS else ""
+    causes: list[str] = []
+    for raw in head.splitlines():
+        line = raw.strip()[:BUILD_ERROR_LINE_CHARS]
+        if line and _BUILD_ERROR_LINE.search(line) and line not in causes:
+            causes.append(line)
+    causes = causes[-BUILD_ERROR_LINES_MAX:]
+    return "\n".join([*causes, "…", tail]) if causes else tail
+
+
+def is_download_failure(detail: str) -> bool:
+    """DEV-371: the start check failed while building because a download failed (network, DNS, a busy registry) —
+    nothing the Staviteľ could fix in the code. Only a build failure (``up exit``) counts; a container that died on
+    its own start is the app's business."""
+    text = detail or ""
+    return text.startswith("up exit ") and bool(_DOWNLOAD_FAILURE.search(text))
+
+
 async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
     """Did the app come up and answer? ONE instrument, two callers (ICCINT-42).
 
@@ -9932,7 +9977,7 @@ async def _boot_leg(stack: _SmokeStack) -> tuple[bool, str]:
         return False, await _smoke_failure_detail(stack.base, down, states)
     if not stack.up_ok and not states:
         # Could not look at all — keep the compose output rather than invent a verdict.
-        return False, f"up exit {stack.up_rc}: {stack.up_detail.strip()[-400:]}"
+        return False, f"up exit {stack.up_rc}: {_build_failure_excerpt(stack.up_detail)}"
     ok, detail = await _run_app_starts_smoke(stack, states)
     if not ok:
         return ok, detail
@@ -10455,6 +10500,9 @@ async def run_dispatch(
     # early-returns here. ``directive`` (an uprav/answer/pokracovat re-dispatch) seeds attempt 1 of the resumed
     # task (two-way comms — the Coordinator relay is retired in v2).
     if stage == "programovanie":
+        notice = _download_failure_notice(db, state.version_id) if directive else None
+        if notice:
+            directive = f"{notice}\n\n{directive}"
         return await _run_build_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
 
     # Verifikácia round (CR-V2-014): the independent Auditor's END verification — release-acceptance against
@@ -13397,6 +13445,58 @@ def _reopen_verifikacia_fix_round(db: Session, version_id: uuid.UUID) -> int:
     return len(tasks)
 
 
+#: DEV-371 — what the Manažér reads when the start check after a fix failed twice on a download.
+DOWNLOAD_FAILED_CONTENT = (
+    "Kontrola po oprave neprešla — pri stavbe aplikácie sa nepodarilo stiahnuť balík, ani na druhý pokus. Nie je to "
+    "chyba v kóde aplikácie, ale výpadok sťahovania. Stlač „Skús znova“ — nič netreba písať; Staviteľ kód nezmení "
+    "a skúšku spustenia zopakujem. Výpis je nižšie v technickom detaile."
+)
+DOWNLOAD_FAILED_NEXT_ACTION = (
+    "Kontrola po oprave neprešla — nepodarilo sa stiahnuť balík (výpadok sťahovania, nie chyba kódu). "
+    "Stlač „Skús znova“, nič netreba písať."
+)
+#: DEV-371 — what the next round tells the Staviteľ after that: there is no bug to hunt.
+DOWNLOAD_FAILED_NOTICE = (
+    "SKÚŠKA SPUSTENIA: posledná skúška po oprave zlyhala pri sťahovaní balíkov (výpadok siete), nie pre chybu "
+    "v kóde. Kvôli nej kód nemeň a chybu nehľadaj — dokonči rozrobenú úlohu a to, čo ti nižšie napísal Manažér; "
+    "kokpit skúšku spustenia zopakuje."
+)
+
+
+def _download_failure_notice(db: Session, version_id: uuid.UUID) -> Optional[str]:
+    """DEV-371: the notice for the round after a start check that failed on a download — once, until the Staviteľ
+    answered after it."""
+    failed = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.payload["download_failed"].astext == "true",
+        )
+    ).scalar()
+    if not failed:
+        return None
+    answered = db.execute(
+        select(func.max(PipelineMessage.seq)).where(
+            PipelineMessage.version_id == version_id, PipelineMessage.author == "ai_agent"
+        )
+    ).scalar()
+    return DOWNLOAD_FAILED_NOTICE if (answered or 0) < failed else None
+
+
+def check_failed_on_download(db: Session, version_id: uuid.UUID) -> bool:
+    """DEV-371: did the LATEST start check after a fix fail on a download? The board hands it to the screen, so an
+    empty „Skús znova“ sends a plain retry instead of „find the cause and fix it“."""
+    payload = db.execute(
+        select(PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version_id,
+            PipelineMessage.payload["fix_boot_recheck"].astext == "true",
+        )
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar()
+    return bool(payload) and payload.get("download_failed") is True
+
+
 def _recheck_headline(detail: str) -> str:
     """One plain clause naming what the re-check actually measured (ICCINT-43).
 
@@ -13436,6 +13536,9 @@ async def _settle_fix_boot_recheck(
     measurement, not a relayed claim."""
     slug = _project_slug_for_version(db, state.version_id)
     ok, detail = await _app_starts_after_fix(slug)
+    if not ok and is_download_failure(detail):
+        # DEV-371: a download that failed is mostly momentary — measure once more before anyone is asked.
+        ok, detail = await _app_starts_after_fix(slug)
     if ok:
         msg = _record_message(
             db,
@@ -13457,6 +13560,8 @@ async def _settle_fix_boot_recheck(
         db.flush()
         return False
     reopened = _reopen_verifikacia_fix_round(db, state.version_id)
+    # DEV-371: a download that failed twice is no code to fix — said plainly, the retry without writing.
+    download = is_download_failure(detail)
     # ICCINT-43: say WHAT was measured, never a category. The first version of this sentence read "aplikácia sa
     # stále nespustí" whatever came back — and the run it met had a perfectly healthy app whose test
     # container had failed. A sentence that is right by luck is not right.
@@ -13467,7 +13572,9 @@ async def _settle_fix_boot_recheck(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=(
+        content=DOWNLOAD_FAILED_CONTENT
+        if download
+        else (
             f"Kontrola po oprave neprešla — {_recheck_headline(detail)}, takže oprava hotová nie je. "
             "Vrátil som ju medzi otvorené úlohy, aby plán nehlásil hotovo. "
             "Dôvod je nižšie v technickom detaile — napíš agentovi, čo s tým (Uprav), a spustím stavbu znova."
@@ -13478,6 +13585,7 @@ async def _settle_fix_boot_recheck(
             "smoke": {"pass": False, "detail": detail},
             "technical_detail": detail,
             "reopened_tasks": reopened,
+            "download_failed": download,
         },
     )
     if on_message is not None:
@@ -13489,8 +13597,12 @@ async def _settle_fix_boot_recheck(
     state.status = "blocked"
     state.block_reason = "check_failed"
     state.next_action = (
-        f"Kontrola po oprave neprešla — {_recheck_headline(detail)}. Stavba hotová nie je. "
-        "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
+        DOWNLOAD_FAILED_NEXT_ACTION
+        if download
+        else (
+            f"Kontrola po oprave neprešla — {_recheck_headline(detail)}. Stavba hotová nie je. "
+            "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
+        )
     )
     db.flush()
     return True

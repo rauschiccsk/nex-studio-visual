@@ -108,7 +108,10 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         : {
             action: "uprav" as const,
             payload: {
-              comment: trimmed || (isCheck ? DEFAULT_CHECK_FIX : DEFAULT_RETRY),
+              // DEV-371: a check that failed on a download has no cause in the code to look for.
+              comment:
+                trimmed ||
+                (isCheck && !board?.check_failed_on_download ? DEFAULT_CHECK_FIX : DEFAULT_RETRY),
             },
           };
       const nextBoard = await postPipelineActionApi(versionId, req);

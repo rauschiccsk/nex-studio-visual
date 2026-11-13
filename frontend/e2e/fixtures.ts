@@ -256,6 +256,7 @@ const PIPELINE: S["PipelineBoardRead"] = {
   available_actions: ["decide", "pozastavit"],
   all_tasks_done: false,
   build_open_findings: 0,
+  check_failed_on_download: false,
   spec_approved: false,
   verified: false,
   verified_provenance: "",

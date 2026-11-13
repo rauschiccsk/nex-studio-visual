@@ -23,6 +23,7 @@ vi.mock("@/services/api/pipeline", async (orig) => ({
 }));
 
 import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
+import { DEFAULT_RETRY } from "@/components/controlCenter/blockRecovery";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
 function board(blockReason: string): PipelineBoard {
@@ -169,6 +170,37 @@ describe("BlockRecoveryBar", () => {
     expect(req.action).toBe("uprav");
     // "Skús to prosím znova." would send the agent back to redo the identical build.
     expect(req.payload.comment).toMatch(/zisti príčinu z výpisu/);
+  });
+
+  // DEV-371: 13.11.2026 the start check of NEX Legal Watch failed because a package could not be downloaded.
+  // „Find the cause and fix it" would send the Staviteľ hunting a bug that is not there — the engine says the
+  // download failed, so an empty steer is a plain retry.
+  it("an empty steer on a check that failed on a download sends a plain retry, not a bug hunt", async () => {
+    const b = board("check_failed");
+    b.check_failed_on_download = true;
+    render(<BlockRecoveryBar board={b} versionId="v1" onBoard={vi.fn()} />, {
+      wrapper: MemoryRouter,
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Skús znova/ }));
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalled());
+    const req = postPipelineActionApi.mock.calls[0]![1];
+    expect(req).toEqual({ action: "uprav", payload: { comment: DEFAULT_RETRY } });
+  });
+
+  it("on a download failure the Manažér's own steer is still sent as written", async () => {
+    const b = board("check_failed");
+    b.check_failed_on_download = true;
+    render(<BlockRecoveryBar board={b} versionId="v1" onBoard={vi.fn()} />, {
+      wrapper: MemoryRouter,
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Usmernenie k oprave/), {
+      target: { value: "Pridaj aj zrkadlo PyPI." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Skús znova/ }));
+
+    await waitFor(() => expect(postPipelineActionApi).toHaveBeenCalled());
+    expect(postPipelineActionApi.mock.calls[0]![1].payload.comment).toBe("Pridaj aj zrkadlo PyPI.");
   });
 });
 

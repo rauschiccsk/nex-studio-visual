@@ -6318,6 +6318,11 @@ export interface components {
              * @default 0
              */
             build_open_findings: number;
+            /**
+             * Check Failed On Download
+             * @default false
+             */
+            check_failed_on_download: boolean;
             ci_gate?: components["schemas"]["BoardCiGate"] | null;
             consultation_direction?: components["schemas"]["ConsultationDirectionRead"] | null;
             current_task?: components["schemas"]["BoardTask"] | null;
