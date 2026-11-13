@@ -139,6 +139,7 @@ class _FakeRunner:
         admin_password=None,
         deploy_host=None,
         private_network=False,
+        customer_name=None,
     ):
         self.calls.append(
             {
@@ -151,6 +152,8 @@ class _FakeRunner:
                 "deploy_host": deploy_host,
                 # DEV-42: whether the project is reachable only from the private network — same reason.
                 "private_network": private_network,
+                # DEV-377: whom the installation serves — the renderer tells its backend.
+                "customer_name": customer_name,
             }
         )
         return self._ok, self._detail, (self._url if self._ok else None)
@@ -657,6 +660,7 @@ def _fake_default_runner(monkeypatch):
         admin_password=None,
         deploy_host=None,
         private_network=False,
+        customer_name=None,
     ):
         calls.append(
             {

@@ -63,6 +63,7 @@ def fake_deploy_runner(monkeypatch):
         admin_password=None,
         deploy_host=None,
         private_network=False,
+        customer_name=None,
     ):
         calls.append(
             {
@@ -100,6 +101,7 @@ def prod_failing_deploy_runner(monkeypatch):
         admin_password=None,
         deploy_host=None,
         private_network=False,
+        customer_name=None,
     ):
         calls.append(
             {

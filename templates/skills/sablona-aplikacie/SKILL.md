@@ -91,7 +91,12 @@ Kokpit ju spustí pred Overením a každý problém povie jednou vetou — oprav
    `sessions`, `system-settings`, `user-layout`, `users` — žiadny vlastný dekorátor cesty ani `prefix` v `APIRouter`
    či `include_router` nezačína pod `/api/v1` takým úsekom.
 
+## Komu inštalácia slúži
+Rám (nex-app-kit od v0.13.0) sám ukáže meno zákazníka a prostredie, ktoré kokpit zapíše pri nasadení
+(`NEX_CUSTOMER_NAME`, `NEX_ENVIRONMENT`): názov okna, ľavý panel, kartu prihlásenia a pás UAT. Do aplikácie meno
+zákazníka ani UAT nepíšem a nič z toho nedeklarujem v `docker-compose.yml` ani `.env.example`.
+
 ## Čo nerobím
 Vlastný `Sidebar`/`AppShell`, prihlásenie, stránku Aktualizácií či Nastavení, cesty `/auth/*`, `/launch`, `/session`,
-`/users`, `/sessions`, tabuľku používateľov, kópiu súborov nex-app-kit ani úpravu v `node_modules`. Chýba niečo v ráme?
+`/installation`, `/users`, `/sessions`, tabuľku používateľov, kópiu súborov nex-app-kit ani úpravu v `node_modules`. Chýba niečo v ráme?
 Napíš to Manažérovi (`kind=question`) — nová schopnosť rámu je nová verzia nex-app-kit, nie úprava v projekte.

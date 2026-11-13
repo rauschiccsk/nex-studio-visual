@@ -946,6 +946,7 @@ async def _default_deploy_runner(
     deploy_host: Optional[str] = None,
     private_network: bool = False,
     customer_values: Optional[dict[str, str]] = None,
+    customer_name: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -991,6 +992,7 @@ async def _default_deploy_runner(
             full_project_slug=project_slug,
             admin_password=admin_password,
             customer_values=customer_values,
+            customer_name=customer_name,  # DEV-377: the installation shows whom it serves
             # ICCINT-151 — predpis a nastavenia sa zapíšu aj na stroj, kde inštalácia beží. Pri
             # testovacej inštalácii nikdy: tá býva vždy tu.
             deploy_host=deploy_host if is_prod else None,
@@ -1392,6 +1394,7 @@ async def deploy(
             admin_password=admin_password,
             deploy_host=deploy_host,
             private_network=bool(project.private_network),
+            customer_name=customer.name,  # DEV-377
             # Only when the app declares customer settings: every runner written before DEV-72 (and its fakes) keeps
             # the interface it has, and an app without markers never needed the values.
             **({"customer_values": customer_values} if contract.customer_keys else {}),

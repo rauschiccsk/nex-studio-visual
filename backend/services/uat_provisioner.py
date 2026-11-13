@@ -3543,6 +3543,38 @@ def _yaml_block(data: Any) -> str:
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False, width=4096)
 
 
+#: DEV-377 — what the cockpit tells an installation's backend about itself: the customer it serves and whether it is the
+#: test or the live one. The app template shows it (the left panel, the window's title, the band of a UAT, the name of
+#: the installed app), so nobody has to guess which of many alike windows is whose.
+INSTALLATION_CUSTOMER_KEY = "NEX_CUSTOMER_NAME"
+INSTALLATION_ENVIRONMENT_KEY = "NEX_ENVIRONMENT"
+
+
+def with_installation_identity(
+    compose: dict[str, Any], backend: Optional[str], *, customer_name: Optional[str], environment: str
+) -> dict[str, Any]:
+    """The compose with the backend service told whom it serves (``customer_name``) and where (``environment``).
+
+    Set by the cockpit on every render — a renamed customer is renamed in its installation on the next deploy. Written
+    into the service's own ``environment`` (a mapping or a list, as the project has it), so no app has to declare it;
+    without a backend service nothing is told. ``customer_name`` is left out when the deploy has no customer (the
+    project-level UAT)."""
+    services = compose.get("services") or {}
+    if not backend or backend not in services:
+        return compose
+    told = {INSTALLATION_ENVIRONMENT_KEY: environment}
+    if customer_name and customer_name.strip():
+        told[INSTALLATION_CUSTOMER_KEY] = " ".join(customer_name.split())
+    service = dict(services[backend])
+    current = service.get("environment")
+    if isinstance(current, list):
+        kept = [item for item in current if str(item).split("=", 1)[0] not in told]
+        service["environment"] = kept + [f"{key}={value}" for key, value in told.items()]
+    else:
+        service["environment"] = {**(current or {}), **told}
+    return {**compose, "services": {**services, backend: service}}
+
+
 def render_uat_compose(compose: dict[str, Any], routing: Optional[Routing] = None) -> str:
     """Render the UAT compose dict to YAML text via ``templates/uat/docker-compose.yml.j2``.
 
@@ -3749,6 +3781,7 @@ def provision_uat(
     deploy_host: Optional[str] = None,
     private: bool = False,
     customer_values: Optional[dict[str, str]] = None,
+    customer_name: Optional[str] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -4202,6 +4235,10 @@ def provision_uat(
                 f"Kokpit naviazal {', '.join(naviazane)} na ostatné služby tejto inštalácie — mená týchto služieb "
                 "z nich už nevedú do iných inštalácií v spoločnej sieti."
             )
+        # DEV-377: the installation says whom it serves and where — on every deploy, also a redeploy.
+        povysene = with_installation_identity(
+            povysene, roles["backend"], customer_name=customer_name, environment=environment
+        )
         compose_text = render_uat_compose(povysene, routing)
         pred_nasadenim = _parse_env_file(env_path)
         mala = set(pred_nasadenim)
@@ -4247,6 +4284,9 @@ def provision_uat(
         env_content = "\n".join(f"{k}={v}" for k, v in env_riadky.items()) + "\n"
         instalacia = povysene
     else:
+        compose = with_installation_identity(
+            compose, roles["backend"], customer_name=customer_name, environment=environment
+        )
         compose_text = render_uat_compose(compose, routing)
         instalacia = compose
 
