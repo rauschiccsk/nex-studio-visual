@@ -106,6 +106,43 @@ def test_an_installation_set_aside_is_not_rehearsed(world):
     assert [t.label for t in targets] == [R.NEW_INSTALLATION, "inštalácia zákazníka icc"]
 
 
+def _hand_written(world, customer: str = "andros") -> Path:
+    """An installation written by hand beside the cockpit's — NEX Manager's „andros“ UAT of 07.09.2026: no header."""
+    folder = world["uat"] / customer / "nex-websites"
+    folder.mkdir(parents=True)
+    (folder / "docker-compose.yml").write_text("services:\n  backend:\n    image: x\n", encoding="utf-8")
+    return folder
+
+
+def test_a_hand_written_installation_is_not_rehearsed_the_deploy_never_writes_it(world):
+    """DEV-380: 13.11.2026 the Verifikácia of NEX Manager 1.6.0 failed twice on the rehearsal of the hand-written
+    „andros“ UAT — the deploy refuses to write such an installation, so the rehearsal tried what no deploy does."""
+    _hand_written(world)
+
+    targets = R.render_targets(
+        "nex-websites", "1.1.0", projects_root=world["projects"], uat_root=world["uat"], work=world["work"]
+    )
+
+    assert [t.label for t in targets] == [R.NEW_INSTALLATION, "inštalácia zákazníka icc"]
+
+
+async def test_a_rehearsal_says_which_hand_written_installation_it_left_out(world, monkeypatch):
+    _hand_written(world)
+
+    async def run_one(target, name, project_path, version):
+        return True, ""
+
+    monkeypatch.setattr(R, "_run_one", run_one)
+
+    ok, sentence = await real_rehearse("nex-websites", "1.1.0", projects_root=world["projects"], uat_root=world["uat"])
+
+    assert ok and sentence.startswith("Skúška nasadenia prešla (nová inštalácia, inštalácia zákazníka icc)")
+    assert (
+        "Inštaláciu zákazníka andros kokpit nespravuje (je ručne písaná) — nasadenie do nej nezapíše, "
+        "preto sa neskúšala." in sentence
+    )
+
+
 # ── the rehearsal's own identity ───────────────────────────────────────────────────────────────────────────────────
 
 INSTALLATION = {

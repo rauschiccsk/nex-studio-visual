@@ -56,15 +56,43 @@ class Rendered:
     env: Path
 
 
-def _existing_installations(uat_root: Path, project_slug: str) -> list[Path]:
-    """Every UAT installation of the project — its folder ``<uat_root>/<customer>/<project>`` — set aside ones not."""
-    found = []
+def _installations(uat_root: Path, project_slug: str) -> tuple[list[Path], list[Path]]:
+    """The project's UAT installations — ``<uat_root>/<customer>/<project>``, set aside ones not — as two lists: the
+    ones the deploy writes, and the hand-written ones it never writes (DEV-380).
+
+    The deploy refuses to overwrite an installation without the cockpit's header and offers „Prevziať inštaláciu“
+    instead (:func:`uat_provisioner.is_provisioner_generated` decides it, here as there). 13.11.2026 the Verifikácia
+    of NEX Manager 1.6.0 failed twice rehearsing the hand-written „andros“ UAT of 07.09.2026 — a deploy no one could
+    run."""
+    written, hand_written = [], []
     for compose in sorted(uat_root.glob(f"*/{project_slug}/docker-compose.yml")):
         customer = compose.parent.parent.name
         if customer.startswith((".", "_")) or customer == REHEARSAL_CUSTOMER:
             continue
-        found.append(compose)
-    return found
+        (written if P.is_provisioner_generated(compose) else hand_written).append(compose)
+    return written, hand_written
+
+
+def _existing_installations(uat_root: Path, project_slug: str) -> list[Path]:
+    """Every UAT installation of the project the deploy would write."""
+    return _installations(uat_root, project_slug)[0]
+
+
+def _left_out(uat_root: Path, project_slug: str) -> str:
+    """The sentence of the hand-written installations the rehearsal did not try — empty when there are none."""
+    customers = [compose.parent.parent.name for compose in _installations(uat_root, project_slug)[1]]
+    if not customers:
+        return ""
+    whose = ", ".join(customers)
+    if len(customers) == 1:
+        return (
+            f" Inštaláciu zákazníka {whose} kokpit nespravuje (je ručne písaná) — nasadenie do nej nezapíše, "
+            "preto sa neskúšala."
+        )
+    return (
+        f" Inštalácie zákazníkov {whose} kokpit nespravuje (sú ručne písané) — nasadenie do nich nezapíše, "
+        "preto sa neskúšali."
+    )
 
 
 def _customer_test_values(project_path: Path) -> dict[str, str]:
@@ -273,6 +301,7 @@ async def rehearse(
         return True, (
             f"Skúška nasadenia prešla ({', '.join(done)}): postavené a spustené tak, ako ich nasadí kokpit. Neoverené "
             "sú dáta zákazníka, stroj MAGER a prepojenie s NEX Managerom zákazníka."
+            + _left_out(uat_root or P.UAT_ROOT, project_slug)
         )
     finally:
         shutil.rmtree(work, ignore_errors=True)
