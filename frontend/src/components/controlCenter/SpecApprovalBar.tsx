@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -81,7 +82,7 @@ export default function SpecApprovalBar({ board, versionId, onBoard }: Props) {
           disabled={submitting}
           className="shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Schvaľujem…" : "Schváliť Špecifikáciu"}
+          {submitting ? "Schvaľujem…" : actionLabel(board, "approve_spec")}
         </button>
       </div>
 

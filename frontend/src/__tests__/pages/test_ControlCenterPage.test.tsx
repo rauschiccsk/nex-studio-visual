@@ -117,6 +117,7 @@ describe("ControlCenterPage — the step to Verifikácia waits for CI (DEV-261)"
       state: { current_stage: "programovanie", status: "awaiting_manazer", mode: null },
       recent_messages: [],
       available_actions: ["ask", "uprav"],
+      action_labels: { schvalit: "Prejsť na overenie" }, // DEV-373: named by the cockpit
       ci_gate: { state: "pending", message: "Programovanie je hotové — čaká sa na kontroly na GitHube." },
     } as unknown as PipelineBoard;
 

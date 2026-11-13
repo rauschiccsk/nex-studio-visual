@@ -19,11 +19,19 @@ vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 const PENDING = "Programovanie je hotové — čaká sa na kontroly na GitHube; „Prejsť na overenie“ sa ponúkne, keď dobehnú.";
 const RED = "Kontroly na GitHube po Programovaní zlyhali: CI #65 zlyhal krok test. Vráť prácu agentovi na opravu.";
 
+// DEV-373: the board names the approve button for its gate, as the cockpit sends it (backend action_labels).
+const APPROVE_NAME: Record<string, string> = {
+  vizual: "Schváliť vizuál",
+  programovanie: "Prejsť na overenie",
+  verifikacia: "Schváliť na Hotovo",
+};
+
 function boardWith(gate: CiGate | null, actions: string[] = ["ask", "uprav"], stage = "programovanie"): PipelineBoard {
   return {
     state: { current_stage: stage },
     recent_messages: [],
     available_actions: actions,
+    action_labels: APPROVE_NAME[stage] ? { schvalit: APPROVE_NAME[stage] } : undefined,
     ci_gate: gate,
   } as unknown as PipelineBoard;
 }

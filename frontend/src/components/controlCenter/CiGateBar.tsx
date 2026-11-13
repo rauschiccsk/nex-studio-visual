@@ -16,7 +16,7 @@ import { Hourglass, RotateCw, XCircle } from "lucide-react";
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-import { approveLabel } from "./approveLabel";
+import { actionLabel } from "./actionLabel";
 
 interface Props {
   board: PipelineBoard | null;
@@ -76,7 +76,7 @@ export default function CiGateBar({ board, versionId, onBoard }: Props) {
                 className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-                {submitting ? "Vraciam…" : "Vrátiť Staviteľovi na opravu"}
+                {submitting ? "Vraciam…" : actionLabel(board, "opravit_podla_ci")}
               </button>
             )
           ) : (
@@ -86,7 +86,7 @@ export default function CiGateBar({ board, versionId, onBoard }: Props) {
               title={gate.message}
               className="flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white opacity-50"
             >
-              {approveLabel(board?.state?.current_stage)}
+              {actionLabel(board, "schvalit")}
             </button>
           )}
         </div>

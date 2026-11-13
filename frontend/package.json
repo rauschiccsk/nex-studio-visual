@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "type-check": "tsc -b --noEmit",
-    "codegen:dump": "cd .. && poetry run python -m backend.scripts.dump_openapi frontend/openapi.json",
+    "codegen:dump": "cd .. && poetry run python -m backend.scripts.dump_openapi frontend/openapi.json && poetry run python -m backend.scripts.dump_action_labels frontend/src/services/api/actionLabels.generated.json",
     "codegen": "npm run codegen:dump && openapi-typescript openapi.json -o src/services/api/pipeline.generated.ts"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { listProjectsApi } from "@/services/api/projects";
 import { getVersion, writeZadanie, readZadanie } from "@/services/api/versions";
 import { postPipelineActionApi } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import { RESTORED_DRAFT_LABEL, draftKey, useDraft } from "@/hooks/useDraft";
@@ -336,7 +337,7 @@ export default function VersionDetailPage() {
                   }
                   className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50 transition-colors"
                 >
-                  {starting ? "Spúšťam…" : "Spustiť tvorbu špecifikácie"}
+                  {starting ? "Spúšťam…" : actionLabel(null, "start")}
                 </button>
               </div>
             </div>

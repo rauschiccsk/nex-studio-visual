@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Undo2 } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -31,10 +32,17 @@ const CONFIRM_BUTTON =
 export default function ReturnToPripravaBar({ board, versionId, onBoard }: Props) {
   // Honest-by-construction gate. The question lives in the inner part, so it goes with the offer and the version.
   if (!board?.available_actions?.includes("vratit_do_pripravy")) return null;
-  return <ReturnToPriprava key={versionId} versionId={versionId} onBoard={onBoard} />;
+  return (
+    <ReturnToPriprava
+      key={versionId}
+      versionId={versionId}
+      onBoard={onBoard}
+      label={actionLabel(board, "vratit_do_pripravy")}
+    />
+  );
 }
 
-function ReturnToPriprava({ versionId, onBoard }: Omit<Props, "board">) {
+function ReturnToPriprava({ versionId, onBoard, label }: Omit<Props, "board"> & { label: string }) {
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
@@ -75,7 +83,7 @@ function ReturnToPriprava({ versionId, onBoard }: Omit<Props, "board">) {
           </p>
           <button type="button" onClick={() => setConfirming(true)} className={BUTTON}>
             <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Vrátiť do Prípravy
+            {label}
           </button>
         </div>
       )}

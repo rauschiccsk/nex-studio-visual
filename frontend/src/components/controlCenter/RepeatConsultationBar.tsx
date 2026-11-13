@@ -17,6 +17,7 @@ import { useState } from "react";
 import { Layers, RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -68,7 +69,7 @@ export default function RepeatConsultationBar({ board, versionId, onBoard }: Pro
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCw className={`h-3.5 w-3.5 ${submitting ? "animate-spin" : ""}`} aria-hidden="true" />
-            {submitting ? "Pripravujem…" : "Skúsiť konzultáciu znova"}
+            {submitting ? "Pripravujem…" : actionLabel(board, "zopakovat_konzultaciu")}
           </button>
         </div>
         <ErrorNote error={error} />

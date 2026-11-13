@@ -51,6 +51,7 @@ function board({
     state: { current_stage: stage, status: "awaiting_manazer", resume_after_framework_fix: released },
     recent_messages: messages,
     available_actions: actions,
+    action_labels: { pokracovat: "Pokračovať" }, // DEV-373: named by the cockpit after a release
   } as unknown as PipelineBoard;
 }
 
@@ -169,6 +170,7 @@ function pausedBoard(pauseReason: string | null): PipelineBoard {
     },
     recent_messages: [],
     available_actions: ["pokracovat"],
+    action_labels: { pokracovat: "Pokračovať" }, // DEV-373: named by the cockpit with a fix ready
   } as unknown as PipelineBoard;
 }
 
@@ -219,6 +221,7 @@ describe("ContinueAfterFixBar — one button after a restart cut the build off",
       state: { current_stage: "verifikacia", status: "awaiting_manazer", resume_after_restart: true },
       recent_messages: messages,
       available_actions: ["pokracovat", "uprav"],
+      action_labels: { pokracovat: "Pokračovať" }, // DEV-373: named by the cockpit after a restart
     }) as unknown as PipelineBoard;
 
   beforeEach(() => {

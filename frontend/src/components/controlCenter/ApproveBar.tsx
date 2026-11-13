@@ -23,7 +23,7 @@ import { useVizualChecksStore, vizualCheckKey } from "@/store/vizualChecksStore"
 import { useAuthStore } from "@/store/authStore";
 import { schemaChangeSentence, schemaDocLink, SCHEMA_APPROVER_ONLY } from "./databaseSchema";
 import { approveBarCarriesRevise } from "./reviseControl";
-import { approveLabel } from "./approveLabel";
+import { actionLabel } from "./actionLabel";
 
 const NOTHING_CHECKED: string[] = [];
 
@@ -51,14 +51,15 @@ export default function ApproveBar({ board, versionId, onBoard, previewDown = fa
   // Honest-by-construction gate: the bar exists ONLY when the backend offers `schvalit` right now.
   if (!board?.available_actions?.includes("schvalit")) return null;
 
-  // Context-aware copy: the button names what the SAME `schvalit` verb does at this gate (approveLabel).
+  // Context-aware copy: the button names what the SAME `schvalit` verb does at this gate — named by the cockpit for
+  // this state (DEV-373), the words Poradca uses too.
   const stage = board.state?.current_stage;
   // At the Vizuál gate the change-requests flow through the always-open composer (typed → the AI applies them
   // live, HMR), so this bar's own comment box + "Upraviť" are redundant + confusing there ("2 editory",
   // Director 2026-07-13). Render Vizuál as a pure approve button; keep the comment/rework input at the other
   // gates (Návrh / Programovanie / Verifikácia) where there is no live composer-apply loop.
   const isVizual = stage === "vizual";
-  const stepLabel = approveLabel(stage);
+  const stepLabel = actionLabel(board, "schvalit");
   const approveBusyLabel = stage === "programovanie" ? "Posúvam…" : "Schvaľujem…";
   // DEV-7: a Návrh that changes the database is approved by Ri alone, and approving it writes the Knowledge Base.
   const schema = stage === "navrh" && board.database_schema?.changes ? board.database_schema : null;
@@ -155,7 +156,7 @@ export default function ApproveBar({ board, versionId, onBoard, previewDown = fa
               disabled={submitting}
               className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? "Pracujem…" : "Upraviť"}
+              {submitting ? "Pracujem…" : actionLabel(board, "uprav")}
             </button>
           </>
         )}

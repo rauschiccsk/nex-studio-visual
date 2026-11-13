@@ -45,6 +45,7 @@ import { commonCategory, type BillingCategory } from "@/lib/billingCategory";
 import { findCurrentTaskPath, type CurrentTaskPath } from "./currentTaskPath";
 import { postPipelineActionApi } from "../../services/api/pipeline";
 import type { CiStatus, PipelineActionName, PipelineBoard, PipelineMessage } from "../../services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import type {
   NodeSpend,
   TaskPlanResponse,
@@ -695,7 +696,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {triggering ? "Zostavujem plán…" : "Zostaviť plán"}
+            {triggering ? "Zostavujem plán…" : actionLabel(board, "zostav_plan")}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>
@@ -716,7 +717,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
                 disabled={triggering}
                 className="flex-1 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {triggering ? "Spúšťam vizuál…" : "Spustiť vizuál"}
+                {triggering ? "Spúšťam vizuál…" : actionLabel(board, "spustit_vizual")}
               </button>
             )}
             <button
@@ -725,7 +726,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
               disabled={triggering}
               className="flex-1 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {triggering ? "Spúšťam stavbu…" : "Spustiť stavbu"}
+              {triggering ? "Spúšťam stavbu…" : actionLabel(board, "spustit_stavbu")}
             </button>
           </div>
           <ErrorNote error={triggerError} className="mt-1" />
@@ -759,9 +760,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
               ? startsCoding
                 ? "Spúšťam programovanie…"
                 : "Pokračujem…"
-              : startsCoding
-                ? "Spustiť programovanie"
-                : "Pokračovať v stavbe"}
+              : actionLabel(board, "pokracovat")}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>
@@ -792,7 +791,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
             disabled={triggering}
             className="w-full rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
           >
-            {triggering ? "Pozastavujem…" : "Pozastaviť"}
+            {triggering ? "Pozastavujem…" : actionLabel(board, "pause")}
           </button>
           <ErrorNote error={pauseNoteError} className="mt-1" />
           <ErrorNote error={triggerError} className="mt-1" />
@@ -808,7 +807,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {triggering ? "Kontrolujem…" : "Skontrolovať"}
+            {triggering ? "Kontrolujem…" : actionLabel(board, "skontrolovat")}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>
@@ -823,7 +822,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
             disabled={triggering}
             className="w-full rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {triggering ? "Označujem…" : "Označiť ako hotové"}
+            {triggering ? "Označujem…" : actionLabel(board, "hotovo")}
           </button>
           <ErrorNote error={triggerError} className="mt-1" />
         </div>

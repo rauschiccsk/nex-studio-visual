@@ -320,6 +320,9 @@ class PipelineBoardRead(BaseModel):
     #: iframe so the Manažér can walk the running app while the AI edits it. Additive, no migration; ``None``
     #: whenever the version never entered the ``vizual`` stage (or no URL was recorded yet).
     vizual_url: Optional[str] = None
+    #: DEV-373: the name of every build button in this state, by its action — the screen draws these words and
+    #: Poradca reads them (``backend/services/action_labels.py``). Empty only on a board without a state.
+    action_labels: dict[str, str] = {}
     #: DEV-371: the build stands blocked because the start check after a fix failed twice on a download (the
     #: network, not the code) — the screen's „Skús znova“ then sends a plain retry, not „find the cause and fix it“.
     check_failed_on_download: bool = False

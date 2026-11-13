@@ -224,6 +224,9 @@ export interface PipelineBoard {
   // carries one, else null/absent. The Vizuál page embeds this in an iframe so the Manažér can walk the
   // running app while the AI edits it. Absent whenever the version never entered the vizual stage.
   vizual_url?: string | null;
+  // DEV-373: the name of every build button in this state, by its action — read through actionLabel(), never
+  // written by the component that draws the button. Absent on an older board → the plain names.
+  action_labels?: Record<string, string>;
   // DEV-371: blocked because the start check after a fix failed twice on a download (the network, not the code) —
   // an empty „Skús znova" then sends a plain retry, not „find the cause and fix it". Absent → false.
   check_failed_on_download?: boolean;

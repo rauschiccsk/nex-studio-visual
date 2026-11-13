@@ -61,6 +61,7 @@ beforeEach(() => {
         "Verifikácia PASS — čaká na kontrolu na GitHube (CI); Hotovo pôjde schváliť, keď dobehne. Kokpit to dorieši sám.",
     },
     available_actions: ["ask", "verdict"],
+    action_labels: { schvalit: "Schváliť na Hotovo" }, // DEV-373: named by the cockpit
     recent_messages: [],
     ci_gate: { state: "pending", message: WAITS },
   } as unknown as PipelineBoard;

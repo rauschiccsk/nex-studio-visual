@@ -75,11 +75,19 @@ const CHANGE_MSG = note(14, "Zmena je vo Vizuáli — čo po nej skontrolovať:"
   vizual_checklist: CHANGE,
 });
 
+// DEV-373: the board names the approve button for its gate, as the cockpit sends it (backend action_labels).
+const APPROVE_NAME: Record<string, string> = {
+  vizual: "Schváliť vizuál",
+  programovanie: "Prejsť na overenie",
+  verifikacia: "Schváliť na Hotovo",
+};
+
 function board(stage = "vizual"): PipelineBoard {
   return {
     state: { current_stage: stage },
     recent_messages: [LINK_MSG, CHANGE_MSG],
     available_actions: ["schvalit"],
+    action_labels: APPROVE_NAME[stage] ? { schvalit: APPROVE_NAME[stage] } : undefined,
     vizual_checklists: [
       { ...FIRST, seq: 10 },
       { ...CHANGE, seq: 14 },

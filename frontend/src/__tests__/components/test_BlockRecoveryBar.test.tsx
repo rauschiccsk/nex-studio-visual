@@ -26,6 +26,9 @@ import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
 import { DEFAULT_RETRY } from "@/components/controlCenter/blockRecovery";
 import type { PipelineBoard } from "@/services/api/pipeline";
 
+// DEV-373: on an error or a failed check the board names `uprav` a retry, as the cockpit sends it.
+const RETRY_REASONS = ["agent_error", "system_error", "parse_exhaustion", "check_failed"];
+
 function board(blockReason: string): PipelineBoard {
   return {
     state: {
@@ -34,6 +37,7 @@ function board(blockReason: string): PipelineBoard {
       current_stage: "programovanie",
       next_action: "Odpovedz agentovi.",
     },
+    action_labels: RETRY_REASONS.includes(blockReason) ? { uprav: "Skús znova" } : undefined,
   } as unknown as PipelineBoard;
 }
 

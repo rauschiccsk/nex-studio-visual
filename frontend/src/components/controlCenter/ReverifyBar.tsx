@@ -20,6 +20,7 @@ import { useState } from "react";
 import { RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import WarningActionBar from "@/components/common/WarningActionBar";
 
@@ -62,7 +63,7 @@ export default function ReverifyBar({ board, versionId, onBoard }: Props) {
       variant="docked"
       title="Overenie je zastarané — kód sa odvtedy zmenil"
       action={{
-        label: submitting ? "Overujem…" : "Over znova",
+        label: submitting ? "Overujem…" : actionLabel(board, "overit_znovu"),
         icon: RotateCw,
         spinning: submitting,
         disabled: submitting,

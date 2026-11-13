@@ -30,6 +30,7 @@ import {
   postPipelineActionApi,
   type PipelineBoard,
 } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { BLOCK_REASON_LABELS } from "@/components/cockpit/labels";
 import {
   blockRecoveryOwnsInput,
@@ -224,8 +225,8 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
                 ? "Odosielam…"
                 : "Skúšam…"
               : isQuestion
-                ? "Odpovedať"
-                : "Skús znova"}
+                ? actionLabel(board, "answer")
+                : actionLabel(board, "uprav")}
           </button>
         </div>
 

@@ -22,6 +22,7 @@ import { CircleAlert, FolderOpen, Loader2, RotateCw, Zap } from "lucide-react";
 import WarningActionBar from "@/components/common/WarningActionBar";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { postPipelineActionApi } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import type { DeployBlock } from "@/types/deploy";
 import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
 import { fmtVer } from "./version";
@@ -85,7 +86,7 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
             "verzia sa sama označí ako hotová a nasadenie sa tu odomkne. Zvyčajne to trvá pár minút."
           : " Znova overiť ju môže vlastník projektu alebo Manažér — popros o to niekoho z nich.");
       if (block.can_reverify) {
-        action = { label: submitting ? "Spúšťam…" : "Over znova", icon: "reverify", run: reverify };
+        action = { label: submitting ? "Spúšťam…" : actionLabel(null, "overit_znovu"), icon: "reverify", run: reverify };
       }
       break;
 

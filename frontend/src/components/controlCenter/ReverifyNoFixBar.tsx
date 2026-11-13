@@ -18,6 +18,7 @@ import { useState } from "react";
 import { ShieldCheck, RotateCw } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -48,7 +49,8 @@ export default function ReverifyNoFixBar({ board, versionId, onBoard }: Props) {
   const explanation = isVerifStall
     ? "Predchádzajúci overovací beh sa zasekol (časový limit) — nie je to chyba aplikácie, tá prešla skúškou po spustení. „Znova spustiť overenie“ zopakuje koncové overenie (spustí aplikáciu a nezávislý Audítor ju posúdi). Ak prejde, verzia je pripravená na schválenie (Hotovo)."
     : "Ak sa blokujúca chyba vyriešila mimo tohto projektu (v samotnom NEX Studiu), v projekte niet čo opravovať. „Znova overiť“ preskočí opravnú úlohu a rovno zopakuje koncové overenie (spustí aplikáciu a nezávislý Audítor ju posúdi). Ak prejde, verzia je pripravená na schválenie (Hotovo).";
-  const buttonLabel = isVerifStall ? "Znova spustiť overenie" : "Znova overiť bez opravy";
+  // DEV-373: named by the cockpit for this state (a stalled Verifikácia reruns, a fix loop skips the fix).
+  const buttonLabel = actionLabel(board, "overit_bez_opravy");
 
   async function submit() {
     setError(null);

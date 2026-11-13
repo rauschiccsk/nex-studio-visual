@@ -410,7 +410,12 @@ describe("TaskPlanRail — Programovanie build controls (STEP 4)", () => {
       <TaskPlanRail
         versionId="v1"
         messages={[]}
-        board={mkBoard({ available_actions: ["pokracovat"], state: mkState({ status: "awaiting_manazer" }) })}
+        board={mkBoard({
+          available_actions: ["pokracovat"],
+          // DEV-373: the cockpit names the button — the plan awaits its start (plan_awaits_start)
+          action_labels: { pokracovat: "Spustiť programovanie" },
+          state: mkState({ status: "awaiting_manazer" }),
+        })}
         onBoard={() => {}}
       />,
     );

@@ -14,6 +14,7 @@ import { useNavigate } from "react-router-dom";
 import { Database, FileText } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useAuthStore } from "@/store/authStore";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -75,7 +76,7 @@ export default function SchemaApprovalBar({ board, versionId, onBoard }: Props) 
           disabled={submitting || !mayApprove}
           className="ml-auto shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Schvaľujem…" : "Schváliť štruktúru databázy"}
+          {submitting ? "Schvaľujem…" : actionLabel(board, "schvalit_schemu")}
         </button>
       </div>
       {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}

@@ -13,11 +13,13 @@
 set -euo pipefail
 
 GENERATED=frontend/src/services/api/pipeline.generated.ts
+# DEV-373: the build buttons' plain names, written from backend/services/action_labels.py by the same codegen.
+LABELS=frontend/src/services/api/actionLabels.generated.json
 
 cd "$(git rev-parse --show-toplevel)"
 # `npm run codegen` dumps the OpenAPI schema (poetry → backend.scripts.dump_openapi) and runs openapi-typescript.
 (cd frontend && npm run codegen)
-if ! git diff --exit-code -- "${GENERATED}"; then
-    echo "::error::pipeline.generated.ts is stale — run 'npm run codegen' in frontend/ and commit the result."
+if ! git diff --exit-code -- "${GENERATED}" "${LABELS}"; then
+    echo "::error::pipeline.generated.ts or actionLabels.generated.json is stale — run 'npm run codegen' in frontend/ and commit the result."
     exit 1
 fi

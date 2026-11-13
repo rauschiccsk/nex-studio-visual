@@ -89,7 +89,8 @@ async def test_stavba_reads_state_buttons_and_messages_like_the_screen(world):
     db.flush()
     out = await world["tools"].stavba({})
     assert "Verzia 1.2.0" in out and "Fáza: programovanie; stav: paused" in out
-    assert "„Pokračovať“ (pokracovat)" in out
+    # DEV-373: the name the screen draws for a paused loop — Poradca's own copy said „Pokračovať“.
+    assert "„Pokračovať v stavbe“ (pokracovat)" in out
     assert "Hotová úloha 1.1.1." in out
 
 

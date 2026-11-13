@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { Play, Wrench } from "lucide-react";
 
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 
@@ -112,7 +113,7 @@ export default function ContinueAfterFixBar({ board, versionId, onBoard }: Props
             className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play className="h-3.5 w-3.5" />
-            {submitting ? "Pokračujem…" : "Pokračovať"}
+            {submitting ? "Pokračujem…" : actionLabel(board, "pokracovat")}
           </button>
         </div>
         <ErrorNote error={error} />

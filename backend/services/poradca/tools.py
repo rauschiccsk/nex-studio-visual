@@ -36,35 +36,6 @@ from backend.services.pipeline_status import OWN_DECISION_LABEL
 from backend.services.poradca.context import UatInstallation, uat_installations
 from backend.services.poradca.mcp_server import Tool, ToolError
 
-#: Names of the Riadiace centrum buttons by the action the cockpit offers (``available_actions``). Poradca
-#: advises with the button the human sees on screen — not with a name in code. A test guards them: an action that the
-#: frontend knows and that is missing here turns red.
-ACTION_LABELS: dict[str, str] = {
-    "start": "Spustiť tvorbu špecifikácie",
-    "approve_spec": "Schváliť špecifikáciu",
-    "zostav_plan": "Zostaviť plán",
-    "spustit_stavbu": "Spustiť stavbu",
-    "spustit_vizual": "Spustiť vizuál",
-    "schvalit": "Schváliť",
-    "uprav": "Uprav",
-    "pokracovat": "Pokračovať",
-    "verdict": "verdikt Audítora (PASS / FAIL)",
-    "ask": "otázka pre Staviteľa",
-    "answer": "Odpovedať (agent sa pýta)",
-    "schvalit_schemu": "Schváliť štruktúru databázy (len Ri)",
-    "pause": "Pozastaviť",
-    "decide": "výber na karte rozhodnutia",
-    "overit_znovu": "Over znova",
-    "overit_bez_opravy": "Znova overiť bez opravy",
-    "opravit_podla_ci": "Vrátiť agentovi na opravu",
-    "skontrolovat": "Skontrolovať",
-    "hotovo": "Hotovo",
-    "na_riadnu_verziu": "Preniesť do riadnej verzie",
-    "nahlasit_znova": "Nahlásiť znova",
-    "zopakovat_konzultaciu": "Zopakovať konzultáciu",
-    "vratit_do_pripravy": "Vrátiť do Prípravy",
-}
-
 _MESSAGES_LIMIT = 50
 _MESSAGE_CHARS = 1500
 #: DEV-327 — the version's brief in ``stavba``: longer is cut with a mark; the DEV tickets are named from all of it.
@@ -331,7 +302,6 @@ class PoradcaTools:
 
     async def stavba(self, args: dict) -> str:
         from backend.api.routes.pipeline import _board
-        from backend.services import orchestrator
 
         with SessionLocal() as db:
             version = self._version(db, args.get("verzia"))
@@ -346,18 +316,17 @@ class PoradcaTools:
                 f"čo ďalej: {state.next_action or '—'}."
             )
             lines.extend(_brief_lines(db, version))
+            # DEV-373: the names the screen draws, from the board — never a copy of them. A Decision Card's choice
+            # is described by the card lines below; the agents' own actions are no button of the Manažér's.
             actions = board.available_actions or []
-            labels = dict(ACTION_LABELS)
-            if "pokracovat" in actions and orchestrator.plan_awaits_start(db, version.id):
-                # DEV-214: at the stop after the task plan the same verb STARTS the coding — the screen says so.
-                labels["pokracovat"] = "Spustiť programovanie"
-            if actions:
+            buttons = [a for a in actions if a in board.action_labels]
+            if buttons:
                 lines.append(
                     "Tlačidlá, ktoré Manažér v Riadiacom centre práve vidí: "
-                    + "; ".join(f"„{labels.get(a, a)}“ ({a})" for a in actions)
+                    + "; ".join(f"„{board.action_labels[a]}“ ({a})" for a in buttons)
                     + "."
                 )
-            else:
+            elif "decide" not in actions:
                 lines.append("Manažér teraz v Riadiacom centre nevidí žiadne tlačidlo stavby.")
             if "decide" in actions:
                 lines.extend(_cards_lines(db, version.id))

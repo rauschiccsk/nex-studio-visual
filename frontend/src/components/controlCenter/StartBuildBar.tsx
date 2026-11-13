@@ -13,6 +13,7 @@ import { Play } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 interface Props {
@@ -58,7 +59,7 @@ export default function StartBuildBar({ board, versionId, onBoard }: Props) {
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Play className="h-3.5 w-3.5" aria-hidden="true" />
-          {starting ? "Spúšťam…" : "Spustiť tvorbu špecifikácie"}
+          {starting ? "Spúšťam…" : actionLabel(board, "start")}
         </button>
       </div>
       <ErrorNote error={error} className="mt-2" />

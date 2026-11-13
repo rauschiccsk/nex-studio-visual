@@ -51,6 +51,7 @@ from backend.schemas.pipeline import (
     PipelineStateRead,
     VizualPreviewRead,
 )
+from backend.services import action_labels as action_labels_service
 from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets, unsaved_work
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
@@ -368,6 +369,8 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
         vizual_url=vizual_url,
+        # DEV-373: the buttons' names for this state — the screen and Poradca read the same words.
+        action_labels=action_labels_service.action_labels(db, state) if state is not None else {},
         # DEV-371: only while the build stands blocked on that check — the screen's „Skús znova“ reads it.
         check_failed_on_download=(
             state is not None

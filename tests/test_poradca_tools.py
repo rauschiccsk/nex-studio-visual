@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from backend.services import action_labels
 from backend.services.poradca import tools, uat_db
 from backend.services.poradca.context import UatInstallation
 from backend.services.poradca.mcp_server import ToolError
@@ -20,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_every_action_the_frontend_knows_has_a_button_label():
-    """An action known to the frontend must have a button name — otherwise Poradca would advise by the code name."""
+    """An action known to the frontend must have a button name — otherwise Poradca would advise by the code name.
+    DEV-373: the names live in one place (``action_labels``); an action without a button is named there too."""
     text = (ROOT / "frontend" / "src" / "services" / "api" / "pipeline.ts").read_text(encoding="utf-8")
     lines = text.splitlines()
     start = next((i for i, line in enumerate(lines) if line.startswith("export type PipelineActionName")), None)
@@ -33,7 +35,7 @@ def test_every_action_the_frontend_knows_has_a_button_label():
             if m.group(2):
                 break  # the last action of the list ends with a semicolon (comments have them too — hence line by line)
     assert len(actions) >= 15
-    assert actions - set(tools.ACTION_LABELS) == set()
+    assert actions - set(action_labels.BASE) - action_labels.NOT_BUTTONS == set()
 
 
 # ── kontajnery ───────────────────────────────────────────────────────────────────

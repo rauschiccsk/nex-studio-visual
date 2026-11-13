@@ -30,9 +30,17 @@ vi.mock("@/services/api/pipeline", () => ({
 // A board offering `actions` (honest-by-construction: the bar keys off available_actions only). `stage`
 // drives the CONTEXT-AWARE copy (release-smoke-boot-and-batch-fixes.md C); omitting it (state:null) is the
 // legacy/Návrh default that keeps today's plan copy.
+// DEV-373: the board names the approve button for its gate, as the cockpit sends it (backend action_labels).
+const APPROVE_NAME: Record<string, string> = {
+  vizual: "Schváliť vizuál",
+  programovanie: "Prejsť na overenie",
+  verifikacia: "Schváliť na Hotovo",
+};
+
 function boardWith(actions: string[], stage?: string): PipelineBoard {
   const state = stage ? { current_stage: stage } : null;
-  return { state, recent_messages: [], available_actions: actions } as unknown as PipelineBoard;
+  const action_labels = stage && APPROVE_NAME[stage] ? { schvalit: APPROVE_NAME[stage] } : undefined;
+  return { state, recent_messages: [], available_actions: actions, action_labels } as unknown as PipelineBoard;
 }
 
 // The fresh board the action returns — onBoard must adopt exactly this.

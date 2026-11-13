@@ -63,6 +63,9 @@ const ASKED = message(7, "ai_agent", {
   question: QUESTION,
 });
 
+// DEV-373: on an error or a failed check the board names `uprav` a retry, as the cockpit sends it.
+const RETRY_REASONS = ["agent_error", "system_error", "parse_exhaustion", "check_failed"];
+
 function board(
   reason: string,
   messages: PipelineMessage[],
@@ -76,6 +79,7 @@ function board(
       next_action: nextAction,
     },
     recent_messages: messages,
+    action_labels: RETRY_REASONS.includes(reason) ? { uprav: "Skús znova" } : undefined,
   } as unknown as PipelineBoard;
 }
 

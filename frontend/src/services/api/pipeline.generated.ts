@@ -6304,6 +6304,13 @@ export interface components {
          *     DROPPED — there is no Gate E, no gate_g release-gate, and no Coordinator hub in this model.
          */
         PipelineBoardRead: {
+            /**
+             * Action Labels
+             * @default {}
+             */
+            action_labels: {
+                [key: string]: string;
+            };
             /** Agent Sessions */
             agent_sessions?: components["schemas"]["AgentSession"][];
             /**

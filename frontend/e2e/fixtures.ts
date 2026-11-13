@@ -15,6 +15,7 @@ import type {
 } from "../src/services/api/projects";
 import type { KnowledgeDoc } from "../src/types/knowledge";
 import type { TaskPlanResponse } from "../src/types/task-plan";
+import actionLabels from "../src/services/api/actionLabels.generated.json" with { type: "json" };
 import { answer, answerUntyped, override, type Override } from "./api";
 
 type S = components["schemas"];
@@ -256,6 +257,8 @@ const PIPELINE: S["PipelineBoardRead"] = {
   available_actions: ["decide", "pozastavit"],
   all_tasks_done: false,
   build_open_findings: 0,
+  // DEV-373: the board names its buttons; the plain names stand in for the e2e flows.
+  action_labels: { ...actionLabels },
   check_failed_on_download: false,
   spec_approved: false,
   verified: false,

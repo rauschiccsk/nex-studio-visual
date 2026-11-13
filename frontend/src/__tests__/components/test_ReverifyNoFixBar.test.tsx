@@ -17,7 +17,9 @@ vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: vi.fn() }));
 
 function boardWith(actions: string[], stage?: string): PipelineBoard {
   const state = stage ? { current_stage: stage } : null;
-  return { state, recent_messages: [], available_actions: actions } as unknown as PipelineBoard;
+  // DEV-373: a stalled Verifikácia names the button a rerun, as the cockpit sends it.
+  const action_labels = stage === "verifikacia" ? { overit_bez_opravy: "Znova spustiť overenie" } : undefined;
+  return { state, recent_messages: [], available_actions: actions, action_labels } as unknown as PipelineBoard;
 }
 const NEXT_BOARD = { state: { current_stage: "verifikacia" } } as unknown as PipelineBoard;
 

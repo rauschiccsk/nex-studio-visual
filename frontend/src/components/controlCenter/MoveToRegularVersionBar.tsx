@@ -20,6 +20,7 @@ import { GitBranch } from "lucide-react";
 
 import WarningActionBar from "@/components/common/WarningActionBar";
 import { postPipelineActionApi, type PipelineBoard } from "@/services/api/pipeline";
+import { actionLabel } from "@/components/controlCenter/actionLabel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
 interface Props {
@@ -51,7 +52,7 @@ export default function MoveToRegularVersionBar({ board, versionId, onBoard }: P
       variant="docked"
       title="Táto stavba beží ako rýchla oprava"
       action={{
-        label: submitting ? "Prenášam…" : "Preniesť do riadnej verzie",
+        label: submitting ? "Prenášam…" : actionLabel(board, "na_riadnu_verziu"),
         icon: GitBranch,
         spinning: submitting,
         disabled: submitting,
