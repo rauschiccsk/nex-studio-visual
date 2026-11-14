@@ -138,7 +138,7 @@ async def test_start_begins_priprava(db_session, fake_claude):
 
 async def test_start_rejects_dropped_flow_type(db_session, fake_claude):
     version, _ = _make_version(db_session)
-    with pytest.raises(orchestrator.OrchestratorError, match="Invalid flow_type"):
+    with pytest.raises(orchestrator.OrchestratorError, match="Neznámy druh verzie"):
         await orchestrator.apply_action(db_session, version_id=version.id, action="start", payload={"flow_type": "cr"})
 
 
@@ -363,7 +363,7 @@ async def test_verdict_requires_valid_value(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _to_verifikacia(db_session, version.id)
-    with pytest.raises(orchestrator.OrchestratorError, match="verdict requires"):
+    with pytest.raises(orchestrator.OrchestratorError, match="Verdikt Audítora musí byť PASS alebo FAIL"):
         await orchestrator.apply_action(
             db_session, version_id=version.id, action="verdict", payload={"verdict": "MAYBE"}
         )
@@ -392,7 +392,7 @@ async def test_uprav_requires_comment(db_session, fake_claude):
     version, _ = _make_version(db_session)
     await orchestrator.apply_action(db_session, version_id=version.id, action="start")
     _settle(db_session, version.id)
-    with pytest.raises(orchestrator.OrchestratorError, match="uprav requires"):
+    with pytest.raises(orchestrator.OrchestratorError, match="Úprava je prázdna"):
         await orchestrator.apply_action(db_session, version_id=version.id, action="uprav", payload={"comment": "  "})
 
 

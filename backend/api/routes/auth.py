@@ -50,12 +50,12 @@ def login(
         if "inactive" in msg.lower():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account is inactive",
+                detail="Účet je vypnutý — požiadaj správcu, aby ho zapol.",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail="Nesprávne meno alebo heslo.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 

@@ -240,7 +240,7 @@ class TestSameRowPortUniqueness:
         payload = _payload(creator.id, backend_port=10100, frontend_port=10100)
         resp = router_client.post("/api/v1/projects", json=payload)
         assert resp.status_code == 422
-        assert "must be distinct" in resp.json()["detail"]
+        assert "Každý port musí byť iný" in resp.json()["detail"]
 
     def test_backend_equals_db_rejected(self, router_client, creator):
         payload = _payload(creator.id, backend_port=10100, db_port=10100)

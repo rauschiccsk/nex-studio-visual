@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
 from backend.core.agent_env import project_env
+from backend.core.errors import ConflictError, NotFoundError
 from backend.core.local_time import local_time
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.db.models.backlog import BacklogItem
@@ -1231,6 +1232,14 @@ class OrchestratorError(ValueError):
     """Invalid orchestration request (unknown version/action, missing payload)."""
 
 
+class OrchestratorNotFound(OrchestratorError, NotFoundError):
+    """DEV-385: the version asked for does not exist — the route answers 404 by this type, not by the words."""
+
+
+class OrchestratorConflict(OrchestratorError, ConflictError):
+    """DEV-385: the build already is where the request would take it — 409 by this type."""
+
+
 # ---------------------------------------------------------------------------
 # Resolution helpers
 # ---------------------------------------------------------------------------
@@ -1243,7 +1252,7 @@ def _surfaces_for_version(db: Session, version_id: uuid.UUID) -> tuple[project_s
         select(Project).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
     ).scalar_one_or_none()
     if project is None:
-        raise OrchestratorError(f"Version not found: {version_id}")
+        raise OrchestratorNotFound(f"Verzia {version_id} v kokpite neexistuje.")
     return project_surfaces.surfaces_of(project)
 
 
@@ -1272,7 +1281,7 @@ def _project_slug_for_version(db: Session, version_id: uuid.UUID) -> str:
         select(Project.slug).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
     ).scalar_one_or_none()
     if slug is None:
-        raise OrchestratorError(f"Version not found: {version_id}")
+        raise OrchestratorNotFound(f"Verzia {version_id} v kokpite neexistuje.")
     return slug
 
 
@@ -4805,10 +4814,10 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
     Raises :class:`OrchestratorError` when the pipeline has not started for this version, or when the build
     is blocked on a NEX Studio bug (only Dedo releases that one)."""
     if not text or not str(text).strip():
-        raise OrchestratorError("relay requires a non-empty message")
+        raise OrchestratorError("Správa je prázdna — napíš, čo chceš agentovi poslať.")
     state = _get_state(db, version_id)
     if state is None:
-        raise OrchestratorError("Pipeline not started for this version")
+        raise OrchestratorError("Stavba tejto verzie ešte nezačala.")
     text = str(text).strip()
 
     # ICCINT-163: a message queued now would be drained the moment the loop lands the pause the Manažér just
@@ -12459,7 +12468,7 @@ def _build_fix_consultation(db: Session, version_id: uuid.UUID, state: PipelineS
     recommended_count = sum(1 for o in options if o.recommended)
     if recommended_count != 1:  # pragma: no cover - defensive; construction guarantees exactly one
         raise OrchestratorError(
-            f"fix-consultation invariant violated: expected exactly one recommended option, got {recommended_count}"
+            f"Vnútorná chyba kokpitu: karta opravy má mať práve jednu odporúčanú voľbu, má ich {recommended_count}."
         )
 
     if rerun:
@@ -16151,7 +16160,7 @@ async def _go_back_to_priprava(db: Session, state: PipelineState) -> PipelineSta
     from_stage = state.current_stage
     version = db.get(Version, version_id)
     if version is None:
-        raise OrchestratorError(f"Version not found: {version_id}")
+        raise OrchestratorNotFound(f"Verzia {version_id} v kokpite neexistuje.")
     project = db.get(Project, version.project_id)
     _record_message(
         db,
@@ -16240,11 +16249,13 @@ async def apply_action(
 
     if action == "start":
         if state is not None:
-            raise OrchestratorError("Pipeline already started for this version")
+            raise OrchestratorConflict("Stavba tejto verzie už bola spustená.")
         # OQ-1: only two flow_types survive — a full ``new_version`` (4-phase) or a ``fast_fix`` short path.
         flow_type = payload.get("flow_type", "new_version")
         if flow_type not in ("new_version", "fast_fix"):
-            raise OrchestratorError(f"Invalid flow_type: {flow_type!r}")
+            raise OrchestratorError(
+                f"Neznámy druh verzie ({flow_type!r}) — kokpit pozná riadnu verziu a rýchlu opravu."
+            )
         # Spine STEP 1 (ADDITIVE mode toggle): an explicit ``mode='conversation'`` selects the non-phase
         # conversation loop (``run_conversation_turn``, routed by ``pipeline_runner._run``); anything else
         # (incl. absent) is NULL = the phase automaton (``run_dispatch``), so every existing new_version/
@@ -16326,7 +16337,7 @@ async def apply_action(
         return state
 
     if state is None:
-        raise OrchestratorError("Pipeline not started for this version")
+        raise OrchestratorError("Stavba tejto verzie ešte nezačala.")
 
     # ICCINT-13 THE FRAMEWORK-BLOCK GATE (Director decision 1: "only Dedo releases it"). While a build is
     # blocked on a bug in NEX Studio ITSELF, ``nahlasit_znova`` (re-send the report) is the ONLY executable
@@ -16761,7 +16772,7 @@ async def apply_action(
         # the Coordinator relay is retired, design §2.2). A comment is REQUIRED so the agent has guidance.
         comment = payload.get("comment")
         if not comment or not str(comment).strip():
-            raise OrchestratorError("uprav requires a non-empty payload.comment")
+            raise OrchestratorError("Úprava je prázdna — napíš, čo má agent urobiť inak.")
         # CR-V2-054: an 'Uprav' at Verifikácia is a FIX directive → route it to the AI Agent (the fixer),
         # NOT state.current_actor (the Auditor/finder — which would just re-confirm). Re-enters the bounded
         # fix loop with the operator's comment as the brief. (The was-the-bug: the NEX Agents dogfood 'Uprav'
@@ -17032,7 +17043,7 @@ async def apply_action(
         # question is threaded into the current actor's next turn. The phase does NOT advance.
         text = payload.get("text")
         if not text or not str(text).strip():
-            raise OrchestratorError("ask requires a non-empty payload.text")
+            raise OrchestratorError("Otázka je prázdna — napíš, na čo sa chceš spýtať.")
         question_payload: dict[str, Any] = {"phase": state.current_stage}
         if state.status == "blocked" and state.block_reason == "decision_needed":
             # DEV-27: asked while the Decision Cards wait — answered aside, then back to the same cards.
@@ -17084,7 +17095,7 @@ async def apply_action(
         # resumed turn. The status guard above already required ``blocked``.
         text = payload.get("text")
         if not text or not str(text).strip():
-            raise OrchestratorError("answer requires a non-empty payload.text")
+            raise OrchestratorError("Odpoveď je prázdna — napíš, čo agentovi odpovedáš.")
         _record_message(
             db,
             version_id=version_id,
@@ -17246,7 +17257,7 @@ async def apply_action(
             raise OrchestratorError("verdict je platné len vo fáze Verifikácia")
         verdict = payload.get("verdict")
         if verdict not in ("PASS", "FAIL"):
-            raise OrchestratorError("verdict requires payload.verdict in {PASS, FAIL}")
+            raise OrchestratorError("Verdikt Audítora musí byť PASS alebo FAIL.")
         # CR-V2-050: the fail-closed runtime floor overrides a manual PASS-override too — recompute it from the
         # recorded release evidence and RECORD the EFFECTIVE verdict (a floored PASS becomes FAIL) so the canonical
         # kind=verdict message the fix-loop reads (:func:`_latest_verifikacia_fix_scope`) can never say PASS while

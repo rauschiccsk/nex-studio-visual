@@ -73,7 +73,7 @@ class TestRiCannotDeactivateSelf:
         )
 
         assert resp.status_code == 400
-        assert "deactivate" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == "Vlastný účet vypnúť nemôžeš."
 
 
 class TestHaCannotUpdate:

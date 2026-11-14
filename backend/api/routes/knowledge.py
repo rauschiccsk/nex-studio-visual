@@ -177,7 +177,7 @@ def get_document_content(
     try:
         content = manager.read_document(relative_path)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="Document not found") from e
+        raise HTTPException(status_code=404, detail="Dokument sa nenašiel.") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -287,7 +287,7 @@ async def update_document(
     try:
         manager.update_document(request.relative_path, request.content)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="Document not found") from e
+        raise HTTPException(status_code=404, detail="Dokument sa nenašiel.") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     unpublished = await _record_in_git(manager, request.relative_path, request.content, "upravil", user)
@@ -358,7 +358,7 @@ async def delete_document(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not disk_deleted and deleted_chunks == 0:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(status_code=404, detail="Dokument sa nenašiel.")
 
     result: dict = {
         "deleted": True,

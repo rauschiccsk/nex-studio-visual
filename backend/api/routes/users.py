@@ -206,7 +206,7 @@ def update_user(
     if payload.is_active is False and user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot deactivate your own account",
+            detail="Vlastný účet vypnúť nemôžeš.",
         )
     try:
         user = user_service.update(db, user_id, payload)
@@ -251,7 +251,7 @@ def delete_user(
     if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own account",
+            detail="Vlastný účet zmazať nemôžeš.",
         )
     try:
         user_service.delete(db, user_id)

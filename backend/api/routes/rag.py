@@ -131,7 +131,7 @@ async def get_document(
     except RagUnavailableError as exc:
         raise _unavailable(exc) from exc
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(status_code=404, detail="Dokument sa nenašiel.")
     return doc
 
 

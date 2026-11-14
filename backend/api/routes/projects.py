@@ -152,8 +152,8 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Port {port_value} is assigned to both '{seen[port_value]}' "
-                    f"and '{field_name}'. Each port column must be distinct."
+                    f"Port {port_value} je zadaný dvakrát — pri „{seen[port_value]}“ aj pri „{field_name}“. "
+                    "Každý port musí byť iný."
                 ),
             )
         seen[port_value] = field_name
@@ -169,7 +169,7 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
         if port_value < range_min or port_value > range_max:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(f"Port {port_value} ({field_name}) is outside the allowed range ({range_min}–{range_max})."),
+                detail=(f"Port {port_value} ({field_name}) je mimo povoleného rozsahu {range_min}–{range_max}."),
             )
 
         # Availability — resolved against the projects table, the declared
@@ -300,9 +300,7 @@ def _host_probe_unavailable(exc: Exception) -> HTTPException:
     logger.warning("Host port probe unavailable — refusing to suggest a port: %s", exc)
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=(
-            f"Port availability cannot be verified against this host right now, so no port is being suggested. {exc}"
-        ),
+        detail=(f"Voľnosť portov sa teraz na tomto stroji nedá overiť, preto kokpit port nenavrhuje. {exc}"),
     )
 
 
@@ -1063,13 +1061,13 @@ def create_project(
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create GitHub repository: {exc}",
+                detail=f"Repozitár na GitHube sa nepodarilo založiť: {exc}",
             ) from exc
         except httpx.HTTPError as exc:
             logger.warning("GitHub API network error for %r", payload.repo_url, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"GitHub API unreachable while creating '{payload.repo_url}': {exc}",
+                detail=f"GitHub nebol dostupný pri zakladaní repozitára {payload.repo_url}: {exc}",
             ) from exc
 
     # Did WE scaffold the workspace this request is about? Only then may a failure discard it.
@@ -1166,7 +1164,7 @@ def create_project(
             _discard_orphaned_workspace(project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Filesystem bootstrap failed: {exc}",
+                detail=f"Priečinok projektu sa nepodarilo pripraviť: {exc}",
             ) from exc
 
         # CR-V2-018: provision the v2 two-agent ``Pravidlá agenta`` charters into the just-bootstrapped
@@ -1202,7 +1200,7 @@ def create_project(
             _discard_orphaned_workspace(project.source_path, project.slug, scaffolded_by_this_create=scaffolded_here)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"v2 agent charter provisioning failed: {exc}",
+                detail=f"Príprava pokynov pre agentov projektu zlyhala: {exc}",
             ) from exc
 
         # DEV-253: a project on an app template gets the template's frame — frontend, server, compose, its settings —
@@ -1269,9 +1267,9 @@ def create_project(
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=(
-                        f"Stage 4 push+verify failed: {exc}. Local workspace removed so the same "
-                        f"project name can be created again. GitHub repo {repo_full_name} "
-                        f"preserved — Director cleanup if needed."
+                        f"Odoslanie projektu na GitHub a jeho overenie zlyhalo: {exc}. Miestny priečinok som zmazal, "
+                        "takže projekt s rovnakým menom sa dá založiť znova. Repozitár "
+                        f"{repo_full_name} na GitHube ostal — ak ho netreba, zmaže ho náš technický tím."
                     ),
                 ) from exc
         elif payload.repo_url and project.source_path:
@@ -1360,7 +1358,7 @@ def create_project(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create project filesystem state: {exc}",
+            detail=f"Súbory projektu sa nepodarilo pripraviť: {exc}",
         ) from exc
     db.refresh(project)
     # What did NOT finish. The steps are best-effort by design and the project is genuinely created,

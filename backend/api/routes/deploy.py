@@ -84,7 +84,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
 def _resolve_project(db: Session, slug: str) -> Project:
     project = db.execute(select(Project).where(Project.slug == slug)).scalar_one_or_none()
     if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project not found: {slug}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Projekt „{slug}“ v kokpite neexistuje.")
     return project
 
 

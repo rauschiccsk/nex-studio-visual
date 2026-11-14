@@ -105,7 +105,7 @@ class TestRiCannotDeleteSelf:
         )
 
         assert resp.status_code == 400
-        assert "delete" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == "Vlastný účet zmazať nemôžeš."
 
 
 class TestDeleteKeepsWhatTheUserPaidFor:

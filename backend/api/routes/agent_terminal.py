@@ -148,7 +148,7 @@ async def end_session(
     if row is None or row.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
+            detail="Sedenie terminálu agenta neexistuje — možno už skončilo.",
         )
     if row.ended_at is None:
         await service.end_session(session_id, terminated_by="user", db=db)

@@ -20,4 +20,4 @@ def test_the_route_answers_not_found(client):
     response = client.get(f"/api/v1/pipeline/{uuid.uuid4()}/vizual-mockup")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "No Vizuál mockup for this version."}
+    assert response.json() == {"detail": "Táto verzia nemá maketu Vizuálu."}

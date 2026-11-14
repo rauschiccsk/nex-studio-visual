@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import ConflictError, NotFoundError
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.foundation import User
@@ -413,10 +414,10 @@ def _map_orch_error(db: Session, version_id: Optional[uuid.UUID], exc: Orchestra
             else None
         )
         msg = action_labels_service.say(db, state, msg)
-    lowered = msg.lower()
-    if "not found" in lowered:
+    # DEV-385: the kind by the error's type — the text is Slovak and free to change.
+    if isinstance(exc, NotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
-    if "already started" in lowered:
+    if isinstance(exc, ConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
 
@@ -596,7 +597,7 @@ def get_vizual_mockup(version_id: uuid.UUID, db: Session = Depends(get_db)) -> H
     Called by: the cockpit's Vizuál iframe — the board hands out this URL as ``vizual_url``."""
     html = orchestrator.read_vizual_mockup(db, version_id)
     if html is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Vizuál mockup for this version.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Táto verzia nemá maketu Vizuálu.")
     return HTMLResponse(content=html)
 
 

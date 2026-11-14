@@ -597,7 +597,7 @@ class TestProjectRouter:
         )
 
         assert resp.status_code == 500
-        assert "Failed to create project filesystem state" in resp.json()["detail"]
+        assert "Súbory projektu sa nepodarilo pripraviť" in resp.json()["detail"]
 
         # Nothing landed in the DB — the transaction rolled back.
         remaining = db_session.execute(sa_select_project_by_slug("rollback-test")).scalar_one_or_none()
@@ -771,7 +771,7 @@ class TestProjectRouter:
         app.dependency_overrides.clear()
 
         assert resp.status_code == 500
-        assert "Failed to create GitHub repository" in resp.json()["detail"]
+        assert "Repozitár na GitHube sa nepodarilo založiť" in resp.json()["detail"]
 
         # No DB row, no KB folder.
         remaining = db_session.execute(sa_select_project_by_slug("gh-fail")).scalar_one_or_none()

@@ -87,7 +87,7 @@ def _get_entry(db: Session, project: Project, entry_id: UUID) -> ExternalCost:
     if entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"External cost not found: {entry_id}",
+            detail=f"Externý náklad {entry_id} neexistuje.",
         )
     return entry
 

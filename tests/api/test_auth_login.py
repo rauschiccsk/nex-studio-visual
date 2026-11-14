@@ -120,7 +120,7 @@ class TestLoginInvalidCredentials:
         )
 
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Invalid username or password"
+        assert resp.json()["detail"] == "Nesprávne meno alebo heslo."
 
     def test_nonexistent_user_returns_401(self, client, db_session):
         resp = client.post(
@@ -129,7 +129,7 @@ class TestLoginInvalidCredentials:
         )
 
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Invalid username or password"
+        assert resp.json()["detail"] == "Nesprávne meno alebo heslo."
 
 
 class TestLoginInactiveUser:
@@ -144,4 +144,4 @@ class TestLoginInactiveUser:
         )
 
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "User account is inactive"
+        assert resp.json()["detail"] == "Účet je vypnutý — požiadaj správcu, aby ho zapol."

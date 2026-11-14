@@ -100,7 +100,7 @@ def require_ri_role(
     if current_user.role != "ri":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This operation requires the 'ri' role",
+            detail="Na túto akciu potrebuješ rolu „ri“.",
         )
     return current_user
 
@@ -118,7 +118,7 @@ def require_ha_or_above(
     if current_user.role not in ("ri", "ha"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This operation requires the 'ri' or 'ha' role",
+            detail="Na túto akciu potrebuješ rolu „ri“ alebo „ha“.",
         )
     return current_user
 
