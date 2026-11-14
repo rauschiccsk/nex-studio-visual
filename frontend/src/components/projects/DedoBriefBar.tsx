@@ -16,13 +16,14 @@
 // ČO VIDÍ, TO SA STANE: obe tlačidlá nesú identifikátor zadania, ktoré má na obrazovke. Keby Dedo medzitým
 // napísal novšie, server odmietne (409) namiesto zámeny — a panel vtedy načíta to nové a povie prečo.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Lightbulb, Send, X } from "lucide-react";
 
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useDraft, draftKey } from "@/hooks/useDraft";
 import { ApiError } from "@/services/api";
 import {
+  getGitStatusApi,
   getProjectDedoProposalApi,
   rejectProjectDedoProposalApi,
   sendProjectDedoProposalApi,
@@ -30,6 +31,7 @@ import {
 } from "@/services/api/projects";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import LibraryUpgradeOffers from "@/components/controlCenter/LibraryUpgradeOffers";
 import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
 import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
@@ -70,6 +72,8 @@ const VERSION_NUMBER_RE = /^\d+\.\d+\.\d+$/;
 
 interface Props {
   projectId: string;
+  /** DEV-379: the project is on an app template — a new version founded here is offered the newer template too. */
+  hasTemplate: boolean;
   proposal: DedoProjectProposal | null;
   /** Nahradí zadanie tým, čo hovorí server — alebo `null`, keď už žiadne nie je. */
   onProposal: (proposal: DedoProjectProposal | null) => void;
@@ -77,7 +81,7 @@ interface Props {
   onVersion: (versionId: string, started: boolean) => void | Promise<void>;
 }
 
-export default function DedoBriefBar({ projectId, proposal, onProposal, onVersion }: Props) {
+export default function DedoBriefBar({ projectId, hasTemplate, proposal, onProposal, onVersion }: Props) {
   const proposalId = proposal?.id ?? null;
 
   // Jeho úpravy prežijú odchod z obrazovky. Bez toho by sa vrátil k nedotknutému originálu a odoslal
@@ -100,6 +104,20 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
   const [versionNumber, setVersionNumber] = useState(proposal?.version_number ?? "");
   // Háčiky musia bežať PRED skorým návratom nižšie — háčik za podmieneným návratom React zakazuje.
   const growRef = useAutoGrowTextarea(text);
+  // DEV-379: whether the project's working tree is clean — the upgrade offers of a new version wait until it is
+  // (``null`` while unknown or unreadable: unknown is not clean).
+  const [treeClean, setTreeClean] = useState<boolean | null>(null);
+  const foundsVersion = proposal?.proposed_action === "new_version";
+  const readTree = useCallback(async () => {
+    try {
+      setTreeClean((await getGitStatusApi(projectId)).clean);
+    } catch {
+      setTreeClean(null);
+    }
+  }, [projectId]);
+  useEffect(() => {
+    if (foundsVersion) void readTree();
+  }, [foundsVersion, proposalId, readTree]);
 
   useEffect(() => {
     if (proposalId) {
@@ -238,6 +256,16 @@ export default function DedoBriefBar({ projectId, proposal, onProposal, onVersio
             />
             {!numberOk && <span className="text-[var(--color-state-error-fg)]">v tvare 1.2.3</span>}
           </label>
+        )}
+
+        {/* DEV-379: a new version founded here is offered the same upgrades as on the „Nová verzia“ page. */}
+        {needsNumber && (
+          <LibraryUpgradeOffers
+            projectId={projectId}
+            hasTemplate={hasTemplate}
+            clean={treeClean === true}
+            afterwards={readTree}
+          />
         )}
 
         {needsKind && (

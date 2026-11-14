@@ -22,6 +22,10 @@ import "@testing-library/jest-dom/vitest";
 
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import {
+  getAppKitStatusApi,
+  getGitStatusApi,
+  getNexsharedStatusApi,
+  upgradeAppKitApi,
   getProjectDedoProposalApi,
   rejectProjectDedoProposalApi,
   sendProjectDedoProposalApi,
@@ -37,6 +41,11 @@ vi.mock("@/services/api/projects", () => ({
   commitGitApi: vi.fn(),
   discardGitApi: vi.fn(),
   getGitStatusApi: vi.fn(),
+  // DEV-379: the upgrade offers of a new version
+  getAppKitStatusApi: vi.fn(),
+  getNexsharedStatusApi: vi.fn(),
+  upgradeAppKitApi: vi.fn(),
+  upgradeNexsharedApi: vi.fn(),
 }));
 
 const ZADANIE =
@@ -60,11 +69,17 @@ function navrh(over: Partial<DedoProjectProposal> = {}): DedoProjectProposal {
   };
 }
 
-function vykresli(proposal: DedoProjectProposal | null) {
+function vykresli(proposal: DedoProjectProposal | null, hasTemplate = false) {
   const onProposal = vi.fn();
   const onVersion = vi.fn();
   render(
-    <DedoBriefBar projectId={PROJEKT} proposal={proposal} onProposal={onProposal} onVersion={onVersion} />,
+    <DedoBriefBar
+      projectId={PROJEKT}
+      hasTemplate={hasTemplate}
+      proposal={proposal}
+      onProposal={onProposal}
+      onVersion={onVersion}
+    />,
   );
   return { onProposal, onVersion };
 }
@@ -72,12 +87,16 @@ function vykresli(proposal: DedoProjectProposal | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  // DEV-379: a new version asks whether a newer template or nex-shared is out — by default nothing is behind.
+  vi.mocked(getGitStatusApi).mockResolvedValue({ clean: true, files: [] } as never);
+  vi.mocked(getAppKitStatusApi).mockResolvedValue({ current: "0.13.0", latest: "0.13.0", behind: 0 } as never);
+  vi.mocked(getNexsharedStatusApi).mockResolvedValue({ current: "0.33.0", latest: "0.33.0", behind: 0 } as never);
 });
 
 describe("Panel sa ukáže len vtedy, keď je čo rozhodnúť", () => {
   it("bez zadania nevykreslí nič", () => {
     const { container } = render(
-      <DedoBriefBar projectId={PROJEKT} proposal={null} onProposal={vi.fn()} onVersion={vi.fn()} />,
+      <DedoBriefBar projectId={PROJEKT} hasTemplate={false} proposal={null} onProposal={vi.fn()} onVersion={vi.fn()} />,
     );
 
     expect(container).toBeEmptyDOMElement();
@@ -302,5 +321,43 @@ describe("Neuložené zmeny projektu (DEV-175)", () => {
     expect(getProjectDedoProposalApi).not.toHaveBeenCalled();
     expect(onProposal).not.toHaveBeenCalled();
     expect(onVersion).not.toHaveBeenCalled();
+  });
+});
+
+
+// DEV-379: 13.11.2026 NEX Manager 1.6.0 was founded from this bar and stayed on nex-app-kit v0.11.0 — the offer to
+// upgrade lived only on the „Nová verzia“ page. Director, on the ticket and on doing it: „Súhlasím“.
+describe("Nová verzia zo zadania ponúkne povýšenie šablóny ako stránka „Nová verzia“ (DEV-379)", () => {
+  const BEHIND = { current: "0.11.0", latest: "0.13.0", behind: 2, changelog: [], parts: [], up_to_date: false };
+
+  beforeEach(() => {
+    vi.mocked(getGitStatusApi).mockResolvedValue({ clean: true, files: [] } as never);
+    vi.mocked(getAppKitStatusApi).mockResolvedValue(BEHIND as never);
+    vi.mocked(getNexsharedStatusApi).mockResolvedValue({ current: "0.33.0", latest: "0.33.0", behind: 0 } as never);
+    vi.mocked(upgradeAppKitApi).mockResolvedValue({ upgraded: true, target_version: "0.13.0", committed: true } as never);
+  });
+
+  it("pri novej verzii projektu na šablóne ponúkne novšiu šablónu a povýši ju", async () => {
+    vykresli(navrh({ proposed_action: "new_version", proposed_version_number: "1.6.0", version_number: "1.6.0" }), true);
+
+    expect(await screen.findByText("K dispozícii je novšia šablóna aplikácie")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /0\.13\.0/ }));
+    await waitFor(() => expect(upgradeAppKitApi).toHaveBeenCalledWith(PROJEKT, "0.13.0"));
+  });
+
+  it("rýchla oprava povýšenie neponúka — verzia nevzniká z formulára", async () => {
+    vykresli(navrh({ proposed_action: "fast_fix" }), true);
+    await screen.findByText(/Dedo .*pripravil zadanie/i);
+
+    expect(getAppKitStatusApi).not.toHaveBeenCalled();
+    expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).toBeNull();
+  });
+
+  it("kým má projekt neuložené zmeny, povýšenie počká", async () => {
+    vi.mocked(getGitStatusApi).mockResolvedValue({ clean: false, files: [] } as never);
+    vykresli(navrh({ proposed_action: "new_version", proposed_version_number: "1.6.0", version_number: "1.6.0" }), true);
+
+    await waitFor(() => expect(getAppKitStatusApi).toHaveBeenCalled());
+    expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).toBeNull();
   });
 });

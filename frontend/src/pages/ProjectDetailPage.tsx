@@ -618,6 +618,7 @@ export default function ProjectDetailPage() {
         <div id={DEDO_BRIEF_ANCHOR}>
           <DedoBriefBar
             projectId={project.id}
+            hasTemplate={!!project.template}
             proposal={dedoProposal}
             onProposal={setDedoProposal}
             onVersion={async (versionId, started) => {

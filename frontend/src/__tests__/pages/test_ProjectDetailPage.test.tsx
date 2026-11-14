@@ -99,6 +99,13 @@ vi.mock("@/services/api/projects", () => ({
   // DEV-254: the conversion onto the app template is offered above a new-version brief.
   getAppTemplateConversionApi: getAppTemplateConversionApiMock,
   convertToAppTemplateApi: convertToAppTemplateApiMock,
+  // DEV-379: a new-version brief offers the newer template and nex-shared as the „Nová verzia“ page does — here
+  // nothing is behind and the tree is clean, so the offers stay out of what these tests measure.
+  getGitStatusApi: vi.fn(() => Promise.resolve({ clean: true, files: [] })),
+  getAppKitStatusApi: vi.fn(() => Promise.resolve({ behind: 0 })),
+  getNexsharedStatusApi: vi.fn(() => Promise.resolve({ behind: 0 })),
+  upgradeAppKitApi: vi.fn(),
+  upgradeNexsharedApi: vi.fn(),
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({

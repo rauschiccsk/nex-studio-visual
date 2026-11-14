@@ -2,22 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   listProjectsApi,
-  getNexsharedStatusApi,
-  upgradeNexsharedApi,
-  getAppKitStatusApi,
-  upgradeAppKitApi,
   getGitStatusApi,
   commitGitApi,
   discardGitApi,
-  type AppKitStatus,
-  type NexsharedStatus,
   type GitStatus,
 } from "@/services/api/projects";
-import { NexsharedUpgradePrompt } from "@/components/controlCenter/NexsharedUpgradePrompt";
-import { AppKitUpgradePrompt } from "@/components/controlCenter/AppKitUpgradePrompt";
+import LibraryUpgradeOffers from "@/components/controlCenter/LibraryUpgradeOffers";
 import { AppTemplateConversionPrompt } from "@/components/controlCenter/AppTemplateConversionPrompt";
 import { templateConversionApplies } from "@/components/controlCenter/templateConversion";
-import { useLibraryUpgrade } from "@/hooks/useLibraryUpgrade";
 import { DirtyTreeGuard } from "@/components/controlCenter/DirtyTreeGuard";
 import {
   listVersions,
@@ -105,18 +97,9 @@ export default function NewVersionPage() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
 
-  // #3 auto-notify: is the app behind the latest nex-shared — and, on an app template, behind the newest nex-app-kit
-  // (DEV-253)? Opt-in upgrades before the build; each re-reads the tree afterwards.
-  const nex = useLibraryUpgrade<NexsharedStatus>(
-    "nex-shared",
-    (target) => upgradeNexsharedApi(project!.id, target),
-    () => refreshGitStatus(),
-  );
-  const kit = useLibraryUpgrade<AppKitStatus>(
-    "šablóny aplikácie",
-    (target) => upgradeAppKitApi(project!.id, target),
-    () => refreshGitStatus(),
-  );
+  // #3 / DEV-253: the opt-in upgrades of nex-shared and nex-app-kit live in LibraryUpgradeOffers (DEV-379 — the same
+  // offer where a version is founded from the technical team's brief); a conversion onto a template re-reads them.
+  const [upgradesKey, setUpgradesKey] = useState(0);
   // DEV-254: what the conversion onto the template did, said once it is done.
   const [converted, setConverted] = useState<string | null>(null);
 
@@ -128,14 +111,9 @@ export default function NewVersionPage() {
         "v tejto verzii — Príprava to dostane ako riadnu položku rozsahu.",
     );
     // The conversion moved nex-shared and added the kit — re-read both, and the tree it committed to.
-    getNexsharedStatusApi(project.id).then(setNexStatus).catch(() => {});
-    getAppKitStatusApi(project.id).then(setKitStatus).catch(() => {});
+    setUpgradesKey((k) => k + 1);
     await refreshGitStatus();
   }
-
-  // React keeps a state setter the same for the component's life — the load below may depend on it.
-  const { setStatus: setNexStatus } = nex;
-  const { setStatus: setKitStatus } = kit;
 
   // v4.0.25 dirty-tree guard: block founding until the project's working tree is clean, so the
   // pipeline never starts from an uncommitted baseline it can't scope (Tibor/Nazar lens).
@@ -158,16 +136,6 @@ export default function NewVersionPage() {
         const found = res.items.find((p) => p.slug === slug);
         if (!found) { setLoadError("Projekt nebol nájdený."); return; }
         setProject(found);
-        // #3: check nex-shared freshness (best-effort — a failure just skips the prompt).
-        getNexsharedStatusApi(found.id)
-          .then((st) => { if (!cancelled) setNexStatus(st); })
-          .catch(() => {});
-        // DEV-253: and nex-app-kit's, in a project on an app template.
-        if (found.template) {
-          getAppKitStatusApi(found.id)
-            .then((st) => { if (!cancelled) setKitStatus(st); })
-            .catch(() => {});
-        }
         // v4.0.25: preflight the working tree — a dirty tree blocks founding until resolved.
         // A failed preflight leaves the page unable to tell clean from dirty; say so instead of
         // silently reading "unknown" as "clean" and founding on an unseen baseline.
@@ -189,7 +157,7 @@ export default function NewVersionPage() {
       })
       .catch(() => { if (!cancelled) setLoadError("Nepodarilo sa načítať projekt."); });
     return () => { cancelled = true; };
-  }, [slug, setNexStatus, setKitStatus]);
+  }, [slug]);
 
   useEffect(() => { verRef.current?.focus(); }, []);
 
@@ -268,11 +236,6 @@ export default function NewVersionPage() {
       const gs = await refreshGitStatus();
       if (gs && !gs.clean) {
         setGitError({ message: "Uloženie prebehlo, ale projekt má stále neuložené zmeny." });
-      } else if (gs) {
-        // A verified-clean tree also settles a pin that was written but not saved — this commit saved it.
-        // Leaving that note up would be the same lie in the other direction.
-        nex.clearError();
-        kit.clearError();
       }
     } catch (err: unknown) {
       setGitError(humanizeApiError(err, "Uloženie zmien zlyhalo"));
@@ -295,10 +258,6 @@ export default function NewVersionPage() {
       const gs = await refreshGitStatus();
       if (gs && !gs.clean) {
         setGitError({ message: "Zahodenie prebehlo, ale projekt má stále neuložené zmeny." });
-      } else if (gs) {
-        // Discarding threw the unsaved pin away too — the note about it no longer applies.
-        nex.clearError();
-        kit.clearError();
       }
     } catch (err: unknown) {
       setGitError(humanizeApiError(err, "Zahodenie zmien zlyhalo"));
@@ -503,38 +462,18 @@ export default function NewVersionPage() {
               {converted}
             </p>
           )}
-          {/* Upgrade prompts — only once the tree is clean (resolve pending work first). DEV-253: the app template's
-              kit first; the design kit after it. */}
-          {!isDirty && kit.offered && kit.status && !savedVersion && (
-            <div className="mb-5">
-              <AppKitUpgradePrompt
-                status={kit.status}
-                busy={kit.busy}
-                onUpgrade={(target) => void kit.run(target)}
-                onStay={kit.dismiss}
-              />
-            </div>
+          {/* Upgrade offers — only once the tree is clean (resolve pending work first); DEV-379: the same component as the
+              technical team's brief on the project's page. */}
+          {project && (
+            <LibraryUpgradeOffers
+              projectId={project.id}
+              hasTemplate={!!project.template}
+              clean={!isDirty}
+              hidden={!!savedVersion}
+              reloadKey={upgradesKey}
+              afterwards={refreshGitStatus}
+            />
           )}
-          {!isDirty && nex.offered && nex.status && !savedVersion && (
-            <div className="mb-5">
-              <NexsharedUpgradePrompt
-                status={nex.status}
-                busy={nex.busy}
-                onUpgrade={(target) => void nex.run(target)}
-                onStay={nex.dismiss}
-              />
-            </div>
-          )}
-          {/* An upgrade that wrote the pin but could not save it leaves the tree dirty — which hides
-              the prompt above — so its failure has to stand on its own line. */}
-          {!savedVersion &&
-            [kit.error, nex.error].map((error, i) => (
-              <ErrorNote
-                key={i}
-                error={error}
-                className="mb-5 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] p-3"
-              />
-            ))}
           <form onSubmit={handleSaveZadanie} noValidate className="space-y-5">
 
             {/* Version number + Name */}
