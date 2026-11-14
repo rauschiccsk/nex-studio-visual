@@ -33,8 +33,8 @@ from backend.db.models.backlog import BacklogItem
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
+from backend.services import action_labels, orchestrator, pipeline_runner, vizual_sandbox
 from backend.services import backlog as backlog_service
-from backend.services import orchestrator, pipeline_runner, vizual_sandbox
 from backend.services.pipeline_status import PipelineStatusBlock
 from tests.test_orchestrator_v2_priprava_dial import _make_version, _seed_state
 
@@ -241,11 +241,9 @@ def test_a_conversation_build_is_not_offered_it_and_the_engine_refuses_it():
 
 
 def test_the_next_step_names_the_button_the_manazer_has():
-    """The Manažér's own button to send the Staviteľ what to rework is „Uprav“ (ConversationComposer)."""
-    assert orchestrator.BACK_TO_PRIPRAVA_NEXT_ACTION == (
-        "Verzia je späť v Príprave — Návrh a Vizuál sú zahodené. Zaraď požiadavky zo Zásobníka a v Riadiacom centre "
-        "napíš Staviteľovi, čo má prepracovať, a stlač „Uprav“."
-    )
+    """The Manažér's own button to send the Staviteľ what to rework (``uprav``) — named as his screen draws it when the
+    sentence is shown (DEV-376); the board after the return reads „Uprav“ (below)."""
+    assert orchestrator.BACK_TO_PRIPRAVA_NEXT_ACTION.endswith(f"a stlač {action_labels.press('uprav')}.")
 
 
 def test_the_board_drops_it_once_the_build_started(db_session):
@@ -299,7 +297,8 @@ async def test_the_engine_refuses_it_after_dedo_released_a_build_and_once_the_bu
     db_session.flush()
     with pytest.raises(ValueError) as refused:
         await _go_back(db_session, cut_off.id)
-    assert "Pokračovať" in str(refused.value) and cut_state.current_stage == "vizual"
+    refusal = pipeline_routes._map_orch_error(db_session, cut_off.id, refused.value).detail
+    assert "„Pokračovať“" in refusal and cut_state.current_stage == "vizual"
 
     version, project, started_state = _settled(db_session, stage="vizual")
     _plan(db_session, version, project, started=True)
@@ -331,7 +330,7 @@ async def test_after_it_the_version_is_in_priprava_waiting_for_the_manager(db_se
         "awaiting_manazer",
         None,
     )
-    assert after.next_action == NEXT_ACTION
+    assert pipeline_routes._board(db_session, version.id).state.next_action == NEXT_ACTION
     assert after.pending_vizual_signoff is False and after.retry_consultation is False
     assert db_session.get(Version, version.id).vizual_approved_sha is None
 

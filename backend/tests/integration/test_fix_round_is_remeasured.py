@@ -24,6 +24,7 @@ import uuid as _uuid
 import pytest
 from sqlalchemy import select
 
+from backend.api.routes.pipeline import _board
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
@@ -208,7 +209,11 @@ async def test_a_fix_that_works_says_so_and_hands_over_exactly_as_before(db_sess
     await orchestrator._run_build_round(db_session, state, on_message=_collect(messages))
 
     assert state.status == "awaiting_manazer"
-    assert state.next_action == "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
+    assert state.next_action == orchestrator.PROGRAMOVANIE_NEXT_ACTION
+    # DEV-376: read as the screen draws it — until 14.11.2026 this sentence said „(Schváliť / Uprav)“.
+    assert _board(db_session, state.version_id).state.next_action == (
+        "Manažér: posúdiť výsledok Programovania („Prejsť na overenie“ / „Upraviť“)."
+    )
     said = [m for m in messages if (m.payload or {}).get("fix_boot_recheck")]
     assert said and said[-1].payload["smoke"]["pass"] is True
     assert "spustila" in said[-1].content

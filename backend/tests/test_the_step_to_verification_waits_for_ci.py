@@ -55,7 +55,11 @@ async def test_the_step_waits_while_the_ci_of_the_pushed_commit_runs(db_session,
     board = _board(db_session, version.id)
     assert "schvalit" not in board.available_actions
     assert board.ci_gate is not None and board.ci_gate.state == "pending"
-    assert board.ci_gate.message == orchestrator.PROGRAMOVANIE_CI_PENDING_NEXT_ACTION
+    held = (
+        "Programovanie je hotové — čaká sa na kontroly na GitHube; „Prejsť na overenie“ sa ponúkne, keď dobehnú. "
+        "Kokpit to dorieši sám."
+    )
+    assert board.ci_gate.message == held and board.state.next_action == held
 
 
 async def test_a_project_without_ci_is_offered_the_step_at_once(db_session, monkeypatch):

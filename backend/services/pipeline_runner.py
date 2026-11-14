@@ -25,8 +25,8 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.schemas.pipeline import PipelineMessageRead, PipelineStateRead
-from backend.services import notify, orchestrator
+from backend.schemas.pipeline import PipelineMessageRead
+from backend.services import action_labels, notify, orchestrator
 from backend.services.pipeline_activity import HelperTracker, activity_line
 from backend.services.pipeline_ws import registry
 
@@ -115,10 +115,11 @@ def schedule_dispatch(version_id: uuid.UUID, directive: str | None = None) -> No
     task.add_done_callback(_clear_active)
 
 
-async def _broadcast_state(version_id: uuid.UUID, state: PipelineState) -> None:
+async def _broadcast_state(db, version_id: uuid.UUID, state: PipelineState) -> None:
+    # DEV-376: the state goes out with its sentence's buttons named as the screen draws them.
     await registry.broadcast(
         version_id,
-        {"type": "state_changed", "state": PipelineStateRead.model_validate(state).model_dump(mode="json")},
+        {"type": "state_changed", "state": action_labels.read_state(db, state).model_dump(mode="json")},
     )
 
 
@@ -147,7 +148,7 @@ async def settle_ci_waits(db) -> None:
     for msg in written:
         await _broadcast_message(msg.version_id, msg)
     for state in settled:
-        await _broadcast_state(state.version_id, state)
+        await _broadcast_state(db, state.version_id, state)
         if state.status == "agent_working":
             schedule_dispatch(state.version_id)
 
@@ -291,7 +292,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             )
             while state is not None and state.status == "agent_working" and guard < chain_limit:
                 guard += 1
-                await _broadcast_state(version_id, state)
+                await _broadcast_state(db, version_id, state)
                 on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
                 state = await orchestrator.run_dispatch(db, version_id, on_event, on_message=on_message)
                 db.commit()
@@ -304,7 +305,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
             relay_guard = 0
             while state is not None and orchestrator.has_pending_relay(version_id) and relay_guard < _MAX_RELAY_DRAIN:
                 relay_guard += 1
-                await _broadcast_state(version_id, state)
+                await _broadcast_state(db, version_id, state)
                 on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
                 state = await orchestrator.drain_relay_turn(db, version_id, on_event, on_message)
                 db.commit()
@@ -317,7 +318,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
                 )
                 while state is not None and state.status == "agent_working" and inner_guard < chain_limit:
                     inner_guard += 1
-                    await _broadcast_state(version_id, state)
+                    await _broadcast_state(db, version_id, state)
                     on_event = _activity_callback(version_id, state.current_stage, state.current_actor)
                     state = await orchestrator.run_dispatch(db, version_id, on_event, on_message=on_message)
                     db.commit()
@@ -335,7 +336,7 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
         if state is None:
             return
         db.refresh(state)
-        await _broadcast_state(version_id, state)
+        await _broadcast_state(db, version_id, state)
         await _maybe_notify(db, version_id, state)
     finally:
         try:
@@ -541,7 +542,10 @@ def _mark_blocked(
     # stale one (e.g. a prior 'agent_question'), and the board then renders a crashed dispatch as an
     # answerable question (offers 'answer'). A dispatch crash is a system error → recover via 'Skús znova'.
     state.block_reason = "system_error"
-    state.next_action = f"Dispatch zlyhal{detail}. Skús znova alebo usmerni (Uprav)."
+    state.next_action = (
+        f"Spustenie ťahu agenta zlyhalo{detail}. Môžeš napísať, čo má agent urobiť inak, a stlač "
+        f"{action_labels.press('uprav')}."
+    )
     msg = PipelineMessage(
         version_id=version_id,
         stage=state.current_stage,

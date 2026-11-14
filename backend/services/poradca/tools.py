@@ -313,7 +313,7 @@ class PoradcaTools:
                 return "\n".join(lines)
             lines.append(
                 f"Fáza: {state.current_stage}; stav: {state.status}; dôvod zastavenia: {state.block_reason or '—'}; "
-                f"čo ďalej: {state.next_action or '—'}."
+                f"čo ďalej: {board.state.next_action or '—'}."  # DEV-376: the board names its buttons
             )
             lines.extend(_brief_lines(db, version))
             # DEV-373: the names the screen draws, from the board — never a copy of them. A Decision Card's choice

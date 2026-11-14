@@ -50,7 +50,6 @@ from backend.schemas.dedo import (
     DedoProjectProposalSendResponse,
 )
 from backend.schemas.pagination import PaginatedResponse
-from backend.schemas.pipeline import PipelineStateRead
 from backend.schemas.project import (
     NEW_PROJECT_PRESETS,
     AppKitStatus,
@@ -72,6 +71,7 @@ from backend.schemas.project import (
     TemplateOption,
 )
 from backend.schemas.version import VersionCreate
+from backend.services import action_labels as action_labels_service
 from backend.services import app_kit as app_kit_service
 from backend.services import app_template as app_template_service
 from backend.services import dedo_project_proposal as dedo_proposal_service
@@ -1882,7 +1882,7 @@ async def send_dedo_proposal(
         db.refresh(state)
         await registry.broadcast(
             version_id,
-            {"type": "state_changed", "state": PipelineStateRead.model_validate(state).model_dump(mode="json")},
+            {"type": "state_changed", "state": action_labels_service.read_state(db, state).model_dump(mode="json")},
         )
         if state.status == "agent_working":
             pipeline_runner.schedule_dispatch(version_id, None)

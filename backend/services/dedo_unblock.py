@@ -48,6 +48,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models.pipeline import PipelineState
+from backend.services import action_labels
 from backend.services.dedo_message import DedoMessageError, record_dedo_message
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,10 @@ logger = logging.getLogger(__name__)
 
 #: What the board tells the Manažér once the build is released. Plain Slovak, no "framework"/"Dedo" jargon
 #: (the cockpit's reader is a non-expert): what happened, and the one thing to do about it.
-UNBLOCK_NEXT_ACTION = "Chybu v NEX Studiu sme opravili. Stlač „Pokračovať“ — Staviteľ bude pokračovať tam, kde prestal."
+UNBLOCK_NEXT_ACTION = (
+    f"Chybu v NEX Studiu sme opravili. Stlač {action_labels.press('pokracovat')} — Staviteľ bude pokračovať tam, "
+    "kde prestal."
+)
 
 
 def unblock_framework_issue(

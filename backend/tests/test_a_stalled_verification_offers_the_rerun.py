@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.services import orchestrator
+from backend.services import action_labels, orchestrator
 
 
 class _Stav:
@@ -74,10 +74,10 @@ def test_the_message_names_the_button_that_is_actually_there() -> None:
     import inspect
 
     zdroj = inspect.getsource(orchestrator)
-    popiska = "Znova spustiť overenie"  # presne to, čo je na tlačidle v ReverifyNoFixBar
-
+    # DEV-376: the messages name the button by its action; at a stalled Verifikácia it reads as the bar draws it.
     assert "alebo over znova" not in zdroj, "niekde sa stále radí akcia, ktorá sa tak nevolá"
-    assert zdroj.count(popiska) >= 2, "hlášky pri zablokovanej Verifikácii nemenujú skutočné tlačidlo"
+    assert zdroj.count("_press('overit_bez_opravy')") >= 2, "hlášky pri zablokovanej Verifikácii nemenujú tlačidlo"
+    assert action_labels.RERUN_VERIFICATION_LABEL == "Znova spustiť overenie"  # presne to, čo je na tlačidle
 
 
 def test_the_frontend_bar_keys_on_what_the_backend_offers() -> None:

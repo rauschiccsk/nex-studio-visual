@@ -448,8 +448,8 @@ class TestWhatDedoMayDo:
         assert state.status == "awaiting_manazer"
         assert state.block_reason is None
         assert state.resume_after_framework_fix is True
-        # The build does NOT resume by itself: the human keeps the last word.
-        assert "Pokračovať" in state.next_action
+        # The build does NOT resume by itself: the human keeps the last word — named as his screen draws it (DEV-376).
+        assert "Stlač „Pokračovať“" in body["next_action"]
         assert body["status"] == "awaiting_manazer"
         # Straight through ICCINT-13's service — same reason-as-Dedo's-message record, plus the transport.
         rows = _msgs(db_session, version.id)

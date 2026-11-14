@@ -31,7 +31,7 @@ from backend.db.models.pipeline import PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, DONE, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.services import backlog_tickets, plane_tickets
+from backend.services import action_labels, backlog_tickets, plane_tickets
 from backend.services.plane_gateway import PlaneGateway
 from backend.services.poradca.handoff import (
     HandoffRefused,
@@ -132,8 +132,10 @@ def context_lines(
         else:
             reason = f", dôvod zastavenia {state.block_reason}" if state.block_reason else ""
             lines.append(f"Stavba: fáza {state.current_stage}, stav {state.status}{reason}")
-            if state.next_action:
-                lines.append(f"Čo ďalej podľa kokpitu: {state.next_action}")
+            # DEV-376: the sentence with its buttons named as the Manažér sees them.
+            sentence = action_labels.state_sentence(db, state)
+            if sentence:
+                lines.append(f"Čo ďalej podľa kokpitu: {sentence}")
     if settings.app_public_url:
         lines.append(f"Rozhovor Poradcu: {settings.app_public_url.rstrip('/')}/poradca?c={conversation.id}")
     else:

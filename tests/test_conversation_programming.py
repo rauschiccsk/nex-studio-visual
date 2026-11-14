@@ -34,6 +34,7 @@ calls ``_settle_phase_boundary`` and does not return to priprava. ``invoke_agent
 
 from __future__ import annotations
 
+import inspect
 import uuid
 
 import pytest
@@ -492,8 +493,14 @@ class TestTokenStopViaRunner:
         _wire_runner(db_session, monkeypatch)
 
         # The token-stop must return BEFORE get_next_todo_task — routed through run_dispatch → _run_build_round.
-        def _must_not_reach(db, vid):  # pragma: no cover
-            raise AssertionError("token-stop must pause BEFORE get_next_todo_task")
+        # DEV-376: only the build loop is held to that — the runner's live frame afterwards names the paused
+        # sentence's buttons from the board, which reads the task list as every board does.
+        real_next_todo = orchestrator.task_service.get_next_todo_task
+
+        def _must_not_reach(db, vid):
+            if any(frame.function == "_run_build_round" for frame in inspect.stack()):  # pragma: no cover
+                raise AssertionError("token-stop must pause BEFORE get_next_todo_task")
+            return real_next_todo(db, vid)
 
         monkeypatch.setattr(orchestrator.task_service, "get_next_todo_task", _must_not_reach)
 

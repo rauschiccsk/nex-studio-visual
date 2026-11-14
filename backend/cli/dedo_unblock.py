@@ -34,7 +34,7 @@ import sys
 import uuid
 
 from backend.db.session import SessionLocal
-from backend.services import dedo_message
+from backend.services import action_labels, dedo_message
 from backend.services import dedo_unblock as dedo_unblock_service
 
 
@@ -91,8 +91,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Stavba odblokovaná (verzia {version_id}).")
     print(
-        "Manažér teraz vidí v kokpite jediné tlačidlo „Pokračovať“. Ťah, ktorý ním spustí, nesie tvoju "
-        "odpoveď agentovi — stavba beží ďalej až po jeho kliknutí.",
+        f"Manažér teraz vidí v kokpite jediné tlačidlo „{action_labels.CONTINUE_LABEL}“. Ťah, ktorý ním spustí, "
+        "nesie tvoju odpoveď agentovi — stavba beží ďalej až po jeho kliknutí.",
         file=sys.stderr,
     )
     return 0

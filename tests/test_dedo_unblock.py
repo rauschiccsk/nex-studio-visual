@@ -43,6 +43,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from backend.api.routes.pipeline import _board as pipeline_routes_board
 from backend.api.routes.pipeline import router as pipeline_router
 from backend.cli import dedo_unblock as cli_unblock
 from backend.core.security import require_shu_or_above
@@ -227,8 +228,9 @@ class TestTheRelease:
         assert state.status == "awaiting_manazer"
         assert state.block_reason is None
         assert state.resume_after_framework_fix is True
-        # The board must SAY what happened and what to press — a non-expert cannot infer either.
-        assert "Pokračovať" in state.next_action
+        # The board must SAY what happened and what to press — a non-expert cannot infer either. DEV-376: the button
+        # by the name the screen draws for a released build.
+        assert "Stlač „Pokračovať“" in pipeline_routes_board(db_session, version.id).state.next_action
         # The phase is untouched: the build resumes where it stopped, it does not restart somewhere else.
         assert state.current_stage == "programovanie"
 

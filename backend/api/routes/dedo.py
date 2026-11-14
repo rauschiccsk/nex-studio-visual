@@ -75,6 +75,7 @@ from backend.schemas.dedo import (
     DedoUnblockRequest,
 )
 from backend.schemas.pipeline import PipelineMessageRead
+from backend.services import action_labels as action_labels_service
 from backend.services import dedo_message as dedo_message_service
 from backend.services import dedo_project_proposal as dedo_project_proposal_service
 from backend.services import dedo_unblock as dedo_unblock_service
@@ -95,7 +96,7 @@ API_TRANSPORT = {"dedo_transport": "api"}
 _DEFAULT_MESSAGE_LIMIT = 200
 
 
-def _read(version: Version, project: Project, state: PipelineState) -> DedoBuildRead:
+def _read(db: Session, version: Version, project: Project, state: PipelineState) -> DedoBuildRead:
     return DedoBuildRead(
         version_id=version.id,
         version_number=version.version_number,
@@ -106,7 +107,8 @@ def _read(version: Version, project: Project, state: PipelineState) -> DedoBuild
         current_actor=state.current_actor,
         status=state.status,
         block_reason=state.block_reason,
-        next_action=state.next_action,
+        # DEV-376: the sentence with its buttons named as the Manažér sees them.
+        next_action=action_labels_service.state_sentence(db, state),
         resume_after_framework_fix=state.resume_after_framework_fix,
         waiting_since=state.awaiting_director_since,
         updated_at=state.updated_at,
@@ -187,7 +189,7 @@ def list_waiting_builds(db: Session = Depends(get_db)) -> list[DedoBuildRead]:
         )
         .order_by(PipelineState.updated_at.asc())
     ).all()
-    return [_read(version, project, state) for version, project, state in rows]
+    return [_read(db, version, project, state) for version, project, state in rows]
 
 
 @router.get("/builds/{version_id}", response_model=DedoBuildRead)
@@ -198,7 +200,7 @@ def get_build(version_id: uuid.UUID, db: Session = Depends(get_db)) -> DedoBuild
     is half of every such diagnosis. Reading is the wide half of the charter's grant; writing is the narrow
     one.
     """
-    return _read(*_load(db, version_id))
+    return _read(db, *_load(db, version_id))
 
 
 @router.get("/builds/{version_id}/messages", response_model=list[PipelineMessageRead])
@@ -377,4 +379,4 @@ def unblock_build(
     db.commit()
     logger.info("Dedo (API) unblocked version %s (%s)", version_id, project.slug)
     state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one()
-    return _read(version, project, state)
+    return _read(db, version, project, state)

@@ -48,7 +48,6 @@ from backend.schemas.pipeline import (
     PipelineMessageRead,
     PipelineRelayRequest,
     PipelineRelayResponse,
-    PipelineStateRead,
     VizualPreviewRead,
 )
 from backend.services import action_labels as action_labels_service
@@ -356,8 +355,13 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     # find in the ``recent_messages`` tail — a busy build would push it out of that tail and the cockpit
     # would stop offering a proposal that still exists. One indexed query; ``None`` in the ordinary case.
     proposal = dedo_message_service.open_proposal(db, version_id) if state is not None else None
+    # DEV-373: the buttons' names for this state — the screen and Poradca read the same words; DEV-376: the state's
+    # sentence names its buttons with these very labels.
+    labels = action_labels_service.action_labels(db, state, available_actions) if state is not None else {}
+    if ci_gate is not None:
+        ci_gate = ci_gate.model_copy(update={"message": action_labels_service.name_buttons(ci_gate.message, labels)})
     return PipelineBoardRead(
-        state=PipelineStateRead.model_validate(state) if state is not None else None,
+        state=action_labels_service.read_state(db, state, labels) if state is not None else None,
         recent_messages=[PipelineMessageRead.model_validate(m) for m in _recent_messages(db, version_id, limit)],
         available_actions=available_actions,
         ci_gate=ci_gate,
@@ -369,8 +373,7 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         verified_provenance=verified_provenance,
         spec_approved=spec_approved,
         vizual_url=vizual_url,
-        # DEV-373: the buttons' names for this state — the screen and Poradca read the same words.
-        action_labels=action_labels_service.action_labels(db, state, available_actions) if state is not None else {},
+        action_labels=labels,
         # DEV-371: only while the build stands blocked on that check — the screen's „Skús znova“ reads it.
         check_failed_on_download=(
             state is not None
@@ -399,8 +402,17 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
     )
 
 
-def _map_orch_error(exc: OrchestratorError) -> HTTPException:
+def _map_orch_error(db: Session, version_id: Optional[uuid.UUID], exc: OrchestratorError) -> HTTPException:
+    """A refused action as the Manažér reads it. DEV-376: its buttons are named as the screen he is looking at draws
+    them — the state read after the rollback, before the refused action."""
     msg = str(exc)
+    if action_labels_service.names_a_button(msg):
+        state = (
+            db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+            if version_id is not None
+            else None
+        )
+        msg = action_labels_service.say(db, state, msg)
     lowered = msg.lower()
     if "not found" in lowered:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
@@ -456,7 +468,7 @@ async def start_fast_fix(
         )
     except OrchestratorError as exc:
         db.rollback()
-        raise _map_orch_error(exc) from exc
+        raise _map_orch_error(db, None, exc) from exc
     except ValueError as exc:
         db.rollback()
         # No semver base version / bumped collision — a client/data precondition, not a server fault.
@@ -471,7 +483,7 @@ async def start_fast_fix(
     # symmetric with post_action and harmless). The kickoff Coordinator runs in the background.
     await registry.broadcast(
         version_id,
-        {"type": "state_changed", "state": PipelineStateRead.model_validate(state).model_dump(mode="json")},
+        {"type": "state_changed", "state": action_labels_service.read_state(db, state).model_dump(mode="json")},
     )
     if state.status == "agent_working":
         pipeline_runner.schedule_dispatch(version_id, None)
@@ -569,7 +581,7 @@ async def restart_vizual_preview(
     try:
         return VizualPreviewRead(**await orchestrator.restart_vizual_preview(db, version_id))
     except OrchestratorError as exc:
-        raise _map_orch_error(exc) from exc
+        raise _map_orch_error(db, version_id, exc) from exc
 
 
 @router.get("/{version_id}/vizual-mockup", response_class=HTMLResponse)
@@ -626,7 +638,7 @@ async def _apply_and_publish(
         )
     except OrchestratorError as exc:
         db.rollback()
-        raise _map_orch_error(exc) from exc
+        raise _map_orch_error(db, version_id, exc) from exc
     if on_applied is not None:
         on_applied(state)
     db.commit()
@@ -635,7 +647,7 @@ async def _apply_and_publish(
     new_msgs = [m for m in _recent_messages(db, version_id, 200) if m.id not in pre_ids]
     await registry.broadcast(
         version_id,
-        {"type": "state_changed", "state": PipelineStateRead.model_validate(state).model_dump(mode="json")},
+        {"type": "state_changed", "state": action_labels_service.read_state(db, state).model_dump(mode="json")},
     )
     for m in new_msgs:
         await registry.broadcast(
@@ -768,7 +780,7 @@ async def send_dedo_proposal(
             )
         except OrchestratorError as exc:
             db.rollback()
-            raise _map_orch_error(exc) from exc
+            raise _map_orch_error(db, version_id, exc) from exc
         except ValueError as exc:
             db.rollback()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -783,7 +795,7 @@ async def send_dedo_proposal(
         # nerozbehla. Chytil to test; prvá verzia tejto vetvy končila commitom a stavba by bola ostala stáť.
         await registry.broadcast(
             new_version.id,
-            {"type": "state_changed", "state": PipelineStateRead.model_validate(new_state).model_dump(mode="json")},
+            {"type": "state_changed", "state": action_labels_service.read_state(db, new_state).model_dump(mode="json")},
         )
         if new_state.status == "agent_working":
             pipeline_runner.schedule_dispatch(new_version.id, None)
@@ -909,14 +921,14 @@ async def post_relay(
         result = await orchestrator.relay_manazer_message(db, version_id=version_id, text=payload.text)
     except OrchestratorError as exc:
         db.rollback()
-        raise _map_orch_error(exc) from exc
+        raise _map_orch_error(db, version_id, exc) from exc
     db.commit()
     db.refresh(result.state)
 
     new_msgs = [m for m in _recent_messages(db, version_id, 200) if m.id not in pre_ids]
     await registry.broadcast(
         version_id,
-        {"type": "state_changed", "state": PipelineStateRead.model_validate(result.state).model_dump(mode="json")},
+        {"type": "state_changed", "state": action_labels_service.read_state(db, result.state).model_dump(mode="json")},
     )
     for m in new_msgs:
         await registry.broadcast(

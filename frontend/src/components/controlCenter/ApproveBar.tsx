@@ -36,9 +36,10 @@ interface Props {
   previewDown?: boolean;
 }
 
-/** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run. */
-const VIZUAL_PREVIEW_DOWN =
-  "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ.";
+/** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run — the preview's
+ *  button named where every button is named (DEV-376). */
+const vizualPreviewDown = (board: Props["board"]) =>
+  `Živý náhľad nebeží — spusti ho tlačidlom „${actionLabel(board, "restart_preview")}“, pozri si ho a potom vizuál schváľ.`;
 
 export default function ApproveBar({ board, versionId, onBoard, previewDown = false }: Props) {
   const navigate = useNavigate();
@@ -128,7 +129,7 @@ export default function ApproveBar({ board, versionId, onBoard, previewDown = fa
         </div>
       )}
       {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}
-      {isVizual && previewDown && <p className="text-xs text-[var(--color-text-muted)]">{VIZUAL_PREVIEW_DOWN}</p>}
+      {isVizual && previewDown && <p className="text-xs text-[var(--color-text-muted)]">{vizualPreviewDown(board)}</p>}
 
       <div className="flex items-center gap-2">
         {checkKeys.length > 0 && (

@@ -10,7 +10,7 @@ na obrazovke nie je mi jasné či niečo ešte beží alebo je to hotové“. Th
 from __future__ import annotations
 
 from backend.api.routes.pipeline import _board
-from backend.services import orchestrator
+from backend.services import action_labels, orchestrator
 from tests.test_a_version_waits_for_its_ci import GREEN, _passed_while_ci_runs
 
 
@@ -21,7 +21,9 @@ async def test_after_verification_the_board_says_the_version_waits_for_its_check
     gate = _board(db_session, version.id).ci_gate
 
     assert gate is not None and gate.state == "pending"
-    assert gate.message == orchestrator.VERIFIKACIA_CI_PENDING_GATE
+    assert gate.message == (
+        "Verifikácia prešla — „Schváliť na Hotovo“ sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám."
+    )
 
 
 async def test_the_fast_fix_says_it_too(db_session, monkeypatch):
@@ -44,6 +46,5 @@ async def test_once_the_checks_are_green_the_board_waits_for_nothing(db_session,
 
 
 def test_the_sentence_names_the_step_that_waits():
-    assert orchestrator.VERIFIKACIA_CI_PENDING_GATE == (
-        "Verifikácia prešla — „Schváliť na Hotovo“ sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám."
-    )
+    """The step by its action — the board names it as the gate it holds (DEV-376; the board test above reads it)."""
+    assert action_labels.press("schvalit") in orchestrator.VERIFIKACIA_CI_PENDING_GATE

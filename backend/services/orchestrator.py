@@ -62,6 +62,7 @@ from backend.schemas.epic import EpicCreate
 from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
+    action_labels,
     app_template,
     back_to_priprava,
     build_db,
@@ -145,6 +146,16 @@ from backend.services.pipeline_status import (
 # are deferred to Milestones C/D. This CR (Milestone B) only lands the status-block CONTRACT.
 
 logger = logging.getLogger(__name__)
+
+#: DEV-376: a sentence names a button by its action; the name is filled in as the screen draws it.
+_press = action_labels.press
+#: The way out of an error stop: the error bar's box and its one button (``uprav``, drawn „Skús znova“ there).
+_RETRY_CLAUSE = f"Môžeš napísať, čo má agent urobiť inak, a stlač {_press('uprav')}."
+#: A build stopped on a NEX Studio bug — the Manažér's one move is to report it again later.
+_FRAMEWORK_ISSUE_NEXT_ACTION = (
+    "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na ňu upozornili. "
+    f"Skús to o chvíľu znova tlačidlom {_press('nahlasit_znova')}, alebo zatiaľ pokračuj na inom projekte."
+)
 
 # ── v2.0.0 two-agent role identity (CR-V2-007) ─────────────────────────────────────────────────────
 # The build engine drives exactly two agents: the AI Agent (the doer) + the independent Auditor (the
@@ -697,7 +708,7 @@ VERIF_STALL_BLOCK_REASONS = ("agent_error", "parse_exhaustion", "system_error")
 
 #: ICCINT-163: what the board says between "Pozastaviť" and the loop's next task boundary, and after it.
 PAUSE_PENDING_NEXT_ACTION = "Pozastavujem — Staviteľ dokončí rozrobenú úlohu a potom zastane."
-PAUSED_BY_MANAZER_NEXT_ACTION = "Pozastavené Manažérom — pokračuj cez 'Pokračovať'."
+PAUSED_BY_MANAZER_NEXT_ACTION = f"Pozastavené Manažérom — pokračuj tlačidlom {_press('pokracovat')}."
 
 #: DEV-367 — „Vrátiť do Prípravy": the phases a version goes back from, by the name the Manažér knows them.
 BACK_TO_PRIPRAVA = "vratit_do_pripravy"
@@ -706,7 +717,7 @@ BACK_TO_PRIPRAVA_FROM = {"navrh": "Návrh", "vizual": "Vizuál"}
 BACK_TO_PRIPRAVA_MARKER = "Manažér vrátil verziu z fázy {phase} do Prípravy — Návrh, plán úloh a Vizuál sú zahodené."
 BACK_TO_PRIPRAVA_NEXT_ACTION = (
     "Verzia je späť v Príprave — Návrh a Vizuál sú zahodené. Zaraď požiadavky zo Zásobníka a v Riadiacom centre "
-    "napíš Staviteľovi, čo má prepracovať, a stlač „Uprav“."
+    f"napíš Staviteľovi, čo má prepracovať, a stlač {_press('uprav')}."
 )
 #: What the first round of Príprava after the return tells the Staviteľ, ahead of everything else.
 BACK_TO_PRIPRAVA_NOTICE = (
@@ -720,11 +731,11 @@ BACK_TO_PRIPRAVA_FAST_FIX = "Rýchla oprava nemá Návrh ani Vizuál — do Prí
 BACK_TO_PRIPRAVA_CONVERSATION = "Stavba vedená rozhovorom sa do Prípravy týmto tlačidlom nevracia."
 BACK_TO_PRIPRAVA_NOT_SETTLED = "Do Prípravy sa dá verzia vrátiť, až keď Staviteľ dokončí svoj ťah."
 BACK_TO_PRIPRAVA_AFTER_FIX = (
-    "Stavba čaká na pokračovanie po oprave chyby NEX Studia — najprv ju pusti ďalej („Pokračovať“)."
+    f"Stavba čaká na pokračovanie po oprave chyby NEX Studia — najprv ju pusti ďalej tlačidlom {_press('pokracovat')}."
 )
 BACK_TO_PRIPRAVA_AFTER_RESTART = (
-    "Reštart kokpitu prerušil fázu — najprv ju dokonči („Pokračovať“) alebo usmerni („Uprav“), potom sa dá verzia "
-    "vrátiť do Prípravy."
+    f"Reštart kokpitu prerušil fázu — najprv ju dokonči tlačidlom {_press('pokracovat')} alebo usmerni tlačidlom "
+    f"{_press('uprav')}, potom sa dá verzia vrátiť do Prípravy."
 )
 BACK_TO_PRIPRAVA_BUILD_STARTED = "Programovanie už začalo — verzia sa do Prípravy vrátiť nedá."
 #: What the Manažér reads when the project's git did not take the return (the version is back in Príprava anyway).
@@ -1440,6 +1451,27 @@ def _verdict_message(
     )
 
 
+def _payload_names_a_button(value: Any) -> bool:
+    if isinstance(value, str):
+        return action_labels.names_a_button(value)
+    if isinstance(value, dict):
+        return any(_payload_names_a_button(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_payload_names_a_button(v) for v in value)
+    return False
+
+
+def _name_payload_buttons(value: Any, labels: dict[str, str]) -> Any:
+    """DEV-376: every text a message's payload shows, its buttons named — a Decision Card option is kept as written."""
+    if isinstance(value, str):
+        return action_labels.name_buttons(value, labels)
+    if isinstance(value, dict):
+        return {k: _name_payload_buttons(v, labels) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_name_payload_buttons(v, labels) for v in value]
+    return value
+
+
 def _record_message(
     db: Session,
     *,
@@ -1452,6 +1484,13 @@ def _record_message(
     status: str = "delivered",
     payload: Optional[dict[str, Any]] = None,
 ) -> PipelineMessage:
+    if action_labels.names_a_button(content) or _payload_names_a_button(payload):
+        # DEV-376: a message goes to the Manažér at once — its buttons are named as the screen draws them now, in its
+        # text and in what its payload shows (a Decision Card's options).
+        state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+        labels = action_labels.state_labels(db, state) if state is not None else action_labels.BASE
+        content = action_labels.name_buttons(content, labels)
+        payload = _name_payload_buttons(payload, labels)
     msg = PipelineMessage(
         version_id=version_id,
         stage=stage,
@@ -2550,6 +2589,10 @@ async def _consult_fallback(
     # rebuilds the same brief instead of guessing at one.
     if retry_source:
         base_payload = {**base_payload, "consult_retry": True, "consult_source": retry_source}
+    # DEV-376: settled first — the note names its buttons as the screen draws them at the stop it announces.
+    state.status = "awaiting_manazer"
+    state.block_reason = None
+    state.next_action = next_action or note
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -2562,9 +2605,6 @@ async def _consult_fallback(
     )
     if on_message is not None:
         await on_message(msg)
-    state.status = "awaiting_manazer"
-    state.block_reason = None
-    state.next_action = next_action or note
     db.flush()
     return state
 
@@ -2625,8 +2665,8 @@ async def _settle_for_consultation(
             db,
             state,
             note=(
-                f"Konzultácia sa zopakovala {AUDITOR_LOOP_MAX}× — eskalované Manažérovi. "
-                "Posúď návrh klasicky (Schváliť / Uprav)."
+                f"Konzultácia sa zopakovala {AUDITOR_LOOP_MAX}× — eskalované Manažérovi. Posúď návrh klasicky: "
+                f"schváľ ho tlačidlom {_press('schvalit')}, alebo ho vráť na úpravu tlačidlom {_press('uprav')}."
             ),
             on_message=on_message,
         )
@@ -2671,8 +2711,8 @@ async def _settle_for_consultation(
             agent_response = (result.summary or "").strip()
             content = (
                 f"**Nezávislá previerka označila {len(findings)} bod(ov). Agent namiesto rozhodovacích "
-                "kariet odpovedal takto** — porovnaj oba pohľady s aktuálnymi dokumentmi a rozhodni "
-                "(**Schváliť** / **Uprav**)."
+                "kariet odpovedal takto** — porovnaj oba pohľady s aktuálnymi dokumentmi a rozhodni: "
+                f"{_press('schvalit')}, alebo {_press('uprav')}."
             )
             if findings_md:
                 content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
@@ -2683,7 +2723,8 @@ async def _settle_for_consultation(
                 state,
                 note=content,
                 next_action=(
-                    f"Previerka ({len(findings)} bod.) a odpoveď agenta — posúď oba pohľady (Schváliť / Uprav)."
+                    f"Previerka ({len(findings)} bod.) a odpoveď agenta — posúď oba pohľady: {_press('schvalit')}, "
+                    f"alebo {_press('uprav')}."
                 ),
                 on_message=on_message,
                 findings=findings or None,
@@ -2692,8 +2733,9 @@ async def _settle_for_consultation(
         # A genuine parse failure / empty consultation block → fail-open, but still list the findings for
         # context so the stop is never content-less.
         content = (
-            "Konzultáciu sa nepodarilo pripraviť — odpoveď neprišla. Skús to znova "
-            "(**Skúsiť konzultáciu znova**), alebo posúď návrh klasicky (Schváliť / Uprav)."
+            "Konzultáciu sa nepodarilo pripraviť — odpoveď neprišla. Skús to znova tlačidlom "
+            f"{_press('zopakovat_konzultaciu')}, alebo posúď návrh klasicky: {_press('schvalit')}, alebo "
+            f"{_press('uprav')}."
         )
         if findings_md:
             content += f"\n\n**Nálezy previerky:**\n\n{findings_md}"
@@ -2799,10 +2841,7 @@ async def _block_for_dedo(
     ``framework_issue``, the Manažér's plain notice, and the message delivered to Dedo."""
     state.status = "blocked"
     state.block_reason = "framework_issue"
-    state.next_action = (
-        "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na ňu "
-        "upozornili. Skús to o chvíľu znova (Nahlásiť znova), alebo zatiaľ pokračuj na inom projekte."
-    )
+    state.next_action = _FRAMEWORK_ISSUE_NEXT_ACTION
 
     slug = _project_slug_for_version(db, state.version_id)
     version_number = db.execute(select(Version.version_number).where(Version.id == state.version_id)).scalar_one()
@@ -3990,8 +4029,8 @@ async def _ensure_navrh_schema_document(
     if (root / rel).is_file():
         return None
     return (
-        f"Návrh nemá dokument štruktúry databázy (`{rel}`), hoci aplikácia databázu má — usmerni agenta (Uprav) "
-        "a zopakuj Návrh."
+        f"Návrh nemá dokument štruktúry databázy (`{rel}`), hoci aplikácia databázu má — napíš agentovi, čo má "
+        f"doplniť, a stlač {_press('uprav')}."
     )
 
 
@@ -4775,8 +4814,8 @@ async def relay_manazer_message(db: Session, *, version_id: uuid.UUID, text: str
     # refused (the paused guard in apply_action); the pending pause is the same intent and gets the same answer.
     if pause_pending(state):
         raise OrchestratorError(
-            "Stavba sa pozastavuje — Staviteľ dokončuje rozrobenú úlohu. Napíš mu, keď zastane, "
-            "cez „Vrátiť agentovi na doplnenie“ alebo po „Pokračovať“."
+            "Stavba sa pozastavuje — Staviteľ dokončuje rozrobenú úlohu. Napíš mu, keď zastane — tlačidlom "
+            f"{_press('uprav')}, alebo po {_press('pokracovat')}."
         )
 
     # In-flight → enqueue behind the running turn (the runner drains it next). NEVER dispatch concurrently:
@@ -4926,6 +4965,13 @@ async def invoke_agent(
     gate still reads the STAGE. ``None`` (every legacy caller) omits the key → byte-for-byte the historical
     payload, so attribution falls back to ``msg.stage`` exactly as before.
     """
+    if action_labels.names_a_button(prompt):
+        # DEV-376: what the agent tells the Manažér names the buttons as his screen draws them.
+        prompt = action_labels.say(
+            db,
+            db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none(),
+            prompt,
+        )
     slug = _project_slug_for_version(db, version_id)
     session_id, is_first = _resolve_orch_session(db, slug, role)
     # R1-d (D3): bump the session's last activity for the TTL retention task. One UPDATE per turn (covers
@@ -7594,19 +7640,19 @@ CI_PENDING_REFUSAL = (
 )
 #: DEV-308 — what the board's CI gate says beside the held „Schváliť na Hotovo“ while the version waits for its checks.
 VERIFIKACIA_CI_PENDING_GATE = (
-    "Verifikácia prešla — „Schváliť na Hotovo“ sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám."
+    f"Verifikácia prešla — {_press('schvalit')} sa ponúkne, keď kontroly na GitHube dobehnú. Kokpit to dorieši sám."
 )
 
 # DEV-261 — the step from Programovanie to Verifikácia waits for the CI of the commit the cockpit pushed after the last
 # task. 30.10.2026 NEX Knowledge 0.2.0 offered „Prejsť na overenie“ the moment its fix ended, with CI still running; a
 # red CI would have cost a whole Auditor round to learn what the cockpit knew minutes later.
-PROGRAMOVANIE_NEXT_ACTION = "Manažér: posúdiť výsledok Programovania (Schváliť / Uprav)."
+PROGRAMOVANIE_NEXT_ACTION = f"Manažér: posúdiť výsledok Programovania ({_press('schvalit')} / {_press('uprav')})."
 PROGRAMOVANIE_CI_PENDING_NEXT_ACTION = (
-    "Programovanie je hotové — čaká sa na kontroly na GitHube; „Prejsť na overenie“ sa ponúkne, keď dobehnú. "
+    f"Programovanie je hotové — čaká sa na kontroly na GitHube; {_press('schvalit')} sa ponúkne, keď dobehnú. "
     "Kokpit to dorieši sám."
 )
 PROGRAMOVANIE_CI_RED_NEXT_ACTION = (
-    "Kontroly na GitHube po Programovaní zlyhali — vráť prácu agentovi na opravu („Vrátiť agentovi na opravu“)."
+    f"Kontroly na GitHube po Programovaní zlyhali — vráť prácu na opravu tlačidlom {_press('opravit_podla_ci')}."
 )
 PROGRAMOVANIE_CI_PENDING_REFUSAL = (
     "Na overenie zatiaľ nie: čaká sa na kontroly na GitHube — keď dobehnú, kokpit ponúkne ďalší krok sám."
@@ -7615,7 +7661,11 @@ PROGRAMOVANIE_CI_RED_REFUSAL = (
     "Na overenie nie: kontroly na GitHube po Programovaní zlyhali — najprv vráť prácu agentovi na opravu."
 )
 #: What the Manažér reads about a red CI after Programovanie — in its note and beside the held step.
-CI_RED_SENTENCE = "Kontroly na GitHube po Programovaní zlyhali: {detail}. Vráť prácu agentovi na opravu."
+CI_RED_SENTENCE = (
+    "Kontroly na GitHube po Programovaní zlyhali: {detail}. Vráť prácu na opravu tlačidlom "
+    + _press("opravit_podla_ci")
+    + "."
+)
 CI_RED_FIX_NOT_OFFERED = (
     "Vrátiť na opravu podľa kontrol sa dá len vtedy, keď kontroly na GitHube po Programovaní zlyhali."
 )
@@ -7682,7 +7732,7 @@ async def _settle_programovanie_ci_wait(
     elif ci_state == "unknown":
         gate = "unknown"
         content = (
-            f"Kontroly na GitHube sa nedali zistiť ({ci_detail}) — „Prejsť na overenie“ je k dispozícii; "
+            f"Kontroly na GitHube sa nedali zistiť ({ci_detail}) — {_press('schvalit')} je k dispozícii; "
             "Verifikácia ich skontroluje znova."
         )
         state.next_action = PROGRAMOVANIE_NEXT_ACTION
@@ -7690,7 +7740,7 @@ async def _settle_programovanie_ci_wait(
         gate = "overdue"
         content = (
             f"Kontroly na GitHube nedobehli ani po {settings.ci_pending_cap_hours} h ({ci_detail}) — "
-            "„Prejsť na overenie“ je k dispozícii; Verifikácia na ne počká."
+            f"{_press('schvalit')} je k dispozícii; Verifikácia na ne počká."
         )
         state.next_action = PROGRAMOVANIE_NEXT_ACTION
     note = _record_message(
@@ -10582,13 +10632,13 @@ async def run_dispatch(
         # notification (+ raw-output excerpt) so the AI Agent tab is never left empty.
         state.status = "blocked"
         state.block_reason = "parse_exhaustion"  # R4 (D1): worker produced no parseable output after retries
-        state.next_action = "Blokované — agent nevrátil platný výstup. Usmerni (Uprav) alebo odpovedz."
+        state.next_action = f"Blokované — agent nevrátil platný výstup. {_RETRY_CLAUSE}"
         await _record_parse_exhaustion(
             db,
             state,
             stage=stage,
             result=result,
-            human_hint="Skús znova (Uprav) alebo upresni zadanie.",
+            human_hint=f"Skús to znova tlačidlom {_press('uprav')}, prípadne s upresnením zadania.",
             on_message=on_message,
         )
         db.flush()
@@ -10620,7 +10670,9 @@ async def run_dispatch(
         if spec_err is not None:
             state.status = "blocked"
             state.block_reason = "agent_error"  # R4 (D1): the phase deliverable is missing on disk
-            state.next_action = "Špecifikácia nebola zapísaná — usmerni agenta (Uprav) a zopakuj prípravu."
+            state.next_action = (
+                f"Špecifikácia nebola zapísaná — napíš agentovi, čo má doplniť, a stlač {_press('uprav')}."
+            )
             db.flush()
             return state
 
@@ -11213,6 +11265,12 @@ async def _settle_plan_pass_failure(
         db.flush()
         return state
     phase = metrics_phase if metrics_phase is not None else stage
+    # DEV-376: settled first — the message names its button as the screen draws it at this stop.
+    state.status = "blocked"
+    state.block_reason = (
+        "agent_error" if failed.reason.startswith(_PLAN_PASS_ENVELOPE_LOSS_PREFIX) else "parse_exhaustion"
+    )
+    state.next_action = f"Blokované — plán úloh sa nepodarilo vygenerovať. {_RETRY_CLAUSE}"
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -11220,16 +11278,11 @@ async def _settle_plan_pass_failure(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. Usmerni agenta (Uprav) a zopakuj.",
+        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. {_RETRY_CLAUSE}",
         payload={"phase": phase, **(_failure_metrics_payload(failed) or {})},
     )
     if on_message is not None:
         await on_message(msg)
-    state.status = "blocked"
-    state.block_reason = (
-        "agent_error" if failed.reason.startswith(_PLAN_PASS_ENVELOPE_LOSS_PREFIX) else "parse_exhaustion"
-    )
-    state.next_action = "Blokované — plán úloh sa nepodarilo vygenerovať. Usmerni (Uprav) alebo odpovedz."
     db.flush()
     return state
 
@@ -11348,7 +11401,10 @@ async def _generate_incremental_plan(
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"
-        state.next_action = "Plán úloh zamietnutý — rozklad je príliš jemnozrnný. Usmerni plán (Uprav)."
+        state.next_action = (
+            "Plán úloh zamietnutý — rozklad je príliš jemnozrnný. Napíš, ako má plán rozložiť, a stlač "
+            f"{_press('uprav')}."
+        )
         db.flush()
         return state
 
@@ -11426,7 +11482,9 @@ async def _generate_incremental_plan(
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"
-        state.next_action = "Plán úloh zamietnutý — zostavený plán je neúplný. Usmerni plán (Uprav)."
+        state.next_action = (
+            f"Plán úloh zamietnutý — zostavený plán je neúplný. Napíš, čo v pláne chýba, a stlač {_press('uprav')}."
+        )
         db.flush()
         return state
 
@@ -11507,7 +11565,7 @@ async def _generate_incremental_plan(
             await on_message(msg)
         state.status = "blocked"
         state.block_reason = "system_error"  # R4 (D1): task-plan write failed (engine-side)
-        state.next_action = "Plán úloh sa nepodarilo zapísať — usmerni plán (Uprav)."
+        state.next_action = f"Plán úloh sa nepodarilo zapísať — skús to znova tlačidlom {_press('uprav')}."
         db.flush()
         return state
     return None  # success — the caller settles for its register
@@ -11840,13 +11898,13 @@ async def _run_navrh_round(
             return state
         state.status = "blocked"
         state.block_reason = "parse_exhaustion"  # R4 (D1): no parseable design output after retries
-        state.next_action = "Blokované — agent nevrátil platný návrh. Usmerni (Uprav) alebo odpovedz."
+        state.next_action = f"Blokované — agent nevrátil platný návrh. {_RETRY_CLAUSE}"
         await _record_parse_exhaustion(
             db,
             state,
             stage="navrh",
             result=result,
-            human_hint="Skús znova (Uprav) alebo upresni návrh.",
+            human_hint=f"Skús to znova tlačidlom {_press('uprav')}, prípadne s upresnením návrhu.",
             on_message=on_message,
         )
         db.flush()
@@ -11864,7 +11922,9 @@ async def _run_navrh_round(
     if design_err is not None:
         state.status = "blocked"
         state.block_reason = "agent_error"  # R4 (D1): the phase deliverable (design doc) is missing on disk
-        state.next_action = "Návrhový dokument nebol zapísaný — usmerni agenta (Uprav) a zopakuj Návrh."
+        state.next_action = (
+            f"Návrhový dokument nebol zapísaný — napíš agentovi, čo má doplniť, a stlač {_press('uprav')}."
+        )
         db.flush()
         return state
 
@@ -11942,9 +12002,10 @@ async def _run_navrh_round(
     if state.status != "done":
         state.status = "awaiting_manazer"
         state.next_action = (
-            "Manažér: posúdiť návrh — mení aj štruktúru databázy, ktorú schvaľuje len Ri (Schváliť / Uprav)."
+            "Manažér: posúdiť návrh — mení aj štruktúru databázy, ktorú schvaľuje len Ri "
+            f"({_press('schvalit')} / {_press('uprav')})."
             if schema_changes
-            else "Manažér: posúdiť návrhový dokument (Schváliť / Uprav)."
+            else f"Manažér: posúdiť návrhový dokument ({_press('schvalit')} / {_press('uprav')})."
         )
         db.flush()
     return state
@@ -12642,8 +12703,13 @@ async def _settle_verifikacia_verdict(
                         ConsultOption(
                             id="hold",
                             label="Zatiaľ podržať (rozhodnem neskôr)",
-                            detail="Build ostane blokovaný, kým nerozhodneš; neskôr môžeš usmerniť opravu "
-                            "aj cez 'Uprav'.",
+                            # DEV-376: a card is kept as written — its button named now, for this stop.
+                            detail=action_labels.say(
+                                db,
+                                state,
+                                "Build ostane blokovaný, kým nerozhodneš; neskôr môžeš usmerniť opravu aj tlačidlom "
+                                f"{_press('uprav')}.",
+                            ),
                         ),
                     ],
                     rationale=_RERUN_CI_RATIONALE
@@ -13092,6 +13158,13 @@ async def _run_verifikacia_round(
         # Fail-CLOSED at the release gate: an unparseable verdict must NEVER reach Hotovo (unlike the upfront
         # review's fail-open early net). Record it visibly + metered (system → manazer) and settle blocked.
         # The no-silent-done invariant holds: no PASS verdict on record → Hotovo unreachable.
+        # DEV-376: settled first — the message names its buttons as the screen draws them at this stop.
+        state.status = "blocked"
+        state.block_reason = "agent_error"  # R4 (D1): the release verdict turn produced no parseable output
+        state.next_action = (
+            "Blokované — Auditor nevrátil verdikt Verifikácie (spadol alebo mu vypršal čas). "
+            f"Klikni {_press('overit_bez_opravy')}."
+        )
         msg = _record_message(
             db,
             version_id=version_id,
@@ -13102,19 +13175,13 @@ async def _run_verifikacia_round(
             content=(
                 "Verdikt Auditora vo Verifikácii sa nepodarilo spracovať ani po opakovaných pokusoch — "
                 "Verifikácia je blokovaná (release gate, fail-closed). Aplikácia sama môže byť v poriadku — "
-                "zlyhal overovací beh, nie aplikácia. Klikni „Znova spustiť overenie“; ak by to malo "
-                "zmysel, usmerni opravu cez „Uprav“."
+                f"zlyhal overovací beh, nie aplikácia. Klikni {_press('overit_bez_opravy')}; ak by to malo "
+                f"zmysel, usmerni opravu: napíš pokyn a stlač {_press('uprav')}."
             ),
             payload=_failure_metrics_payload(review) or None,
         )
         if on_message is not None:
             await on_message(msg)
-        state.status = "blocked"
-        state.block_reason = "agent_error"  # R4 (D1): the release verdict turn produced no parseable output
-        state.next_action = (
-            "Blokované — Auditor nevrátil verdikt Verifikácie (spadol alebo mu vypršal čas). "
-            "Klikni „Znova spustiť overenie“."
-        )
         db.flush()
         return state
 
@@ -13455,12 +13522,12 @@ def _reopen_verifikacia_fix_round(db: Session, version_id: uuid.UUID) -> int:
 #: DEV-371 — what the Manažér reads when the start check after a fix failed twice on a download.
 DOWNLOAD_FAILED_CONTENT = (
     "Kontrola po oprave neprešla — pri stavbe aplikácie sa nepodarilo stiahnuť balík, ani na druhý pokus. Nie je to "
-    "chyba v kóde aplikácie, ale výpadok sťahovania. Stlač „Skús znova“ — nič netreba písať; Staviteľ kód nezmení "
-    "a skúšku spustenia zopakujem. Výpis je nižšie v technickom detaile."
+    f"chyba v kóde aplikácie, ale výpadok sťahovania. Stlač {_press('uprav')} — nič netreba písať; Staviteľ kód "
+    "nezmení a skúšku spustenia zopakujem. Výpis je nižšie v technickom detaile."
 )
 DOWNLOAD_FAILED_NEXT_ACTION = (
     "Kontrola po oprave neprešla — nepodarilo sa stiahnuť balík (výpadok sťahovania, nie chyba kódu). "
-    "Stlač „Skús znova“, nič netreba písať."
+    f"Stlač {_press('uprav')}, nič netreba písať."
 )
 #: DEV-371 — what the next round tells the Staviteľ after that: there is no bug to hunt.
 DOWNLOAD_FAILED_NOTICE = (
@@ -13569,6 +13636,21 @@ async def _settle_fix_boot_recheck(
     reopened = _reopen_verifikacia_fix_round(db, state.version_id)
     # DEV-371: a download that failed twice is no code to fix — said plainly, the retry without writing.
     download = is_download_failure(detail)
+    # The same honest shape a dropped task already settles into a few lines up in the build loop: blocked,
+    # NOT ``programming_complete``, no phase advance — nothing downstream may read a green completion.
+    # ``check_failed``, NOT ``agent_error``: the cockpit turns the reason into a sentence, and this one must
+    # not read "Agent zlyhal" over an agent whose fix worked (ICCINT-43). DEV-376: settled before the message is
+    # written — it names its button as the screen draws it at this stop.
+    state.status = "blocked"
+    state.block_reason = "check_failed"
+    state.next_action = (
+        DOWNLOAD_FAILED_NEXT_ACTION
+        if download
+        else (
+            f"Kontrola po oprave neprešla — {_recheck_headline(detail)}. Stavba hotová nie je. "
+            f"Napíš, čo treba opraviť, a stlač {_press('uprav')} — spustím stavbu znova."
+        )
+    )
     # ICCINT-43: say WHAT was measured, never a category. The first version of this sentence read "aplikácia sa
     # stále nespustí" whatever came back — and the run it met had a perfectly healthy app whose test
     # container had failed. A sentence that is right by luck is not right.
@@ -13584,7 +13666,8 @@ async def _settle_fix_boot_recheck(
         else (
             f"Kontrola po oprave neprešla — {_recheck_headline(detail)}, takže oprava hotová nie je. "
             "Vrátil som ju medzi otvorené úlohy, aby plán nehlásil hotovo. "
-            "Dôvod je nižšie v technickom detaile — napíš agentovi, čo s tým (Uprav), a spustím stavbu znova."
+            "Dôvod je nižšie v technickom detaile — napíš agentovi, čo s tým, a stlač "
+            f"{_press('uprav')} — spustím stavbu znova."
         ),
         payload={
             "phase": "programovanie",
@@ -13597,20 +13680,6 @@ async def _settle_fix_boot_recheck(
     )
     if on_message is not None:
         await on_message(msg)
-    # The same honest shape a dropped task already settles into a few lines up in the build loop: blocked,
-    # NOT ``programming_complete``, no phase advance — nothing downstream may read a green completion.
-    # ``check_failed``, NOT ``agent_error``: the cockpit turns the reason into a sentence, and this one must
-    # not read "Agent zlyhal" over an agent whose fix worked (ICCINT-43).
-    state.status = "blocked"
-    state.block_reason = "check_failed"
-    state.next_action = (
-        DOWNLOAD_FAILED_NEXT_ACTION
-        if download
-        else (
-            f"Kontrola po oprave neprešla — {_recheck_headline(detail)}. Stavba hotová nie je. "
-            "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
-        )
-    )
     db.flush()
     return True
 
@@ -13665,7 +13734,7 @@ async def _route_manazer_fix_to_ai_agent(
         # ICCINT-126: povedz PREČO. Toto je výzva („je to pripravené, potvrď"), nie prekážka — a
         # dovtedy sa od prekročeného stropu nedala odlíšiť ničím okrem textu, ktorý sa preformuluje.
         state.pause_reason = "fix_ready"
-        state.next_action = "Oprava podľa tvojho pokynu je pripravená — 'Pokračovať' ju spustí."
+        state.next_action = f"Oprava podľa tvojho pokynu je pripravená — tlačidlo {_press('pokracovat')} ju spustí."
         db.flush()
     return state
 
@@ -14209,16 +14278,26 @@ def recover_orphaned_builds_on_startup(db: Session) -> int:
         if stage == "programovanie":
             # The coding loop keeps the resume CTA ("Pokračovať" = pokracovat); the per-task reclaim is
             # additive (CR-V2-012's self-checking loop owns it), not replaced here.
-            state.next_action = "Programovanie prerušené reštartom backendu — pokračuj cez 'Pokračovať'."
+            state.next_action = (
+                f"Programovanie prerušené reštartom backendu — pokračuj tlačidlom {_press('pokracovat')}."
+            )
             content = (
                 "Programovanie bolo prerušené reštartom backendu — obnovené do stavu 'čaká na Manažéra'. "
-                "Pokračuj cez 'Pokračovať'."
+                f"Pokračuj tlačidlom {_press('pokracovat')}."
             )
         else:
-            state.next_action = f"Fáza '{stage}' prerušená reštartom — {audit}. Pokračuj."
+            state.next_action = (
+                f"Fáza '{stage}' prerušená reštartom — {audit}. Pokračuj tlačidlom {_press('pokracovat')}."
+            )
             content = (
                 f"Fáza '{stage}' bola prerušená reštartom backendu — {audit}. Obnovené do stavu 'čaká na Manažéra'."
             )
+        # DEV-376: settled before the message is written — it names the button as the screen draws it after a restart.
+        state.status = "awaiting_manazer"  # the set listener also clears the flag + baseline …
+        state.dispatch_in_flight = False  # … cleared explicitly too for robustness (Seam #2).
+        state.dispatch_baseline_sha = None
+        # DEV-204: „Pokračuj“ must be a button in every phase, not only in a paused Programovanie.
+        state.resume_after_restart = True
         _record_message(
             db,
             version_id=state.version_id,
@@ -14235,11 +14314,6 @@ def recover_orphaned_builds_on_startup(db: Session) -> int:
                 "detected_commit_count": count,
             },
         )
-        state.status = "awaiting_manazer"  # the set listener also clears the flag + baseline …
-        state.dispatch_in_flight = False  # … cleared explicitly too for robustness (Seam #2).
-        state.dispatch_baseline_sha = None
-        # DEV-204: „Pokračuj“ must be a button in every phase, not only in a paused Programovanie.
-        state.resume_after_restart = True
     db.commit()
     return len(rows)
 
@@ -14831,11 +14905,12 @@ VIZUAL_PREVIEW_STATE_CAP = 30.0
 #: DEV-241: what the Manažér reads when a preview on old libraries could not be built anew — the strip then offers
 #: „Spustiť náhľad znova“, which tries again.
 VIZUAL_PREVIEW_REBUILD_FAILED = (
-    "Knižnice aplikácie sa zmenili a náhľad sa nepodarilo spustiť nanovo — skús „Spustiť náhľad znova“."
+    "Knižnice aplikácie sa zmenili a náhľad sa nepodarilo spustiť nanovo — skús "
+    f"„{action_labels.BASE['restart_preview']}“."
 )
 #: DEV-127: why „Schváliť vizuál" is refused while the preview does not run — the same words the button gives.
 VIZUAL_PREVIEW_DOWN = (
-    "Živý náhľad nebeží — spusti ho tlačidlom „Spustiť náhľad znova“, pozri si ho a potom vizuál schváľ."
+    f"Živý náhľad nebeží — spusti ho tlačidlom {_press('restart_preview')}, pozri si ho a potom vizuál schváľ."
 )
 
 
@@ -15038,14 +15113,17 @@ async def _run_vizual_round(
             state.block_reason = "system_error"  # R4 (D1): an engine-side step (the live preview) failed
             hlaska = (
                 f"Živý náhľad sa nerozbehol do {VIZUAL_SPINUP_CAP // 60} minút. Príprava možno ešte beží — "
-                "daj jej chvíľu a skús Uprav; ak sa neobjaví ani potom, počkaj na technický tím."
+                f"daj jej chvíľu a stlač {_press('uprav')}; ak sa neobjaví ani potom, počkaj na technický tím."
                 if timed_out
-                else "Živý náhľad sa nepodarilo spustiť. Skús to znova alebo počkaj na technický tím."
+                else f"Živý náhľad sa nepodarilo spustiť. Skús to znova tlačidlom {_press('uprav')}, alebo počkaj na "
+                "technický tím."
             )
             state.next_action = (
-                f"Živý náhľad sa nerozbehol do {VIZUAL_SPINUP_CAP // 60} minút — daj mu chvíľu a skús Uprav."
+                f"Živý náhľad sa nerozbehol do {VIZUAL_SPINUP_CAP // 60} minút — daj mu chvíľu a stlač "
+                f"{_press('uprav')}."
                 if timed_out
-                else "Živý náhľad sa nepodarilo spustiť — skús to znova (Uprav) alebo počkaj na technický tím."
+                else f"Živý náhľad sa nepodarilo spustiť — skús to znova tlačidlom {_press('uprav')}, alebo počkaj na "
+                "technický tím."
             )
             err_msg = _record_message(
                 db,
@@ -15241,14 +15319,15 @@ async def _run_vizual_round(
 
 #: What the Manažér is told to do at the plan stop — the buttons by the names the screen gives them.
 PLAN_STOP_NEXT_ACTION = (
-    "Manažér: pozri plán úloh a spusti programovanie (Spustiť programovanie), alebo plán vráť na úpravu (Uprav)."
+    f"Manažér: pozri plán úloh a spusti programovanie ({_press('pokracovat')}), alebo plán vráť na úpravu "
+    f"({_press('uprav')})."
 )
 #: The agent's turn when the Manažér asks about the plan before any task started — an answer, never a task.
 PLAN_QUESTION_DIRECTIVE = (
     "Plán úloh je zostavený a programovanie ešte nezačalo — čaká, kým ho Manažér spustí. Medzitým sa ťa pýta:\n\n"
     "{text}\n\n"
     "Odpovedz mu na otázku. Žiadnu úlohu nezačínaj, nič neprogramuj a nič necommituj. Ak je jeho správa pokynom "
-    "na zmenu plánu, povedz mu, nech plán vráti tlačidlom „Uprav“ s touto pripomienkou."
+    f"na zmenu plánu, povedz mu, nech plán vráti tlačidlom {_press('uprav')} s touto pripomienkou."
 )
 #: The plan passes' brief when „Uprav“ sends the plan back — the comment is about the PLAN, not about a task.
 PLAN_REWORK_DIRECTIVE = (
@@ -15296,6 +15375,10 @@ async def _settle_at_plan_stop(
     from backend.services import build_forecast
 
     version_id = state.version_id
+    # DEV-376: settled first — the announcement names the buttons as the screen draws them at the plan stop.
+    state.status = "awaiting_manazer"
+    state.block_reason = None
+    state.next_action = PLAN_STOP_NEXT_ACTION
     if announce:
         epics = db.execute(select(func.count()).select_from(Epic).where(Epic.version_id == version_id)).scalar_one()
         feats = db.execute(
@@ -15324,15 +15407,13 @@ async def _settle_at_plan_stop(
                 f"Plán úloh je zostavený: {_count_words(epics, 'epic', 'epicy', 'epicov')}, "
                 f"{_count_words(feats, 'feat', 'featy', 'featov')}, {_count_words(tasks, 'úloha', 'úlohy', 'úloh')}"
                 f"{work}. Programovanie sa začne, až keď ho spustíš: pozri si plán v Pláne úloh a klikni "
-                "„Spustiť programovanie“, alebo plán vráť agentovi na úpravu tlačidlom „Uprav“ s pripomienkou."
+                f"{_press('pokracovat')}, alebo plán vráť agentovi na úpravu tlačidlom {_press('uprav')} s "
+                "pripomienkou."
             ),
             payload={"phase": state.current_stage, "plan_stop": True},
         )
         if on_message is not None:
             await on_message(msg)
-    state.status = "awaiting_manazer"
-    state.block_reason = None
-    state.next_action = PLAN_STOP_NEXT_ACTION
     db.flush()
     return state
 
@@ -15558,7 +15639,7 @@ async def _run_build_round(
                 state.pause_reason = "token_limit"  # ICCINT-126: prekážka, nie výzva
                 state.next_action = (
                     f"Pozastavené — build prekročil token-limit ({limit_millions} mil.). "
-                    "Skontroluj stav a pokračuj cez „Pokračovať“."
+                    f"Skontroluj stav a pokračuj tlačidlom {_press('pokracovat')}."
                 )
                 stop_msg = _record_message(
                     db,
@@ -15599,7 +15680,7 @@ async def _run_build_round(
                 state.block_reason = "agent_error"
                 state.next_action = (
                     f"{open_findings} úloh sa nepodarilo dokončiť — stavba ešte nie je hotová. "
-                    "Napíš, čo treba opraviť (Uprav), a spustím stavbu znova."
+                    f"Napíš, čo treba opraviť, a stlač {_press('uprav')} — spustím stavbu znova."
                 )
                 db.flush()
                 return state
@@ -15965,10 +16046,7 @@ async def _run_build_round(
             if machinery_reason is not None:
                 state.status = "blocked"
                 state.block_reason = "framework_issue"
-                state.next_action = (
-                    "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na "
-                    "ňu upozornili. Skús to o chvíľu znova (Nahlásiť znova), alebo zatiaľ pokračuj na inom projekte."
-                )
+                state.next_action = _FRAMEWORK_ISSUE_NEXT_ACTION
                 version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
                 dedo_message = (
                     f"Úloha #{_task_full_number(db, task)} „{task.title}“ zlyhala {_SELF_CHECK_RETRIES}× na "
@@ -16009,7 +16087,7 @@ async def _run_build_round(
             state.status = "awaiting_manazer"
             state.next_action = (
                 f"Úloha #{_task_full_number(db, task)} zlyhala po {_pokusy(_SELF_CHECK_RETRIES)} self-check — "
-                "Manažér: usmerni Staviteľa (Uprav) alebo rozhodni o ďalšom kroku."
+                f"Manažér: usmerni Staviteľa tlačidlom {_press('uprav')}, alebo rozhodni o ďalšom kroku."
             )
             db.flush()
             return state
@@ -16285,7 +16363,10 @@ async def apply_action(
     # guard it would fall through to its handler, call _begin_dispatch and flip the status back to
     # agent_working. The Manažér resumes deliberately, never as a side effect of asking/answering.
     if state.status == "paused" and action not in ("pokracovat", "uprav"):
-        raise OrchestratorError("Build je pozastavený — pokračuj cez 'Pokračovať' alebo ho usmerni (Uprav).")
+        raise OrchestratorError(
+            f"Build je pozastavený — pokračuj tlačidlom {_press('pokracovat')}, alebo ho usmerni tlačidlom "
+            f"{_press('uprav')}."
+        )
     # Durable single-flight dispatch guard (R-BLAST safeguard #2; R1-b / D2, CR-NS-027 hardening):
     # refuse to start a SECOND agent turn while a dispatch is already in flight for this version. The DB
     # flag survives a backend restart (unlike the in-memory ``_ACTIVE_DISPATCH``), and the settle listener
@@ -16368,7 +16449,9 @@ async def apply_action(
         if not spec_approved(db, version_id):
             raise OrchestratorError("Zostaviť plán je platné až po schválení Špecifikácie.")
         if navrh_plan_materialized(db, version_id):
-            raise OrchestratorError("Plán úloh už existuje — jeho úpravu rieš v rozhovore (Uprav).")
+            raise OrchestratorError(
+                f"Plán úloh už existuje — jeho úpravu rieš v rozhovore tlačidlom {_press('uprav')}."
+            )
         # Durable, restart-safe trigger (FIX3): record a manazer→ai_agent kind='directive' marker carrying
         # payload.compose_plan. ``run_conversation_turn`` delegates to the plan round SOLELY on this DB marker
         # — the in-memory dispatch directive is None for ``zostav_plan`` (directive_for_action) and is lost on
@@ -16398,7 +16481,7 @@ async def apply_action(
         if not navrh_plan_materialized(db, version_id):
             raise OrchestratorError("Spustiť stavbu je platné až po zostavení plánu úloh.")
         if _build_started(db, version_id):
-            raise OrchestratorError("Stavba už beží alebo je dokončená — pokračuj cez „Pokračovať v stavbe“.")
+            raise OrchestratorError(f"Stavba už beží alebo je dokončená — pokračuj tlačidlom {_press('pokracovat')}.")
         # Durable audit breadcrumb (MINOR — NOT the trigger): a manazer→ai_agent kind='directive' start_build
         # marker for the audit trail. The ACTUAL trigger + restart-safety is the durable current_stage=
         # 'programovanie' + _begin_dispatch (the runner routes on STAGE via run_dispatch→_run_build_round);
@@ -16438,7 +16521,9 @@ async def apply_action(
         if _build_started(db, version_id):
             raise OrchestratorError("Stavba už beží alebo je dokončená — vizuál sa spúšťa pred stavbou.")
         if state.current_stage == "vizual":
-            raise OrchestratorError("Vizuál už beží — zmeny píš do rozhovoru, alebo pokračuj cez „Spustiť stavbu“.")
+            raise OrchestratorError(
+                f"Vizuál už beží — zmeny píš do rozhovoru, alebo pokračuj tlačidlom {_press('spustit_stavbu')}."
+            )
         # Durable audit breadcrumb (MINOR — NOT the trigger): a manazer→ai_agent kind='directive' marker for the
         # audit trail. The ACTUAL trigger + restart-safety is the durable current_stage='vizual' + _begin_dispatch
         # (the runner routes a conversation build at ``vizual`` through run_dispatch → _run_vizual_round). NO
@@ -17079,7 +17164,7 @@ async def apply_action(
         if c.get("source") == "verifikacia_fail":
             ans = answered.get("verifikacia_fail_next") or {}
             if ans.get("held"):
-                state.next_action = "Podržané — usmerni opravu neskôr (Decision Card alebo 'Uprav')."
+                state.next_action = f"Podržané — usmerni opravu neskôr na karte alebo tlačidlom {_press('uprav')}."
                 db.flush()
                 return state
             if ans.get("option_id") == "rerun_ci" and not ans.get("free_text") and not ans.get("note"):

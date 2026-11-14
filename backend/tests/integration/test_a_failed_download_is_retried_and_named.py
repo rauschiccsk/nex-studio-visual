@@ -128,11 +128,13 @@ async def test_a_download_failing_twice_says_so_and_offers_the_retry_without_wri
     assert blocked is True and len(calls) == 2
     assert (state.status, state.block_reason) == ("blocked", "check_failed")
     msg = _last(db_session, version.id)
-    assert msg.content == orchestrator.DOWNLOAD_FAILED_CONTENT
+    assert msg.content.startswith("Kontrola po oprave neprešla — pri stavbe aplikácie sa nepodarilo stiahnuť balík")
+    assert "Stlač „Skús znova“ — nič netreba písať" in msg.content  # DEV-376: the bar's button, by its name
     assert msg.payload["download_failed"] is True
     assert "Temporary failure in name resolution" in msg.payload["technical_detail"]
     assert state.next_action == orchestrator.DOWNLOAD_FAILED_NEXT_ACTION
-    assert "Skús znova" in state.next_action and "Uprav" not in state.next_action
+    shown = _board(db_session, version.id).state.next_action
+    assert "„Skús znova“" in shown and "Uprav" not in shown
 
 
 async def test_a_broken_build_is_measured_once_and_goes_back_to_the_stavitel_as_before(db_session, monkeypatch):
@@ -143,7 +145,7 @@ async def test_a_broken_build_is_measured_once_and_goes_back_to_the_stavitel_as_
 
     assert blocked is True and len(calls) == 1
     msg = _last(db_session, version.id)
-    assert "napíš agentovi, čo s tým (Uprav)" in msg.content
+    assert "napíš agentovi, čo s tým, a stlač „Skús znova“ — spustím stavbu znova." in msg.content
     assert msg.payload["download_failed"] is False
 
 

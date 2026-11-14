@@ -15,6 +15,8 @@ import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import type { PipelineBoard, VizualPreview } from "@/services/api/pipeline";
 
+import { actionLabel } from "./actionLabel";
+
 interface Props {
   board: PipelineBoard | null;
   /** The preview's real state (useVizualPreview); null until first asked. */
@@ -41,7 +43,7 @@ export default function LivePreviewBar({ board, preview = null, restarting = fal
         </span>
         <button type="button" onClick={onRestart} disabled={restarting || !onRestart} className={BUTTON}>
           {restarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          {restarting ? "Spúšťam náhľad…" : "Spustiť náhľad znova"}
+          {restarting ? "Spúšťam náhľad…" : actionLabel(board, "restart_preview")}
         </button>
         {error && <span className="w-full text-[var(--color-status-error)]">{error}</span>}
       </div>
