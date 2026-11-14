@@ -536,23 +536,27 @@ def _mark_blocked(
     state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
     if state is None:
         return None, None
-    detail = f": {reason[:300]}" if reason else ""
     state.status = "blocked"
     # Audit P2 (2026-07-12): a crash-path settle MUST stamp its own block_reason — otherwise it INHERITS a
     # stale one (e.g. a prior 'agent_question'), and the board then renders a crashed dispatch as an
     # answerable question (offers 'answer'). A dispatch crash is a system error → recover via 'Skús znova'.
     state.block_reason = "system_error"
-    state.next_action = (
-        f"Spustenie ťahu agenta zlyhalo{detail}. Môžeš napísať, čo má agent urobiť inak, a stlač "
-        f"{action_labels.press('uprav')}."
-    )
+    # DEV-384: told in Slovak, with the button the error bar draws; the raw reason is the technical detail, not the
+    # sentence (it used to read „Agent dispatch failed: <the exception> — pipeline blocked.“).
+    state.next_action = f"Ťah agenta sa nečakane zrútil a stavba stojí. {orchestrator.RETRY_CLAUSE}"
     msg = PipelineMessage(
         version_id=version_id,
         stage=state.current_stage,
         author="system",
         recipient="manazer",  # CR-V2-009: Director → Manažér participant rename (matches PARTICIPANT_VALUES)
         kind="notification",
-        content=f"Agent dispatch failed{detail} — pipeline blocked.",
+        content=action_labels.say(
+            db,
+            state,
+            f"Ťah agenta sa nečakane zrútil a stavba sa zastavila. {orchestrator.RETRY_CLAUSE}"
+            + (" Dôvod je nižšie v technickom detaile." if reason else ""),
+        ),
+        payload={"technical_detail": reason[:2000]} if reason else None,
     )
     db.add(msg)
     db.flush()

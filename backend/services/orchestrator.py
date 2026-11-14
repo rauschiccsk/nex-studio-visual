@@ -150,7 +150,7 @@ logger = logging.getLogger(__name__)
 #: DEV-376: a sentence names a button by its action; the name is filled in as the screen draws it.
 _press = action_labels.press
 #: The way out of an error stop: the error bar's box and its one button (``uprav``, drawn „Skús znova“ there).
-_RETRY_CLAUSE = f"Môžeš napísať, čo má agent urobiť inak, a stlač {_press('uprav')}."
+RETRY_CLAUSE = f"Môžeš napísať, čo má agent urobiť inak, a stlač {_press('uprav')}."
 #: A build stopped on a NEX Studio bug — the Manažér's one move is to report it again later.
 _FRAMEWORK_ISSUE_NEXT_ACTION = (
     "Túto chybu musí opraviť náš technický tím — nedá sa vyriešiť odtiaľto. Automaticky sme ho na ňu upozornili. "
@@ -4286,7 +4286,9 @@ def _write_task_plan(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=f"Plán úloh zapísaný: {n_epics} epicov, {n_feats} featov, {n_tasks} taskov. Doc: spec/task-plan.md.",
+        content=(
+            f"Plán úloh zapísaný: {n_epics} epicov, {n_feats} featov, {n_tasks} taskov. Dokument: spec/task-plan.md."
+        ),
         payload={"task_plan_summary": {"epics": n_epics, "feats": n_feats, "tasks": n_tasks}, "phase": phase},
     )
     return None
@@ -10632,7 +10634,7 @@ async def run_dispatch(
         # notification (+ raw-output excerpt) so the AI Agent tab is never left empty.
         state.status = "blocked"
         state.block_reason = "parse_exhaustion"  # R4 (D1): worker produced no parseable output after retries
-        state.next_action = f"Blokované — agent nevrátil platný výstup. {_RETRY_CLAUSE}"
+        state.next_action = f"Blokované — agent nevrátil platný výstup. {RETRY_CLAUSE}"
         await _record_parse_exhaustion(
             db,
             state,
@@ -11270,7 +11272,7 @@ async def _settle_plan_pass_failure(
     state.block_reason = (
         "agent_error" if failed.reason.startswith(_PLAN_PASS_ENVELOPE_LOSS_PREFIX) else "parse_exhaustion"
     )
-    state.next_action = f"Blokované — plán úloh sa nepodarilo vygenerovať. {_RETRY_CLAUSE}"
+    state.next_action = f"Blokované — plán úloh sa nepodarilo vygenerovať. {RETRY_CLAUSE}"
     msg = _record_message(
         db,
         version_id=state.version_id,
@@ -11278,7 +11280,7 @@ async def _settle_plan_pass_failure(
         author="system",
         recipient="manazer",
         kind="notification",
-        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. {_RETRY_CLAUSE}",
+        content=f"Plán úloh sa nepodarilo vygenerovať: {note}. {RETRY_CLAUSE}",
         payload={"phase": phase, **(_failure_metrics_payload(failed) or {})},
     )
     if on_message is not None:
@@ -11898,7 +11900,7 @@ async def _run_navrh_round(
             return state
         state.status = "blocked"
         state.block_reason = "parse_exhaustion"  # R4 (D1): no parseable design output after retries
-        state.next_action = f"Blokované — agent nevrátil platný návrh. {_RETRY_CLAUSE}"
+        state.next_action = f"Blokované — agent nevrátil platný návrh. {RETRY_CLAUSE}"
         await _record_parse_exhaustion(
             db,
             state,
