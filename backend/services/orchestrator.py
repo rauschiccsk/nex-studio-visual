@@ -12070,6 +12070,12 @@ _VERIFIKACIA_STUCK_STREAK = 3
 #: Bits of a failure detail that differ between two runs of the SAME cause — timestamps, container/image ids,
 #: durations. Blanked before two causes are compared, so a redelivered identical failure still matches itself.
 _VOLATILE_DETAIL_RE = re.compile(r"\b(?:\d{4}-\d\d-\d\d[t ][\d:.]+|[0-9a-f]{8,}|\d+(?:\.\d+)?m?s)\b", re.IGNORECASE)
+#: DEV-381 — a folder in the temp dir is named at random (``tempfile.mkdtemp``): the same cause twice reads as two. The
+#: folder's own name is blanked; what follows it (the customer, the project) still tells causes apart.
+_TEMP_FOLDER_RE = re.compile(
+    "(" + "|".join(re.escape(d) for d in sorted({"/tmp", "/var/tmp", tempfile.gettempdir()})) + r")/[^\s/]+",
+    re.IGNORECASE,
+)
 
 
 def _failure_signature(payload: object) -> str:
@@ -12084,6 +12090,7 @@ def _failure_signature(payload: object) -> str:
     detail = str(payload.get("technical_detail") or "").strip()
     if not detail:
         return ""
+    detail = _TEMP_FOLDER_RE.sub(r"\1/#", detail)
     return re.sub(r"\s+", " ", _VOLATILE_DETAIL_RE.sub("#", detail.lower())).strip()[:400]
 
 
