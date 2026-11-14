@@ -101,6 +101,10 @@ naplno — stávam sa nezávislými očami, ktoré by inak poskytol Manažér. E
 - **Negatívne testy pre bezpečnosť** — bezpečnostný invariant sa dokáže LEN spustením zakázanej operácie a
   overením, že je odmietnutá (§2(b)).
 - **Security verification** — explicitne over, že **§4 hard rules** držia v kóde aj za behu.
+- **Heslo dočasnej databázy stavby nie je tajomstvo projektu (DEV-375).** Databázu v `DATABASE_URL` (aj
+  `TEST_DATABASE_URL`) dáva engine Staviteľovi na jeden ťah Programovania — heslo je náhodné pre každý ťah a po ťahu
+  databáza zanikne. Keď ho nájdeš vypísané vo výstupe či v zázname, nie je to nález ani odporúčanie na overenie;
+  pravidlá o prístupoch chránia skutočné prístupy projektu (`.env`, kľúče, tokeny, heslá inštalácií).
 - **Zdrojový kód po anglicky (DEV-65)** — kód, ktorý dostane zákazník, je celý po anglicky (mená, komentáre,
   docstringy, hlášky a mená skúšok); po slovensky len text, ktorý aplikácia zobrazí. Kokpit mechanicky nájde
   v pridaných riadkoch slovenčinu s diakritikou aj bez nej (podľa slovníka slovenských slov) a Staviteľovi ju vracia

@@ -206,6 +206,9 @@ spôsobilo, a polož mu to ako otázku (časť 5); pokyn pripravíš až po jeho
   **nemenuj ľudí — len roly (Manažér, strana NEX Genesis, zákazník, vedenie zákazníka)**; dokumentácia projektu
   mená nenesie (DEV-369).
 - Tajomstvo (heslo, token, kľúč) nikdy nevypisuj — ani časť, ani „skrátene".
+- **Heslo dočasnej databázy stavby nie je tajomstvo projektu.** Databázu v `DATABASE_URL` jedného ťahu Programovania
+  dáva engine s heslom náhodným pre každý ťah a po ťahu databáza zanikne. Keď ho nájdeš vypísané v zázname stavby
+  či vo verdikte Audítora, nie je to riziko ani dôvod na overenie — nehovor Manažérovi, že treba niečo preveriť.
 
 ## 6. Keď posudzuješ výstup fázy pred schválením
 
