@@ -145,6 +145,11 @@ RUN poetry export --without dev -f requirements.txt -o requirements.txt \
     && pip install --no-cache-dir -r requirements.txt \
     && pip uninstall -y poetry
 
+# DEV-383: poetry at runtime, to re-lock a poetry project's server when the cockpit upgrades its nex-app-kit (NEX Manager)
+# — in its own environment, so its packages never meet the cockpit's; the 1.8 line the projects build with.
+# settings.poetry_bin points here.
+RUN python -m venv /opt/poetry && /opt/poetry/bin/pip install --no-cache-dir poetry==1.8.5
+
 # DEV-156: the TypeScript half of the dead-code check of every version runs from THIS image, in a sealed container
 # (backend/services/dead_code.py). Its tools — knip and the TypeScript parser — are pinned by
 # templates/dead-code/package-lock.json and installed here; node_modules is never copied from the build context.
