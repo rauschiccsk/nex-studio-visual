@@ -119,12 +119,35 @@ describe("Inštalácie (DEV-378)", () => {
   it.each([
     [{ state: "up", version: "1.6.0", detail: "" }, "● beží"],
     [{ state: "answers", version: null, detail: "aplikácia odpovedá, stav nehlási" }, "◐ odpovedá"],
-    [{ state: "down", version: null, detail: "certifikát nie je platný" }, "○ neodpovedá — certifikát nie je platný"],
+    [{ state: "down", version: null, detail: "certifikát nie je platný" }, "○ neodpovedá"],
   ])("says what the installation answered: %o", async (answer, text) => {
     getInstallationStatusApi.mockResolvedValue(answer);
     renderPage();
 
     await waitFor(() => expect(screen.getAllByText(text).length).toBe(5));
+  });
+
+  it("a reason the installation does not answer goes under it, not between the state and „Otvoriť“", async () => {
+    getInstallationStatusApi.mockResolvedValue({ state: "down", version: null, detail: "certifikát nie je platný" });
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText("certifikát nie je platný")).toHaveLength(5));
+    expect(screen.queryByText(/neodpovedá — /)).toBeNull();
+  });
+
+  // DEV-382: 14.11.2026 the Director, with a picture: „aby obrazovka nebola tak porozhadzovaná“ — each customer's
+  // table split its columns by its own content, so UAT started at a different place for every customer.
+  it.each([["all"], ["prod"]])("every customer's table has the same columns, also with the filter %s", async (filter) => {
+    renderPage();
+    await screen.findByRole("region", { name: "ICC s.r.o." });
+    fireEvent.change(screen.getByLabelText(/Prostredie/), { target: { value: filter } });
+
+    const tables = screen.getAllByRole("table");
+    expect(tables.length).toBe(2);
+    const widths = tables.map((t) => [...t.querySelectorAll("col")].map((c) => c.style.width));
+    expect(widths[0]).toEqual(filter === "all" ? ["22%", "39%", "39%"] : ["22%", "78%"]);
+    expect(widths.every((w) => JSON.stringify(w) === JSON.stringify(widths[0]))).toBe(true);
+    expect(tables.every((t) => t.classList.contains("table-fixed"))).toBe(true);
   });
 
   it("asks the installations a few at a time, never all at once", async () => {

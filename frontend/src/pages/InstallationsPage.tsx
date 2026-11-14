@@ -25,6 +25,9 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 
 const ENVIRONMENTS: Environment[] = ["uat", "prod"];
 const ENV_LABEL: Record<Environment, string> = { uat: "UAT", prod: "PROD" };
+/** DEV-382: the width of the app's column in per cent, the same in every customer's table; the environments share
+ *  the rest equally. */
+const APP_COLUMN_PERCENT = 22;
 
 type Asked = InstallationStatus | "asking" | "unknown";
 
@@ -84,11 +87,12 @@ function StatusChip({ asked }: { asked: Asked | undefined }) {
       </span>
     );
   }
-  return (
-    <span className="text-xs font-medium text-[var(--color-status-error)]">
-      ○ neodpovedá{asked.detail ? ` — ${asked.detail}` : ""}
-    </span>
-  );
+  return <span className="text-xs font-medium text-[var(--color-status-error)]">○ neodpovedá</span>;
+}
+
+/** Why it does not answer — on its own line, so the state and „Otvoriť“ keep their places in every row. */
+function reasonOf(asked: Asked | undefined): string {
+  return asked && typeof asked === "object" && asked.state === "down" ? asked.detail : "";
 }
 
 function OpenLinks({ installation }: { installation: InstallationEnvironment }) {
@@ -115,11 +119,18 @@ function EnvironmentCell({ app, environment, asked }: { app: InstallationApp; en
   if (!installation) {
     return <span className="text-xs text-[var(--color-text-muted)]">— ešte nenasadené</span>;
   }
+  const reason = reasonOf(asked);
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="font-mono text-xs text-[var(--color-text-primary)]">{installation.version}</span>
-      <StatusChip asked={asked} />
-      <OpenLinks installation={installation} />
+    <div className="flex flex-col gap-1">
+      {/* DEV-382: fixed places — the version, the state and „Otvoriť“ start at the same spot in every row. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="w-14 shrink-0 font-mono text-xs text-[var(--color-text-primary)]">{installation.version}</span>
+        <span className="w-24 shrink-0">
+          <StatusChip asked={asked} />
+        </span>
+        <OpenLinks installation={installation} />
+      </div>
+      {reason && <span className="text-xs text-[var(--color-status-error)]">{reason}</span>}
       {installation.last_attempt_failed && (
         <span className="text-xs text-[var(--color-status-warning)]">posledný pokus o nasadenie zlyhal</span>
       )}
@@ -230,7 +241,14 @@ export default function InstallationsPage() {
           <section key={group.key} aria-label={group.name}>
             <h2 className="mb-1.5 text-sm font-semibold text-[var(--color-text-primary)]">{group.name}</h2>
             <div className="overflow-x-auto rounded-lg border border-[var(--color-border-default)]">
-              <table className="w-full text-left">
+              {/* DEV-382: the same columns for every customer — not split by each table's own content. */}
+              <table className="w-full table-fixed text-left">
+                <colgroup>
+                  <col style={{ width: `${APP_COLUMN_PERCENT}%` }} />
+                  {shownEnvironments.map((env) => (
+                    <col key={env} style={{ width: `${(100 - APP_COLUMN_PERCENT) / shownEnvironments.length}%` }} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr className="border-b border-[var(--color-border-default)] text-xs text-[var(--color-text-muted)]">
                     <th className="px-3 py-1.5 font-medium">Aplikácia</th>
