@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     # (one question per repository, not one per person), and how many of the newest runs it lists (GitHub's page cap).
     ci_runs_cache_seconds: int = 30
     ci_runs_listed: int = 100
+    # DEV-378: the „Inštalácie“ page — how long the cockpit waits for an installation to say whether it lives, and how
+    # long the answer is shared (one question per installation, not one per window, so a customer's server is spared).
+    installation_status_timeout_seconds: float = 8.0
+    installation_status_cache_seconds: int = 120
     # DEV-85: the watch of every project's main branch — how often it looks, whether it runs at all (off in tests: the
     # app's real life cycle would ask GitHub and send Telegram messages), how long an undelivered message is retried.
     ci_watch_interval_seconds: int = 60

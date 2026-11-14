@@ -37,6 +37,7 @@ const IconHome = () => <NavIcon glyph="🏠" />;
 const IconGuide = () => <NavIcon glyph="🧭" />;
 const IconNotes = () => <NavIcon glyph="📝" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
+const IconInstallations = () => <NavIcon glyph="🖥️" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
 const IconBacklog = () => <NavIcon glyph="📋" />;
 const IconPlaneTickets = () => <NavIcon glyph="🎫" />;
@@ -216,6 +217,14 @@ export default function Sidebar() {
       <NavItem icon={<IconGuide />} label="Ako začať" active={isActive("/getting-started")} onClick={() => navigate("/getting-started")} />
       {/* DEV-89: the person's own quick notes — not tied to the selected project, so among the general entries. */}
       <NavItem icon={<IconNotes />} label="Poznámky" active={isActive("/notes")} onClick={() => navigate("/notes")} />
+      {/* DEV-378: every installation across projects, always open — above Nápady, which stays right above Projekty
+          (DEV-318), whose selected project sits right under it (Director 15.05.2026). */}
+      <NavItem
+        icon={<IconInstallations />}
+        label="Inštalácie"
+        active={isActive("/instalacie")}
+        onClick={() => navigate("/instalacie")}
+      />
       {/* DEV-318: Nápady — a new idea with Poradca before any project exists, so above Projekty (Director 06.11.2026:
           „Podľa mojej logiky "Návrhy" má byť nie pod ale nad "Projekty".“ — the name became Nápady: „Súhlasím, nazveme to
           Nápady“). Always open: no project needed. */}

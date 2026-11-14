@@ -8,4 +8,9 @@ export const SETTINGS = {
    * tiny static file; a window left on screen learns about a deploy within a minute, not fifteen.
    */
   VERSION_CHECK_INTERVAL_MS: 60 * 1000,
+  /**
+   * DEV-378: how many installations the „Inštalácie“ page asks at once whether they live — a few at a time, never all
+   * fifty customers' servers in one burst; the server shares each answer for a while.
+   */
+  INSTALLATION_STATUS_CONCURRENCY: 4,
 } as const;

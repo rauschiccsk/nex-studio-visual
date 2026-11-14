@@ -34,6 +34,7 @@ import RepositoryPage from "./pages/RepositoryPage";
 import NsCodePage from "./pages/NsCodePage";
 import CredentialsPage from "./pages/CredentialsPage";
 import CustomersPage from "./pages/CustomersPage";
+import InstallationsPage from "./pages/InstallationsPage";
 import UatPage from "./pages/UatPage";
 import ProdPage from "./pages/ProdPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -113,6 +114,7 @@ function App() {
                 Zákazníci = CR-V2-025 (project-scoped registry).
                 UAT / PROD = CR-V2-027 (version × customer matrix + Nasadiť + Akceptovať gate). */}
             <Route path="zakaznici" element={<CustomersPage />} />
+            <Route path="instalacie" element={<InstallationsPage />} />
             <Route path="uat" element={<UatPage />} />
             <Route path="prod" element={<ProdPage />} />
             <Route path="credentials" element={<CredentialsPage />} />

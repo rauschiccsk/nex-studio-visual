@@ -26,6 +26,7 @@ from backend.api.routes.delivery_statements import router as delivery_statements
 from backend.api.routes.deploy import router as deploy_router
 from backend.api.routes.external_cost import router as external_cost_router
 from backend.api.routes.health import health_check as _health_check_handler
+from backend.api.routes.installations import router as installations_router
 from backend.api.routes.knowledge import router as knowledge_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.ns_code import router as ns_code_router
@@ -444,6 +445,7 @@ app.include_router(versions_router, prefix="/api/v1")
 # because it spans two URL families (``/projects/{slug}/customers`` and
 # ``/customers/{id}``) — see design §3.2 Zákazníci.
 app.include_router(customers_router, prefix="/api/v1")
+app.include_router(installations_router, prefix="/api/v1")  # DEV-378 „Inštalácie“
 app.include_router(plane_tickets_router, prefix="/api/v1")  # DEV-120 „Plane tikety“
 app.include_router(standing_router, prefix="/api/v1")  # DEV-150 „Kde stojíme“ na Prehľade
 app.include_router(version_notes_router, prefix="/api/v1")  # DEV-151 „Kde sme skončili“

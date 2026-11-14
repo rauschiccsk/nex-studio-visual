@@ -818,6 +818,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Installations
+         * @description Every customer with an installation the person may see — the owner's projects, the admin's all.
+         */
+        get: operations["list_installations_api_v1_installations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/installations/{customer_id}/{environment}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Installation Status
+         * @description Whether the installation lives — the address is the cockpit's, the answer shared for a while.
+         */
+        get: operations["installation_status_api_v1_installations__customer_id___environment__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge/categories": {
         parameters: {
             query?: never;
@@ -5985,6 +6025,80 @@ export interface components {
              */
             updated_at: string;
         };
+        /** InstallationApp */
+        InstallationApp: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            prod?: components["schemas"]["InstallationEnvironment"] | null;
+            /** Project Name */
+            project_name: string;
+            /** Project Slug */
+            project_slug: string;
+            uat?: components["schemas"]["InstallationEnvironment"] | null;
+        };
+        /** InstallationCustomer */
+        InstallationCustomer: {
+            /** Apps */
+            apps: components["schemas"]["InstallationApp"][];
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * InstallationEnvironment
+         * @description A customer's installation of one app in one environment.
+         */
+        InstallationEnvironment: {
+            /** Deployed At */
+            deployed_at?: string | null;
+            /**
+             * Last Attempt Failed
+             * @default false
+             */
+            last_attempt_failed: boolean;
+            /**
+             * Links
+             * @default []
+             */
+            links: components["schemas"]["InstallationLink"][];
+            /** Url */
+            url: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * InstallationLink
+         * @description One frontend of a Web project's installation (DEV-164) — its name and address.
+         */
+        InstallationLink: {
+            /** Label */
+            label: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * InstallationStatus
+         * @description Whether an installation lives: ``up`` (says it is ok), ``answers`` (the app answers, reports no state),
+         *     ``down`` (nothing of the app answers — ``detail`` says why).
+         */
+        InstallationStatus: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "up" | "answers" | "down";
+            /** Version */
+            version?: string | null;
+        };
         /**
          * IssueStatementWrite
          * @description DEV-54 — the valid statement the Manažér confirmed to replace; empty when the version has none yet.
@@ -10488,6 +10602,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_installations_api_v1_installations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallationCustomer"][];
+                };
+            };
+        };
+    };
+    installation_status_api_v1_installations__customer_id___environment__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+                environment: "uat" | "prod";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallationStatus"];
                 };
             };
             /** @description Validation Error */

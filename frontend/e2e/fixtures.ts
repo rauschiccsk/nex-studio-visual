@@ -982,6 +982,44 @@ export function registerFixtures(): void {
       created_at: T2,
     },
   ]);
+  // DEV-378 — „Inštalácie“: a customer with a long name, an app on UAT and PROD, one only on UAT, a Web project's two
+  // frontends — the widest row the page draws.
+  answer("get", "/api/v1/installations", [
+    {
+      key: "mager",
+      name: "MÁGERSTAV s.r.o. — stavebná spoločnosť s veľmi dlhým obchodným menom",
+      apps: [
+        {
+          customer_id: "11111111-1111-4111-8111-111111111111",
+          project_slug: PROJECT.slug,
+          project_name: "NEX Inbox pre MÁGERSTAV s dlhým menom, ktoré sa musí zalomiť",
+          uat: { version: "1.10.3", deployed_at: T1, url: "https://uat-mager-inbox.isnex.eu", links: [], last_attempt_failed: false },
+          prod: {
+            version: "1.10.3",
+            deployed_at: T1,
+            url: "https://mager-inbox.icc.sk",
+            links: [
+              { label: "Administrácia", url: "https://mager-inbox.icc.sk" },
+              { label: "Web", url: "https://mager-inbox-web.icc.sk" },
+            ],
+            last_attempt_failed: true,
+          },
+        },
+        {
+          customer_id: "22222222-2222-4222-8222-222222222222",
+          project_slug: "nex-manager",
+          project_name: "NEX Manager",
+          uat: { version: "1.6.0", deployed_at: T1, url: "https://uat-mager-manager.isnex.eu", links: [], last_attempt_failed: false },
+          prod: null,
+        },
+      ],
+    },
+  ]);
+  answer("get", "/api/v1/installations/{customer_id}/{environment}/status", {
+    state: "down",
+    version: null,
+    detail: "certifikát nie je platný",
+  });
   // DEV-150 — „Kde stojíme“ on the Prehľad: one project waiting on the Manažér with a long name, one at work, one still.
   answer("get", "/api/v1/standing", {
     projects: [
