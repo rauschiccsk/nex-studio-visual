@@ -9,6 +9,10 @@ the AI Agent would get 37 111 characters. Dedo's own workspace has the same guar
 Director 09.10.2026: „Áno, súhlasím s hranicou 37 000, začni DEV-45“. The ceiling is his; when the text outgrows it,
 the text is shortened — the ceiling is not moved to make this pass.
 
+DEV-387: 37 000 was the size of the text that day, not a measured limit of quality — 14.11.2026 the AI Agent stood at
+36 606 and every new rule of his would have had to shorten another first. Dedo's own ceiling was raised from 36 500 to
+50 000 for the same reason (MAGER-58). Director 14.11.2026, on raising this one to 50 000 too: „Súlasím, zvýš.“
+
 What is measured is what the cockpit itself writes — the files come from the real provisioning code on a scratch
 project, not from adding up template sizes here, so a change in how the charter is assembled is measured too.
 
@@ -27,8 +31,8 @@ import yaml
 from backend.services import app_template, create_project_postscaffold
 from backend.services.poradca import runner as poradca_runner
 
-#: Director 09.10.2026 (DEV-45). Changed only by the Director.
-CEILING = 37_000
+#: Director 09.10.2026 37 000 (DEV-45), 14.11.2026 50 000 (DEV-387). Changed only by the Director.
+CEILING = 50_000
 
 
 def _scaffold(tmp_path: Path, project_type: str, template: str | None = None) -> Path:
@@ -81,7 +85,7 @@ def test_every_agent_reads_less_than_the_ceiling(tmp_path, project_type, templat
 
     over = {agent: size for agent, size in sizes.items() if size > CEILING}
     assert over == {}, (
-        f"agent instructions exceed {CEILING} characters: {over} — shorten (Director 09.10.2026, DEV-45), "
+        f"agent instructions exceed {CEILING} characters: {over} — shorten (the Director's ceiling, DEV-45, DEV-387), "
         "do not raise the ceiling"
     )
 
