@@ -88,36 +88,37 @@ class KnowledgeManager:
         normalized = category.strip("/").lower()
         for blocked in BLOCKED_CATEGORIES:
             if normalized == blocked or normalized.startswith(f"{blocked}/"):
-                raise ValueError(f"Category '{category}' is not accessible")
+                raise ValueError(f"Kategória „{category}“ nie je prístupná.")
         if allow_create:
             return
         cat_path = self.base_path / normalized
         if cat_path.is_dir():
             return
-        raise ValueError(f"Invalid category: '{category}'. Directory does not exist in the knowledge base")
+        raise ValueError(f"Neplatná kategória „{category}“ — taký priečinok Znalostná báza nemá.")
 
     def _validate_filename(self, filename: str) -> None:
         """Raise ValueError for unsafe filenames."""
         if not _SAFE_FILENAME_RE.match(filename):
             raise ValueError(
-                f"Invalid filename: '{filename}'. Use alphanumeric, hyphens, underscores, dots. Must end with .md"
+                f"Neplatné meno súboru „{filename}“ — použi písmená, číslice, pomlčky, podčiarkovníky a bodky; "
+                "musí končiť na .md."
             )
 
     def _safe_resolve(self, relative_path: str) -> Path:
         """Resolve relative_path under base_path, reject traversal."""
         normalized = relative_path.replace("\\", "/")
         if ".." in normalized.split("/"):
-            raise ValueError("Path traversal is not allowed")
+            raise ValueError("Cesta nesmie viesť mimo Znalostnej bázy.")
 
         resolved = (self.base_path / normalized).resolve()
         base_resolved = self.base_path.resolve()
 
         if not str(resolved).startswith(str(base_resolved)):
-            raise ValueError("Path traversal is not allowed")
+            raise ValueError("Cesta nesmie viesť mimo Znalostnej bázy.")
 
         rel_parts = normalized.strip("/").lower().split("/")
         if rel_parts and rel_parts[0] in BLOCKED_CATEGORIES:
-            raise ValueError(f"Category '{rel_parts[0]}' is not accessible")
+            raise ValueError(f"Kategória „{rel_parts[0]}“ nie je prístupná.")
 
         return resolved
 

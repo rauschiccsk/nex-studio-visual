@@ -303,7 +303,7 @@ class TestProdAcceptanceGate:
             json={"version_number": "0.1.0", "environment": "prod"},
         )
         assert blocked.status_code == 409, blocked.text
-        assert "accept" in blocked.json()["detail"].lower()
+        assert "akceptuj UAT" in blocked.json()["detail"]
 
         # The matrix still shows the version as NOT accepted → FE keeps PROD disabled.
         matrix = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()

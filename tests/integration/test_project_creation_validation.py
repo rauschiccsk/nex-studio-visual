@@ -98,7 +98,7 @@ class TestProjectCreationValidation:
         )
         assert resp2.status_code == 409
         detail = resp2.json()["detail"]
-        assert "already exists" in detail.lower() or "duplicate" in detail.lower()
+        assert "už existuje" in detail
 
     def test_conflicting_port_returns_409(self, integration_client, _seed_admin):
         """Creating a project with a port already allocated returns 409."""

@@ -67,7 +67,7 @@ def bump_patch(version_number: str) -> str:
     """
     parsed = _parse_semver(version_number)
     if parsed is None:
-        raise ValueError(f"Cannot bump non-semver version_number: {version_number!r}")
+        raise ValueError(f"Číslo verzie {version_number!r} nemá tvar X.Y.Z — rýchla oprava ho nevie zvýšiť.")
     prefix, major, minor, patch = parsed
     return f"{prefix}{major}.{minor}.{patch + 1}"
 

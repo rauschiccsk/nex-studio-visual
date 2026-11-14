@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_knowledge_base_writer, get_rag_indexer
 from backend.core import authz
+from backend.core.errors import NotFoundError, http_error
 from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
@@ -273,22 +274,6 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
                 )
 
 
-def _map_value_error(exc: ValueError) -> HTTPException:
-    """Translate a service-layer ``ValueError`` into an HTTP exception.
-
-    Mirrors the ICC error-handling pattern: ``not found`` → 404,
-    duplicates/conflicts → 409, everything else (constraint / FK /
-    validation failures) → 422.
-    """
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
-
-
 def _host_probe_unavailable(exc: Exception) -> HTTPException:
     """Translate a failed host port probe into 503.
 
@@ -470,7 +455,7 @@ def list_projects(
             slug=slug,
         )
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
     return PaginatedResponse[ProjectRead](
         items=[ProjectRead.model_validate(row) for row in rows],
@@ -691,7 +676,7 @@ def get_project(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     result = ProjectRead.model_validate(project)
     # CR-V2-027: compute the PROD-deploy flag here (one query) so the FE can disable + explain the
@@ -712,7 +697,7 @@ def get_nexshared_status(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     surfaces = project_surfaces_service.surfaces_of(project)
     if not project.source_path:
@@ -741,7 +726,7 @@ def upgrade_nexshared(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
@@ -782,7 +767,7 @@ def get_app_template_conversion(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     reason = app_template_service.conversion_refusal(db, project)
     return AppTemplateConversionOffer(
@@ -806,7 +791,7 @@ def convert_to_app_template(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     reason = app_template_service.conversion_refusal(db, project)
     if reason:
@@ -843,7 +828,7 @@ def get_app_kit_status(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     if not project.template or not project.source_path:
         return AppKitStatus()
@@ -862,7 +847,7 @@ def upgrade_app_kit(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     if not project.template or not project.source_path:
         raise HTTPException(
@@ -895,7 +880,7 @@ def get_git_status(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     try:
         # DEV-175: the same answer every founding of a version is refused over.
@@ -921,7 +906,7 @@ def commit_git(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
@@ -946,7 +931,7 @@ def discard_git(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.authorize_project(current_user, project)
     if not project.source_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Projekt nemá zdrojovú cestu.")
@@ -1353,7 +1338,7 @@ def create_project(
             db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     except OSError as exc:
         db.rollback()
         raise HTTPException(
@@ -1395,7 +1380,7 @@ def update_project(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(project)
 
     # Move the block in the registry too. A port changed here and left unrecorded there is
@@ -1476,7 +1461,7 @@ def delete_project(
     try:
         project = project_service.get_by_id(db, project_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     # v4.0.35: delete was owner-or-admin — now owner-or-admin (a Junior may delete their OWN throwaway project; a
     # Medior does NOT gain delete on projects they don't own). ha is NOT privileged for this write.
     authz.authorize_project(current_user, project)
@@ -1525,7 +1510,7 @@ def delete_project(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
     # UAT teardown — orphan prevention (v0.9.0 Phase 3 CR-2). A deleted project's UAT is orphaned:
     # tear down its containers (`docker compose down -v`) + reclaim the allocated port. Best-effort,
@@ -1706,7 +1691,7 @@ def reassign_project(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     project = handover.project
     db.refresh(project)
 
@@ -1739,7 +1724,7 @@ def read_project_assignments(
     kým bol niekto preč."""
     project = db.execute(select(Project).where(Project.id == project_id)).scalar_one_or_none()
     if project is None:
-        raise _map_value_error(ValueError(f"Project {project_id} not found"))
+        raise http_error(NotFoundError(f"Projekt {project_id} neexistuje."))
     authz.authorize_project(current_user, project)
 
     names = {

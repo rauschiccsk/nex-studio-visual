@@ -70,6 +70,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
@@ -154,7 +155,7 @@ def get_by_id(db: Session, version_id: UUID) -> Version:
     stmt = select(Version).where(Version.id == version_id).options(selectinload(Version.epics))
     version = db.execute(stmt).scalar_one_or_none()
     if version is None:
-        raise ValueError(f"Version {version_id} not found")
+        raise NotFoundError(f"Verzia {version_id} neexistuje.")
     return version
 
 
@@ -280,9 +281,7 @@ def create(
             ``(project_id, version_number)`` pair.
     """
     if _get_by_project_and_version_number(db, project_id, data.version_number) is not None:
-        raise ValueError(
-            f"Version with project_id={project_id} and version_number={data.version_number!r} already exists"
-        )
+        raise ConflictError(f"Verzia {data.version_number!r} v projekte {project_id} už existuje.")
 
     version = Version(
         project_id=project_id,
@@ -316,7 +315,7 @@ def _zadanie_paths(slug: str, version_number: str) -> tuple[str, Path]:
     try:
         abs_path.relative_to(project_root)
     except ValueError as exc:
-        raise ValueError("Resolved Zadanie path escapes the project root") from exc
+        raise ValueError("Cesta k zadaniu vedie mimo priečinka projektu.") from exc
     return rel_path, abs_path
 
 
@@ -377,7 +376,7 @@ def write_zadanie(
         .where(Version.id == version_id)
     ).first()
     if row is None:
-        raise ValueError(f"Version {version_id} not found")
+        raise NotFoundError(f"Verzia {version_id} neexistuje.")
     version_number, slug = row
 
     rel_path, abs_path = _zadanie_paths(slug, version_number)
@@ -414,7 +413,7 @@ def read_zadanie(db: Session, version_id: UUID) -> str:
         .where(Version.id == version_id)
     ).first()
     if row is None:
-        raise ValueError(f"Version {version_id} not found")
+        raise NotFoundError(f"Verzia {version_id} neexistuje.")
     version_number, slug = row
     _, abs_path = _zadanie_paths(slug, version_number)
     return abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""
@@ -439,7 +438,7 @@ def peek_zadanie(db: Session, project_id: UUID, version_number: str) -> tuple[st
     """
     slug = db.execute(select(Project.slug).where(Project.id == project_id)).scalar_one_or_none()
     if slug is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
     rel_path, abs_path = _zadanie_paths(slug, version_number)
     return (abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""), rel_path
 
@@ -468,7 +467,7 @@ def version_number_lock_reason(db: Session, version_id: UUID) -> Optional[str]:
         .where(Version.id == version_id)
     ).first()
     if row is None:
-        raise ValueError(f"Version {version_id} not found")
+        raise NotFoundError(f"Verzia {version_id} neexistuje.")
     version_number, slug = row
 
     zaznam = db.execute(select(PipelineState.id).where(PipelineState.version_id == version_id)).first()
@@ -552,9 +551,7 @@ def update(db: Session, version_id: UUID, data: VersionUpdate) -> Version:
             raise ValueError(dovod)
         existing = _get_by_project_and_version_number(db, version.project_id, new_version_number)
         if existing is not None and existing.id != version.id:
-            raise ValueError(
-                f"Version with project_id={version.project_id} and version_number={new_version_number!r} already exists"
-            )
+            raise ConflictError(f"Verzia {new_version_number!r} v projekte {version.project_id} už existuje.")
         _move_founding_zadanie(db, version, new_version_number)
 
     # DEV-323: a sent null clears an optional field (name, description, dates) and leaves a required one.

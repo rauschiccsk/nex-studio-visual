@@ -427,7 +427,7 @@ class TestCreateProjectEdgeCases:
         )
         assert conflict.status_code == 409, conflict.text
         detail = conflict.json()["detail"]
-        assert "already exists" in detail.lower()
+        assert "už existuje" in detail
 
         # Only the first row survives.
         db_session.expire_all()
@@ -468,7 +468,7 @@ class TestCreateProjectEdgeCases:
         )
         assert conflict.status_code == 409, conflict.text
         detail = conflict.json()["detail"]
-        assert "already exists" in detail.lower()
+        assert "už existuje" in detail
 
         # Only the first row survives; filtering by the duplicated
         # slug's project id returns the original.

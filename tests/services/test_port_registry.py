@@ -131,11 +131,11 @@ class TestSuggestNextPortBlock:
         assert base == PORT_RANGE_MIN + PORT_BLOCK_SIZE
 
     def test_invalid_block_size_raises(self, db_session):
-        with pytest.raises(ValueError, match="block_size must be positive"):
+        with pytest.raises(ValueError, match="Veľkosť bloku portov musí byť kladná"):
             suggest_next_port_block(db_session, block_size=0)
 
     def test_negative_block_size_raises(self, db_session):
-        with pytest.raises(ValueError, match="block_size must be positive"):
+        with pytest.raises(ValueError, match="Veľkosť bloku portov musí byť kladná"):
             suggest_next_port_block(db_session, block_size=-1)
 
     def test_custom_block_size(self, db_session):

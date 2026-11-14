@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.versions import Version
@@ -59,7 +60,7 @@ def get_by_id(db: Session, item_id: UUID) -> BacklogItem:
     """Return one backlog item or raise ``ValueError`` (→ 404)."""
     item = db.get(BacklogItem, item_id)
     if item is None:
-        raise ValueError(f"Backlog item {item_id} not found")
+        raise NotFoundError(f"Požiadavka zásobníka {item_id} neexistuje.")
     return item
 
 
@@ -85,7 +86,7 @@ def create(db: Session, data: BacklogItemCreate) -> BacklogItem:
         ).scalar_one_or_none()
         is not None
     ):
-        raise ValueError(f"Backlog item with project_id={data.project_id} and number={number} already exists")
+        raise ConflictError(f"Požiadavka č. {number} v projekte {data.project_id} už existuje.")
     item = BacklogItem(
         project_id=data.project_id,
         number=number,
@@ -170,9 +171,9 @@ def assign_to_version(db: Session, item_id: UUID, version_id: UUID) -> BacklogIt
     item = get_by_id(db, item_id)
     version = db.get(Version, version_id)
     if version is None:
-        raise ValueError(f"Version {version_id} not found")
+        raise NotFoundError(f"Verzia {version_id} neexistuje.")
     if version.project_id != item.project_id:
-        raise ValueError(f"Version {version_id} belongs to a different project")
+        raise ValueError(f"Verzia {version_id} patrí inému projektu.")
     refusal = assign_refusal(db, version)
     if refusal is not None:
         raise ValueError(refusal)
@@ -211,7 +212,8 @@ def delete(db: Session, item_id: UUID) -> None:
     item = get_by_id(db, item_id)
     if item.status not in DELETABLE_STATUSES:
         raise ValueError(
-            f"Cannot delete backlog item {item_id}: status is '{item.status}' (only open or rejected is deletable)"
+            f"Požiadavku {item_id} nemožno zmazať: je v stave „{item.status}“ — zmazať sa dá len otvorená alebo "
+            "zamietnutá."
         )
     db.delete(item)
     db.flush()

@@ -29,6 +29,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.projects import Project
@@ -77,7 +78,7 @@ def project_contract(db: Session, project_id: UUID) -> env_contract.Contract:
 
     project = db.get(Project, project_id)
     if project is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
     return env_contract.for_project(claude_agent.PROJECTS_ROOT / project.slug)
 
 
@@ -152,7 +153,7 @@ def get_by_id(db: Session, customer_id: UUID) -> Customer:
     """
     customer = db.get(Customer, customer_id)
     if customer is None:
-        raise ValueError(f"Customer {customer_id} not found")
+        raise NotFoundError(f"Zákazník {customer_id} neexistuje.")
     return customer
 
 
@@ -232,17 +233,17 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
             same instance directory (router → 404 / 409).
     """
     if db.get(Project, project_id) is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
 
     if _get_by_project_and_slug(db, project_id, data.slug) is not None:
-        raise ValueError(f"Customer with slug {data.slug!r} already exists in this project")
+        raise ConflictError(f"Zákazník so slugom {data.slug!r} už v tomto projekte je.")
 
     dir_slug = _instance_dir_slug(data.subdomain, data.slug)
     conflict = _find_instance_dir_conflict(db, project_id, dir_slug)
     if conflict is not None:
-        raise ValueError(
-            f"Customer {conflict.slug!r} already exists in this project with instance directory "
-            f"{dir_slug!r} — two customers cannot share one instance directory"
+        raise ConflictError(
+            f"Zákazník {conflict.slug!r} už v tomto projekte je s priečinkom inštalácie {dir_slug!r} — dvaja "
+            "zákazníci nemôžu zdieľať jeden priečinok inštalácie."
         )
 
     _check_settings(db, project_id, data.settings, data.secret_settings)
@@ -297,7 +298,7 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
     if data.slug is not None and data.slug != customer.slug:
         existing = _get_by_project_and_slug(db, customer.project_id, data.slug)
         if existing is not None and existing.id != customer.id:
-            raise ValueError(f"Customer with slug {data.slug!r} already exists in this project")
+            raise ConflictError(f"Zákazník so slugom {data.slug!r} už v tomto projekte je.")
 
     # ``None`` = field omitted from the PATCH → the stored value stays in force.
     new_slug = data.slug if data.slug is not None else customer.slug
@@ -316,9 +317,9 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
         _assert_deploy_safe_instance_dir(dir_slug)
         conflict = _find_instance_dir_conflict(db, customer.project_id, dir_slug, exclude_id=customer.id)
         if conflict is not None:
-            raise ValueError(
-                f"Customer {conflict.slug!r} already exists in this project with instance directory "
-                f"{dir_slug!r} — two customers cannot share one instance directory"
+            raise ConflictError(
+                f"Zákazník {conflict.slug!r} už v tomto projekte je s priečinkom inštalácie {dir_slug!r} — dvaja "
+                "zákazníci nemôžu zdieľať jeden priečinok inštalácie."
             )
 
     if data.slug is not None:
@@ -381,10 +382,10 @@ def delete(db: Session, customer_id: UUID) -> None:
 
     event_count = db.scalar(select(func.count()).select_from(DeployEvent).where(DeployEvent.customer_id == customer_id))
     if event_count:
-        raise ValueError(
+        raise ConflictError(
             f"Zákazník má v evidencii {event_count} záznamov o nasadení, ktoré by sa spolu s ním "
-            f"nenávratne zmazali — a práve tie rozhodujú, či sa projekt smie zmazať. Conflict: "
-            f"najprv zruš nasadenia tohto zákazníka, potom ho odstráň."
+            "nenávratne zmazali — a práve tie rozhodujú, či sa projekt smie zmazať. Najprv zruš nasadenia "
+            "tohto zákazníka, potom ho odstráň."
         )
 
     db.delete(customer)

@@ -32,6 +32,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import http_error
 from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
@@ -69,16 +70,6 @@ from backend.services import uat_launch as uat_launch_service
 
 router = APIRouter(tags=["Deploy"])
 logger = logging.getLogger(__name__)
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "blocked" in lowered or "zastaven" in lowered or "cannot accept" in lowered or "already" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 def _resolve_project(db: Session, slug: str) -> Project:
@@ -282,7 +273,7 @@ async def deploy_customer(
     except ValueError as exc:
         db.rollback()
         _keep_the_refusal(db, customer_id, payload.version_number, payload.environment, current_user.id, str(exc))
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(event)
     return DeployResult(
         ok=event.status == "ok",
@@ -512,7 +503,7 @@ async def adopt_instance(
     except ValueError as exc:
         db.rollback()
         _keep_the_refusal(db, customer_id, payload.version_number, payload.environment, current_user.id, str(exc))
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(event)
     return DeployResult(
         ok=event.status == "ok",
@@ -630,6 +621,6 @@ def accept_customer_uat(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(event)
     return event

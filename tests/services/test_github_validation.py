@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.core.errors import NotFoundError
 from backend.services.github_validation import (
     create_github_repo,
     delete_github_repo,
@@ -113,7 +114,7 @@ class TestCreateGithubRepo:
         with patch("backend.services.github_validation.settings") as mock_settings:
             mock_settings.github_token = "ghp_test"
             mock_settings.github_api_timeout = 10.0
-            with pytest.raises(ValueError, match="github_token belongs to 'rauschiccsk'"):
+            with pytest.raises(ValueError, match="github_token patrí „rauschiccsk“"):
                 create_github_repo("someone-else/nex-test")
 
         mock_post.assert_not_called()
@@ -126,7 +127,7 @@ class TestCreateGithubRepo:
         with patch("backend.services.github_validation.settings") as mock_settings:
             mock_settings.github_token = "ghp_test"
             mock_settings.github_api_timeout = 10.0
-            with pytest.raises(ValueError, match="account 'nowhere' not found"):
+            with pytest.raises(NotFoundError, match="Účet GitHub „nowhere“ neexistuje"):
                 create_github_repo("nowhere/some-repo")
 
         mock_post.assert_not_called()
@@ -202,11 +203,11 @@ class TestCreateGithubRepo:
                 create_github_repo("rauschiccsk/nex-test")
 
     def test_invalid_format_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repository format"):
+        with pytest.raises(ValueError, match="Neplatný tvar repozitára"):
             create_github_repo("missing-slash")
 
     def test_empty_string_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repository format"):
+        with pytest.raises(ValueError, match="Neplatný tvar repozitára"):
             create_github_repo("")
 
     @patch("backend.services.github_validation.httpx.post")
@@ -281,5 +282,5 @@ class TestDeleteGithubRepo:
                 delete_github_repo("rauschiccsk/nex-test")
 
     def test_invalid_format_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Invalid repository format"):
+        with pytest.raises(ValueError, match="Neplatný tvar repozitára"):
             delete_github_repo("no-slash")

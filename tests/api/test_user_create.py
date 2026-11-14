@@ -129,7 +129,7 @@ class TestDuplicateUsername:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp2.status_code == 409
-        assert "already exists" in resp2.json()["detail"].lower()
+        assert "už existuje" in resp2.json()["detail"]
 
 
 class TestSharedEmail:

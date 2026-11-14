@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.credentials import Credential
 from backend.schemas.credentials import (
     CredentialContent,
@@ -54,9 +55,9 @@ def _ensure_storage_dir() -> Path:
 def _validate_filename(filename: str) -> None:
     """Reject any filename that escapes the flat directory."""
     if "/" in filename or "\\" in filename:
-        raise ValueError("filename must be a flat name (no slashes)")
+        raise ValueError("Meno súboru nesmie obsahovať lomku.")
     if filename in ("", ".", ".."):
-        raise ValueError("filename must not be empty or a directory marker")
+        raise ValueError("Meno súboru nesmie byť prázdne ani označovať priečinok.")
 
 
 def _validate_path_in_store(path: Path) -> None:
@@ -65,7 +66,7 @@ def _validate_path_in_store(path: Path) -> None:
     try:
         path.resolve().relative_to(root)
     except ValueError as exc:
-        raise ValueError(f"path resolves outside the credentials store: {path}") from exc
+        raise ValueError(f"Cesta vedie mimo úložiska prístupov: {path}") from exc
 
 
 def list_credentials(db: Session) -> list[Credential]:
@@ -77,7 +78,7 @@ def list_credentials(db: Session) -> list[Credential]:
 def get_by_id(db: Session, credential_id: UUID) -> Credential:
     cred = db.get(Credential, credential_id)
     if cred is None:
-        raise ValueError(f"Credential {credential_id} not found")
+        raise NotFoundError(f"Prístup {credential_id} neexistuje.")
     return cred
 
 
@@ -96,11 +97,12 @@ def create(db: Session, data: CredentialCreate) -> Credential:
     _validate_path_in_store(target)
 
     if target.exists():
-        raise ValueError(f"credential file already exists: {data.filename}")
+        raise ConflictError(f"Súbor prístupu {data.filename} už existuje.")
 
     if len(data.content.encode("utf-8")) > settings.credentials_content_max_bytes:
         raise ValueError(
-            f"content too large: exceeds credentials_content_max_bytes ({settings.credentials_content_max_bytes})"
+            f"Obsah je príliš veľký — limit je {settings.credentials_content_max_bytes} bajtov "
+            "(credentials_content_max_bytes)."
         )
 
     cred = Credential(title=data.title, file_path=str(target))
@@ -137,15 +139,15 @@ def read_content(db: Session, credential_id: UUID) -> CredentialContent:
     size_bytes = target.stat().st_size
     if size_bytes > settings.credentials_content_max_bytes:
         raise ValueError(
-            f"file too large: {size_bytes} bytes exceeds "
-            f"credentials_content_max_bytes ({settings.credentials_content_max_bytes})"
+            f"Súbor je príliš veľký: {size_bytes} bajtov, limit je {settings.credentials_content_max_bytes} "
+            "(credentials_content_max_bytes)."
         )
 
     raw = target.read_bytes()
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ValueError(f"file is not valid UTF-8 (likely binary): {cred.file_path}") from exc
+        raise ValueError(f"Súbor nie je platný text UTF-8 (asi je binárny): {cred.file_path}") from exc
 
     return CredentialContent(
         credential_id=cred.id,
@@ -164,7 +166,8 @@ def write_content(db: Session, credential_id: UUID, content: str) -> CredentialC
     encoded = content.encode("utf-8")
     if len(encoded) > settings.credentials_content_max_bytes:
         raise ValueError(
-            f"content too large: exceeds credentials_content_max_bytes ({settings.credentials_content_max_bytes})"
+            f"Obsah je príliš veľký — limit je {settings.credentials_content_max_bytes} bajtov "
+            "(credentials_content_max_bytes)."
         )
 
     target.write_text(content, encoding="utf-8")

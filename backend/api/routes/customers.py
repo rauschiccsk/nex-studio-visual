@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import http_error
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
@@ -40,16 +41,6 @@ from backend.services import customer as customer_service
 from backend.services import prod_machines
 
 router = APIRouter(tags=["Customers"])
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 def _to_read(customer: Customer, db: Session) -> CustomerRead:
@@ -144,7 +135,7 @@ def create_customer(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(customer)
     return _to_read(customer, db)
 
@@ -176,7 +167,7 @@ def update_customer(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(customer)
     return _to_read(customer, db)
 
@@ -203,5 +194,5 @@ def delete_customer(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

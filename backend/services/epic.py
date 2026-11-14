@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.tasks import Epic
 from backend.schemas.epic import (
     EpicCreate,
@@ -30,7 +31,7 @@ def get_by_id(db: Session, epic_id: UUID) -> Epic:
     """
     epic = db.get(Epic, epic_id)
     if epic is None:
-        raise ValueError(f"Epic {epic_id} not found")
+        raise NotFoundError(f"Epika {epic_id} neexistuje.")
     return epic
 
 
@@ -102,11 +103,11 @@ def create(db: Session, data: EpicCreate) -> Epic:
             ``(project_id, number)`` pair (concurrent-create race).
     """
     if data.version_id is None:
-        raise ValueError("version_id required for new epics")
+        raise ValueError("Nová epika potrebuje version_id.")
 
     number = _next_epic_number(db, data.project_id)
     if _get_by_project_and_number(db, data.project_id, number) is not None:
-        raise ValueError(f"Epic with project_id={data.project_id} and number={number} already exists")
+        raise ConflictError(f"Epika č. {number} v projekte {data.project_id} už existuje.")
 
     epic = Epic(
         project_id=data.project_id,

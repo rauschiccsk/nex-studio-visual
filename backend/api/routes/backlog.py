@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import http_error
 from backend.core.security import get_current_user
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
@@ -47,17 +48,6 @@ from backend.services import backlog_tickets, plane_tickets
 from backend.services.plane_gateway import PlaneError
 
 router = APIRouter(tags=["Backlog"])
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    """``not found`` → 404, duplicate/conflict → 409, else → 422 (ICC convention)."""
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 @router.get("", response_model=PaginatedResponse[BacklogItemRead])
@@ -124,7 +114,7 @@ def create_backlog_item(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(item)
     return BacklogItemRead.model_validate(item)
 
@@ -153,7 +143,7 @@ def update_backlog_item(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(item)
     warning = _ticket_follows(db, item, was_status, was_version, current_user)
     return BacklogItemRead.model_validate(item).model_copy(update={"plane_warning": warning})
@@ -185,7 +175,7 @@ def plane_ticket_draft(
     try:
         item = backlog_service.get_by_id(db, item_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     authz.assert_project_id_access(db, current_user, item.project_id)
     try:
         found = backlog_tickets.draft(None, item, current_user)
@@ -210,7 +200,7 @@ def found_plane_ticket(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     except PlaneError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
@@ -239,5 +229,5 @@ def delete_backlog_item(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

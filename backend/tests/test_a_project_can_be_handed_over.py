@@ -116,7 +116,7 @@ def test_a_deactivated_person_cannot_be_given_a_project(db_session) -> None:
     odisiel = _user(db_session, "odisiel", active=False)
     projekt = _project(db_session, _user(db_session, "nazar4"))
 
-    with pytest.raises(ValueError, match="not active"):
+    with pytest.raises(ValueError, match="je vypnutý"):
         project_service.reassign(db_session, projekt.id, to_user_id=odisiel.id, assigned_by=spravca.id)
 
 

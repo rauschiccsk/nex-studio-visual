@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import UserSession
 
 
@@ -84,7 +85,7 @@ def get_by_id(db: Session, session_id: UUID) -> UserSession:
     """
     session = db.get(UserSession, session_id)
     if session is None:
-        raise ValueError(f"UserSession {session_id} not found")
+        raise NotFoundError(f"Sedenie {session_id} neexistuje.")
     return session
 
 

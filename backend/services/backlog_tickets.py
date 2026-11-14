@@ -22,6 +22,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import NotFoundError
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -123,7 +124,7 @@ def found(
         select(BacklogItem).where(BacklogItem.id == item_id).with_for_update().execution_options(populate_existing=True)
     ).scalar_one_or_none()
     if item is None:
-        raise ValueError(f"Backlog item {item_id} not found")
+        raise NotFoundError(f"Požiadavka zásobníka {item_id} neexistuje.")
     if item.plane_issue_id:
         return item, False
     if item.status not in FOUNDABLE_STATUSES:

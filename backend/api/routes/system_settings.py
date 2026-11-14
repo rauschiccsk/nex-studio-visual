@@ -13,6 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.core.errors import NotFoundError
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -67,7 +68,7 @@ def update_system_setting(
         # An UNKNOWN KEY is a 404; a rejected VALUE is a 422. Both used to answer 404, so the Settings
         # UI reported "this setting does not exist" for a value it had simply refused to store — a
         # misdirection that sends the operator looking for the wrong problem.
-        unknown_key = "unknown system setting" in str(exc).lower()
+        unknown_key = isinstance(exc, NotFoundError)  # DEV-386: by the error's type, not its words
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND if unknown_key else status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

@@ -412,7 +412,7 @@ def describe_port_availability(
     """
     range_min, range_max = _port_range(db)
     if port < range_min or port > range_max:
-        raise ValueError(f"Port {port} is outside the allowed range ({range_min}–{range_max}).")
+        raise ValueError(f"Port {port} je mimo povoleného rozsahu {range_min}–{range_max}.")
 
     reserved = reserved_ranges_status(db)
     warnings = tuple(reserved.warnings)
@@ -801,7 +801,7 @@ def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
     if block_size is None:
         block_size = _port_block_size(db)
     if block_size <= 0:
-        raise ValueError(f"block_size must be positive, got {block_size!r}.")
+        raise ValueError(f"Veľkosť bloku portov musí byť kladná, je {block_size!r}.")
 
     # DB-allocated ports + externally-reserved ranges + ports the HOST is
     # actually publishing, so the suggested base neither lands inside a range
@@ -820,7 +820,7 @@ def suggest_next_port_block(db: Session, block_size: int | None = None) -> int:
         if blocked.isdisjoint(candidate) and not any(_bind_probe_says_taken(p) for p in candidate):
             return base
 
-    raise ValueError(f"No free {block_size}-port block in range {range_min}–{range_max}.")
+    raise ValueError(f"V rozsahu {range_min}–{range_max} nie je voľný blok {block_size} portov.")
 
 
 def _drop_block_for(text: str, slug: str) -> str:

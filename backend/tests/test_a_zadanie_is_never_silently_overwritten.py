@@ -151,5 +151,5 @@ def test_a_version_number_cannot_climb_out_of_the_project(db_session, tmp_path, 
     """
     version = _seed(db_session, tmp_path, monkeypatch, slug="neutecie")
 
-    with pytest.raises(ValueError, match="escapes the project root"):
+    with pytest.raises(ValueError, match="mimo priečinka projektu"):
         version_service.peek_zadanie(db_session, version.project_id, "./../../../../../etc")

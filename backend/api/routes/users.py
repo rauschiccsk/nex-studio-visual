@@ -29,6 +29,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from backend.core.errors import http_error
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -48,23 +49,6 @@ from backend.services import user as user_service
 from backend.services.plane_gateway import PlaneError, name_key
 
 router = APIRouter(tags=["Users"])
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    """Translate a service-layer ``ValueError`` into an HTTP exception.
-
-    Mirrors the ICC error-handling pattern: ``not found`` → 404,
-    duplicates/conflicts → 409, everything else (constraint / FK /
-    validation failures such as "cannot delete ... referenced by ...") →
-    422.
-    """
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 @router.get("", response_model=PaginatedResponse[UserRead])
@@ -97,7 +81,7 @@ def list_users(
             is_active=is_active,
         )
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
     return PaginatedResponse[UserRead](
         items=[UserRead.model_validate(row) for row in rows],
@@ -149,7 +133,7 @@ def set_plane_responsible(
     try:
         user = user_service.get_by_id(db, user_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     name = (payload.name or "").strip()
     if name:
         chosen = {name_key(person): person for person in people}.get(name_key(name))
@@ -186,7 +170,7 @@ def create_user(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(user)
     return UserRead.model_validate(user)
 
@@ -213,7 +197,7 @@ def update_user(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(user)
     return UserRead.model_validate(user)
 
@@ -258,7 +242,7 @@ def delete_user(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -286,17 +270,9 @@ def change_password(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        message = str(exc)
-        if "permissions" in message.lower():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=message,
-            ) from exc
-        if "current password" in message.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Súčasné heslo je nesprávne.",
-            ) from exc
-        raise _map_value_error(exc) from exc
+        # DEV-386: by the error's type — a wrong current password is 400, a foreign one (ForbiddenError) 403.
+        if isinstance(exc, user_service.WrongCurrentPassword):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise http_error(exc) from exc
     db.refresh(user)
     return UserRead.model_validate(user)

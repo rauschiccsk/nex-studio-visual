@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User, UserSession
 from backend.services import user_session as service
 
@@ -60,7 +61,7 @@ class TestUserSessionService:
 
     def test_get_by_id_missing_raises(self, db_session):
         """``get_by_id`` raises ``ValueError`` for an unknown id."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     # ---------------------------------------------------------------- update
@@ -73,12 +74,12 @@ class TestUserSessionService:
 
         service.delete(db_session, created.id)
 
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, created.id)
 
     def test_delete_missing_raises(self, db_session):
         """``delete`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.delete(db_session, uuid.uuid4())
 
     def test_delete_one_session_leaves_siblings_intact(self, db_session):

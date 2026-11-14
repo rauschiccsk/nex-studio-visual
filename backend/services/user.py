@@ -42,11 +42,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import ACCOUNT_COLORS
+from backend.core.errors import ConflictError, ForbiddenError, NotFoundError
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.poradca import PoradcaConversation
 from backend.db.models.projects import Project
 from backend.schemas.user import SelfProfileUpdate, UserCreate, UserRole, UserUpdate
 from backend.services.patch import apply_changes
+
+
+class WrongCurrentPassword(ValueError):
+    """DEV-386: the current password given to change one's own was wrong or missing — the route answers 400 by this
+    type, not by the words of the message."""
 
 
 def list_users(
@@ -119,7 +125,7 @@ def get_by_id(db: Session, user_id: UUID) -> User:
     """
     user = db.get(User, user_id)
     if user is None:
-        raise ValueError(f"User {user_id} not found")
+        raise NotFoundError(f"Používateľ {user_id} neexistuje.")
     return user
 
 
@@ -160,7 +166,7 @@ def create(db: Session, data: UserCreate) -> User:
         ValueError: If another user already uses the same ``username``.
     """
     if _get_by_username(db, data.username) is not None:
-        raise ValueError(f"User with username {data.username!r} already exists")
+        raise ConflictError(f"Používateľ s menom {data.username!r} už existuje.")
 
     hashed = bcrypt.hashpw(
         data.password.encode("utf-8"),
@@ -229,7 +235,7 @@ def update(db: Session, user_id: UUID, data: UserUpdate) -> User:
     if new_username is not None and new_username != user.username:
         existing = _get_by_username(db, new_username)
         if existing is not None and existing.id != user.id:
-            raise ValueError(f"User with username {new_username!r} already exists")
+            raise ConflictError(f"Používateľ s menom {new_username!r} už existuje.")
 
     # DEV-323: a sent null clears an optional field (surname, name, Telegram) and leaves a required one.
     apply_changes(user, update_data, allowed_fields)
@@ -361,7 +367,7 @@ def change_password(
 
     # --- Authorization ---
     if current_user.role != "ri" and not is_self:
-        raise ValueError("Insufficient permissions: only ri role can change another user's password")
+        raise ForbiddenError("Heslo iného používateľa môže zmeniť len rola „ri“.")
 
     # --- Fetch target user ---
     user = get_by_id(db, user_id)
@@ -373,9 +379,9 @@ def change_password(
     # is verified, so a wrong entry never silently succeeds.
     if is_self:
         if current_user.role != "ri" and not current_password:
-            raise ValueError("Current password is incorrect")
+            raise WrongCurrentPassword("Súčasné heslo nie je správne.")
         if current_password and not verify_password(current_password, user.password_hash):
-            raise ValueError("Current password is incorrect")
+            raise WrongCurrentPassword("Súčasné heslo nie je správne.")
 
     # --- Hash and persist ---
     hashed = bcrypt.hashpw(

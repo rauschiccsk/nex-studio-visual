@@ -17,10 +17,11 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import http_error
 from backend.core.security import require_ha_or_above
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -34,22 +35,6 @@ router = APIRouter(
     tags=["User Sessions"],
     dependencies=[Depends(require_ha_or_above)],
 )
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    """Translate a service-layer ``ValueError`` into an HTTP exception.
-
-    Mirrors the ICC error-handling pattern: ``not found`` → 404,
-    duplicates / conflicts → 409, everything else (constraint / FK /
-    validation failures) → 422.
-    """
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 @router.get("", response_model=PaginatedResponse[UserSessionRead])
@@ -90,7 +75,7 @@ def list_user_sessions(
             user_id=user_id,
         )
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
     owner_ids = {row.user_id for row in rows}
     usernames: dict[UUID, str] = (
@@ -137,5 +122,5 @@ def delete_user_session(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -24,10 +24,12 @@ import uuid
 import bcrypt
 import pytest
 
+from backend.core.errors import ConflictError, ForbiddenError, NotFoundError
 from backend.db.models.foundation import User, UserSession
 from backend.db.models.projects import Project
 from backend.schemas.user import SelfProfileUpdate, UserCreate, UserUpdate
 from backend.services import user as service
+from backend.services.user import WrongCurrentPassword
 
 
 def _payload(**overrides) -> UserCreate:
@@ -65,7 +67,7 @@ class TestUserService:
     def test_create_duplicate_username_raises(self, db_session):
         """Second ``create`` with the same ``username`` must raise ``ValueError``."""
         service.create(db_session, _payload(username="dup", email="one@example.com"))
-        with pytest.raises(ValueError, match="username"):
+        with pytest.raises(ConflictError):
             service.create(
                 db_session,
                 _payload(username="dup", email="two@example.com"),
@@ -134,7 +136,7 @@ class TestUserService:
 
     def test_get_by_id_missing_raises(self, db_session):
         """``get_by_id`` raises ``ValueError`` for an unknown id."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     # ---------------------------------------------------------------- update
@@ -182,7 +184,7 @@ class TestUserService:
 
     def test_update_missing_raises(self, db_session):
         """``update`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.update(
                 db_session,
                 uuid.uuid4(),
@@ -194,7 +196,7 @@ class TestUserService:
         service.create(db_session, _payload(username="taken", email="t@example.com"))
         other = service.create(db_session, _payload(username="me", email="me@example.com"))
 
-        with pytest.raises(ValueError, match="username"):
+        with pytest.raises(ConflictError):
             service.update(db_session, other.id, UserUpdate(username="taken"))
 
     def test_update_to_shared_email_allowed(self, db_session):
@@ -225,12 +227,12 @@ class TestUserService:
         created = service.create(db_session, _payload())
         service.delete(db_session, created.id)
 
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, created.id)
 
     def test_delete_missing_raises(self, db_session):
         """``delete`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.delete(db_session, uuid.uuid4())
 
     def test_delete_blocked_by_project(self, db_session):
@@ -354,20 +356,20 @@ class TestChangePassword:
         """An ``ha`` user cannot change another user's password."""
         ha_user = service.create(db_session, _payload(username="ha_actor", email="ha_a@ex.com", role="ha"))
         target = service.create(db_session, _payload(username="other", email="other@ex.com", role="shu"))
-        with pytest.raises(ValueError, match="Insufficient permissions"):
+        with pytest.raises(ForbiddenError):
             service.change_password(db_session, target.id, "Nope!", ha_user)
 
     def test_shu_cannot_change_other_users_password(self, db_session):
         """An ``shu`` user cannot change another user's password."""
         shu_user = service.create(db_session, _payload(username="shu_actor", email="shu_a@ex.com", role="shu"))
         target = service.create(db_session, _payload(username="other2", email="other2@ex.com", role="ha"))
-        with pytest.raises(ValueError, match="Insufficient permissions"):
+        with pytest.raises(ForbiddenError):
             service.change_password(db_session, target.id, "Nope!", shu_user)
 
     def test_change_password_for_nonexistent_user_raises(self, db_session):
         """``change_password`` raises ``ValueError`` for unknown user_id."""
         ri_user = service.create(db_session, _payload(username="ri_404", email="ri404@ex.com", role="ri"))
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.change_password(db_session, uuid.uuid4(), "Pass!", ri_user)
 
     def test_password_rotation_invalidates_tokens(self, db_session):
@@ -415,13 +417,13 @@ class TestChangePassword:
     def test_self_change_requires_current_password(self, db_session):
         """A self change without ``current_password`` is rejected (a hijacked session can't reset)."""
         user = service.create(db_session, _payload(username="sc_none", email="sc_none@ex.com", role="shu"))
-        with pytest.raises(ValueError, match="Current password is incorrect"):
+        with pytest.raises(WrongCurrentPassword):
             service.change_password(db_session, user.id, "NewPass!", user)
 
     def test_self_change_rejects_wrong_current_password(self, db_session):
         """A self change with the WRONG ``current_password`` is rejected."""
         user = service.create(db_session, _payload(username="sc_wrong", email="sc_wrong@ex.com", role="ha"))
-        with pytest.raises(ValueError, match="Current password is incorrect"):
+        with pytest.raises(WrongCurrentPassword):
             service.change_password(db_session, user.id, "NewPass!", user, current_password="nope")
 
     def test_admin_reset_does_not_need_current_password(self, db_session):
@@ -465,7 +467,7 @@ class TestChangePassword:
         """When a current password IS supplied (the Moje konto form always sends it), a WRONG one is
         rejected even for an ``ri`` — a wrong entry never silently succeeds."""
         ri_user = service.create(db_session, _payload(username="ri_wc", email="ri_wc@ex.com", role="ri"))
-        with pytest.raises(ValueError, match="Current password is incorrect"):
+        with pytest.raises(WrongCurrentPassword):
             service.change_password(db_session, ri_user.id, "RiReset1!", ri_user, current_password="wrong")
 
 

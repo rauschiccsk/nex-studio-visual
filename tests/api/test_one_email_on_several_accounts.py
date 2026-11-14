@@ -61,8 +61,8 @@ def test_a_taken_username_is_still_refused(client, db_session) -> None:
     assert client.post("/api/v1/users", json=_account(username=taken), headers=auth).status_code == 201
     again = client.post("/api/v1/users", json=_account(username=taken), headers=auth)
     assert again.status_code == 409
-    assert "username" in again.json()["detail"].lower()
+    assert "Používateľ s menom" in again.json()["detail"]
     other = client.post("/api/v1/users", json=_account(), headers=auth).json()
     rename = client.patch(f"/api/v1/users/{other['id']}", json={"username": taken}, headers=auth)
     assert rename.status_code == 409
-    assert "username" in rename.json()["detail"].lower()
+    assert "Používateľ s menom" in rename.json()["detail"]

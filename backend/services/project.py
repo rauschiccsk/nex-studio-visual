@@ -53,6 +53,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.project_assignments import ProjectAssignment
 from backend.db.models.projects import Project
@@ -163,7 +164,7 @@ def get_by_id(db: Session, project_id: UUID) -> Project:
     """
     project = db.get(Project, project_id)
     if project is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
     return project
 
 
@@ -200,9 +201,9 @@ def create(db: Session, data: ProjectCreate) -> Project:
             ``slug``.
     """
     if _get_by_name(db, data.name) is not None:
-        raise ValueError(f"Project with name {data.name!r} already exists")
+        raise ConflictError(f"Projekt s menom {data.name!r} už existuje.")
     if _get_by_slug(db, data.slug) is not None:
-        raise ValueError(f"Project with slug {data.slug!r} already exists")
+        raise ConflictError(f"Projekt so slugom {data.slug!r} už existuje.")
 
     # Convention-based defaults for filesystem paths — only applied when the
     # caller did not supply an explicit value. The templates live in
@@ -291,7 +292,7 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
     if new_name is not None and new_name != project.name:
         existing = _get_by_name(db, new_name)
         if existing is not None and existing.id != project.id:
-            raise ValueError(f"Project with name {new_name!r} already exists")
+            raise ConflictError(f"Projekt s menom {new_name!r} už existuje.")
 
     # DEV-324: an assigned port is never emptied — the projects table is the port ledger, and a freed port could go to
     # another project while an install still runs on it. Moving it to another number stays allowed.
@@ -411,14 +412,14 @@ def reassign(
     """
     project = db.execute(select(Project).where(Project.id == project_id)).scalar_one_or_none()
     if project is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
 
     new_owner = db.execute(select(User).where(User.id == to_user_id)).scalar_one_or_none()
     if new_owner is None:
-        raise ValueError(f"User {to_user_id} not found")
+        raise NotFoundError(f"Používateľ {to_user_id} neexistuje.")
     if not new_owner.is_active:
         # Projekt bez činného gazdu je projekt, ktorý nikto nevidí a za ktorý nikto nezodpovedá.
-        raise ValueError(f"User {new_owner.username} is not active")
+        raise ValueError(f"Používateľ {new_owner.username} je vypnutý.")
 
     previous_owner_id = project.created_by
     if previous_owner_id != to_user_id:

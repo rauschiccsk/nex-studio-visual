@@ -114,7 +114,7 @@ def _status_entries(
     args = ["status", "--porcelain", "-z", *(["--untracked-files=all"] if every_file else []), *_outside(exclude)]
     proc = _run(root, args, timeout=timeout)
     if proc.returncode != 0:
-        raise ValueError("git status zlyhal")
+        raise ValueError("Príkaz git status zlyhal.")
     fields = iter(proc.stdout.split("\0"))
     entries: list[tuple[str, str, Optional[str]]] = []
     for field in fields:
@@ -148,7 +148,7 @@ def working_tree_status(
         args += ["--", *paths]
     proc = _run(root, args, timeout=timeout)
     if proc.returncode != 0:
-        raise ValueError("git status zlyhal")
+        raise ValueError("Príkaz git status zlyhal.")
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
     files = [{"code": (ln[:2].strip() or ln[:2]), "path": ln[3:]} for ln in lines[:_MAX_FILES]]
     return {

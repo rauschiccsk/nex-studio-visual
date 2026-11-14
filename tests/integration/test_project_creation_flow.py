@@ -141,7 +141,7 @@ class TestProjectCreationFlow:
             )
         assert dup_resp.status_code == 409
         error_detail = dup_resp.json()["detail"]
-        assert "already exists" in error_detail.lower() or "duplicate" in error_detail.lower()
+        assert "už existuje" in error_detail
 
     def test_ports_occupied_after_creation(self, integration_client, _seed_admin):
         """After project creation, the allocated ports must show as occupied."""

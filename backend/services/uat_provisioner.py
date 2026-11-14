@@ -235,13 +235,13 @@ def validate_uat_slug(slug: str) -> None:
     leading hyphen/dot/slash) — duplicated here so the backend module stays self-contained.
     """
     if not slug:
-        raise ValueError("slug must not be empty")
+        raise ValueError("Slug nesmie byť prázdny.")
     if slug != slug.lower():
-        raise ValueError(f"slug must be lowercase: {slug!r}")
+        raise ValueError(f"Slug musí byť malými písmenami: {slug!r}")
     if "/" in slug:
-        raise ValueError(f"slug contains slash (invalid char): {slug!r}")
+        raise ValueError(f"Slug nesmie obsahovať lomku: {slug!r}")
     if not SLUG_PATTERN.match(slug):
-        raise ValueError(f"slug invalid char (allowed: a-z, 0-9, hyphen, no leading hyphen): {slug!r}")
+        raise ValueError(f"Slug má nepovolený znak (povolené sú a-z, 0-9 a pomlčka, nie na začiatku): {slug!r}")
 
 
 def derive_uat_slug(project: Any) -> str:
@@ -273,9 +273,9 @@ def load_source_compose(source_project_path: Path) -> dict[str, Any]:
     try:
         data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise ValueError(f"source docker-compose.yml is not valid YAML: {exc}") from exc
+        raise ValueError(f"Zdrojový docker-compose.yml nie je platný YAML: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("services"), dict) or not data["services"]:
-        raise ValueError(f"source docker-compose.yml has no services: {compose_path}")
+        raise ValueError(f"Zdrojový docker-compose.yml nemá žiadne služby: {compose_path}")
     return data
 
 

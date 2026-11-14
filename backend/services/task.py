@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.schemas.task import (
     TaskCreate,
@@ -51,7 +52,7 @@ def get_by_id(db: Session, task_id: UUID) -> Task:
     """
     task = db.get(Task, task_id)
     if task is None:
-        raise ValueError(f"Task {task_id} not found")
+        raise NotFoundError(f"Úloha {task_id} neexistuje.")
     return task
 
 
@@ -116,7 +117,7 @@ def create(db: Session, data: TaskCreate) -> Task:
     """
     number = _next_task_number(db, data.feat_id)
     if _get_by_feat_and_number(db, data.feat_id, number) is not None:
-        raise ValueError(f"Task with feat_id={data.feat_id} and number={number} already exists")
+        raise ConflictError(f"Úloha č. {number} vo feate {data.feat_id} už existuje.")
 
     task = Task(
         feat_id=data.feat_id,

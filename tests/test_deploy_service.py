@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from backend.config.settings import settings
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
@@ -230,7 +231,7 @@ async def test_deploy_unknown_version_rejected(db_session):
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    with pytest.raises(ValueError, match="not found for this project"):
+    with pytest.raises(NotFoundError):
         await _deploy(db_session, customer, version_number="9.9.9", environment="uat", actor=user, runner=runner)
     assert runner.calls == [], "an unknown version must never reach the deploy runner"
 
@@ -241,7 +242,7 @@ async def test_unknown_environment_rejected(db_session):
     project = _make_project(db_session, user=user)
     _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
-    with pytest.raises(ValueError, match="Unknown environment"):
+    with pytest.raises(ValueError, match="Neznáme prostredie"):
         await _deploy(
             db_session, customer, version_number="0.1.0", environment="staging", actor=user, runner=_FakeRunner()
         )
@@ -348,7 +349,7 @@ async def test_prod_deploy_without_acceptance_blocked(db_session):
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
-    with pytest.raises(ValueError, match="PROD deploy blocked"):
+    with pytest.raises(ConflictError, match="Nasadenie na PROD zastavené"):
         await _deploy(db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner)
     assert runner.calls == [], "a PROD deploy without acceptance must never reach the runner"
 
@@ -361,7 +362,7 @@ async def test_accept_requires_uat_deploy_first(db_session):
     _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
 
-    with pytest.raises(ValueError, match="has not been successfully deployed"):
+    with pytest.raises(ConflictError, match="nemožno akceptovať"):
         deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
 
 
@@ -407,7 +408,7 @@ async def test_acceptance_is_per_customer_and_per_version(db_session):
 
     # Another customer is NOT opened by A's acceptance.
     assert deploy_service.is_accepted(db_session, cust_b.id, "0.1.0") is False
-    with pytest.raises(ValueError, match="PROD deploy blocked"):
+    with pytest.raises(ConflictError, match="Nasadenie na PROD zastavené"):
         await _deploy(db_session, cust_b, version_number="0.1.0", environment="prod", actor=user, runner=runner)
 
     # A different version for A is NOT opened either.
@@ -526,7 +527,7 @@ async def test_a_started_version_whose_check_failed_is_the_version_that_runs(db_
     assert deploy_service.current_version(db_session, customer.id, "uat") == "0.2.0"
     assert deploy_service.last_deploy_attempt_failed(db_session, customer.id, "uat") is True
     assert deploy_service.last_successful_deploy(db_session, customer.id, "uat").version_number == "0.1.0"
-    with pytest.raises(ValueError, match="has not been successfully deployed"):
+    with pytest.raises(ConflictError, match="nemožno akceptovať"):
         deploy_service.accept(db_session, customer.id, "0.2.0", user.id)
 
 

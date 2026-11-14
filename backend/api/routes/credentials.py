@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from backend.core.errors import http_error
 from backend.core.security import require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
@@ -26,16 +27,6 @@ from backend.schemas.credentials import (
 from backend.services import credentials as credentials_service
 
 router = APIRouter(tags=["Credentials"])
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 @router.get("", response_model=list[CredentialRead])
@@ -58,7 +49,7 @@ def get_credential_content(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
 
 @router.put("/{credential_id}/content", response_model=CredentialContent)
@@ -73,7 +64,7 @@ def put_credential_content(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return result
 
 
@@ -88,7 +79,7 @@ def create_credential(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(cred)
     return CredentialRead.model_validate(cred)
 
@@ -104,5 +95,5 @@ def delete_credential(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

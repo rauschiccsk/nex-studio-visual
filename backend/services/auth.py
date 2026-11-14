@@ -21,8 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.config.settings import settings
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User, UserSession
 from backend.services import system_setting as system_setting_service
+
+
+class InactiveAccount(ValueError):
+    """DEV-386: the account exists but is switched off — the login says so by this type, not by the words."""
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -46,10 +51,10 @@ def authenticate_user(db: Session, username: str, password: str) -> User:
     user = db.execute(stmt).scalar_one_or_none()
 
     if user is None or not verify_password(password, user.password_hash):
-        raise ValueError("Invalid username or password")
+        raise ValueError("Nesprávne meno alebo heslo.")
 
     if not user.is_active:
-        raise ValueError("User account is inactive")
+        raise InactiveAccount("Účet je vypnutý — požiadaj správcu, aby ho zapol.")
 
     return user
 
@@ -148,7 +153,7 @@ def refresh_session(db: Session, user: User) -> tuple[str, int]:
     """
     token_version = get_token_version(db, user.id)
     if token_version is None:
-        raise ValueError("Session not found for user")
+        raise NotFoundError("Sedenie tohto používateľa neexistuje — prihlás sa znova.")
     expire_minutes = system_setting_service.get_int(db, "access_token_expire_minutes")
     return create_access_token(user, token_version, expire_minutes)
 
@@ -166,7 +171,7 @@ def logout(db: Session, user_id: object) -> None:
     session = db.execute(stmt).scalar_one_or_none()
 
     if session is None:
-        raise ValueError("Session not found for user")
+        raise NotFoundError("Sedenie tohto používateľa neexistuje — prihlás sa znova.")
 
     session.token_version = session.token_version + 1
     session.last_seen_at = datetime.now(timezone.utc)

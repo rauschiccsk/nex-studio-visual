@@ -23,6 +23,7 @@ import uuid
 import pytest
 from sqlalchemy import select as sa_select
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat
@@ -184,7 +185,7 @@ class TestFeatService:
 
     def test_get_by_id_missing_raises(self, db_session):
         """``get_by_id`` raises ``ValueError`` for an unknown id."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     # ---------------------------------------------------------------- update

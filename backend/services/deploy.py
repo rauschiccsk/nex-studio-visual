@@ -66,6 +66,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import (
     DEPLOY_STATUS_FAILED,
@@ -191,14 +192,14 @@ class DeployOutcome(_WarningTuple):
 def _get_customer(db: Session, customer_id: UUID) -> Customer:
     customer = db.get(Customer, customer_id)
     if customer is None:
-        raise ValueError(f"Customer {customer_id} not found")
+        raise NotFoundError(f"Zákazník {customer_id} neexistuje.")
     return customer
 
 
 def _get_project(db: Session, project_id: UUID) -> Project:
     project = db.get(Project, project_id)
     if project is None:
-        raise ValueError(f"Project {project_id} not found")
+        raise NotFoundError(f"Projekt {project_id} neexistuje.")
     return project
 
 
@@ -212,7 +213,7 @@ def _resolve_version(db: Session, project_id: UUID, version_number: str) -> Vers
         select(Version).where(Version.project_id == project_id, Version.version_number == version_number)
     ).scalar_one_or_none()
     if version is None:
-        raise ValueError(f"Version {version_number!r} not found for this project")
+        raise NotFoundError(f"Verzia {version_number!r} v tomto projekte neexistuje.")
     return version
 
 
@@ -1137,9 +1138,9 @@ def accept(
         )
     ).first()
     if has_uat_deploy is None:
-        raise ValueError(
-            f"Cannot accept {version_number!r}: it has not been successfully deployed to this customer's UAT "
-            f"(current UAT version: {uat_version or 'none'})"
+        raise ConflictError(
+            f"Verziu {version_number!r} nemožno akceptovať: u tohto zákazníka nebola úspešne nasadená na UAT "
+            f"(na UAT je {uat_version or 'žiadna verzia'})."
         )
 
     event = DeployEvent(
@@ -1205,7 +1206,7 @@ async def deploy(
             deploy without an acceptance (router → 404 / 409 / 422).
     """
     if environment not in ("uat", "prod"):
-        raise ValueError(f"Unknown environment {environment!r} (expected 'uat' or 'prod')")
+        raise ValueError(f"Neznáme prostredie {environment!r} — kokpit pozná „uat“ a „prod“.")
     if force_fresh and environment == "prod":
         # DEV-238: „nanovo“ takes the installation down with its data — on PROD those are the customer's.
         raise ValueError(FRESH_PROD_REFUSAL)
@@ -1226,9 +1227,9 @@ async def deploy(
 
     _ok, _prov = version_verified(db, version.id)
     if not _ok:
-        raise ValueError(
-            f"Deploy blocked: version {version_number!r} is not verified against the current code ({_prov}) — "
-            "re-run Verifikácia on the current HEAD before deploying."
+        raise ConflictError(
+            f"Nasadenie zastavené: verzia {version_number!r} nie je overená na aktuálnom kóde ({_prov}) — pred "
+            "nasadením spusti Verifikáciu znova."
         )
 
     # DEV-51: the same rule as the matrix, asked fresh — the action decides, the screen only shows. A deploy
@@ -1239,12 +1240,12 @@ async def deploy(
     _root = claude_agent.PROJECTS_ROOT / project.slug
     ci = await ci_status.stav_commitu(_root, cerstvy=True)
     if ci_deploy_cause(ci) == DEPLOY_CAUSE_CI_RED:
-        raise ValueError(
+        raise ConflictError(
             f"Nasadenie zastavené: kontroly projektu na kóde, ktorý by sa nasadil, zlyhali — {ci.detail}. "
             "Verzia sa k zákazníkovi nedostane, kým chyba nie je opravená a kontroly neprejdú."
         )
     if ci_deploy_cause(ci) == DEPLOY_CAUSE_CI_RUNNING:
-        raise ValueError(
+        raise ConflictError(
             f"Nasadenie zastavené: kontroly projektu na kóde, ktorý by sa nasadil, ešte bežia — {ci.detail}. "
             "Nasadiť sa dá, keď dobehnú."
         )
@@ -1256,9 +1257,9 @@ async def deploy(
 
     # PROD gate (§3.5) — never bypassed.
     if environment == "prod" and not is_accepted(db, customer_id, version_number):
-        raise ValueError(
-            f"PROD deploy blocked: version {version_number!r} has no recorded UAT acceptance for this customer "
-            f"— accept the customer's UAT first (the acceptance gate is never bypassed)"
+        raise ConflictError(
+            f"Nasadenie na PROD zastavené: verzia {version_number!r} nemá u tohto zákazníka akceptovaný UAT — "
+            "najprv akceptuj UAT (akceptácia sa nikdy neobchádza)."
         )
 
     # §3.6 versioning: the project's first PROD deploy bumps to v1.0.0. The bumped
@@ -1750,9 +1751,9 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
             select(Version).where(Version.project_id == version.project_id, Version.version_number == target)
         ).scalar_one_or_none()
         if clash is not None and clash.id != version.id:
-            raise ValueError(
-                f"Cannot graduate to {target!r}: a different version row already carries it for this "
-                f"project (uq_versions_project_id_version_number) — a first-prod graduation must not collide"
+            raise ConflictError(
+                f"Verziu nemožno povýšiť na {target!r}: toto číslo už v projekte nesie iná verzia "
+                "(uq_versions_project_id_version_number) — prvé povýšenie na PROD sa s ňou nesmie zraziť."
             )
         version.version_number = target
     version.status = "released"

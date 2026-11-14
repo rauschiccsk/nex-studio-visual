@@ -29,6 +29,7 @@ import uuid
 
 import pytest
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.schemas.project import ProjectCreate, ProjectUpdate
@@ -91,7 +92,7 @@ class TestProjectService:
         """Second ``create`` with the same ``name`` must raise ``ValueError``."""
         user = _make_user(db_session)
         service.create(db_session, _payload(user.id, name="dup", slug="one"))
-        with pytest.raises(ValueError, match="name"):
+        with pytest.raises(ConflictError):
             service.create(db_session, _payload(user.id, name="dup", slug="two"))
 
     def test_create_duplicate_slug_raises(self, db_session):
@@ -163,7 +164,7 @@ class TestProjectService:
 
     def test_get_by_id_missing_raises(self, db_session):
         """``get_by_id`` raises ``ValueError`` for an unknown id."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     # ---------------------------------------------------------------- update
@@ -233,7 +234,7 @@ class TestProjectService:
 
     def test_update_missing_raises(self, db_session):
         """``update`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.update(
                 db_session,
                 uuid.uuid4(),
@@ -246,7 +247,7 @@ class TestProjectService:
         service.create(db_session, _payload(user.id, name="taken", slug="taken"))
         other = service.create(db_session, _payload(user.id, name="free", slug="free"))
 
-        with pytest.raises(ValueError, match="name"):
+        with pytest.raises(ConflictError):
             service.update(db_session, other.id, ProjectUpdate(name="taken"))
 
     def test_update_same_name_allowed(self, db_session):
@@ -294,12 +295,12 @@ class TestProjectService:
         created = service.create(db_session, _payload(user.id))
         service.delete(db_session, created.id)
 
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, created.id)
 
     def test_delete_missing_raises(self, db_session):
         """``delete`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.delete(db_session, uuid.uuid4())
 
     # ------------------------------------------------------------------ list

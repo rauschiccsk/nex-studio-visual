@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.system_settings import SystemSetting
 from backend.services import system_setting as service
@@ -53,7 +54,7 @@ def test_get_by_key_returns_default_when_no_row(db_session: Any) -> None:
 
 
 def test_get_by_key_unknown_raises(db_session: Any) -> None:
-    with pytest.raises(ValueError, match="Unknown system setting"):
+    with pytest.raises(NotFoundError):
         service.get_by_key(db_session, "not-registered")
 
 
@@ -88,7 +89,7 @@ def test_upsert_updates_existing_row(db_session: Any) -> None:
 
 
 def test_upsert_unknown_key_raises(db_session: Any) -> None:
-    with pytest.raises(ValueError, match="Unknown system setting"):
+    with pytest.raises(NotFoundError):
         service.upsert(db_session, "unregistered", "anything")
 
 

@@ -34,6 +34,7 @@ from datetime import date, timedelta
 
 import pytest
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -172,7 +173,7 @@ class TestCreate:
         project = _make_project(db_session, user=user)
         service.create(db_session, project.id, _payload("1.0.0"), user.id)
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError):
             service.create(db_session, project.id, _payload("1.0.0"), user.id)
 
     def test_create_same_version_number_different_projects_ok(self, db_session):
@@ -208,7 +209,7 @@ class TestGetById:
 
     def test_get_by_id_missing_raises(self, db_session):
         """Unknown id → ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     def test_get_by_id_eager_loads_epics(self, db_session):
@@ -317,7 +318,7 @@ class TestUpdate:
         service.create(db_session, project.id, _payload("1.0.0"), user.id)
         other = service.create(db_session, project.id, _payload("1.1.0"), user.id)
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError):
             service.update(
                 db_session,
                 other.id,
@@ -326,7 +327,7 @@ class TestUpdate:
 
     def test_update_missing_raises(self, db_session):
         """``update`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.update(
                 db_session,
                 uuid.uuid4(),
@@ -459,7 +460,7 @@ class TestAutoActivate:
 
     def test_auto_activate_missing_raises(self, db_session):
         """``auto_activate`` on a non-existent id raises ``ValueError``."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.auto_activate(db_session, uuid.uuid4())
 
 

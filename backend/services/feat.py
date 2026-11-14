@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.tasks import Feat
 from backend.schemas.feat import (
     FeatCreate,
@@ -29,7 +30,7 @@ def get_by_id(db: Session, feat_id: UUID) -> Feat:
     """
     feat = db.get(Feat, feat_id)
     if feat is None:
-        raise ValueError(f"Feat {feat_id} not found")
+        raise NotFoundError(f"Feat {feat_id} neexistuje.")
     return feat
 
 
@@ -95,7 +96,7 @@ def create(db: Session, data: FeatCreate) -> Feat:
     """
     number = _next_feat_number(db, data.epic_id)
     if _get_by_epic_and_number(db, data.epic_id, number) is not None:
-        raise ValueError(f"Feat with epic_id={data.epic_id} and number={number} already exists")
+        raise ConflictError(f"Feat č. {number} v epike {data.epic_id} už existuje.")
 
     feat = Feat(
         epic_id=data.epic_id,

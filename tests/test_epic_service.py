@@ -34,6 +34,7 @@ import uuid
 
 import pytest
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
@@ -165,7 +166,7 @@ class TestEpicService:
         """
         project = _make_project(db_session)
 
-        with pytest.raises(ValueError, match="version_id required for new epics"):
+        with pytest.raises(ValueError, match="Nová epika potrebuje version_id"):
             service.create(db_session, _payload(project.id))
 
     def test_create_with_custom_status(self, db_session):
@@ -219,7 +220,7 @@ class TestEpicService:
 
     def test_get_by_id_missing_raises(self, db_session):
         """``get_by_id`` raises ``ValueError`` for an unknown id."""
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError):
             service.get_by_id(db_session, uuid.uuid4())
 
     # ---------------------------------------------------------------- update

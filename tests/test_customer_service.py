@@ -27,6 +27,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.config.settings import settings
+from backend.core.errors import ConflictError, NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
@@ -119,14 +120,14 @@ def test_create_with_integrations_jsonb(db_session):
 
 
 def test_create_unknown_project_raises(db_session):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError):
         service.create(db_session, uuid.uuid4(), CustomerCreate(name="X", slug="x"))
 
 
 def test_create_duplicate_slug_in_project_rejected(db_session):
     project = _make_project(db_session)
     service.create(db_session, project.id, CustomerCreate(name="A", slug="dup"))
-    with pytest.raises(ValueError, match="already exists"):
+    with pytest.raises(ConflictError):
         service.create(db_session, project.id, CustomerCreate(name="B", slug="dup"))
 
 
@@ -289,12 +290,12 @@ def test_update_slug_collision_rejected(db_session):
     project = _make_project(db_session)
     service.create(db_session, project.id, CustomerCreate(name="A", slug="taken"))
     other = service.create(db_session, project.id, CustomerCreate(name="B", slug="free"))
-    with pytest.raises(ValueError, match="already exists"):
+    with pytest.raises(ConflictError):
         service.update(db_session, other.id, CustomerUpdate(slug="taken"))
 
 
 def test_update_unknown_raises(db_session):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError):
         service.update(db_session, uuid.uuid4(), CustomerUpdate(name="X"))
 
 
@@ -310,15 +311,15 @@ def test_delete_removes_row_and_secret(db_session):
 
     service.delete(db_session, customer.id)
 
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError):
         service.get_by_id(db_session, customer.id)
     # The stored secret is gone too — no orphan secret survives.
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError):
         credentials_service.read_content(db_session, cred_id)
 
 
 def test_delete_unknown_raises(db_session):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(NotFoundError):
         service.delete(db_session, uuid.uuid4())
 
 
@@ -529,7 +530,7 @@ def test_create_duplicate_subdomain_in_project_rejected(db_session):
     """Two customers sharing a subdomain resolve to ONE instance directory — refuse at registration."""
     project = _make_project(db_session)
     service.create(db_session, project.id, CustomerCreate(name="A", slug="a", subdomain="shared"))
-    with pytest.raises(ValueError, match="already exists"):  # 'already exists' ⇒ router maps to 409
+    with pytest.raises(ConflictError):  # ConflictError ⇒ the route answers 409
         service.create(db_session, project.id, CustomerCreate(name="B", slug="b", subdomain="shared"))
 
 
@@ -538,7 +539,7 @@ def test_create_subdomain_colliding_with_another_slug_rejected(db_session):
     (which has no subdomain of its own) lands both on ``/opt/customers/alpha``."""
     project = _make_project(db_session)
     service.create(db_session, project.id, CustomerCreate(name="A", slug="alpha"))
-    with pytest.raises(ValueError, match="already exists"):
+    with pytest.raises(ConflictError):
         service.create(db_session, project.id, CustomerCreate(name="B", slug="beta", subdomain="alpha"))
 
 
@@ -557,7 +558,7 @@ def test_update_subdomain_collision_rejected_and_row_untouched(db_session):
     service.create(db_session, project.id, CustomerCreate(name="A", slug="a", subdomain="taken"))
     other = service.create(db_session, project.id, CustomerCreate(name="B", slug="b", subdomain="free"))
 
-    with pytest.raises(ValueError, match="already exists"):
+    with pytest.raises(ConflictError):
         service.update(db_session, other.id, CustomerUpdate(slug="b2", subdomain="taken", name="B2"))
 
     assert other.slug == "b"  # the slug assignment must NOT have run before the conflict check
@@ -624,4 +625,4 @@ def test_http_duplicate_subdomain_409(client, db_session):
     )
     assert resp.status_code == 409, resp.text
     # The detail names the real cause so the FE can offer the right fix (change the subdomain).
-    assert "instance directory" in resp.json()["detail"]
+    assert "priečinkom inštalácie" in resp.json()["detail"]

@@ -46,11 +46,10 @@ def login(
         user, access_token, expires_in = auth_service.login(db, body.username, body.password)
         db.commit()
     except ValueError as exc:
-        msg = str(exc)
-        if "inactive" in msg.lower():
+        if isinstance(exc, auth_service.InactiveAccount):  # DEV-386: by the error's type, not its words
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Účet je vypnutý — požiadaj správcu, aby ho zapol.",
+                detail=str(exc),
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
         raise HTTPException(

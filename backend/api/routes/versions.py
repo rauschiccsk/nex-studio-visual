@@ -54,6 +54,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
+from backend.core.errors import http_error
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
@@ -75,22 +76,6 @@ _BLOCKING_IDS_RE = re.compile(r"\[([^\]]*)\]")
 #: Číslo verzie je súčasťou názvu priečinka na disku. Tvar sa preto overuje TU, na vstupe — nie až
 #: v službe, kde by z neho bola len záhadná cesta. (Únik zo stromu projektu blokuje aj
 #: ``version._zadanie_paths``; toto je prvá z tých dvoch obrán, nie jediná.)
-
-
-def _map_value_error(exc: ValueError) -> HTTPException:
-    """Translate a service-layer ``ValueError`` into an HTTP exception.
-
-    Mirrors the ICC error-handling pattern: ``not found`` → 404,
-    duplicates / conflicts → 409, everything else (constraint / FK /
-    validation failures) → 422. Used by every endpoint of this router.
-    """
-    message = str(exc)
-    lowered = message.lower()
-    if "not found" in lowered:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-    if "already exists" in lowered or "duplicate" in lowered or "conflict" in lowered:
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=message)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +144,7 @@ def create_version(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(version)
     return VersionRead.model_validate(version)
 
@@ -191,7 +176,7 @@ def get_version(
     try:
         version = version_service.get_by_id(db, version_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return VersionRead.model_validate(version)
 
 
@@ -229,7 +214,7 @@ def update_version(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     db.refresh(version)
     return VersionRead.model_validate(version)
 
@@ -440,7 +425,7 @@ def write_zadanie(
         ) from clash
     except ValueError as exc:
         db.rollback()
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return _ZadanieWriteResponse(relative_path=rel, status="saved")
 
 
@@ -468,7 +453,7 @@ def read_zadanie(
     try:
         content = version_service.read_zadanie(db, version_id)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return _ZadanieReadResponse(content=content)
 
 
@@ -500,7 +485,7 @@ def version_settings(
             version_number_lock_reason=version_service.version_number_lock_reason(db, version_id)
         )
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
 
 
 class _ZadaniePeekResponse(BaseModel):
@@ -552,5 +537,5 @@ def peek_zadanie(
     try:
         content, rel = version_service.peek_zadanie(db, project_id, version_number)
     except ValueError as exc:
-        raise _map_value_error(exc) from exc
+        raise http_error(exc) from exc
     return _ZadaniePeekResponse(content=content, relative_path=rel)

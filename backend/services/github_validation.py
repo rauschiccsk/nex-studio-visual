@@ -16,6 +16,7 @@ import logging
 import httpx
 
 from backend.config.settings import settings
+from backend.core.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
     probe_url = f"{GITHUB_API_BASE}/users/{owner}"
     probe = httpx.get(probe_url, headers=github_headers(), timeout=timeout)
     if probe.status_code == 404:
-        raise ValueError(f"GitHub account '{owner}' not found. Check the github_org setting.")
+        raise NotFoundError(f"Účet GitHub „{owner}“ neexistuje — skontroluj nastavenie github_org.")
     if probe.status_code != 200:
         raise RuntimeError(
             f"GitHub API returned unexpected status {probe.status_code} while probing account '{owner}': {probe.text}"
@@ -135,9 +136,8 @@ def _resolve_repo_endpoint(owner: str, timeout: float) -> str:
         token_login = who_resp.json().get("login")
         if token_login != owner:
             raise ValueError(
-                f"Cannot create repository under user '{owner}' — the configured "
-                f"github_token belongs to '{token_login}'. Use a token owned by "
-                f"'{owner}' or host the repo under an organisation."
+                f"Repozitár nemožno založiť pod používateľom „{owner}“ — nastavený github_token patrí "
+                f"„{token_login}“. Použi token používateľa „{owner}“, alebo repozitár založ pod organizáciou."
             )
         return f"{GITHUB_API_BASE}/user/repos"
 
@@ -191,11 +191,11 @@ def create_github_repo(
         unexpected status code.
     """
     if not repo or repo.count("/") != 1:
-        raise ValueError(f"Invalid repository format '{repo}'. Expected 'owner/repo'.")
+        raise ValueError(f"Neplatný tvar repozitára „{repo}“ — očakáva sa „vlastník/repozitár“.")
 
     owner, name = repo.split("/")
     if not owner or not name:
-        raise ValueError(f"Invalid repository format '{repo}'. Owner and repo name must not be empty.")
+        raise ValueError(f"Neplatný tvar repozitára „{repo}“ — vlastník ani meno repozitára nesmú byť prázdne.")
 
     if not settings.github_token:
         raise RuntimeError(
@@ -278,11 +278,11 @@ def delete_github_repo(repo: str, *, timeout: float = _DEFAULT_GITHUB_API_TIMEOU
         unexpected status.
     """
     if not repo or repo.count("/") != 1:
-        raise ValueError(f"Invalid repository format '{repo}'. Expected 'owner/repo'.")
+        raise ValueError(f"Neplatný tvar repozitára „{repo}“ — očakáva sa „vlastník/repozitár“.")
 
     owner, name = repo.split("/")
     if not owner or not name:
-        raise ValueError(f"Invalid repository format '{repo}'. Owner and repo name must not be empty.")
+        raise ValueError(f"Neplatný tvar repozitára „{repo}“ — vlastník ani meno repozitára nesmú byť prázdne.")
 
     if not settings.github_token:
         raise RuntimeError("Cannot delete GitHub repository: no github_token configured.")

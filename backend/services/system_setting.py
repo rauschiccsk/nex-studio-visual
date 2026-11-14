@@ -30,6 +30,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.core.errors import NotFoundError
 from backend.db.models.foundation import User
 from backend.db.models.system_settings import SystemSetting
 from backend.schemas.system_setting import SystemSettingRead, SystemSettingValueType
@@ -591,7 +592,7 @@ def get_by_key(db: Session, key: str) -> SystemSettingRead:
 
     default = DEFAULT_SETTINGS.get(key)
     if default is None:
-        raise ValueError(f"Unknown system setting: {key!r}")
+        raise NotFoundError(f"Nastavenie {key!r} kokpit nepozná.")
     return _to_read_from_default(key, default)
 
 
@@ -603,17 +604,17 @@ def _validate_value_for_type(value: str, value_type: SystemSettingValueType) -> 
         try:
             int(value)
         except ValueError as exc:
-            raise ValueError(f"Value {value!r} is not a valid int") from exc
+            raise ValueError(f"Hodnota {value!r} nie je celé číslo.") from exc
         return
     if value_type == "float":
         try:
             float(value)
         except ValueError as exc:
-            raise ValueError(f"Value {value!r} is not a valid float") from exc
+            raise ValueError(f"Hodnota {value!r} nie je číslo.") from exc
         return
     if value_type == "bool":
         if value.strip().lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
-            raise ValueError(f"Value {value!r} is not a valid bool — use true/false/1/0/yes/no/on/off")
+            raise ValueError(f"Hodnota {value!r} nie je áno/nie — použi true/false, 1/0, yes/no alebo on/off.")
 
 
 #: Settings whose EMPTY value is a documented state rather than a mistake. Emptiness used to be
@@ -668,10 +669,10 @@ def upsert(
     """
     default = DEFAULT_SETTINGS.get(key)
     if default is None:
-        raise ValueError(f"Unknown system setting: {key!r}")
+        raise NotFoundError(f"Nastavenie {key!r} kokpit nepozná.")
 
     if value == "" and key not in EMPTY_MEANS_OFF:
-        raise ValueError(f"System setting {key!r} may not be empty")
+        raise ValueError(f"Nastavenie {key!r} nesmie byť prázdne.")
 
     if key == "default_source_path_template":
         _validate_source_path_template(value)
