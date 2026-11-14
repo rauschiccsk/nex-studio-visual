@@ -26,7 +26,7 @@ def list_installations(
 
 
 @router.get("/{customer_id}/{environment}/status", response_model=InstallationStatus)
-def installation_status(
+async def installation_status(
     customer_id: UUID,
     environment: Literal["uat", "prod"],
     current_user: User = Depends(get_current_user),
@@ -34,7 +34,7 @@ def installation_status(
 ) -> InstallationStatus:
     """Whether the installation lives — the address is the cockpit's, the answer shared for a while."""
     try:
-        answer = installations_service.status(db, current_user, customer_id, environment)
+        answer = await installations_service.status(db, current_user, customer_id, environment)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return InstallationStatus(state=answer.state, version=answer.version, detail=answer.detail)

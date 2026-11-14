@@ -176,29 +176,29 @@ def _icc_manager(db, world) -> Customer:
         (httpx.ReadTimeout("slow"), "down", "neodpovedá včas"),
     ],
 )
-def test_the_state_says_what_the_installation_answered(db_session, world, asked, answer, state, detail):
+async def test_the_state_says_what_the_installation_answered(db_session, world, asked, answer, state, detail):
     calls, answers = asked
     answers["next"] = answer
 
-    result = I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
+    result = await I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
 
     assert (result.state, result.detail) == (state, detail)
     assert calls == [result_url := calls[0]] and result_url.endswith("/api/v1/health")
     assert result_url.startswith("https://uat-icc-")  # the cockpit's address, never the caller's
 
 
-def test_the_answer_is_shared_for_a_while_one_question_per_installation(db_session, world, asked):
+async def test_the_answer_is_shared_for_a_while_one_question_per_installation(db_session, world, asked):
     calls, answers = asked
     answers["next"] = _Answer(200, {"status": "ok", "version": "1.6.0"})
     customer = _icc_manager(db_session, world)
 
-    I.status(db_session, world["rausch"], customer.id, "uat")
-    I.status(db_session, world["admin"], customer.id, "uat")
+    await I.status(db_session, world["rausch"], customer.id, "uat")
+    await I.status(db_session, world["admin"], customer.id, "uat")
 
     assert len(calls) == 1
 
 
-def test_a_stranger_may_not_ask_and_an_undeployed_environment_is_not_asked(db_session, world, asked):
+async def test_a_stranger_may_not_ask_and_an_undeployed_environment_is_not_asked(db_session, world, asked):
     from fastapi import HTTPException
 
     calls, answers = asked
@@ -207,8 +207,36 @@ def test_a_stranger_may_not_ask_and_an_undeployed_environment_is_not_asked(db_se
     mager = db_session.query(Customer).filter_by(project_id=world["manager"].id, slug="mager").one()
 
     with pytest.raises(HTTPException) as refused:
-        I.status(db_session, world["zoltan"], customer.id, "uat")
+        await I.status(db_session, world["zoltan"], customer.id, "uat")
     assert refused.value.status_code == 403
     with pytest.raises(LookupError):
-        I.status(db_session, world["rausch"], mager.id, "prod")
+        await I.status(db_session, world["rausch"], mager.id, "prod")
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("checks", "state", "detail"),
+    [({"database": ("ok", "")}, "up", ""), (None, "down", "zvnútra inštalácie neodpovedá")],
+)
+async def test_a_private_installation_is_asked_inside_as_the_deploy_asks_it(
+    db_session, world, asked, monkeypatch, checks, state, detail
+):
+    """DEV-378: 14.11.2026 three private UATs (…int.isnex.eu) read „neodpovedá“ on the live page — the private gate
+    refused the cockpit's container with 403. Asked inside, as the deploy asks; never at the address."""
+    calls, _ = asked
+    world["manager"].private_network = True
+    db_session.flush()
+    seen = []
+
+    async def instance_health(compose, project_slug, deploy_host=None):
+        seen.append((str(compose), project_slug, deploy_host))
+        return checks
+
+    monkeypatch.setattr(I.orchestrator, "instance_health", instance_health)
+
+    result = await I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
+
+    assert (result.state, result.detail) == (state, detail)
+    assert calls == []
+    slug = world["manager"].slug
+    assert seen[0][0].endswith(f"/icc/{slug}/docker-compose.yml") and seen[0][1:] == (slug, None)

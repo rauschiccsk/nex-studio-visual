@@ -9,11 +9,14 @@ The list is read from the cockpit's own deploy records with the deploy matrix's 
 so it cannot go stale and needs no register of its own: an installation appears with its first deploy. A person sees
 the installations of the projects they may see (the owner theirs, the admin all); archived projects stay out, and an
 installation the cockpit never deployed is not known to it. Whether an installation lives is asked one installation at
-a time (:func:`status`) — the address is the cockpit's, never the caller's — and shared for a while.
+a time (:func:`status`) — the address is the cockpit's, never the caller's — and shared for a while. An installation on
+the private network (DEV-42) cannot be asked at its address from the cockpit (the private gate refuses the cockpit's
+container with 403), so it is asked inside, as the deploy asks it (``orchestrator.instance_health``).
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -29,7 +32,7 @@ from backend.core import authz
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.services import deploy
+from backend.services import deploy, orchestrator
 
 ENVIRONMENTS = ("uat", "prod")
 HEALTH_PATH = "/api/v1/health"
@@ -129,7 +132,23 @@ def _ask(url: str) -> Status:
     return Status(DOWN, None, "inštalácia nebeží")
 
 
-def status(db: Session, user: User, customer_id: UUID, environment: str) -> Status:
+async def _ask_inside(customer: Customer, project: Project, environment: str) -> Status:
+    """A private installation, asked inside its backend the way the deploy asks it — on the machine it runs on."""
+    compose = orchestrator._uat_compose_path(
+        deploy._instance_slug(customer, environment),
+        environment=environment,
+        customer_slug=deploy._customer_dir_slug(customer),
+        full_project_slug=project.slug,
+    )
+    checks = await orchestrator.instance_health(
+        compose, project.slug, (customer.prod_host or None) if environment == "prod" else None
+    )
+    if checks is None:
+        return Status(DOWN, None, "zvnútra inštalácie neodpovedá")
+    return Status(UP, None, "")
+
+
+async def status(db: Session, user: User, customer_id: UUID, environment: str) -> Status:
     """Whether the ``environment`` installation of the customer row lives — the address is worked out here, never taken
     from the caller; the answer is shared for ``installation_status_cache_seconds``."""
     if environment not in ENVIRONMENTS:
@@ -146,6 +165,9 @@ def status(db: Session, user: User, customer_id: UUID, environment: str) -> Stat
     cached = _cache.get(url)
     if cached is not None and now - cached[0] < settings.installation_status_cache_seconds:
         return cached[1]
-    answer = _ask(url)
+    if project.private_network:
+        answer = await _ask_inside(customer, project, environment)
+    else:
+        answer = await asyncio.to_thread(_ask, url)
     _cache[url] = (now, answer)
     return answer
