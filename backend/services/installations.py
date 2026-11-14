@@ -9,9 +9,10 @@ The list is read from the cockpit's own deploy records with the deploy matrix's 
 so it cannot go stale and needs no register of its own: an installation appears with its first deploy. A person sees
 the installations of the projects they may see (the owner theirs, the admin all); archived projects stay out, and an
 installation the cockpit never deployed is not known to it. Whether an installation lives is asked one installation at
-a time (:func:`status`) — the address is the cockpit's, never the caller's — and shared for a while. An installation on
-the private network (DEV-42) cannot be asked at its address from the cockpit (the private gate refuses the cockpit's
-container with 403), so it is asked inside, as the deploy asks it (``orchestrator.instance_health``).
+a time (:func:`status`) — the address is the cockpit's, never the caller's — and shared for a while. A project on the
+private network (DEV-42) whose gate refuses the cockpit at the address (403 — the gate on ANDROS lets in the private
+network, not the cockpit's container) is asked inside: whether its backend answers on its health path, the deploy's
+own rule for where that is (``uat_provisioner.resolve_be_health_path``).
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Optional
 from uuid import UUID
 
 import httpx
+import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -32,13 +34,23 @@ from backend.core import authz
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.services import deploy, orchestrator
+from backend.services import claude_agent, deploy, orchestrator, uat_provisioner
 
 ENVIRONMENTS = ("uat", "prod")
 HEALTH_PATH = "/api/v1/health"
 
 #: What the page says of an installation — the three answers a person can act on.
 UP, ANSWERS, DOWN = "up", "answers", "down"
+#: The private gate refused the cockpit at the address — not an answer about the installation behind it.
+GATE_REFUSED = "súkromná brána odmietla kokpit"
+#: Asked inside the backend's container: the HTTP status of its own health path, the last line printed.
+_INSIDE_PROBE = (
+    "import urllib.request\n"
+    "try:\n"
+    "    print(urllib.request.urlopen('http://127.0.0.1:{port}{path}', timeout=5).status)\n"
+    "except Exception as exc:\n"
+    "    print(getattr(exc, 'code', 0))\n"
+)
 
 
 def _sort_key(text: str) -> str:
@@ -129,23 +141,42 @@ def _ask(url: str) -> Status:
         return Status(ANSWERS, None, "aplikácia odpovedá, stav nehlási")
     if answer.status_code >= 500:
         return Status(DOWN, None, f"chyba servera (HTTP {answer.status_code})")
+    if answer.status_code == 403:
+        return Status(DOWN, None, GATE_REFUSED)
     return Status(DOWN, None, "inštalácia nebeží")
 
 
 async def _ask_inside(customer: Customer, project: Project, environment: str) -> Status:
-    """A private installation, asked inside its backend the way the deploy asks it — on the machine it runs on."""
+    """A private installation, asked inside its backend's container on the machine it runs on: does the backend answer
+    on its own health path (the deploy's rule for where that is) with 200."""
     compose = orchestrator._uat_compose_path(
         deploy._instance_slug(customer, environment),
         environment=environment,
         customer_slug=deploy._customer_dir_slug(customer),
         full_project_slug=project.slug,
     )
-    checks = await orchestrator.instance_health(
-        compose, project.slug, (customer.prod_host or None) if environment == "prod" else None
+    try:
+        services = (yaml.safe_load(compose.read_text(encoding="utf-8")) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return Status(DOWN, None, "predpis inštalácie sa nedá prečítať")
+    backend = uat_provisioner.identify_service_roles(services).get("backend")
+    if backend is None:
+        return Status(DOWN, None, "inštalácia nemá backend")
+    port = uat_provisioner.detect_internal_port(services[backend], 8000)
+    path = uat_provisioner.resolve_be_health_path(services[backend], claude_agent.PROJECTS_ROOT / project.slug)
+    deploy_host = (customer.prod_host or None) if environment == "prod" else None
+    command = ["docker", "compose", "-f", str(compose), "exec", "-T", backend, "python", "-c"]
+    rc, out = await orchestrator._compose_smoke_step(
+        [*command, _INSIDE_PROBE.format(port=port, path=path)],
+        int(settings.installation_status_timeout_seconds) * 2,
+        env=orchestrator._verify_env_for_target(deploy_host),
     )
-    if checks is None:
-        return Status(DOWN, None, "zvnútra inštalácie neodpovedá")
-    return Status(UP, None, "")
+    code = (out or "").strip().splitlines()[-1] if rc == 0 and (out or "").strip() else ""
+    if code == "200":
+        return Status(UP, None, "")
+    if code.isdigit() and code != "0":
+        return Status(DOWN, None, f"zvnútra odpovedá chybou (HTTP {code})")
+    return Status(DOWN, None, "zvnútra inštalácie neodpovedá")
 
 
 async def status(db: Session, user: User, customer_id: UUID, environment: str) -> Status:
@@ -165,9 +196,8 @@ async def status(db: Session, user: User, customer_id: UUID, environment: str) -
     cached = _cache.get(url)
     if cached is not None and now - cached[0] < settings.installation_status_cache_seconds:
         return cached[1]
-    if project.private_network:
+    answer = await asyncio.to_thread(_ask, url)
+    if project.private_network and answer.detail == GATE_REFUSED:
         answer = await _ask_inside(customer, project, environment)
-    else:
-        answer = await asyncio.to_thread(_ask, url)
     _cache[url] = (now, answer)
     return answer

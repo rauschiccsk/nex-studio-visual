@@ -214,29 +214,72 @@ async def test_a_stranger_may_not_ask_and_an_undeployed_environment_is_not_asked
     assert calls == []
 
 
+GATE = _Answer(403, None, "text/html")  # the private gate on ANDROS refuses the cockpit's container
+
+
+@pytest.fixture
+def inside(monkeypatch, tmp_path):
+    """The private installation's compose, and what its backend answers when asked inside its container."""
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text("services:\n  backend:\n    image: x\n  frontend:\n    image: y\n", encoding="utf-8")
+    seen = []
+    answer = {"rc": 0, "out": "200\n"}
+
+    async def smoke_step(cmd, timeout, env=None):
+        seen.append(cmd)
+        return answer["rc"], answer["out"]
+
+    monkeypatch.setattr(I.orchestrator, "_uat_compose_path", lambda *a, **k: compose)
+    monkeypatch.setattr(I.orchestrator, "_compose_smoke_step", smoke_step)
+    return seen, answer
+
+
 @pytest.mark.parametrize(
-    ("checks", "state", "detail"),
-    [({"database": ("ok", "")}, "up", ""), (None, "down", "zvnútra inštalácie neodpovedá")],
+    ("rc", "out", "state", "detail"),
+    [
+        (0, "200\n", "up", ""),
+        (0, "500\n", "down", "zvnútra odpovedá chybou (HTTP 500)"),
+        (1, "", "down", "zvnútra inštalácie neodpovedá"),
+    ],
 )
-async def test_a_private_installation_is_asked_inside_as_the_deploy_asks_it(
-    db_session, world, asked, monkeypatch, checks, state, detail
+async def test_a_private_installation_the_gate_refuses_is_asked_inside(
+    db_session, world, asked, inside, rc, out, state, detail
 ):
     """DEV-378: 14.11.2026 three private UATs (…int.isnex.eu) read „neodpovedá“ on the live page — the private gate
-    refused the cockpit's container with 403. Asked inside, as the deploy asks; never at the address."""
-    calls, _ = asked
+    refused the cockpit's container with 403. Then the backend is asked inside, on its own health path."""
+    calls, answers = asked
+    seen, answer = inside
+    answers["next"], answer["rc"], answer["out"] = GATE, rc, out
     world["manager"].private_network = True
     db_session.flush()
-    seen = []
-
-    async def instance_health(compose, project_slug, deploy_host=None):
-        seen.append((str(compose), project_slug, deploy_host))
-        return checks
-
-    monkeypatch.setattr(I.orchestrator, "instance_health", instance_health)
 
     result = await I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
 
     assert (result.state, result.detail) == (state, detail)
-    assert calls == []
-    slug = world["manager"].slug
-    assert seen[0][0].endswith(f"/icc/{slug}/docker-compose.yml") and seen[0][1:] == (slug, None)
+    assert len(calls) == 1 and len(seen) == 1
+    assert seen[0][:7] == ["docker", "compose", "-f", seen[0][3], "exec", "-T", "backend"]
+
+
+async def test_a_private_installation_that_answers_at_its_address_is_not_asked_inside(db_session, world, asked, inside):
+    """PROD on MAGER: the private names answer the cockpit — the address proves the whole way, nothing more is asked."""
+    calls, answers = asked
+    seen, _ = inside
+    answers["next"] = _Answer(200, {"status": "ok", "version": "1.0.1"})
+    world["manager"].private_network = True
+    db_session.flush()
+
+    result = await I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
+
+    assert result.state == "up" and seen == []
+
+
+async def test_a_public_installation_refused_at_its_address_is_down_and_never_asked_inside(
+    db_session, world, asked, inside
+):
+    calls, answers = asked
+    seen, _ = inside
+    answers["next"] = GATE
+
+    result = await I.status(db_session, world["rausch"], _icc_manager(db_session, world).id, "uat")
+
+    assert (result.state, result.detail) == ("down", I.GATE_REFUSED) and seen == []
