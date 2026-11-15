@@ -12,6 +12,7 @@ and the project's Poradca keep the owner rule (``authz``).
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Optional
@@ -25,18 +26,15 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.services import secret_files
+from backend.services import doc_ages, secret_files
 from backend.services.poradca.mcp_server import Tool, ToolError
-from backend.services.poradca.tools import PoradcaTools, _schema, knowledge_tools
+from backend.services.poradca.tools import PoradcaTools, _schema, knowledge_tools, latest_finished_number
 
 #: The most projects one overview lists — far more than the cockpit has; a longer list is cut with a sentence.
 _PROJECTS_MAX = 200
 #: The most documents one listing names, and the most characters of one document.
-_DOCS_MAX = 300
 _DOC_CHARS = 60_000
 #: What of a project is its documentation — never its code.
-_DOCS_DIR = "docs"
-_ROOT_DOCS = ("README.md",)
 
 
 class IdeaTools:
@@ -96,9 +94,11 @@ class IdeaTools:
         with SessionLocal() as db:
             project = self._project(db, args.get("projekt"))
             root = os.path.realpath(PROJECTS_ROOT / project.slug)
+            slug, latest = project.slug, latest_finished_number(db, project.id)
         wanted = args.get("cesta")
         if not wanted:
-            return _list_docs(root, project.slug)
+            # DEV-359: every document with the date of its last change — git, off the main loop.
+            return await asyncio.to_thread(doc_ages.listing, root, slug, latest)
         return _read_doc(root, str(wanted))
 
     async def moznosti_zalozenia(self, args: dict) -> str:
@@ -135,28 +135,11 @@ def _person(user: Optional[User]) -> str:
     return " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
 
 
-def _list_docs(root: str, slug: str) -> str:
-    found: list[str] = [name for name in _ROOT_DOCS if os.path.isfile(os.path.join(root, name))]
-    base = os.path.join(root, _DOCS_DIR)
-    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
-        dirnames.sort()
-        for name in sorted(filenames):
-            if name.endswith(".md") and not secret_files.SECRET_FILE_RE.match(name):
-                found.append(os.path.relpath(os.path.join(dirpath, name), root))
-    if not found:
-        return f"Projekt {slug} nemá dokumentáciu (docs/ ani README.md)."
-    lines = [f"Dokumentácia projektu {slug} ({len(found)} dokumentov; prečítaš ich s cesta=…):"]
-    lines += [f"- {path}" for path in found[:_DOCS_MAX]]
-    if len(found) > _DOCS_MAX:
-        lines.append(f"(a ďalších {len(found) - _DOCS_MAX})")
-    return "\n".join(lines)
-
-
 def _read_doc(root: str, wanted: str) -> str:
     full = os.path.realpath(os.path.join(root, wanted.lstrip("/")))
     rel = os.path.relpath(full, root)
-    inside_docs = full.startswith(os.path.join(root, _DOCS_DIR) + os.sep)
-    if not (inside_docs or rel in _ROOT_DOCS) or not rel.endswith(".md"):
+    inside_docs = full.startswith(os.path.join(root, doc_ages.DOCS_DIR) + os.sep)
+    if not (inside_docs or rel in doc_ages.ROOT_DOCS) or not rel.endswith(".md"):
         raise ToolError("Čítam len dokumentáciu projektu — súbory .md v docs/ a README.md, nie kód.")
     if secret_files.SECRET_FILE_RE.match(os.path.basename(full)) or not os.path.isfile(full):
         raise ToolError(f"Dokument {rel} v projekte nie je.")

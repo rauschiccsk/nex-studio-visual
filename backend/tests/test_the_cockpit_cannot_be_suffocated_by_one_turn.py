@@ -51,6 +51,7 @@ SHELLING_MODULES = {
     "dead_code",
     "delivered_tokens",
     "delivery_statement",
+    "doc_ages",
     "git_push",
     "git_state",
     "host_docker_guard",

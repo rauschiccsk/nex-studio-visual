@@ -815,6 +815,19 @@ class PoradcaTools:
         lines.extend(f"{ticket.identifier} [{ticket.state}] {ticket.title}" for ticket in found)
         return "\n".join(lines)
 
+    async def dokumenty(self, args: dict) -> str:
+        """DEV-359 — the project's documents with the date of their last change, the version a version's document
+        belongs to and a mark on what has not changed since the last finished version. Poradca reads the files with
+        Read and Glob, which show no age: 11.11.2026 an old summary was taken for the project as it is."""
+        from backend.services import doc_ages
+        from backend.services.claude_agent import PROJECTS_ROOT
+
+        with SessionLocal() as db:
+            project = self._project(db)
+            root = os.path.realpath(PROJECTS_ROOT / project.slug)
+            slug, latest = project.slug, latest_finished_number(db, project.id)
+        return await asyncio.to_thread(doc_ages.listing, root, slug, latest)
+
     async def naklady(self, args: dict) -> str:
         """The Náklady screen: what each version cost and the project in total — in whole euros, as the screen."""
         from backend.services import metrics as metrics_service
@@ -1170,6 +1183,14 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             lambda a: str(a.get("nazov") or ""),
         ),
         Tool(
+            "dokumenty",
+            "Obrazovka Dokumenty: dokumenty projektu (README.md a docs/) s dátumom poslednej zmeny, pri dokumentoch "
+            "verzií aj verziou, a označením, čo sa od poslednej dokončenej verzie nezmenilo. Čítaš ich nástrojom Read.",
+            _schema(),
+            t.dokumenty,
+            lambda a: "projekt",
+        ),
+        Tool(
             "naklady",
             "Obrazovka Náklady: čo stála každá verzia a projekt spolu, v celých eurách ako obrazovka.",
             _schema(),
@@ -1186,6 +1207,16 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
     ]
 
 
+def latest_finished_number(db, project_id) -> Optional[str]:
+    """DEV-359 — the project's last finished version (the number), or None before the first one is finished."""
+    from backend.services import fast_fix
+
+    try:
+        return fast_fix.latest_finished_version(db, project_id).version_number
+    except ValueError:
+        return None
+
+
 #: Files of the project — Poradca reads them with Read, Grep and Glob, not with a cockpit tool.
 FILES = "Read/Grep/Glob"
 
@@ -1197,7 +1228,7 @@ SCREENS: dict[str, tuple[str, ...]] = {
     "Zásobník": ("zasobnik", "poziadavka"),
     "Plane tikety": ("plane_tikety", "plane_tiket"),
     "Riadiace centrum": ("stavba", "plan_uloh", "zaznam_agenta"),
-    "Dokumenty": (FILES,),
+    "Dokumenty": ("dokumenty", FILES),
     "Repozitár": ("git_historia", "git_zmena", "ci"),
     "NS Code": (FILES,),
     "Zákazníci": ("zakaznici",),

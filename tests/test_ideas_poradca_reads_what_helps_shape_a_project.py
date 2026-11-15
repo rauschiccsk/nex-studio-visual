@@ -105,7 +105,11 @@ def test_each_project_names_its_manager(world):
 
 def test_documentation_is_read_never_code(world):
     listing = _call(world["me"], "dokumentacia_projektu", projekt=world["mine"].slug)
-    assert listing.splitlines()[1:] == ["- README.md", "- docs/specs/spec.md"]
+    # DEV-359: each document with its last change (no git in this project — the date is unknown)
+    assert [line for line in listing.splitlines() if line.startswith("- ")] == [
+        "- README.md — dátum neznámy (nie je v gite)",
+        "- docs/specs/spec.md — dátum neznámy (nie je v gite)",
+    ]
     assert _call(world["me"], "dokumentacia_projektu", projekt=world["mine"].slug, cesta="docs/specs/spec.md") == (
         "# Špecifikácia\nKrsty a sobáše."
     )
@@ -118,8 +122,9 @@ def test_another_persons_project_is_read_too(world):
     (world["root"].parent / world["theirs"].slug / "docs").mkdir(parents=True)
     (world["root"].parent / world["theirs"].slug / "docs" / "riesenie.md").write_text("# Riešenie", encoding="utf-8")
 
-    assert _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug).splitlines()[1:] == [
-        "- docs/riesenie.md"
+    listing = _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug)
+    assert [line for line in listing.splitlines() if line.startswith("- ")] == [
+        "- docs/riesenie.md — dátum neznámy (nie je v gite)"
     ]
     assert _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug, cesta="docs/riesenie.md") == (
         "# Riešenie"
