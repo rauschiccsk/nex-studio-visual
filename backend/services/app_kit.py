@@ -36,6 +36,17 @@ _POETRY_TAG_RE = re.compile(r'\btag\s*=\s*"v(\d+\.\d+\.\d+)"')
 _POETRY_SERVER_RE = re.compile(r'\bsubdirectory\s*=\s*"server"')
 #: A poetry project builds from its lock (``poetry export``) — the upgrade re-locks it and must see it follow.
 POETRY_LOCK_FILE = "backend/poetry.lock"
+#: DEV-353 — a server whose image is built from requirements.txt (NEX Knowledge) carries the pin there too; it moves
+#: with pyproject.toml or the upgrade does not happen.
+REQUIREMENTS_FILE = "backend/requirements.txt"
+_NAMES_THE_KIT_RE = re.compile(rf"(?mi)^\s*{re.escape(app_template.KIT_PACKAGE)}\b")
+
+
+def _read(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+    except OSError:
+        return None
 
 
 def _poetry_pins(text: str) -> list[tuple[re.Match, str]]:
@@ -88,14 +99,25 @@ def _poetry_locked_version(lock_path: Path) -> Optional[str]:
 
 
 def server_version(source_path: str) -> Optional[str]:
-    """The nex-app-kit release the server is pinned to in ``backend/pyproject.toml``, or None."""
-    try:
-        text = (Path(source_path) / SERVER_PIN_FILE).read_text(encoding="utf-8")
-    except OSError:
+    """The nex-app-kit release the server is pinned to in ``backend/pyproject.toml``, or None — None too when
+    ``backend/requirements.txt`` names the kit on another release or in a spelling the cockpit cannot read (DEV-353:
+    the status does not claim a release the server's build does not install)."""
+    root = Path(source_path)
+    text = _read(root / SERVER_PIN_FILE)
+    if text is None:
         return None
     # DEV-383: the founding's spelling, or a poetry git dependency — one pin either way, never a guess between two.
     found = _SERVER_PIN_RE.findall(text) + [version for _match, version in _poetry_pins(text)]
-    return found[0] if len(found) == 1 else None
+    if len(found) != 1:
+        return None
+    requirements = _read(root / REQUIREMENTS_FILE)
+    if (
+        requirements is not None
+        and _NAMES_THE_KIT_RE.search(requirements)
+        and _SERVER_PIN_RE.findall(requirements) != found
+    ):
+        return None
+    return found[0]
 
 
 def status_for_source(
@@ -170,11 +192,11 @@ def upgrade_source(
     follow. Does NOT commit."""
     root = Path(source_path)
     pkg, lock, server = root / FRONTEND / "package.json", root / FRONTEND / "package-lock.json", root / SERVER_PIN_FILE
-    poetry_lock = root / POETRY_LOCK_FILE
+    poetry_lock, requirements = root / POETRY_LOCK_FILE, root / REQUIREMENTS_FILE
     try:
         originals = {
             path: path.read_text(encoding="utf-8") if path.is_file() else None
-            for path in (pkg, lock, server, poetry_lock)
+            for path in (pkg, lock, server, poetry_lock, requirements)
         }
     except OSError:
         return False
@@ -192,12 +214,23 @@ def upgrade_source(
         new_server, pins = _with_poetry_tag(originals[server], target_version)
     if not on_kit or pins != 1:
         return False
+    # DEV-353: requirements.txt that names the kit moves with pyproject.toml — or, in a spelling the cockpit cannot
+    # rewrite, the upgrade stops here, before any file is touched.
+    new_requirements = None
+    if originals[requirements] is not None and _NAMES_THE_KIT_RE.search(originals[requirements]):
+        new_requirements, required = _SERVER_PIN_RE.subn(
+            app_template.kit_server_dependency(target_version), originals[requirements]
+        )
+        if required != 1:
+            return False
     release = (scaffold_package or fetch_scaffold_package)(template, target_version)
     if release is None:
         return False
     package, specs = app_template.with_template_packages(project_package, release)
     pkg.write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     server.write_text(new_server, encoding="utf-8")
+    if new_requirements is not None:
+        requirements.write_text(new_requirements, encoding="utf-8")
     wanted = {
         name: _PIN_VERSION_RE.search(spec).group(1)
         for name in (app_template.KIT_PACKAGE, nexshared.PACKAGE)
@@ -227,8 +260,8 @@ def commit_upgrade(source_path: str, target_version: str) -> bool:
         target_version,
         directories=(FRONTEND,),
         package=app_template.KIT_PACKAGE,
-        # DEV-383: a poetry project's lock goes in the same commit — it is what its build installs.
-        also=(SERVER_PIN_FILE, POETRY_LOCK_FILE)
-        if (Path(source_path) / POETRY_LOCK_FILE).is_file()
-        else (SERVER_PIN_FILE,),
+        # DEV-383: a poetry project's lock goes in the same commit — it is what its build installs; DEV-353: and so does
+        # requirements.txt, which a server's image may be built from.
+        also=(SERVER_PIN_FILE,)
+        + tuple(rel for rel in (POETRY_LOCK_FILE, REQUIREMENTS_FILE) if (Path(source_path) / rel).is_file()),
     )
