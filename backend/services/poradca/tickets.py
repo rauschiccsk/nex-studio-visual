@@ -143,9 +143,30 @@ def context_lines(
     return lines
 
 
+#: DEV-388 — Slovak endings the search sets aside, longest first (on words without diacritics): „šablóne“, „šablóna“ and
+#: „šablónach“ are one word to it. 15.11.2026 Poradca asked „meno v šablóne projektov“ and missed DEV-372 „šablóna
+#: projektov“; the preview of „Založiť tiket“ runs the same search.
+_ENDINGS = ("ami", "ach", "ych", "ymi", "eho", "emu", "ovi", "om", "ov", "ou", "ej", "ia", "ie", "iu", "im") + tuple(
+    "aeiouy"
+)
+#: A stem keeps at least this many letters — „meno“ is „men“, never „me“.
+_STEM_MIN = 3
+
+
+def _plain(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c)).casefold()
+
+
+def _stem(word: str) -> str:
+    for ending in _ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= _STEM_MIN:
+            return word[: -len(ending)]
+    return word
+
+
 def _words(text: str) -> set[str]:
-    plain = "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c))
-    return set(_WORD.findall(plain.casefold()))
+    """The stems of a title's words — compared, so a word meets itself in any of its Slovak forms (DEV-388)."""
+    return {_stem(word) for word in _WORD.findall(_plain(text))}
 
 
 def similar_tickets(
