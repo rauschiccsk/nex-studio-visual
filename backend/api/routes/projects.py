@@ -561,7 +561,8 @@ def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
         default_template=app_template_service.DEFAULT_TEMPLATE,
         # DEV-395 — the languages an app on a template can speak.
         languages=[LanguageOption(code=code, label=label) for code, label in app_languages.LANGUAGES.items()],
-        default_languages=list(app_languages.DEFAULT_LANGUAGES),
+        # DEV-399: a new project on the template starts speaking Slovak, Hungarian and English.
+        default_languages=list(app_languages.NEW_PROJECT_LANGUAGES),
     )
 
 
@@ -843,8 +844,8 @@ def get_app_kit_status(
     return AppKitStatus(
         **found,
         # DEV-395: the settings offer the upgrade beside the languages when the kit does not know them yet.
-        speaks_languages=app_languages.kit_speaks_languages(found["current"]),
-        languages_from=app_languages.MIN_KIT_VERSION,
+        languages_known=app_languages.kit_knows(found["current"]),
+        languages_from=dict(app_languages.KIT_SINCE),
     )
 
 

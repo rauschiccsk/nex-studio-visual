@@ -43,10 +43,15 @@ const PROJECT = {
 const OPTIONS = [
   { code: "sk", label: "slovenčina" },
   { code: "hu", label: "maďarčina" },
+  { code: "en", label: "angličtina" },
 ];
 
-function kit(current: string, speaks: boolean) {
-  return { current, latest: "0.14.1", behind: speaks ? 0 : 1, up_to_date: speaks, changelog: [], parts: [], speaks_languages: speaks, languages_from: "0.14.1" };
+const SINCE = { sk: "0.14.1", hu: "0.14.1", en: "0.15.0" };
+
+/** The kit status as the backend says it: the languages the project's release speaks. */
+function kit(current: string) {
+  const known = current === "0.15.0" ? ["sk", "hu", "en"] : current === "0.14.1" ? ["sk", "hu"] : [];
+  return { current, latest: "0.15.0", behind: current === "0.15.0" ? 0 : 1, up_to_date: current === "0.15.0", changelog: [], parts: [], languages_known: known, languages_from: SINCE };
 }
 
 beforeEach(() => {
@@ -78,7 +83,7 @@ describe("ProjectSettingsSection — languages (DEV-395)", () => {
   });
 
   it("saves the languages chosen — the main one first", async () => {
-    api.getAppKitStatusApi.mockResolvedValue(kit("0.14.1", true));
+    api.getAppKitStatusApi.mockResolvedValue(kit("0.15.0"));
     edit();
     await screen.findByTestId("project-languages");
     fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
@@ -92,7 +97,7 @@ describe("ProjectSettingsSection — languages (DEV-395)", () => {
   });
 
   it("an older kit is upgraded first — saving waits for it", async () => {
-    api.getAppKitStatusApi.mockResolvedValueOnce(kit("0.13.0", false)).mockResolvedValueOnce(kit("0.14.1", true));
+    api.getAppKitStatusApi.mockResolvedValueOnce(kit("0.13.0")).mockResolvedValueOnce(kit("0.15.0"));
     api.upgradeAppKitApi.mockResolvedValue({ upgraded: true, target_version: "0.14.1", committed: true });
     edit();
     await screen.findByTestId("project-languages");
@@ -100,18 +105,33 @@ describe("ProjectSettingsSection — languages (DEV-395)", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "maďarčina" }));
 
     const note = await screen.findByTestId("kit-too-old");
-    expect(note).toHaveTextContent("Jazyky pozná šablóna aplikácie od verzie nex-app-kit 0.14.1, projekt stojí na 0.13.0.");
+    expect(note).toHaveTextContent("Jazyky slovenčina, maďarčina pozná šablóna aplikácie od verzie nex-app-kit 0.14.1, projekt stojí na 0.13.0.");
     expect(screen.getByRole("button", { name: /Uložiť/ })).toBeDisabled();
 
-    fireEvent.click(within(note).getByRole("button", { name: "Povýšiť šablónu na 0.14.1" }));
+    fireEvent.click(within(note).getByRole("button", { name: "Povýšiť šablónu na 0.15.0" }));
 
-    await waitFor(() => expect(api.upgradeAppKitApi).toHaveBeenCalledWith("p1", "0.14.1"));
+    await waitFor(() => expect(api.upgradeAppKitApi).toHaveBeenCalledWith("p1", "0.15.0"));
     await waitFor(() => expect(screen.queryByTestId("kit-too-old")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: /Uložiť/ })).toBeEnabled();
   });
 
+  it("English needs a newer kit than Hungarian — the note names the release English comes with (DEV-399)", async () => {
+    api.getAppKitStatusApi.mockResolvedValue(kit("0.14.1"));
+    edit({ ...PROJECT, languages: ["sk", "hu"] } as ProjectRead);
+    await screen.findByTestId("project-languages");
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+    await waitFor(() => expect(api.getAppKitStatusApi).toHaveBeenCalled());
+    expect(screen.queryByTestId("kit-too-old")).not.toBeInTheDocument(); // Slovak and Hungarian are known to 0.14.1
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "angličtina" }));
+
+    expect(await screen.findByTestId("kit-too-old")).toHaveTextContent(
+      "Jazyky slovenčina, maďarčina, angličtina pozná šablóna aplikácie od verzie nex-app-kit 0.15.0, projekt stojí na 0.14.1.",
+    );
+  });
+
   it("a refused upgrade is said and nothing is saved", async () => {
-    api.getAppKitStatusApi.mockResolvedValue(kit("0.13.0", false));
+    api.getAppKitStatusApi.mockResolvedValue(kit("0.13.0"));
     api.upgradeAppKitApi.mockRejectedValue(new Error("Agent práve pracuje na verzii 0.1.0"));
     edit();
     await screen.findByTestId("project-languages");

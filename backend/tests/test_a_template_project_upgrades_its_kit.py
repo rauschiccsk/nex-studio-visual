@@ -347,8 +347,8 @@ def test_a_project_without_a_template_is_offered_nothing(client, db_session, tmp
         "up_to_date": False,
         "changelog": [],
         "parts": [],
-        "speaks_languages": False,
-        "languages_from": "",
+        "languages_known": [],
+        "languages_from": {},
     }
     refused = client.post(f"/api/v1/projects/{project.id}/app-kit-upgrade", json={"target_version": "0.4.0"})
     assert refused.status_code == 400

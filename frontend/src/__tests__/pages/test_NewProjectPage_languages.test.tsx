@@ -78,6 +78,20 @@ describe("DEV-395 — „Jazyky aplikácie“ when founding a project", () => {
     expect(await create()).toMatchObject({ template: "nsv-standard", languages: ["hu", "sk"] });
   });
 
+  it("a new project starts speaking Slovak, Hungarian and English when the cockpit says so (DEV-399)", async () => {
+    api.getProjectCreatePresetsApi.mockResolvedValue({
+      ...PRESETS,
+      languages: [...PRESETS.languages, { code: "en", label: "angličtina" }],
+      default_languages: ["sk", "hu", "en"],
+    });
+    renderForm();
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "angličtina" })).toBeChecked());
+    expect((screen.getByRole("combobox", { name: /Hlavný jazyk/ }) as HTMLSelectElement).value).toBe("sk");
+    expect(screen.getByRole("checkbox", { name: "maďarčina" })).toBeChecked();
+    expect(await create()).toMatchObject({ template: "nsv-standard", languages: ["sk", "hu", "en"] });
+  });
+
   it("the main language is never also one of the others", async () => {
     renderForm();
     fireEvent.click(await screen.findByRole("checkbox", { name: "maďarčina" }));

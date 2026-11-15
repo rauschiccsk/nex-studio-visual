@@ -60,9 +60,13 @@ def test_the_form_starts_with_ci_and_the_full_check_on(router_client, db_session
             }
         ],
         "default_template": "nsv-standard",
-        # DEV-395: the languages an app on a template can speak; a project speaks Slovak unless chosen otherwise.
-        "languages": [{"code": "sk", "label": "slovenčina"}, {"code": "hu", "label": "maďarčina"}],
-        "default_languages": ["sk"],
+        # DEV-395/DEV-399: the languages an app on a template can speak; a new one starts with all three.
+        "languages": [
+            {"code": "sk", "label": "slovenčina"},
+            {"code": "hu", "label": "maďarčina"},
+            {"code": "en", "label": "angličtina"},
+        ],
+        "default_languages": ["sk", "hu", "en"],
     }
 
 

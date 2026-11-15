@@ -148,9 +148,9 @@ class AppKitStatus(BaseModel):
     up_to_date: bool = False
     changelog: list[ChangelogEntry] = Field(default_factory=list)
     parts: list[AppKitPart] = Field(default_factory=list)
-    #: DEV-395: whether the project's kit knows languages, and from which release it does.
-    speaks_languages: bool = False
-    languages_from: str = ""
+    #: DEV-395/DEV-399: the languages the project's kit can speak, and the release each language comes with.
+    languages_known: list[str] = Field(default_factory=list)
+    languages_from: dict[str, str] = Field(default_factory=dict)
 
 
 class AppTemplateConversionOffer(BaseModel):

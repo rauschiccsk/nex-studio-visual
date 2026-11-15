@@ -291,8 +291,8 @@ describe("NewVersionPage — nex-app-kit of a project on an app template (DEV-25
       { name: "frontend", label: "Rám (frontend)", current: "0.3.0" },
       { name: "server", label: "Server", current: "0.3.0" },
     ],
-    speaks_languages: false,
-    languages_from: "0.14.1",
+    languages_known: [],
+    languages_from: { sk: "0.14.1", hu: "0.14.1", en: "0.15.0" },
   };
   const onTemplate = { ...project, template: "nsv-standard" };
 

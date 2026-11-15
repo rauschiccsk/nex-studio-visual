@@ -81,7 +81,7 @@ def test_known_languages_are_accepted_and_the_rest_is_said():
     assert app_languages.refusal([]) == "Aplikácia musí hovoriť aspoň jedným jazykom — vyber hlavný jazyk."
     assert app_languages.refusal(["hu", "hu"]) == "Každý jazyk aplikácie môže byť vybraný len raz."
     assert app_languages.refusal(["de"]) == (
-        "Jazyk „de“ šablóna aplikácie nepozná — pozná tieto: slovenčina (sk), maďarčina (hu)."
+        "Jazyk „de“ šablóna aplikácie nepozná — pozná tieto: slovenčina (sk), maďarčina (hu), angličtina (en)."
     )
 
 
@@ -95,6 +95,28 @@ def test_more_than_slovak_needs_the_template():
         ProjectCreate(**base, languages=["hu"])
     with pytest.raises(ValueError, match="šablóna aplikácie nepozná"):
         ProjectCreate(**base, template="nsv-standard", languages=["de"])
+
+
+def test_each_language_comes_with_its_release_of_the_kit():
+    """DEV-399 — English came with nex-app-kit 0.15.0, Slovak and Hungarian with 0.14.1."""
+    assert app_languages.kit_needed(("sk", "hu")) == "0.14.1"
+    assert app_languages.kit_needed(("sk", "hu", "en")) == "0.15.0"
+    assert app_languages.kit_knows("0.14.1") == ["sk", "hu"]
+    assert app_languages.kit_knows("0.15.0") == ["sk", "hu", "en"]
+    assert app_languages.kit_knows("0.13.0") == [] and app_languages.kit_knows(None) == []
+    assert set(app_languages.KIT_SINCE) == set(app_languages.LANGUAGES)  # every language says its release
+    assert app_languages.NEW_PROJECT_LANGUAGES == ("sk", "hu", "en")
+
+
+def test_an_english_app_on_a_kit_before_english_is_stopped(tmp_path):
+    root = _project(tmp_path, languages=["sk", "hu", "en"], kit="0.14.1", catalogs={"sk": HU, "hu": HU, "en": HU})
+
+    assert app_languages.static_problems(root, ("sk", "hu", "en")) == [
+        "aplikácia stojí na nex-app-kit 0.14.1 — jazyky slovenčina, maďarčina, angličtina pozná šablóna od 0.15.0; "
+        "šablónu povýši Manažér v nastaveniach projektu"
+    ]
+    rules = postscaffold.project_type_rules("standard", "nsv-standard", ("hu", "sk", "en"))
+    assert "a šablóna nex-app-kit je aspoň 0.15.0" in rules
 
 
 def test_an_installation_starts_in_the_customers_language_when_the_app_speaks_it():
@@ -180,8 +202,8 @@ def test_each_static_problem_is_said_in_a_sentence(tmp_path):
     assert app_languages.static_problems(root, ("hu", "sk")) == [
         "frontend/app.manifest.json hovorí o jazykoch „sk“, projekt má hovoriť: maďarčina (hlavný jazyk), slovenčina "
         '— pole `languages` v manifeste je ["hu", "sk"], hlavný jazyk prvý',
-        "aplikácia stojí na nex-app-kit 0.13.0 — jazyky pozná šablóna od 0.14.1; šablónu povýši Manažér v nastaveniach "
-        "projektu",
+        "aplikácia stojí na nex-app-kit 0.13.0 — jazyky maďarčina, slovenčina pozná šablóna od 0.14.1; šablónu povýši "
+        "Manažér v nastaveniach projektu",
         "chýba katalóg textov pre jazyk slovenčina — frontend/src/locales/sk.ts",
         "chýba stráž textov aplikácie frontend/src/test/texts.test.ts (zo šablóny nex-app-kit)",
     ]

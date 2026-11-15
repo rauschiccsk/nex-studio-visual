@@ -32,7 +32,7 @@ import {
   type AppKitStatus,
 } from "@/services/api/projects";
 import { AppLanguagesChoice } from "./AppLanguagesChoice";
-import type { LanguageOption } from "@/lib/appLanguages";
+import { kitNeeded, unknownToKit, type LanguageOption } from "@/lib/appLanguages";
 import { PRIVATE_NETWORK_APPLIES, PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "./privateNetwork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -78,6 +78,11 @@ function isMultilingual(languages: string[]): boolean {
 function describe(languages: string[], options: LanguageOption[]): string {
   const names = languages.map((code) => options.find((o) => o.code === code)?.label ?? code);
   return names.length > 1 ? `${names[0]} (hlavný jazyk), ${names.slice(1).join(", ")}` : (names[0] ?? "");
+}
+
+/** „Jazyky slovenčina, maďarčina, angličtina“ — the languages without saying which one is the main. */
+function describePlain(languages: string[], options: LanguageOption[]): string {
+  return `Jazyky ${languages.map((code) => options.find((o) => o.code === code)?.label ?? code).join(", ")}`;
 }
 
 function toForm(p: ProjectRead): FormState {
@@ -161,7 +166,8 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
     };
   }, [wantsLanguages, kit, project.id]);
 
-  const kitTooOld = wantsLanguages && kit !== null && !kit.speaks_languages;
+  // DEV-399: each language comes with its own release of the kit (English later than Hungarian).
+  const kitTooOld = wantsLanguages && kit !== null && unknownToKit(form.languages, kit.languages_known ?? []).length > 0;
 
   const upgradeKit = async () => {
     if (!kit?.latest) return;
@@ -390,7 +396,8 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
                 className="mt-2 rounded-lg border border-[var(--color-status-warning)]/50 bg-[var(--color-status-warning)]/10 p-3 text-xs text-[var(--color-text-secondary)]"
               >
                 <p>
-                  Jazyky pozná šablóna aplikácie od verzie nex-app-kit {kit.languages_from}, projekt stojí na{" "}
+                  {describePlain(form.languages, languageOptions)} pozná šablóna aplikácie od verzie nex-app-kit{" "}
+                  {kitNeeded(form.languages, kit.languages_from ?? {})}, projekt stojí na{" "}
                   {kit.current ?? "verzii, ktorá sa nedá prečítať"}. Najprv šablónu povýš, potom jazyky ulož.
                 </p>
                 {kit.latest && (

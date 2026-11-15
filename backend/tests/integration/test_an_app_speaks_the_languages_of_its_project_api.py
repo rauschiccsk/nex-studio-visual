@@ -98,8 +98,8 @@ def test_an_old_kit_is_upgraded_before_the_languages(client, db_session, tmp_pat
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
-        "Jazyky aplikácie pozná šablóna od verzie nex-app-kit 0.14.1, projekt stojí na 0.13.0. Najprv povýš šablónu "
-        "aplikácie (tlačidlo pri jazykoch), potom jazyky ulož."
+        "Jazyky maďarčina, slovenčina pozná šablóna od verzie nex-app-kit 0.14.1, projekt stojí na 0.13.0. Najprv "
+        "povýš šablónu aplikácie (tlačidlo pri jazykoch), potom jazyky ulož."
     )
 
 
@@ -185,14 +185,17 @@ def test_the_kit_waits_while_an_agent_works_in_the_checkout(client, db_session, 
 def test_the_status_says_whether_the_kit_knows_languages(client, db_session, tmp_path, monkeypatch):
     from backend.services import nexshared
 
-    monkeypatch.setattr(nexshared, "list_remote_tags", lambda *a, **k: ["0.13.0", "0.14.1"])
+    monkeypatch.setattr(nexshared, "list_remote_tags", lambda *a, **k: ["0.13.0", "0.14.1", "0.15.0"])
     monkeypatch.setattr(nexshared, "fetch_changelog", lambda *a, **k: "")
     old = _project(db_session, tmp_path / "old", kit="0.13.0")
-    new = _project(db_session, tmp_path / "new", kit="0.14.1")
+    middle = _project(db_session, tmp_path / "middle", kit="0.14.1")
+    new = _project(db_session, tmp_path / "new", kit="0.15.0")
 
-    assert client.get(f"/api/v1/projects/{old.id}/app-kit-status").json()["speaks_languages"] is False
+    assert client.get(f"/api/v1/projects/{old.id}/app-kit-status").json()["languages_known"] == []
+    assert client.get(f"/api/v1/projects/{middle.id}/app-kit-status").json()["languages_known"] == ["sk", "hu"]
     body = client.get(f"/api/v1/projects/{new.id}/app-kit-status").json()
-    assert (body["speaks_languages"], body["languages_from"]) == (True, "0.14.1")
+    assert body["languages_known"] == ["sk", "hu", "en"]
+    assert body["languages_from"] == {"sk": "0.14.1", "hu": "0.14.1", "en": "0.15.0"}
 
 
 # --- the deploy ----------------------------------------------------------------------------------------------------

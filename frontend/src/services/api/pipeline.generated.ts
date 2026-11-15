@@ -3687,20 +3687,16 @@ export interface components {
             changelog?: components["schemas"]["ChangelogEntry"][];
             /** Current */
             current?: string | null;
-            /**
-             * Languages From
-             * @default
-             */
-            languages_from: string;
+            /** Languages From */
+            languages_from?: {
+                [key: string]: string;
+            };
+            /** Languages Known */
+            languages_known?: string[];
             /** Latest */
             latest?: string | null;
             /** Parts */
             parts?: components["schemas"]["AppKitPart"][];
-            /**
-             * Speaks Languages
-             * @default false
-             */
-            speaks_languages: boolean;
             /**
              * Up To Date
              * @default false

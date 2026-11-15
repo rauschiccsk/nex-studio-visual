@@ -119,7 +119,7 @@ def languages_rules(languages: Sequence[str]) -> str:
         "{{LANGUAGES}}": app_languages.describe(languages),
         "{{MAIN}}": languages[0],
         "{{CODES}}": json.dumps(list(languages)),
-        "{{MIN_KIT}}": app_languages.MIN_KIT_VERSION,
+        "{{MIN_KIT}}": app_languages.kit_needed(languages),
     }
     for token, value in filled.items():
         text = text.replace(token, value)

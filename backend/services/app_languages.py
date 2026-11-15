@@ -12,8 +12,8 @@ What is where:
 * a customer may say which of them its installation starts in (``customers.language``) — the cockpit writes it into the
   installation as ``NEX_LANGUAGE``, the template reads it (nex-app-kit ``installation.py``) and each person may still
   choose their own;
-* the template knows the languages from nex-app-kit :data:`MIN_KIT_VERSION`; a project on an older release is moved to
-  a newer one first (the cockpit's own upgrade, :mod:`backend.services.app_kit`);
+* each language is known to the template from its own release of nex-app-kit (:data:`KIT_SINCE`); a project on an older
+  release is moved to a newer one first (the cockpit's own upgrade, :mod:`backend.services.app_kit`);
 * the build agents read the rule in their charters (``templates/app-languages-charter.md``) and Verifikácia measures it
   (:func:`problems`): the manifest names the project's languages, every language has its catalog, no catalog misses a
   text of the main one, and no text a person reads is written into the code — the last by the checker of the very kit
@@ -40,11 +40,15 @@ logger = logging.getLogger(__name__)
 
 #: The languages the app template speaks — nex-app-kit's ``KNOWN_LANGUAGES`` (scaffold/render.py), nex-shared's
 #: ``LANGUAGES`` — with the name a person reads in the cockpit. A new language is a new catalog in both first.
-LANGUAGES: dict[str, str] = {"sk": "slovenčina", "hu": "maďarčina"}
-#: What a project speaks when nobody chose otherwise — every project founded before DEV-395.
+LANGUAGES: dict[str, str] = {"sk": "slovenčina", "hu": "maďarčina", "en": "angličtina"}
+#: What a project speaks when nobody chose otherwise — every project founded before DEV-395, one without the template.
 DEFAULT_LANGUAGES: tuple[str, ...] = ("sk",)
-#: The first release of nex-app-kit that speaks more than Slovak (0.14.0 lacked the server's catalogs in its package).
-MIN_KIT_VERSION = "0.14.1"
+#: DEV-399 — what the new-project form starts with for a project on the template. Director 15.11.2026: „Túto
+#: kombináciu by som chcel mať ako základné nastavenie pre každú aplikáciu.“
+NEW_PROJECT_LANGUAGES: tuple[str, ...] = ("sk", "hu", "en")
+#: The first release of nex-app-kit that speaks each language beyond Slovak alone (0.14.0 lacked the server's catalogs
+#: in its package; English came with 0.15.0, DEV-398). Every language of :data:`LANGUAGES` has its entry.
+KIT_SINCE: dict[str, str] = {"sk": "0.14.1", "hu": "0.14.1", "en": "0.15.0"}
 #: The variable the installation's default language is written under (nex-app-kit ``installation.LANGUAGE_KEY``).
 INSTALLATION_LANGUAGE_KEY = "NEX_LANGUAGE"
 
@@ -75,6 +79,11 @@ def describe(languages: Sequence[str]) -> str:
     if len(names) == 1:
         return names[0]
     return f"{names[0]} (hlavný jazyk), " + ", ".join(names[1:])
+
+
+def describe_plain(languages: Sequence[str]) -> str:
+    """„slovenčina, maďarčina, angličtina“ — the languages without saying which one is the main."""
+    return ", ".join(name_of(c) for c in languages)
 
 
 def is_multilingual(languages: Optional[Sequence[str]]) -> bool:
@@ -109,8 +118,20 @@ def _key(version: str) -> tuple[int, int, int]:
     return (a, b, c)
 
 
-def kit_speaks_languages(version: Optional[str]) -> bool:
-    return bool(version) and bool(_SEMVER.match(version or "")) and _key(version) >= _key(MIN_KIT_VERSION)
+def kit_needed(languages: Sequence[str]) -> str:
+    """The oldest release of nex-app-kit that speaks every one of *languages*."""
+    return max((KIT_SINCE[c] for c in languages if c in KIT_SINCE), key=_key, default=KIT_SINCE["sk"])
+
+
+def kit_knows(version: Optional[str]) -> list[str]:
+    """The languages a project on nex-app-kit *version* can speak beyond Slovak alone — none for an unreadable one."""
+    if not version or not _SEMVER.match(version):
+        return []
+    return [code for code, since in KIT_SINCE.items() if _key(version) >= _key(since)]
+
+
+def kit_speaks_languages(version: Optional[str], languages: Sequence[str]) -> bool:
+    return set(languages) <= set(kit_knows(version))
 
 
 def kit_version(source_path: str) -> Optional[str]:
@@ -128,16 +149,16 @@ def kit_version(source_path: str) -> Optional[str]:
 
 
 def old_kit_refusal(languages: Sequence[str], source_path: Optional[str]) -> Optional[str]:
-    """Why the project cannot speak *languages* on the kit it builds with — it needs :data:`MIN_KIT_VERSION`."""
+    """Why the project cannot speak *languages* on the kit it builds with — each needs its release (``KIT_SINCE``)."""
     if not is_multilingual(languages) or not source_path:
         return None
     version = kit_version(source_path)
-    if kit_speaks_languages(version):
+    if kit_speaks_languages(version, languages):
         return None
     return (
-        f"Jazyky aplikácie pozná šablóna od verzie nex-app-kit {MIN_KIT_VERSION}, projekt stojí na "
-        f"{version or 'verzii, ktorá sa nedá prečítať'}. Najprv povýš šablónu aplikácie (tlačidlo pri jazykoch), potom "
-        "jazyky ulož."
+        f"Jazyky {describe_plain(languages)} pozná šablóna od verzie nex-app-kit {kit_needed(languages)}, "
+        f"projekt stojí na {version or 'verzii, ktorá sa nedá prečítať'}. Najprv povýš šablónu aplikácie (tlačidlo "
+        "pri jazykoch), potom jazyky ulož."
     )
 
 
@@ -191,10 +212,11 @@ def static_problems(root: Path, languages: Sequence[str]) -> list[str]:
             f"v manifeste je [{', '.join(json.dumps(c) for c in languages)}], hlavný jazyk prvý"
         )
     version = kit_version(str(root))
-    if not kit_speaks_languages(version):
+    if not kit_speaks_languages(version, languages):
         problems.append(
-            f"aplikácia stojí na nex-app-kit {version or '(verzia sa nedá prečítať)'} — jazyky pozná šablóna od "
-            f"{MIN_KIT_VERSION}; šablónu povýši Manažér v nastaveniach projektu"
+            f"aplikácia stojí na nex-app-kit {version or '(verzia sa nedá prečítať)'} — jazyky "
+            f"{describe_plain(languages)} pozná šablóna od {kit_needed(languages)}; šablónu povýši Manažér "
+            "v nastaveniach projektu"
         )
     for code in languages:
         if not (root / CATALOG_DIR / f"{code}.ts").is_file():
@@ -272,7 +294,7 @@ def problems(root: Path, languages: Sequence[str]) -> tuple[list[str], list[str]
     sentences in ``not_run`` say which part could not be measured and why."""
     found = static_problems(root, languages)
     version = kit_version(str(root))
-    if len(languages) < 2 or not kit_speaks_languages(version):
+    if len(languages) < 2 or not kit_speaks_languages(version, languages):
         return found, []
     try:
         return found + tool_problems(root, languages, version or ""), []
