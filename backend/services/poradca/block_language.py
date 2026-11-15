@@ -148,7 +148,7 @@ def rewrite_directive(found: list[NotSlovak]) -> str:
         "[Kontrola kokpitu] Tvoja odpoveď nesie text, ktorý človek odovzdá ďalej, a ten nie je po slovensky — "
         f"kokpit ho neponúkne:\n{listed}\n\n"
         "Pokyn pre agenta, odpoveď pre agenta, požiadavka do Zásobníka, zadanie aj doplnenie projektu sú vždy po "
-        "slovensky — Director: „celá komunikácia s Agentom ide po slovensky“. Cesty, mená súborov, funkcií a kódov "
+        "slovensky — tak je to pravidlo kokpitu. Cesty, mená súborov, funkcií a kódov "
         "ostávajú presne ako v kóde; daj ich do `…`.\n"
         "Napíš celú odpoveď znova, vecne rovnakú, s týmito blokmi po slovensky. Nič nové nezisťuj a nič iné nemeň."
     )

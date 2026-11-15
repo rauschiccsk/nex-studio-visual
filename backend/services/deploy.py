@@ -1615,9 +1615,23 @@ def _frontend_urls(main_url: str, project: Project) -> list[dict[str, str]]:
     surfaces = project_surfaces.surfaces_of(project)
     if len(surfaces) < 2:
         return []
+    return [{"label": s.label, "url": _frontend_url(main_url, s.address_suffix)} for s in surfaces]
+
+
+def _frontend_url(main_url: str, address_suffix: str) -> str:
     scheme, rest = main_url.split("://", 1)
     name, zone = rest.split(".", 1)
-    return [{"label": s.label, "url": f"{scheme}://{name}{s.address_suffix}.{zone}"} for s in surfaces]
+    return f"{scheme}://{name}{address_suffix}.{zone}"
+
+
+def uat_addresses(customer: Customer, project: Project) -> dict[str, str]:
+    """DEV-340 — where a customer's UAT installation of *project* is reached: ``""`` the main address (the link of the
+    deploy matrix), then every frontend by its surface name."""
+    main_url = _instance_url(customer, "uat", project)
+    found = {"": main_url}
+    for surface in project_surfaces.surfaces_of(project):
+        found[surface.name] = _frontend_url(main_url, surface.address_suffix)
+    return found
 
 
 def installation_addresses(db: Session, project: Project) -> list[str]:

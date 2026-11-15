@@ -4,14 +4,14 @@
 # installations. On 15.10.2026 GitHub cancelled a NEX Manager CI job mid-test; its database kept running for four
 # days, open on the server's network, until the nightly backup check found it. On a shared Docker nothing says which
 # job a container belongs to, so nothing can be cleaned up safely after a job — and any job could stop or delete a
-# customer's database. Director 19.10.2026: "Súhlasím s návrhom na oddelený docker."
+# customer's database. Approved 19.10.2026: "Súhlasím s návrhom na oddelený docker."
 #
 # How. Service `docker` is the runner's own daemon (docker:dind); a job never sees the live Docker. The runner shares
 # its network namespace, so a port a test publishes (`-p 5432`) is on the job's localhost and not on the server's
 # network. The work dir is the same path in both (ICCINT-66: a bind mount is resolved by the daemon that starts the
 # container). The cleanup hook empties the runner's own daemon at the start and at the end of every job.
 #
-# The ONLY description of the pair (Director 19.10.2026: "Súhlasím"): the cockpit starts it for its projects
+# The ONLY description of the pair (approved 19.10.2026: "Súhlasím"): the cockpit starts it for its projects
 # (backend/services/ci_runner.py) and Dedo's nastroje/ci_bezec.sh starts the cockpit's own runner from this file.
 #
 # Everything the containers get is IN this file or in the environment of `docker compose` — nothing is mounted from a
@@ -22,7 +22,7 @@
 # then lives in volume runner-data, so no key stays in the runner's configuration.
 #
 # What the tests read matches the old runners on the server: Ubuntu 24.04 with git 2.43, an ordinary user (not root)
-# and the git identity ICC CI. On 19.10.2026 eight cockpit tests failed without it; Director: "Súhlasím".
+# and the git identity ICC CI. On 19.10.2026 eight cockpit tests failed without it; approved: "Súhlasím".
 #
 # More runners for one project (DEV-215): every one is a whole pair of its own — its own daemon, work dir, compose
 # project and name on GitHub (the cleanup hook empties the WHOLE daemon at every job, so two runners sharing one would

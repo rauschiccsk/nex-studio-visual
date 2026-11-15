@@ -331,7 +331,7 @@ class DeployMatrix(BaseModel):
         default=False,
         description=(
             "True iff THIS user may record a UAT acceptance (``require_ri_role``). Acceptance is what OPENS "
-            "PROD for a (version, customer) — the ri-only Director gate of v4.0.35/D3, deliberately narrower "
+            "PROD for a (version, customer) — the ri-only gate of v4.0.35/D3, deliberately narrower "
             "than the owner-or-ri UAT deploy. Surfaced so the button can be disabled WITH a reason instead of "
             "looking live and then failing with 403."
         ),
@@ -340,7 +340,7 @@ class DeployMatrix(BaseModel):
         default=False,
         description=(
             "True iff THIS user may deploy to PROD (the deploy route's ``environment == 'prod'`` role gate). "
-            "PROD deploy is ri-only by the same v4.0.35/D3 Director gate as acceptance, while UAT deploy is "
+            "PROD deploy is ri-only by the same v4.0.35/D3 gate as acceptance, while UAT deploy is "
             "open to the project owner — so the PROD 'Nasadiť' cannot be hidden by page-level role and needs "
             "its own flag, or it looks live to a Junior/Medior and then fails with 403."
         ),
@@ -374,6 +374,14 @@ class UatGuideLoginRead(BaseModel):
     login: Optional[str] = None
 
 
+class UatGuideAddressRead(BaseModel):
+    """DEV-340 — what one placeholder of the guide (``<adresa-inštalácie>``) stands for at one customer's UAT."""
+
+    customer_id: UUID
+    placeholder: str
+    url: str
+
+
 class UatGuideRead(BaseModel):
     """DEV-90 — what to try in UAT for one version of the project."""
 
@@ -386,6 +394,8 @@ class UatGuideRead(BaseModel):
     nothing_to_test: Optional[str] = None
     changes: list[str] = Field(default_factory=list)
     logins: list[UatGuideLoginRead] = Field(default_factory=list)
+    #: DEV-340 — every customer's full UAT address for each placeholder the guide may write; the tab links it.
+    addresses: list[UatGuideAddressRead] = Field(default_factory=list)
 
 
 class UatCheckRead(BaseModel):

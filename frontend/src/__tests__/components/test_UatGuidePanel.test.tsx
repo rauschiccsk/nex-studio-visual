@@ -135,6 +135,46 @@ describe("UatGuidePanel (DEV-90)", () => {
     expect(getUatGuide).not.toHaveBeenCalled();
   });
 
+  // ── DEV-340 ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+  it("shows the full address of the customer being tried in place of the guide's placeholder, as a link", async () => {
+    const tataUrl = "https://uat-tata-author-asistent.int.isnex.eu";
+    vi.mocked(getUatGuide).mockResolvedValue({
+      ...GUIDE,
+      sections: [
+        {
+          title: "Stav aplikácie",
+          screen: "prehliadač, adresa inštalácie (napríklad `https://<adresa-inštalácie>/api/v1/health`)",
+          data: null,
+          steps: ["Otvor https://<adresa-inštalácie>/api/v1/health."],
+          expected: ["ukáže sa verzia 1.0.1"],
+        },
+      ],
+      addresses: [
+        { customer_id: "tata", placeholder: "<adresa-inštalácie>", url: tataUrl },
+        { customer_id: "new", placeholder: "<adresa-inštalácie>", url: "https://uat-new-author-asistent.int.isnex.eu" },
+      ],
+    });
+    const rows = [
+      { customer_id: "tata", customer_name: "TATA", uat_url: tataUrl, uat_version: "1.0.1" },
+      { customer_id: "new", customer_name: "Nový zákazník", uat_url: null, uat_version: null },
+    ] as unknown as DeployMatrixRow[];
+    render(<UatGuidePanel slug="author-asistent" versions={["1.0.1"]} rows={rows} />);
+
+    const card = (await screen.findByRole("heading", { name: "Stav aplikácie" })).closest("li") as HTMLElement;
+    const links = within(card).getAllByRole("link", { name: `${tataUrl}/api/v1/health` });
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([`${tataUrl}/api/v1/health`, `${tataUrl}/api/v1/health`]);
+    expect(within(card).getByText(/Obrazovka:/).textContent).toBe(
+      `Obrazovka: prehliadač, adresa inštalácie (napríklad ${tataUrl}/api/v1/health)`,
+    );
+    expect(card.textContent).not.toContain("<adresa-inštalácie>");
+
+    // a customer without a UAT installation has no address to link — the sentence stays as the guide wrote it
+    fireEvent.change(screen.getByLabelText("Zákazník, u ktorého skúšaš"), { target: { value: "new" } });
+    await waitFor(() => expect(within(card).queryAllByRole("link")).toEqual([]));
+    expect(card.textContent).toContain("Otvor https://<adresa-inštalácie>/api/v1/health.");
+  });
+
   // ── DEV-91 ──────────────────────────────────────────────────────────────────────────────────────────────────
 
   it("ticks a change off as tried for the customer that runs the version, and counts it", async () => {

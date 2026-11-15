@@ -70,12 +70,12 @@ class UserCreate(BaseModel):
         max_length=128,
         description=(
             "Plaintext password (hashed with bcrypt before storage). "
-            "Min 5 — Director directive 2026-05-13, NEX Studio is internal."
+            "Min 5 — decided 2026-05-13, NEX Studio is internal."
         ),
     )
     role: UserRole = Field(
         ...,
-        description="Access level: ri (Director/Senior), ha (Medior), shu (Junior).",
+        description="Access level: ri (Senior), ha (Medior), shu (Junior).",
     )
     is_active: bool = Field(
         default=True,
@@ -159,8 +159,7 @@ class ChangePasswordRequest(BaseModel):
         min_length=5,
         max_length=128,
         description=(
-            "New plaintext password (min 5, max 128 characters). "
-            "Min 5 — Director directive 2026-05-13, NEX Studio is internal."
+            "New plaintext password (min 5, max 128 characters). Min 5 — decided 2026-05-13, NEX Studio is internal."
         ),
     )
     current_password: Optional[str] = Field(

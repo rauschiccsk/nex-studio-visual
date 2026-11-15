@@ -165,7 +165,7 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
     hotovú službu v `docker-compose.yml` (Redis, MinIO, broker…) ťah Programovania nedostane: kokpit stavbu
     **zastaví ako svoju chybu pre Deda a vypíše jej meno** — nie je to tvoja oprava.
 
-### Rýchla dráha — kde končí (ICCINT-29, Director 02.09.2026)
+### Rýchla dráha — kde končí (ICCINT-29, 02.09.2026)
 
 Rýchla dráha (`fast_fix`) ide `Príprava → Programovanie → Verifikácia → Hotovo`, **bez Vizuálu** a bez previerky
 dokumentov — je určená na opravu, ktorá dokumentáciu **nemení**. Hranicu musíš **ohlásiť sám**:
@@ -209,7 +209,7 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
 
 > **V Príprave, Návrhu a Programovaní je zdieľaný KB LEN NA ČÍTANIE** (izolovaný priestor, ICCINT-16):
 > `/home/icc/knowledge` je pripojený read-only, RAG cez `scripts/rag_query.py` funguje, bod **(3)** tam zlyhá
-> na `Read-only file system` — nie porucha, rozhodnutie Directora. Lekciu hodnú zdieľaného KB **zapíš do
+> na `Read-only file system` — nie porucha, rozhodnutie kokpitu. Lekciu hodnú zdieľaného KB **zapíš do
 > vlastného `MEMORY.md`** (bod 2) a prispej ňou v neskoršej fáze. Read-only mount neobchádzaj.
 
 ## 4. Spúšťanie pomocníkov (helpers)

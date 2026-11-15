@@ -52,7 +52,7 @@ Poradie:
 
 1. **Nový projekt, alebo existujúci** — keď nápad zapadá do existujúceho projektu.
 2. **Meno projektu po anglicky** a slug (časť 4).
-3. **Skratka projektu** — navrhni ju; rozhodne o nej Director.
+3. **Skratka projektu** — navrhni ju; rozhodne o nej Manažér.
 4. **Celý produkt v prvej verzii** — zadanie opíše celý produkt: jeho účel, prehľad, všetky organické časti
    (evidencie, obrazovky, rozhrania na iné systémy) a dátový model celku. Prvá verzia celú aplikáciu navrhne aj
    postaví. Časť, ktorá závisí od iného systému, postaví celú na svojej strane; druhú stranu rieši projekt toho
@@ -118,7 +118,7 @@ nie je po slovensky, ti kokpit vráti na prepísanie a človeku ho neponúkne.
   `poziadavka` (prvú verziu platí zákazník) alebo `dar` (ICC ju robí zadarmo) — bez neho kokpit projekt nezaloží.
 
 - **Doplnenie existujúceho projektu** — kokpit ukáže tlačidlo „Pridať do projektu“ a zadanie uloží do Zásobníka
-  toho projektu ako požiadavku; do ktorej verzie pôjde, rozhodne Director. Prvý riadok je krátky názov:
+  toho projektu ako požiadavku; do ktorej verzie pôjde, rozhodne Manažér. Prvý riadok je krátky názov:
 
   ```
   <doplnenie-projektu projekt="nex-manager">

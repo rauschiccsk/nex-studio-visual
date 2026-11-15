@@ -13,6 +13,11 @@ One shape, read by everybody — the brief shows it to the agent (:data:`BRIEF_R
 it: a ``##`` heading per change as a user names it, then the screen (:data:`SCREEN_PREFIX`), optional test data
 (:data:`DATA_PREFIX`), numbered steps and what has to happen (:data:`EXPECTED_PREFIX`). A version that changes
 nothing a user can try says so in one line instead (:data:`NOTHING_PREFIX` and why).
+
+DEV-340 — one guide serves every customer, so it never writes a customer's address out: it writes a placeholder
+(:data:`PLACEHOLDERS`) and the UAT tab puts the full address of the customer being tried in its place, as a link.
+10.11.2026 Author Asistent 1.0.1 told the Manažér „https://<adresa-inštalácie>/api/v1/health“ and left the address to
+him, while the cockpit knew TATA's; Career Asistent 1.1.0 wrote ICC's address out, wrong for any other customer.
 """
 
 from __future__ import annotations
@@ -35,6 +40,22 @@ DATA_PREFIX = "Testovacie údaje:"
 EXPECTED_PREFIX = "Očakávané:"
 NOTHING_PREFIX = "Nie je čo skúšať:"
 
+#: DEV-340 — the placeholder the guide writes for an address of the installation, by frontend (``""`` is the
+#: installation's main address, the others a Web project's frontends — :mod:`project_surfaces`). The first one is the
+#: shape Author Asistent's agent came to by itself.
+PLACEHOLDERS = {"": "<adresa-inštalácie>", "admin": "<adresa-administrácie>", "web": "<adresa-webu>"}
+_ADDRESS_RULE = (
+    "Adresu aplikácie nepíš natvrdo — návod je jeden pre všetkých zákazníkov: píš `https://"
+    + PLACEHOLDERS[""]
+    + "` a za ňu cestu (napríklad `https://"
+    + PLACEHOLDERS[""]
+    + "/api/v1/health`), v projekte s administráciou a webom `https://"
+    + PLACEHOLDERS["admin"]
+    + "` a `https://"
+    + PLACEHOLDERS["web"]
+    + "`. Panel UAT na to miesto dosadí celú adresu zákazníka, u ktorého Manažér skúša, ako odkaz. "
+)
+
 #: The rule every Programovanie task brief carries (new version and fast fix alike). The path is filled in.
 BRIEF_RULE = (
     "NÁVOD NA SKÚŠKU V UAT (DEV-90): Manažér skúša verziu v UAT podľa súboru `{path}`. Keď táto úloha mení to, čo "
@@ -46,7 +67,8 @@ BRIEF_RULE = (
     "1. <krok — kam kliknúť, čo zadať; tlačidlá presne tak, ako sú na obrazovke>\n"
     "2. <ďalší krok>\n"
     "Očakávané: <čo sa má stať>\n"
-    "Najdôležitejšie zmeny daj navrch. Keď úloha nemení nič, čo by sa dalo vyskúšať, súbor nemeň; keď celá verzia "
+    + _ADDRESS_RULE
+    + "Najdôležitejšie zmeny daj navrch. Keď úloha nemení nič, čo by sa dalo vyskúšať, súbor nemeň; keď celá verzia "
     "nemení nič viditeľné, napíš doň jediný riadok `Nie je čo skúšať: <prečo>`. Verifikácia návod skontroluje — "
     "bez neho verzia neprejde."
 )
@@ -189,6 +211,12 @@ def for_commit(repo: Path, version_number: str, sha: Optional[str]) -> VersionGu
     now = read_at(repo, "HEAD", note)
     changes = release_note_changes(now if now is not None else read_at(repo, sha, note))
     return VersionGuide(source=RELEASE_NOTES if changes else NONE, changes=changes)
+
+
+def addresses(by_frontend: dict[str, str]) -> dict[str, str]:
+    """DEV-340 — what each placeholder of the guide stands for at one customer's installation; ``by_frontend`` is
+    :func:`deploy.uat_addresses` (``""`` the main address, then each frontend by its surface name)."""
+    return {PLACEHOLDERS[name]: url for name, url in by_frontend.items() if name in PLACEHOLDERS}
 
 
 def admin_login(contract_settings: list, values: dict, legacy_admin: bool) -> Optional[str]:

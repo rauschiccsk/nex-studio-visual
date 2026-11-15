@@ -1,6 +1,6 @@
 # v4.29.0 — päť opráv z ostrej prevádzky
 
-Všetkých päť vzniklo tak, že Director na niečo klikol a nefungovalo to — alebo to
+Všetkých päť vzniklo tak, že Manažér na niečo klikol a nefungovalo to — alebo to
 fungovalo inak, než malo. Ani jedna nevznikla od stola.
 
 ## Poznámky k vydaniu už nikto neprepisuje pod rukami

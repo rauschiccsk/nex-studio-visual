@@ -20,7 +20,7 @@ Nie je to len odovzdanie projektu. Je to aj **zastupovanie, keď je niekto preč
 
 Doteraz sa to riešilo tak, že ste si navzájom poznali heslá. To má jednu tichú
 cenu: v zázname potom stojí, že to urobil ten, komu konto patrí — nie ten, kto pri
-klávesnici naozaj sedel. A naše pravidlo „nič nezvratné bez Directora" sa opiera
+klávesnici naozaj sedel. A naše pravidlo „nič nezvratné bez Manažéra" sa opiera
 práve o ten podpis.
 
 Keď sa projekt zverí, zastupujúci pracuje **pod sebou** a v zázname ostane pravda.

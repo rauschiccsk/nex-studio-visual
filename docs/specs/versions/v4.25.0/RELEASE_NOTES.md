@@ -3,7 +3,7 @@
 ## Čo sa dialo
 
 Po kliknutí na „Schváliť vizuál“ bežal ťah agenta aj tri minúty. V evidencii pritom
-stále stálo „čaká na súhlas“ — takže obrazovka nezobrazovala nič. Director to opísal
+stále stálo „čaká na súhlas“ — takže obrazovka nezobrazovala nič. Manažér to opísal
 slovami *„nič sa nedeje, nefunguje to“*. Agent celý ten čas pracoval.
 
 ## Prečo je ticho horšie než chyba

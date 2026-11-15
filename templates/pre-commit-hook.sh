@@ -11,7 +11,7 @@
 #
 # Installed + activated by the scaffold (`git config core.hooksPath .githooks`).
 # Skips docs-only commits (nothing lint-relevant staged).
-# Bypass (rare, Director-approved only): `git commit --no-verify`.
+# Bypass (rare, only with the manager's approval): `git commit --no-verify`.
 
 set -euo pipefail
 REPO_ROOT=$(git rev-parse --show-toplevel)

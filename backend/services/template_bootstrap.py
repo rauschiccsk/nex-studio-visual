@@ -536,7 +536,7 @@ def rollback_partial_state(
 
     if delete_github_repo:
         logger.warning(
-            "K-002 rollback: deleting GitHub repo %s (Director confirmation required)",
+            "K-002 rollback: deleting GitHub repo %s (the Manažér's confirmation required)",
             repo_full_name,
         )
         result = subprocess.run(

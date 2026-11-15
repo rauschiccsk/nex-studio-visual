@@ -306,7 +306,7 @@ def found(
             source="poradca",
             title=title,
             description=(
-                f"{description.strip()}\n\nNávrh: {WAY_WORDS[way]}. O verzii rozhoduje Director — tiket ju nezakladá "
+                f"{description.strip()}\n\nNávrh: {WAY_WORDS[way]}. O verzii rozhoduje Manažér — tiket ju nezakladá "
                 "ani nespúšťa."
             ),
             labels=(*labels, f"{backlog_tickets.RESPONSIBLE_GROUP}: {responsible}"),

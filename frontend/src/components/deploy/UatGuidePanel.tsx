@@ -12,7 +12,10 @@
 // never accepted, and the guide showed 1.4.1 alone („Nie je čo skúšať“). For the version a customer runs on UAT the
 // panel shows every version that UAT carries and the customer has not accepted (uat_versions_to_test), each under its
 // number; what was tried is still kept per version.
-import { useEffect, useState } from "react";
+//
+// DEV-340 — the guide writes a placeholder where an address goes; the panel shows the full address of the customer
+// being tried in its place, as a link (lib/uatAddresses).
+import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ExternalLink, ListChecks } from "lucide-react";
 
@@ -21,6 +24,7 @@ import { getUatChecks, getUatGuide, setUatCheck } from "@/services/api/deploy";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { fastFixText, handOffFastFix } from "@/lib/fastFixHandoff";
 import { combineProgress } from "@/lib/uatTesting";
+import { addressesOf, withAddresses } from "@/lib/uatAddresses";
 import type { DeployMatrixRow, UatGuide, UatProgress } from "@/types/deploy";
 
 interface Props {
@@ -59,6 +63,29 @@ function changesOf(guide: UatGuide | undefined): Change[] {
 /** The customer whose UAT is being tried: the one that runs this version there, else the first. */
 function defaultCustomer(rows: DeployMatrixRow[], version: string): string {
   return (rows.find((r) => r.uat_version === version) ?? rows[0])?.customer_id ?? "";
+}
+
+/** DEV-340: a sentence of the guide with the customer's address in place of its placeholder, as a link. */
+function Linked({ text, addresses }: { text: string; addresses: Record<string, string> }) {
+  return (
+    <>
+      {withAddresses(text, addresses).map((part, i) =>
+        "url" in part ? (
+          <a
+            key={i}
+            href={part.url}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all text-primary-400 underline hover:text-primary-300"
+          >
+            {part.url}
+          </a>
+        ) : (
+          <Fragment key={i}>{part.text}</Fragment>
+        ),
+      )}
+    </>
+  );
 }
 
 export default function UatGuidePanel({ slug, versions, rows }: Props) {
@@ -163,6 +190,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
     const g = guides[v];
     const changes = changesOf(g);
     const checks = new Map((progresses[v]?.checks ?? []).map((c) => [c.item, c]));
+    const addresses = addressesOf(g, customerId, Boolean(customer?.uat_url));
     return (
       <div key={v}>
         {toTry.length > 1 && (
@@ -173,7 +201,9 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
           {!g && !error && <p className="mt-3 text-xs text-[var(--color-text-muted)]">Načítavam návod…</p>}
 
           {g?.source === "guide" && g.nothing_to_test && changes.length === 0 && (
-            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">Nie je čo skúšať: {g.nothing_to_test}</p>
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+              Nie je čo skúšať: <Linked text={g.nothing_to_test} addresses={addresses} />
+            </p>
           )}
           {g?.source === "release_notes" && (
             <p className="mt-3 text-xs text-[var(--color-text-muted)]">
@@ -190,21 +220,31 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
                     <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{change.title}</h3>
                     {(change.screen || change.data) && (
                       <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                        {change.screen && <>Obrazovka: {change.screen}</>}
+                        {change.screen && (
+                          <>
+                            Obrazovka: <Linked text={change.screen} addresses={addresses} />
+                          </>
+                        )}
                         {change.screen && change.data && " · "}
-                        {change.data && <>Testovacie údaje: {change.data}</>}
+                        {change.data && (
+                          <>
+                            Testovacie údaje: <Linked text={change.data} addresses={addresses} />
+                          </>
+                        )}
                       </p>
                     )}
                     {change.steps.length > 0 && (
                       <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-sm text-[var(--color-text-primary)]">
                         {change.steps.map((step, j) => (
-                          <li key={j}>{step}</li>
+                          <li key={j}>
+                            <Linked text={step} addresses={addresses} />
+                          </li>
                         ))}
                       </ol>
                     )}
                     {change.expected.map((e, j) => (
                       <p key={j} className="mt-2 text-sm text-[var(--color-state-success-fg)]">
-                        Očakávané: {e}
+                        Očakávané: <Linked text={e} addresses={addresses} />
                       </p>
                     ))}
 

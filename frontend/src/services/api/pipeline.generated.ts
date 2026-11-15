@@ -2771,7 +2771,8 @@ export interface paths {
         /**
          * Get Uat Guide
          * @description DEV-90 — what to try in UAT for ``version``: the agent's test guide of the commit that was verified, or the
-         *     changes of the release note for a version from before the guide; and how each customer's admin signs in.
+         *     changes of the release note for a version from before the guide; how each customer's admin signs in, and (DEV-340)
+         *     each customer's address for the placeholders the guide writes.
          */
         get: operations["get_uat_guide_api_v1_projects__slug__uat_guide_get"];
         put?: never;
@@ -4130,7 +4131,7 @@ export interface components {
             current_password?: string | null;
             /**
              * New Password
-             * @description New plaintext password (min 5, max 128 characters). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
+             * @description New plaintext password (min 5, max 128 characters). Min 5 — decided 2026-05-13, NEX Studio is internal.
              */
             new_password: string;
         };
@@ -5390,7 +5391,7 @@ export interface components {
             auth_mode: string;
             /**
              * Can Accept
-             * @description True iff THIS user may record a UAT acceptance (``require_ri_role``). Acceptance is what OPENS PROD for a (version, customer) — the ri-only Director gate of v4.0.35/D3, deliberately narrower than the owner-or-ri UAT deploy. Surfaced so the button can be disabled WITH a reason instead of looking live and then failing with 403.
+             * @description True iff THIS user may record a UAT acceptance (``require_ri_role``). Acceptance is what OPENS PROD for a (version, customer) — the ri-only gate of v4.0.35/D3, deliberately narrower than the owner-or-ri UAT deploy. Surfaced so the button can be disabled WITH a reason instead of looking live and then failing with 403.
              * @default false
              */
             can_accept: boolean;
@@ -5402,7 +5403,7 @@ export interface components {
             can_deploy: boolean;
             /**
              * Can Deploy Prod
-             * @description True iff THIS user may deploy to PROD (the deploy route's ``environment == 'prod'`` role gate). PROD deploy is ri-only by the same v4.0.35/D3 Director gate as acceptance, while UAT deploy is open to the project owner — so the PROD 'Nasadiť' cannot be hidden by page-level role and needs its own flag, or it looks live to a Junior/Medior and then fails with 403.
+             * @description True iff THIS user may deploy to PROD (the deploy route's ``environment == 'prod'`` role gate). PROD deploy is ri-only by the same v4.0.35/D3 gate as acceptance, while UAT deploy is open to the project owner — so the PROD 'Nasadiť' cannot be hidden by page-level role and needs its own flag, or it looks live to a Junior/Medior and then fails with 403.
              * @default false
              */
             can_deploy_prod: boolean;
@@ -5734,7 +5735,7 @@ export interface components {
         FastFixStartRequest: {
             /**
              * Directive
-             * @description The Director's fast-fix directive (the task brief).
+             * @description The Manažér's fast-fix directive (the task brief).
              */
             directive: string;
             /** Plane Issue Id */
@@ -8296,6 +8297,21 @@ export interface components {
             version_number: string;
         };
         /**
+         * UatGuideAddressRead
+         * @description DEV-340 — what one placeholder of the guide (``<adresa-inštalácie>``) stands for at one customer's UAT.
+         */
+        UatGuideAddressRead: {
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Placeholder */
+            placeholder: string;
+            /** Url */
+            url: string;
+        };
+        /**
          * UatGuideLoginRead
          * @description How a customer's first admin signs in to UAT — a login, never a password.
          */
@@ -8313,6 +8329,8 @@ export interface components {
          * @description DEV-90 — what to try in UAT for one version of the project.
          */
         UatGuideRead: {
+            /** Addresses */
+            addresses?: components["schemas"]["UatGuideAddressRead"][];
             /** Changes */
             changes?: string[];
             /** Logins */
@@ -8478,12 +8496,12 @@ export interface components {
             last_name?: string | null;
             /**
              * Password
-             * @description Plaintext password (hashed with bcrypt before storage). Min 5 — Director directive 2026-05-13, NEX Studio is internal.
+             * @description Plaintext password (hashed with bcrypt before storage). Min 5 — decided 2026-05-13, NEX Studio is internal.
              */
             password: string;
             /**
              * Role
-             * @description Access level: ri (Director/Senior), ha (Medior), shu (Junior).
+             * @description Access level: ri (Senior), ha (Medior), shu (Junior).
              * @enum {string}
              */
             role: "ri" | "ha" | "shu";

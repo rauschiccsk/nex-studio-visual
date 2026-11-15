@@ -91,7 +91,7 @@ tlačidlo nestačí, ponúkni jedno z troch, podľa situácie:
 
 - **Požiadavka do Zásobníka** — keď je verzia hotová alebo zmena do bežiacej stavby nepatrí. Celú
   požiadavku daj medzi značky; kokpit ukáže tlačidlo „Uložiť do Zásobníka" a požiadavka sa zapíše do Zásobníka
-  projektu. Verzia z nej nevzniká: **do ktorej verzie požiadavka pôjde, rozhoduje Director** — nenavrhuj číslo
+  projektu. Verzia z nej nevzniká: **do ktorej verzie požiadavka pôjde, rozhoduje Manažér** — nenavrhuj číslo
   verzie a nepíš, že vznikne verzia. Prvý riadok je krátky názov požiadavky.
   Pred požiadavkou do Zásobníka zavolaj `zasobnik`. Keď tam podobná požiadavka už je,
   menuj ju (REQ-číslo) a novú nenavrhuj; ak jej niečo chýba, povedz, čo by sa do nej malo doplniť —
@@ -123,7 +123,7 @@ tlačidlo nestačí, ponúkni jedno z troch, podľa situácie:
   - **Práca na projekte** — konkrétna oprava či zmena aplikácie projektu, ktorú treba urobiť a sledovať.
     Navrhni druh práce — `oprava` (chyba v dodanom kóde), `dar` (pozornosť ICC zadarmo), `poziadavka` (zmena,
     ktorú zákazník platí) — a cestu: `verzia` (pôjde s ďalšou verziou) alebo `rychla-oprava` (malá a jasná
-    oprava hneď). Je to len návrh: tiket verziu nezakladá ani rýchlu opravu nespúšťa, rozhoduje Director.
+    oprava hneď). Je to len návrh: tiket verziu nezakladá ani rýchlu opravu nespúšťa, rozhoduje Manažér.
 
     ```
     <tiket-projektu druh="oprava" cesta="rychla-oprava">
@@ -133,7 +133,7 @@ tlačidlo nestačí, ponúkni jedno z troch, podľa situácie:
     ```
 
   - **Len do Zásobníka** (blok vyššie) ide požiadavka na niektorú budúcu verziu, ktorú netreba sledovať ako
-    tiket — o jej zaradení rozhodne Director pri plánovaní verzie.
+    tiket — o jej zaradení rozhodne Manažér pri plánovaní verzie.
 
 Najviac jeden blok každého druhu a najviac jeden tiket v odpovedi. Bez značiek kokpit tlačidlo neukáže.
 

@@ -49,6 +49,7 @@ from backend.schemas.deploy import (
     DeployResult,
     UatCheckRead,
     UatCheckWrite,
+    UatGuideAddressRead,
     UatGuideLoginRead,
     UatGuideRead,
     UatGuideSectionRead,
@@ -173,7 +174,8 @@ def get_uat_guide(
     _current_user: User = Depends(get_current_user),
 ) -> UatGuideRead:
     """DEV-90 — what to try in UAT for ``version``: the agent's test guide of the commit that was verified, or the
-    changes of the release note for a version from before the guide; and how each customer's admin signs in."""
+    changes of the release note for a version from before the guide; how each customer's admin signs in, and (DEV-340)
+    each customer's address for the placeholders the guide writes."""
     authz.assert_project_slug_access(db, _current_user, slug)
     project = _resolve_project(db, slug)
     row = db.execute(
@@ -187,7 +189,9 @@ def get_uat_guide(
     contract = env_contract.for_project(repo)
     people = contract.of_kind(env_contract.CUSTOMER)
     legacy = env_contract.declares_legacy_admin(repo)
-    customers = db.execute(select(Customer).where(Customer.project_id == project.id).order_by(Customer.name)).scalars()
+    customers = (
+        db.execute(select(Customer).where(Customer.project_id == project.id).order_by(Customer.name)).scalars().all()
+    )
     return UatGuideRead(
         version_number=row.version_number,
         source=found.source,
@@ -200,6 +204,11 @@ def get_uat_guide(
         logins=[
             UatGuideLoginRead(customer_id=c.id, login=uat_guide.admin_login(people, c.settings or {}, legacy))
             for c in customers
+        ],
+        addresses=[
+            UatGuideAddressRead(customer_id=c.id, placeholder=placeholder, url=url)
+            for c in customers
+            for placeholder, url in uat_guide.addresses(deploy_service.uat_addresses(c, project)).items()
         ],
     )
 

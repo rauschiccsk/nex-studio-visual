@@ -1,6 +1,6 @@
 # v4.32.0 — verziu už možno premenovať
 
-Director si po dokončení stavby chcel opraviť názov verzie a napísal: *„Nemám možnosť
+Manažér si po dokončení stavby chcel opraviť názov verzie a napísal: *„Nemám možnosť
 (aspoň som nenašiel) ako premenovať verziu."* Nenašiel preto, že tam nebola.
 
 ## Nastavenia verzie

@@ -420,7 +420,7 @@ class FastFixStartRequest(BaseModel):
     """
 
     project_id: UUID
-    directive: str = Field(..., min_length=1, description="The Director's fast-fix directive (the task brief).")
+    directive: str = Field(..., min_length=1, description="The Manažér's fast-fix directive (the task brief).")
     #: DEV-50: a fix of an error in delivered code (``fix`` — never billed) or a change (``change`` — billed).
     #: Required (DEV-56): without it the fast fix does not start — 400 with the sentence why, never a guess.
     work_kind: Optional[WorkKind] = None

@@ -237,7 +237,7 @@ def test_a_click_founds_the_project_ticket_as_a_proposal_and_starts_nothing(setu
     assert _modules_of(plane, issue["id"]) == [project.name]
     assert _label_names(plane, issue) == {"Typ: Bug", "Zodpovedný: Zoltán", "Druh práce: Oprava (BUG)"}
     assert issue["description_html"].startswith(
-        "<p>Robí: Zoltán</p><p>Číslo je len vo VS.</p><p>Návrh: do rýchlej opravy. O verzii rozhoduje Director — "
+        "<p>Robí: Zoltán</p><p>Číslo je len vo VS.</p><p>Návrh: do rýchlej opravy. O verzii rozhoduje Manažér — "
         "tiket ju nezakladá ani nespúšťa.</p>"
     )
     assert db_session.execute(select(func.count()).select_from(Version)).scalar_one() == versions

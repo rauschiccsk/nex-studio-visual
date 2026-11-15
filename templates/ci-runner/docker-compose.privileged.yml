@@ -5,7 +5,7 @@
 # its own, `andros-ubuntu-<slug>-privileged`, never the project's, so only a job that names that label comes here.
 # The cockpit starts it for a project one of whose workflows names the label (ci_runner.needs_privileged). On ANDROS
 # 25.10.2026 that is one job: NEX Inbox's smb-blackhole — a real CIFS share and an iptables DROP in a privileged
-# container. Director 25.10.2026: „Áno, súhlasím, začni DEV-167“.
+# container. Approved 25.10.2026: „Áno, súhlasím, začni DEV-167“.
 services:
   docker:
     image: docker:29.1.3-dind

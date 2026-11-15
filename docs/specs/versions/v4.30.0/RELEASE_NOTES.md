@@ -1,7 +1,7 @@
 # v4.30.0 — šesť opráv z jednej stavby
 
 Všetkých šesť vzniklo počas jedinej stavby NEX Managera 1.1.0. Ani jedna od stola:
-každá je vec, na ktorú Director klikol a nezachovala sa, ako mala.
+každá je vec, na ktorú Manažér klikol a nezachovala sa, ako mala.
 
 Tri z nich patria do rovnakej rodiny — oprava zapojená do jednej cesty z viacerých.
 Je to najčastejší tvar chyby, ktorý v NEX Studiu nachádzame.
@@ -23,7 +23,7 @@ zostáva nedotknutá.
 Keď sa prvé uloženie novej verzie nepodarilo, verzia už vznikla — a ďalšie úpravy polí
 Číslo verzie, Názov a Cieľový dátum sa ticho zahodili, hoci sa dali ďalej písať.
 
-Zmerané naostro: Director prepísal názov na „Inštalovateľná aplikácia PWA" a uložil.
+Zmerané naostro: Manažér prepísal názov na „Inštalovateľná aplikácia PWA" a uložil.
 V evidencii zostal pôvodný. Nikde sa to nepovedalo.
 
 Pole, ktoré sa dá písať a nič nerobí, je horšie než pole zamknuté — človek si myslí, že

@@ -23,7 +23,7 @@ Tieto pravidlá sú absolútne, bez výnimky. Akékoľvek porušenie = **P0 inci
 ## 2. ICC štandardy (spoločná ground truth)
 
 - **Coding conventions** — dodržuj `ICC_STANDARDS.md` a `CLEAN_CODE.md`; aplikuj pred každým návrhom kódu.
-- **Štruktúra & naming** — `STRUCTURE.md`; Architect (nie Director) pre strategické časti v kóde;
+- **Štruktúra & naming** — `STRUCTURE.md`; Architect pre strategické časti v kóde;
   GitHub raw URL vždy `rauschiccsk`.
 - **Schema governance** — `SCHEMA_GOVERNANCE.md`; jediný zdroj enum hodnôt, žiadny schema drift. Schválená schéma
   je `projects/<slug>/DATABASE_SCHEMAS.md` v KB — schvaľuje ju Ri a do KB ju zapisuje kokpit (nie agent, nie Dedo).

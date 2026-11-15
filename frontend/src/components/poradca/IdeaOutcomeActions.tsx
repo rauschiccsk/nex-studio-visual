@@ -1,6 +1,6 @@
 // The two ways a new idea ends (DEV-318, docs/specs/ideas.md §3.6) — under the latest brief Poradca wrote. A click is
 // always the person's: „Založiť projekt“ opens the form Nový projekt prefilled from the brief; „Pridať do projektu“
-// saves the brief as a requirement of that project's Zásobník (which version takes it, the Director decides — DEV-29).
+// saves the brief as a requirement of that project's Zásobník (which version takes it, the Manažér decides — DEV-29).
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -72,7 +72,7 @@ export default function IdeaOutcomeActions({
         <>
           <p className="text-[var(--color-text-secondary)]">
             Zadanie „{addition.title}“ patrí do existujúceho projektu <strong>{addition.project_slug}</strong>. Uloží
-            sa do jeho Zásobníka ako požiadavka — do ktorej verzie pôjde, rozhodne Director.
+            sa do jeho Zásobníka ako požiadavka — do ktorej verzie pôjde, rozhodne Manažér.
           </p>
           <button
             type="button"
