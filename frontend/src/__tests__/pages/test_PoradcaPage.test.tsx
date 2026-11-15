@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -379,7 +379,8 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     attachment_max_bytes: 5 * 1024 * 1024,
     attachments_max_count: 5,
     attachments_max_total_bytes: 15 * 1024 * 1024,
-    attachment_types: ["image/gif", "image/jpeg", "image/png", "image/webp"],
+    attachment_types: ["application/pdf", "image/gif", "image/jpeg", "image/png", "image/webp", "text/markdown", "text/plain"],
+    attachment_extensions: [".md", ".markdown", ".txt", ".pdf"],
   };
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   const PNG_BASE64 = btoa(String.fromCharCode(...PNG));
@@ -403,7 +404,7 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     api.askPoradcaApi.mockResolvedValue(conversation("v13", []));
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     paste(textarea, [new File([PNG], "image.png", { type: "image/png" })]);
     const preview = await screen.findByRole("img", { name: /^Snímka 1 .*\.png$/ });
@@ -417,24 +418,24 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
         { name: preview.getAttribute("alt"), data: PNG_BASE64 },
       ]),
     );
-    await waitFor(() => expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("pending-attachments")).not.toBeInTheDocument());
   });
 
   it("text vložený zo schránky ostane textom a nič sa nehlási", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     paste(textarea, [], ["text/plain"]);
 
-    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pending-attachments")).not.toBeInTheDocument();
     expect(screen.queryByText(/schránka je prázdna/)).not.toBeInTheDocument();
   });
 
   it("⚠️ Ctrl+V so snímkou funguje kdekoľvek na stránke, nielen v poli — a len raz", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     paste(document.body, [new File([PNG], "mimo-pola.png", { type: "image/png" })]);
     paste(textarea, [new File([PNG], "v-poli.png", { type: "image/png" })]);
@@ -451,7 +452,7 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     const added = vi.spyOn(document, "addEventListener");
     let listening: boolean | null = null;
     const seen = new MutationObserver(() => {
-      if (listening === null && document.querySelector('[aria-label="Priložiť snímku obrazovky"]')) {
+      if (listening === null && document.querySelector('[aria-label="Priložiť snímku alebo dokument"]')) {
         listening = added.mock.calls.some(([type]) => type === "paste");
       }
     });
@@ -469,7 +470,7 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
 
   it("⚠️ po odchode zo stránky Poradcu vloženie obrázka inde v kokpite nezachytáva", async () => {
     const { unmount } = renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     unmount();
     const notPrevented = fireEvent.paste(document.body, {
@@ -482,14 +483,14 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
   it("⚠️ Ctrl+V s prázdnou schránkou povie prečo, namiesto ticha", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     paste(textarea, [], []);
 
     expect(
       await screen.findByText(
         "Ctrl+V nedonieslo obrázok ani text — schránka je prázdna. Snímku urob na počítači, kde beží kokpit (vo " +
-          "vzdialenej ploche priamo v nej, napríklad klávesom PrtScn), alebo ju vyber tlačidlom s obrázkom.",
+          "vzdialenej ploche priamo v nej, napríklad klávesom PrtScn), alebo ju vyber tlačidlom s kancelárskou sponkou.",
       ),
     ).toBeInTheDocument();
   });
@@ -501,28 +502,30 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     );
   });
 
-  it("⚠️ iný súbor než obrázok ani priveľký obrázok neprijme a povie prečo", async () => {
+  it("⚠️ súbor, ktorý nie je obrázok ani dokument, ani priveľký súbor neprijme a povie prečo", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
-    paste(textarea, [new File(["%PDF"], "faktura.pdf", { type: "image/svg+xml" })]);
-    expect(await screen.findByText("„faktura.pdf“ nie je PNG, JPEG, WebP ani GIF.")).toBeInTheDocument();
+    paste(textarea, [new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" })]);
+    expect(
+      await screen.findByText("„logo.svg“ nie je obrázok (PNG, JPEG, WebP, GIF) ani dokument (Markdown, text v UTF-8, PDF)."),
+    ).toBeInTheDocument();
 
     paste(textarea, [new File([new Uint8Array(6 * 1024 * 1024)], "velka.png", { type: "image/png" })]);
-    expect(await screen.findByText("Obrázok má 6 MB — jeden môže mať najviac 5 MB.")).toBeInTheDocument();
-    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+    expect(await screen.findByText("„velka.png“ má 6 MB — jeden súbor môže mať najviac 5 MB.")).toBeInTheDocument();
+    expect(screen.queryByTestId("pending-attachments")).not.toBeInTheDocument();
   });
 
   it("snímku prijme aj pretiahnutím a cez tlačidlo Priložiť", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
 
     fireEvent.drop(textarea.closest("form")!, {
       dataTransfer: { files: [new File([PNG], "pretiahnuta.png", { type: "image/png" })], items: [] },
     });
-    fireEvent.change(screen.getByTestId("poradca-image-picker"), {
+    fireEvent.change(screen.getByTestId("poradca-attachment-picker"), {
       target: { files: [new File([PNG], "vybrana.png", { type: "image/png" })] },
     });
 
@@ -533,12 +536,12 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
   it("priloženú snímku sa dá pred odoslaním odobrať", async () => {
     renderPage();
     const textarea = await box();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku obrazovky" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
     paste(textarea, [new File([PNG], "obrazovka.png", { type: "image/png" })]);
 
     fireEvent.click(await screen.findByRole("button", { name: "Odobrať obrazovka.png" }));
 
-    expect(screen.queryByTestId("pending-images")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pending-attachments")).not.toBeInTheDocument();
   });
 
   it("otázka so snímkou ukáže náhľad a po kliknutí celý obrázok", async () => {
@@ -563,5 +566,82 @@ describe("PoradcaPage — snímka obrazovky v otázke (DEV-52)", () => {
     expect(screen.getByRole("dialog", { name: "Snímka 1.png" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Snímka 1.png" })).not.toBeInTheDocument());
+  });
+
+  // ── DEV-389 — a document goes with the question, whole ─────────────────────────────────────────────────────────
+
+  it("⚠️ dokument Markdown bez typu od prehliadača priloží sponkou, ukáže menom a pošle celý", async () => {
+    api.askPoradcaApi.mockResolvedValue(conversation("v13", []));
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
+    const design = "# Orthodox Hermenia\n\nIkonopisec hľadá predlohu.";
+
+    fireEvent.change(screen.getByTestId("poradca-attachment-picker"), {
+      target: { files: [new File([design], "customer-requirements.md", { type: "" })] },
+    });
+    const pending = await screen.findByTestId("pending-attachments");
+    expect(pending.textContent).toBe("customer-requirements.md");
+    expect(within(pending).queryByRole("img")).toBeNull();
+    fireEvent.change(textarea, { target: { value: "Návrh je v prílohe." } });
+    fireEvent.click(screen.getByRole("button", { name: /Opýtať sa/ }));
+
+    const sent = btoa(String.fromCharCode(...new TextEncoder().encode(design)));
+    await waitFor(() =>
+      expect(api.askPoradcaApi).toHaveBeenCalledWith("c1", "Návrh je v prílohe.", [
+        { name: "customer-requirements.md", data: sent },
+      ]),
+    );
+  });
+
+  it("⚠️ pretiahnutý dokument Word neotvorí prehliadač, ale odmietne a povie, čo berie", async () => {
+    renderPage();
+    const textarea = await box();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priložiť snímku alebo dokument" })).toBeInTheDocument());
+    const word = new File(["PK"], "navrh.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const allowed = !fireEvent.dragOver(textarea.closest("form")!, {
+      dataTransfer: { files: [], items: [{ kind: "file", type: "" }] },
+    });
+    const notOpened = !fireEvent.drop(textarea.closest("form")!, { dataTransfer: { files: [word], items: [] } });
+
+    expect([allowed, notOpened]).toEqual([true, true]);
+    expect(
+      await screen.findByText("„navrh.docx“ nie je obrázok (PNG, JPEG, WebP, GIF) ani dokument (Markdown, text v UTF-8, PDF)."),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("pending-attachments")).not.toBeInTheDocument();
+  });
+
+  it("otázka s dokumentom ukáže jeho meno a po kliknutí ho otvorí v novej karte", async () => {
+    api.getPoradcaConversationApi.mockResolvedValue(
+      conversation("v13", [
+        {
+          ...ANSWER_WITH_INSTRUCTION,
+          id: "m1",
+          author: "human",
+          content: "Návrh je v prílohe.",
+          instruction: null,
+          attachments: [{ id: "d1", name: "customer-requirements.md", mime: "text/markdown", size_bytes: 35254 }],
+        },
+      ]),
+    );
+    api.getPoradcaAttachmentApi.mockResolvedValue(new Blob(["# Návrh"], { type: "text/plain" }));
+    const tab = { location: { href: "" }, close: vi.fn() };
+    const opened = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    try {
+      renderPage();
+      const document = await screen.findByRole("button", { name: "customer-requirements.md" });
+      expect(api.getPoradcaAttachmentApi).not.toHaveBeenCalled(); // a document is fetched only when opened
+
+      fireEvent.click(document);
+
+      await waitFor(() => expect(tab.location.href).toBe("blob:nahled"));
+      expect(api.getPoradcaAttachmentApi).toHaveBeenCalledWith("c1", "d1");
+      expect(opened).toHaveBeenCalledWith("", "_blank");
+    } finally {
+      opened.mockRestore();
+    }
   });
 });

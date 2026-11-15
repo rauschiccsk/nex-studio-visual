@@ -72,6 +72,8 @@ _CHARTER = Path(__file__).resolve().parents[3] / "templates" / "poradca-charter.
 #: DEV-318 — Poradca's rules for a new idea (Nápady): how a new project is shaped and its brief written.
 _IDEA_CHARTER = _CHARTER.parent / "poradca-ideas-charter.md"
 _STREAM_LINE_LIMIT = 16 * 1024 * 1024
+#: DEV-389 — how an attached document's file ends in the container (a screenshot's ends otherwise).
+_DOCUMENT_SUFFIXES = tuple(f".{extension}" for extension in attachments.DOCUMENT_TYPES.values())
 
 
 class PoradcaBusy(Exception):
@@ -207,12 +209,13 @@ def ask(
     conversation: PoradcaConversation,
     question: str,
     user: User,
-    images: Sequence[attachments.Incoming] = (),
+    files: Sequence[attachments.Incoming] = (),
 ) -> tuple[PoradcaMessage, PoradcaMessage]:
     """Saves the question and starts the answer in the background. The caller has verified access to the conversation.
 
-    DEV-52: ``images`` sú snímky, ktoré Manažér priložil (už prijaté :func:`attachments.accept`). Uložia sa k
-    rozhovoru pred zápisom otázky; keď sa otázka nezapíše, zmažú sa — nikdy neostane snímka bez otázky.
+    DEV-52 / DEV-389: ``files`` are the screenshots and documents the Manažér attached (already accepted by
+    :func:`attachments.accept`). They are stored beside the conversation before the question is recorded and removed
+    when it is not — an attachment never lies there without its question.
 
     Raises:
         PoradcaBusy: an answer is already running in this conversation.
@@ -229,7 +232,7 @@ def ask(
     first = (
         db.execute(select(PoradcaMessage.id).where(PoradcaMessage.conversation_id == conversation.id)).first() is None
     )
-    stored = attachments.store(conversation.id, list(images))
+    stored = attachments.store(conversation.id, list(files))
     human = PoradcaMessage(
         conversation_id=conversation.id,
         version_id=conversation.version_id,
@@ -400,7 +403,8 @@ def _builtin_target(name: str, args: dict, project_dir: str) -> str:
     if name == "Read":
         path = str(args.get("file_path") or "")
         if path.startswith(sandbox.CONTAINER_ATTACHMENTS_DIR + "/"):
-            return "priložená snímka obrazovky"  # DEV-52 — the Manažér's own image, not a file of the project
+            # DEV-52 / DEV-389 — the Manažér's own image or document, not a file of the project
+            return "priložený dokument" if path.endswith(_DOCUMENT_SUFFIXES) else "priložená snímka obrazovky"
         return rel(path)
     if name == "Grep":
         where = rel(args.get("path")) if args.get("path") else "celý projekt"

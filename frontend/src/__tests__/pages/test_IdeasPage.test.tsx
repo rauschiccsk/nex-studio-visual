@@ -276,7 +276,7 @@ describe("a new idea starts with the Projektant (DEV-343)", () => {
     renderAt("/napady");
 
     expect(
-      await screen.findByText(/Projektant pozrie, čo už máme/),
+      await screen.findByText(/prilož\s+sponkou vedľa poľa.*Projektant si ho\s+prečíta celý, pozrie, čo už máme/s),
     ).toBeInTheDocument();
     expect(screen.getByText(/Projektant sám nič nezaloží/)).toBeInTheDocument();
     expect((document.body.textContent ?? "").match(/Poradc/g)).toBeNull();

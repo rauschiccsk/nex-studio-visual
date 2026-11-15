@@ -32,15 +32,17 @@ class PoradcaStep(BaseModel):
 
 
 class PoradcaAttachmentUpload(BaseModel):
-    """DEV-52 — snímka obrazovky priložená k otázke: meno súboru a obsah v base64 (tak ako ich berie aj API
-    Claude). Typ sa neberie z mena ani z prehliadača — backend ho rozpozná z obsahu."""
+    """DEV-52 — a screenshot (DEV-389: or a document) attached to a question: the file's name and its content in base64
+    (as the Claude API takes them too). The type is never taken from the name or the browser — the backend reads it
+    from the content."""
 
     name: str = Field(default="", max_length=500)
     data: str = Field(..., min_length=1)
 
 
 class PoradcaAttachmentRead(BaseModel):
-    """Priložená snímka — čo o nej vie obrazovka (obsah sa sťahuje zvlášť, s overením prístupu)."""
+    """An attached screenshot or document — what the screen knows of it (the content is fetched apart, with access
+    checked)."""
 
     id: str
     name: str
@@ -91,7 +93,7 @@ class PoradcaMessageRead(BaseModel):
     author: Literal["human", "poradca"]
     content: str
     steps: list[PoradcaStep] = Field(default_factory=list)
-    #: DEV-52 — snímky, ktoré Manažér priložil k otázke.
+    #: DEV-52 / DEV-389 — the screenshots and documents the Manažér attached to the question.
     attachments: list[PoradcaAttachmentRead] = Field(default_factory=list)
     status: Literal["running", "done", "failed", "stopped"]
     #: Full model name as reported by Claude Code; ``None`` for a question and for an unfinished answer.
@@ -171,7 +173,7 @@ class PoradcaConversationDetail(PoradcaConversationRead):
 class PoradcaConversationCreate(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
     version_id: Optional[UUID] = None
-    #: DEV-52 — snímky obrazovky k prvej otázke (počet a veľkosť stráži ``poradca.attachments.accept``).
+    #: DEV-52 / DEV-389 — screenshots and documents of the first question (``poradca.attachments.accept`` checks them).
     attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
     #: DEV-138 — founded by the „Overiť s Poradcom“ button: the conversation is the one for the cards of this version
     #: in its current phase, titled „<verzia> — rozhodnutia v <fáze>“ (``backend.services.poradca.review``).
@@ -191,7 +193,7 @@ class PoradcaReviewConversation(BaseModel):
 
 class PoradcaAsk(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
-    #: DEV-52 — snímky obrazovky k otázke (počet a veľkosť stráži ``poradca.attachments.accept``).
+    #: DEV-52 / DEV-389 — screenshots and documents of the question (``poradca.attachments.accept`` checks them).
     attachments: list[PoradcaAttachmentUpload] = Field(default_factory=list)
 
     @field_validator("question")
@@ -250,11 +252,13 @@ class PoradcaStatus(BaseModel):
     problems: list[str] = Field(default_factory=list)
     running: int
     max_concurrent: int
-    #: DEV-52 — stropy priložených snímok, aby obrazovka odmietla priveľký obrázok hneď pri vložení.
+    #: DEV-52 — the limits of attachments, so the screen refuses one too large as soon as it is added.
     attachment_max_bytes: int = 0
     attachments_max_count: int = 0
     attachments_max_total_bytes: int = 0
     attachment_types: list[str] = Field(default_factory=list)
+    #: DEV-389 — the names a document is picked by (a browser often gives a text file no type); the content decides.
+    attachment_extensions: list[str] = Field(default_factory=list)
     #: DEV-103 — how long a question may be, so a question composed from a decision card fits before it is sent.
     question_max_chars: int = MAX_QUESTION_CHARS
 

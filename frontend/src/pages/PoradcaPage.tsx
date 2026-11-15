@@ -18,7 +18,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
 import PoradcaComposer, { type IncomingQuestion } from "@/components/poradca/PoradcaComposer";
 import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
-import QuestionImages from "@/components/poradca/QuestionImages";
+import QuestionAttachments from "@/components/poradca/QuestionAttachments";
 import { draftKey } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
@@ -39,7 +39,7 @@ import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { versionOptionLabel } from "@/lib/poradcaAnswer";
 import { REVIEW_PARAM, reviewQuestion, takeReview } from "@/lib/poradcaReview";
-import { toUpload } from "@/lib/poradcaImages";
+import { toUpload } from "@/lib/poradcaAttachments";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
 
 const WHOLE_PROJECT = "";
@@ -457,7 +457,7 @@ export default function PoradcaPage() {
               >
                 {m.content}
                 {conversationId && (m.attachments ?? []).length > 0 && (
-                  <QuestionImages conversationId={conversationId} attachments={m.attachments ?? []} />
+                  <QuestionAttachments conversationId={conversationId} attachments={m.attachments ?? []} />
                 )}
               </div>
             ) : (
@@ -477,9 +477,9 @@ export default function PoradcaPage() {
           }
           limits={status}
           incoming={incoming}
-          onAsk={async (question, images) => {
+          onAsk={async (question, files) => {
             thread.follow(); // his own question: show what comes back, wherever he had scrolled to
-            const uploads = await Promise.all(images.map(toUpload));
+            const uploads = await Promise.all(files.map(toUpload));
             if (conversationId) {
               setDetail(await askPoradcaApi(conversationId, question, uploads));
             } else {

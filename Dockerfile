@@ -72,7 +72,7 @@ WORKDIR /app
 # ships neither, so project creation failed at `git init` (exit 127, v4.0.36) then at the push. Install
 # both. gh authenticates non-interactively from GH_TOKEN at runtime.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && apt-get install -y --no-install-recommends git curl ca-certificates poppler-utils \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -107,6 +107,8 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
         openssh-client \
     && rm -rf /var/lib/apt/lists/*
+# DEV-389 — `poppler-utils` (pdftoppm) is for Poradca and Projektant: their container runs on this image, and Claude
+# Code renders the pages of a longer PDF the Manažér attached with pdftoppm — without it such a PDF cannot be read.
 # ICCINT-151 — `openssh-client` nie je pre prihlasovanie, ale pre Docker: nasadenie na druhý
 # stroj beží cez `DOCKER_HOST=ssh://…`, kde si Docker otvára spojenie sám. Kľúč, ktorý na to
 # dostane, je na cieli obmedzený na `docker system dial-stdio` — shell ním získať nejde.
@@ -120,9 +122,10 @@ RUN docker_bin="$(command -v docker)" && test -x "$docker_bin" \
     && gh_bin="$(command -v gh)" && test -x "$gh_bin" \
     && git_bin="$(command -v git)" && test -x "$git_bin" \
     && ssh_bin="$(command -v ssh)" && test -x "$ssh_bin" \
+    && pdftoppm_bin="$(command -v pdftoppm)" && test -x "$pdftoppm_bin" \
     && docker compose version \
     && docker buildx version \
-    && echo "Docker CLI at $docker_bin (+ compose and buildx plugins), GitHub CLI at $gh_bin, git at $git_bin, ssh at $ssh_bin"
+    && echo "Docker CLI at $docker_bin (+ compose and buildx plugins), GitHub CLI at $gh_bin, git at $git_bin, ssh at $ssh_bin, pdftoppm at $pdftoppm_bin"
 
 # Node.js — the AI Agent (claude) shells out to node/npm when it builds a generated app's frontend
 # (npm install / build), so the backend that hosts the agent needs a node runtime. The `claude` binary

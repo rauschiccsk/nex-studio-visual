@@ -239,8 +239,9 @@ def _detail(db: Session, conversation: PoradcaConversation) -> PoradcaConversati
     )
 
 
-def _accept_images(uploads: list) -> list[attachments.Incoming]:
-    """DEV-52 — the pasted screenshots, checked before anything is created: refused → 422 with the sentence why."""
+def _accept_attachments(uploads: list) -> list[attachments.Incoming]:
+    """DEV-52 / DEV-389 — the screenshots and documents of a question, checked before anything is created: refused →
+    422 with the sentence why."""
     try:
         return attachments.accept((u.name, u.data) for u in uploads)
     except attachments.AttachmentRefused as exc:
@@ -252,7 +253,7 @@ def _ask(
     conversation: PoradcaConversation,
     question: str,
     user: User,
-    images: Optional[list[attachments.Incoming]] = None,
+    files: Optional[list[attachments.Incoming]] = None,
 ) -> None:
     ready = readiness.status(db)
     if not ready.ready:
@@ -261,7 +262,7 @@ def _ask(
             detail=f"{runner.agent_of(conversation).name} teraz nevie bežať: " + "; ".join(ready.problems),
         )
     try:
-        runner.ask(db, conversation, question, user, images or [])
+        runner.ask(db, conversation, question, user, files or [])
     except runner.PoradcaBusy as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except runner.ConversationGone as exc:
@@ -319,12 +320,12 @@ async def create_idea(
 ) -> IdeaDetail:
     """A new idea: its conversation with Poradca starts with the rough idea. Whoever may found a project may start
     one (the same role as Nový projekt)."""
-    images = _accept_images(payload.attachments)
+    files = _accept_attachments(payload.attachments)
     idea, conversation = ideas.create(
         db, author=current_user, title=_title((payload.title or "").strip() or payload.question)
     )
     db.commit()
-    _ask(db, conversation, payload.question, current_user, images)
+    _ask(db, conversation, payload.question, current_user, files)
     return IdeaDetail(**_idea_read(db, idea, conversation).model_dump(), conversation=_detail(db, conversation))
 
 
@@ -505,7 +506,7 @@ async def create_conversation(
 ) -> PoradcaConversationDetail:
     project = authz.assert_project_slug_access(db, current_user, slug)
     _check_version(db, project, payload.version_id)
-    images = _accept_images(payload.attachments)
+    files = _accept_attachments(payload.attachments)
     # DEV-138: a card from the „Overiť s Poradcom“ button founds the conversation for the cards of this version in
     # its current phase — the next card finds it through ``review-conversation``. A version never built has no phase:
     # its card founds an ordinary conversation.
@@ -518,7 +519,7 @@ async def create_conversation(
     )
     conversation.review_stage = stage
     db.commit()
-    _ask(db, conversation, payload.question, current_user, images)
+    _ask(db, conversation, payload.question, current_user, files)
     return _detail(db, conversation)
 
 
@@ -603,7 +604,7 @@ async def ask(
     current_user: User = Depends(get_current_user),
 ) -> PoradcaConversationDetail:
     conversation, _project = _conversation_for(db, current_user, conversation_id)
-    _ask(db, conversation, payload.question, current_user, _accept_images(payload.attachments))
+    _ask(db, conversation, payload.question, current_user, _accept_attachments(payload.attachments))
     return _detail(db, conversation)
 
 
@@ -614,10 +615,11 @@ def get_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> FileResponse:
-    """DEV-52 — one screenshot of a question, for whoever may read the conversation (anyone else gets 404).
+    """DEV-52 — one screenshot (DEV-389: or document) of a question, for whoever may read the conversation (anyone
+    else gets 404).
 
     Found through the conversation's own messages, never by a path from the request — another conversation's
-    image is not reachable even with its id."""
+    attachment is not reachable even with its id. A text document is given as plain text, never as a page."""
     conversation, _project = _conversation_for(db, current_user, conversation_id)
     for (stored,) in db.execute(
         select(PoradcaMessage.attachments).where(PoradcaMessage.conversation_id == conversation.id)
@@ -625,8 +627,9 @@ def get_attachment(
         meta = next((m for m in stored or [] if m.get("id") == attachment_id), None)
         path = attachments.path_of(conversation.id, meta) if meta else None
         if path is not None and path.is_file():
-            return FileResponse(path, media_type=meta["mime"], headers={"Cache-Control": "private, max-age=3600"})
-    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Obrázok sa nenašiel.")
+            media_type = "text/plain; charset=utf-8" if meta["mime"].startswith("text/") else meta["mime"]
+            return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Príloha sa nenašla.")
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_202_ACCEPTED)

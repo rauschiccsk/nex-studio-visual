@@ -3,7 +3,7 @@
 // Director 06.11.2026: „Návrhy nových projektov sa mi zhromažďujú. Navrhni mi riešenie, aby som mohol tie návrhy robiť
 // pokiaľ ty pracuješ nad kokpitom.“ — „Robiť nový projekt pod iným cudzím projektom, je nelogické.“ So this screen
 // needs no pinned project. On the left my ideas (the admin account sees all) with where each stands; on the right the
-// talk with Poradca — the same answers, images and live progress as in a project's Poradca — and, under the latest
+// talk with Poradca — the same answers, attachments and live progress as in a project's Poradca — and, under the latest
 // brief, the two ways it ends: a new project, or the brief added to an existing one. The address carries the idea
 // (`/napady/<id>`); bare `/napady` starts a new one. Director 06.11.2026 on the name: „Súhlasím, nazveme to Nápady“.
 
@@ -21,13 +21,13 @@ import PoradcaComposer, {
 import PoradcaConversationItem, {
   type Removal,
 } from "@/components/poradca/PoradcaConversationItem";
-import QuestionImages from "@/components/poradca/QuestionImages";
+import QuestionAttachments from "@/components/poradca/QuestionAttachments";
 import { draftKey } from "@/hooks/useDraft";
 import { useFollowBottom } from "@/hooks/useFollowBottom";
 import { usePoradcaConversation } from "@/hooks/usePoradcaConversation";
 import { followUpStart, followUpTitle, ideaStateLabel } from "@/lib/ideas";
 import { formatCost } from "@/lib/poradcaAnswer";
-import { toUpload } from "@/lib/poradcaImages";
+import { toUpload } from "@/lib/poradcaAttachments";
 import {
   createIdeaApi,
   getIdeaApi,
@@ -379,10 +379,11 @@ export default function IdeasPage() {
           {!ideaId && (
             <div className="max-w-xl space-y-1 text-xs text-[var(--color-text-muted)]">
               <p>
-                Vlož svoj nápad na novú aplikáciu — pokojne celý text z
-                Obsidianu, aj s náčrtmi obrazoviek. Projektant pozrie, čo už
-                máme, opýta sa ťa po jednej otázke a nakoniec napíše zadanie
-                prvej verzie.
+                Vlož svoj nápad na novú aplikáciu — kratší text napíš rovno sem,
+                dlhší návrh (Markdown z Obsidianu, text alebo PDF) prilož
+                sponkou vedľa poľa, aj s náčrtmi obrazoviek. Projektant si ho
+                prečíta celý, pozrie, čo už máme, opýta sa ťa po jednej otázke a
+                nakoniec napíše zadanie prvej verzie.
               </p>
               <p>
                 Z hotového zadania založíš tlačidlom nový projekt, alebo ho
@@ -399,7 +400,7 @@ export default function IdeasPage() {
               >
                 {m.content}
                 {conversationId && (m.attachments ?? []).length > 0 && (
-                  <QuestionImages
+                  <QuestionAttachments
                     conversationId={conversationId}
                     attachments={m.attachments ?? []}
                   />
@@ -446,9 +447,9 @@ export default function IdeasPage() {
           limits={status}
           incoming={ideaId ? null : incoming}
           placeholder={ideaId ? "Odpovedz Projektantovi…" : "Opíš svoj nápad…"}
-          onAsk={async (question, images) => {
+          onAsk={async (question, files) => {
             thread.follow();
-            const uploads = await Promise.all(images.map(toUpload));
+            const uploads = await Promise.all(files.map(toUpload));
             if (conversationId) {
               setDetail(await askPoradcaApi(conversationId, question, uploads));
             } else {

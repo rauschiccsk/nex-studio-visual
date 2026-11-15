@@ -1,6 +1,7 @@
-// The question field of a Poradca conversation (ICCINT-167) — text, pasted or dropped screenshots (DEV-52), a draft that
-// survives leaving the screen (DEV-24) and a question handed over from a decision card (DEV-103). Shared by Poradca of a
-// project and by Nápady (DEV-318), so a new idea is asked exactly as a project question is.
+// The question field of a Poradca conversation (ICCINT-167) — text, pasted or dropped screenshots (DEV-52) and attached
+// documents (DEV-389), a draft that survives leaving the screen (DEV-24) and a question handed over from a decision card
+// (DEV-103). Shared by Poradca of a project and by Nápady (DEV-318), so a new idea is asked exactly as a project
+// question is.
 
 import {
   useEffect,
@@ -10,7 +11,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ImagePlus, Loader2, Send, X } from "lucide-react";
+import { FileText, Loader2, Paperclip, Send, X } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -19,12 +20,14 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { appendInstruction } from "@/lib/poradcaHandoff";
 import {
   EMPTY_CLIPBOARD,
-  addImages,
+  addAttachments,
+  carriesFiles,
   carriesText,
-  imagesIn,
-  type ImageLimits,
-  type PendingImage,
-} from "@/lib/poradcaImages";
+  filesIn,
+  fits,
+  type AttachmentLimits,
+  type PendingAttachment,
+} from "@/lib/poradcaAttachments";
 
 /** DEV-103 — a question from a decision card: sent once by itself, or left in the box with the reason (`held`). */
 export interface IncomingQuestion {
@@ -49,8 +52,8 @@ export default function PoradcaComposer({
   draftKey: string | null;
   onAsk: (question: string, images: File[]) => Promise<void>;
   disabledReason: string | null;
-  /** DEV-52 — the backend's limits for pasted screenshots; null until Poradca's status is known. */
-  limits: ImageLimits | null;
+  /** DEV-52 / DEV-389 — the backend's limits and types of attachments; null until Poradca's status is known. */
+  limits: AttachmentLimits | null;
   /** DEV-103 — the question from a decision card, sent once by itself (or left in the box when it cannot go). */
   incoming: IncomingQuestion | null;
   /** DEV-318 — what the empty box says; Nápady asks for the idea, not a question about a project. */
@@ -59,7 +62,7 @@ export default function PoradcaComposer({
   const { text, setText, clear, restored } = useDraft(key);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
-  const [images, setImages] = useState<PendingImage[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [refused, setRefused] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const growRef = useAutoGrowTextarea(text);
@@ -68,8 +71,8 @@ export default function PoradcaComposer({
 
   function attach(files: File[]) {
     if (!limits || files.length === 0) return;
-    const { images: next, refused: why } = addImages(images, files, limits);
-    setImages(next);
+    const { attachments: next, refused: why } = addAttachments(attachments, files, limits);
+    setAttachments(next);
     setRefused(why);
   }
 
@@ -81,7 +84,10 @@ export default function PoradcaComposer({
   useLayoutEffect(() => {
     if (!canAttach) return;
     function onPaste(e: ClipboardEvent) {
-      const pasted = imagesIn(e.clipboardData);
+      // A paste of text may carry a picture of it too: then only what the backend takes is attached and the text
+      // pastes. Files alone are attached — or refused with the reason (DEV-389).
+      const files = filesIn(e.clipboardData);
+      const pasted = carriesText(e.clipboardData) ? files.filter((f) => limits !== null && fits(f, limits)) : files;
       if (pasted.length > 0) {
         e.preventDefault();
         attach(pasted);
@@ -94,9 +100,9 @@ export default function PoradcaComposer({
   });
 
   function detach(key: string) {
-    const gone = images.find((i) => i.key === key);
-    if (gone) URL.revokeObjectURL(gone.url);
-    setImages(images.filter((i) => i.key !== key));
+    const gone = attachments.find((a) => a.key === key);
+    if (gone?.url) URL.revokeObjectURL(gone.url);
+    setAttachments(attachments.filter((a) => a.key !== key));
     setRefused(null);
   }
 
@@ -106,17 +112,17 @@ export default function PoradcaComposer({
     await send(question, true);
   }
 
-  // `own` — the text of the box, with its images. A question from a card is not his draft: it leaves the draft
+  // `own` — the text of the box, with its attachments. A question from a card is not his draft: it leaves the draft
   // alone when it goes out, and lands under it when it does not.
   async function send(question: string, own: boolean) {
     setSending(true);
     setError(null);
     try {
-      await onAsk(question, own ? images.map((i) => i.file) : []);
+      await onAsk(question, own ? attachments.map((a) => a.file) : []);
       if (own) {
-        clear(); // only once it went out — a failed question stays in the box, with its images
-        images.forEach((i) => URL.revokeObjectURL(i.url));
-        setImages([]);
+        clear(); // only once it went out — a failed question stays in the box, with its attachments
+        attachments.forEach((a) => a.url && URL.revokeObjectURL(a.url));
+        setAttachments([]);
         setRefused(null);
       }
     } catch (e: unknown) {
@@ -160,11 +166,12 @@ export default function PoradcaComposer({
         void submit();
       }}
       onDragOver={(e) => {
-        if (canAttach && !locked && imagesIn(e.dataTransfer).length)
+        if (canAttach && !locked && carriesFiles(e.dataTransfer))
           e.preventDefault();
       }}
       onDrop={(e) => {
-        const dropped = imagesIn(e.dataTransfer);
+        // DEV-389: every dropped file is attached or refused with the reason — never opened by the browser instead.
+        const dropped = filesIn(e.dataTransfer);
         if (!canAttach || locked || dropped.length === 0) return;
         e.preventDefault();
         attach(dropped);
@@ -190,22 +197,29 @@ export default function PoradcaComposer({
           {refused}
         </p>
       )}
-      {images.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-images">
-          {images.map((i) => (
+      {attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-attachments">
+          {attachments.map((a) => (
             <div
-              key={i.key}
+              key={a.key}
               className="relative overflow-hidden rounded border border-[var(--color-border-default)]"
             >
-              <img
-                src={i.url}
-                alt={i.file.name}
-                className="h-16 max-w-[8rem] object-cover"
-              />
+              {a.url ? (
+                <img
+                  src={a.url}
+                  alt={a.file.name}
+                  className="h-16 max-w-[8rem] object-cover"
+                />
+              ) : (
+                <span className="flex h-16 max-w-[12rem] items-center gap-1.5 py-1 pl-2 pr-6 text-xs text-[var(--color-text-secondary)]">
+                  <FileText className="h-4 w-4 flex-shrink-0" aria-hidden />
+                  <span className="break-all">{a.file.name}</span>
+                </span>
+              )}
               <button
                 type="button"
-                aria-label={`Odobrať ${i.file.name}`}
-                onClick={() => detach(i.key)}
+                aria-label={`Odobrať ${a.file.name}`}
+                onClick={() => detach(a.key)}
                 disabled={sending}
                 className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80"
               >
@@ -221,10 +235,10 @@ export default function PoradcaComposer({
             <input
               ref={picker}
               type="file"
-              accept={(limits.attachment_types ?? []).join(",")}
+              accept={[...(limits.attachment_types ?? []), ...(limits.attachment_extensions ?? [])].join(",")}
               multiple
               hidden
-              data-testid="poradca-image-picker"
+              data-testid="poradca-attachment-picker"
               onChange={(e) => {
                 attach(Array.from(e.target.files ?? []));
                 e.target.value = "";
@@ -234,11 +248,11 @@ export default function PoradcaComposer({
               type="button"
               onClick={() => picker.current?.click()}
               disabled={locked}
-              title="Priložiť snímku obrazovky (alebo ju vlož do otázky cez Ctrl+V)"
-              aria-label="Priložiť snímku obrazovky"
+              title="Priložiť snímku obrazovky alebo dokument (Markdown, text, PDF) — snímku vložíš aj cez Ctrl+V"
+              aria-label="Priložiť snímku alebo dokument"
               className="flex h-10 items-center rounded-lg border border-[var(--color-border-default)] px-2.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <ImagePlus className="h-4 w-4" />
+              <Paperclip className="h-4 w-4" />
             </button>
           </>
         )}

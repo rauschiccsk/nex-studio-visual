@@ -222,9 +222,10 @@ class Settings(BaseSettings):
     # The role profiles the cockpit writes for turns outside the sandbox — inside the backend container, never in a
     # project the turn could edit.
     agent_profile_dir: str = "/tmp/nex-agent-profiles"
-    # DEV-52 — screenshots the Manažér pastes into a question for Poradca: one image, how many in one question, and
-    # all of one question together (they travel base64 in the question, a third larger). The cockpit's nginx
-    # (frontend/nginx.conf, client_max_body_size) must let the largest request through — a test compares them.
+    # DEV-52 — screenshots (DEV-389: and documents) the Manažér attaches to a question for Poradca: one file, how many
+    # in one question, and all of one question together (they travel base64 in the question, a third larger). The
+    # cockpit's nginx (frontend/nginx.conf, client_max_body_size) must let the largest request through — a test compares
+    # them.
     poradca_attachment_max_bytes: int = 5 * 1024 * 1024
     poradca_attachments_max_count: int = 5
     poradca_attachments_max_total_bytes: int = 15 * 1024 * 1024

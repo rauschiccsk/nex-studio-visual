@@ -1329,10 +1329,11 @@ export interface paths {
         };
         /**
          * Get Attachment
-         * @description DEV-52 — one screenshot of a question, for whoever may read the conversation (anyone else gets 404).
+         * @description DEV-52 — one screenshot (DEV-389: or document) of a question, for whoever may read the conversation (anyone
+         *     else gets 404).
          *
          *     Found through the conversation's own messages, never by a path from the request — another conversation's
-         *     image is not reachable even with its id.
+         *     attachment is not reachable even with its id. A text document is given as plain text, never as a page.
          */
         get: operations["get_attachment_api_v1_poradca_conversations__conversation_id__attachments__attachment_id__get"];
         put?: never;
@@ -6749,7 +6750,8 @@ export interface components {
         };
         /**
          * PoradcaAttachmentRead
-         * @description Priložená snímka — čo o nej vie obrazovka (obsah sa sťahuje zvlášť, s overením prístupu).
+         * @description An attached screenshot or document — what the screen knows of it (the content is fetched apart, with access
+         *     checked).
          */
         PoradcaAttachmentRead: {
             /** Id */
@@ -6763,8 +6765,9 @@ export interface components {
         };
         /**
          * PoradcaAttachmentUpload
-         * @description DEV-52 — snímka obrazovky priložená k otázke: meno súboru a obsah v base64 (tak ako ich berie aj API
-         *     Claude). Typ sa neberie z mena ani z prehliadača — backend ho rozpozná z obsahu.
+         * @description DEV-52 — a screenshot (DEV-389: or a document) attached to a question: the file's name and its content in base64
+         *     (as the Claude API takes them too). The type is never taken from the name or the browser — the backend reads it
+         *     from the content.
          */
         PoradcaAttachmentUpload: {
             /** Data */
@@ -7027,6 +7030,8 @@ export interface components {
          * @description Whether Poradca can run — for the screen (greyed out with a reason) and for ``/health``.
          */
         PoradcaStatus: {
+            /** Attachment Extensions */
+            attachment_extensions?: string[];
             /**
              * Attachment Max Bytes
              * @default 0

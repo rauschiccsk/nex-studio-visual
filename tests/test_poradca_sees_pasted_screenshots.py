@@ -77,26 +77,28 @@ def _start(c, proj, question="Čo je na snímke?", images=()):
         (b"\xff\xd8\xff\xe0" + b"\x00" * 20, "image/jpeg"),
         (b"GIF89a" + b"\x00" * 20, "image/gif"),
         (b"RIFF\x10\x00\x00\x00WEBPVP8 " + b"\x00" * 20, "image/webp"),
-        (b"%PDF-1.7 obsah", None),
-        (b"<svg xmlns='http://www.w3.org/2000/svg'/>", None),
+        # DEV-389: a PDF is a document now; an SVG is text, never an image (it may carry a script)
+        (b"%PDF-1.7 obsah", "application/pdf"),
+        (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "text/plain"),
+        (b"PK\x03\x04\x14\x00\x06\x00\x08\x00\xff\xfe", None),
     ],
 )
 def test_the_type_is_read_from_the_content(data, mime):
     assert attachments.detect(data) == mime
 
 
-def test_a_renamed_file_is_not_an_image():
-    with pytest.raises(attachments.AttachmentRefused, match="nie je obrázok PNG, JPEG, WebP ani GIF"):
-        attachments.accept([("snimka.png", _b64(b"toto je text, nie obrazok"))])
+def test_a_renamed_binary_file_is_neither_an_image_nor_a_document():
+    with pytest.raises(attachments.AttachmentRefused, match="nie je obrázok .* ani dokument"):
+        attachments.accept([("snimka.png", _b64(b"PK\x03\x04\x14\x00\x06\x00\x08\x00\xff\xfe obsah"))])
 
 
 def test_too_many_too_large_or_broken_images_are_refused(monkeypatch):
     monkeypatch.setattr(settings, "poradca_attachments_max_count", 2)
-    with pytest.raises(attachments.AttachmentRefused, match="najviac 2 obrázkov"):
+    with pytest.raises(attachments.AttachmentRefused, match="najviac 2 súborov"):
         attachments.accept([("a.png", _b64(_png()))] * 3)
 
     monkeypatch.setattr(settings, "poradca_attachment_max_bytes", 50)
-    with pytest.raises(attachments.AttachmentRefused, match="jeden obrázok môže mať najviac"):
+    with pytest.raises(attachments.AttachmentRefused, match="jeden súbor môže mať najviac"):
         attachments.accept([("a.png", _b64(_png()))])
 
     monkeypatch.setattr(settings, "poradca_attachment_max_bytes", 10_000)
@@ -152,7 +154,7 @@ def test_a_refused_image_creates_no_conversation(db_session, poradca):
     proj = _project(db_session, owner)
     c = _client(db_session, owner)
 
-    refused = _start(c, proj, images=[("faktura.png", b"%PDF-1.7 obsah")])
+    refused = _start(c, proj, images=[("faktura.docx", b"PK\x03\x04\x14\x00\x06\x00\x08\x00\xff\xfe obsah")])
 
     assert refused.status_code == 422 and "nie je obrázok" in refused.json()["detail"]
     assert db_session.query(PoradcaConversation).filter(PoradcaConversation.project_id == proj.id).count() == 0

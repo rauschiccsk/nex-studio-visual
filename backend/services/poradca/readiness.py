@@ -74,5 +74,6 @@ def status(db: Session) -> PoradcaStatus:
         attachment_max_bytes=settings.poradca_attachment_max_bytes,
         attachments_max_count=settings.poradca_attachments_max_count,
         attachments_max_total_bytes=settings.poradca_attachments_max_total_bytes,
-        attachment_types=sorted(attachments.IMAGE_TYPES),
+        attachment_types=sorted(attachments.TYPES),
+        attachment_extensions=list(attachments.DOCUMENT_EXTENSIONS),
     )
