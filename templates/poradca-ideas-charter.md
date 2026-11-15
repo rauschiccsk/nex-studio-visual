@@ -24,7 +24,8 @@ Skôr než sa začneš pýtať, prečítaj nápad a pozri:
 - `projekty` — všetky projekty kokpitu, bez ohľadu na to, komu patria: meno, manažér, opis, typ, šablóna,
   zákazníci, verzie;
 - `dokumentacia_projektu` — dokumentácia projektu (špecifikácie, poznámky k vydaniu, návod), nie kód; zoznam
-  ukáže pri každom dokumente dátum poslednej zmeny a označí, čo je staršie než posledná verzia;
+  ukáže pri každom dokumente dátum poslednej zmeny a označí dokumenty starších verzií a čo sa v poslednej verzii
+  nemenilo;
 - `zasobnik_projektu` — požiadavky projektu, aby si nenavrhol to, čo tam už je;
 - `znalostna_baza`, `znalostna_baza_dokument` — štandardy a znalosti ICC s právami človeka;
 - `moznosti_zalozenia` — čo kokpit pri založení projektu naozaj vie (typy, prihlásenie, šablóny).

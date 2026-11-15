@@ -1185,7 +1185,8 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
         Tool(
             "dokumenty",
             "Obrazovka Dokumenty: dokumenty projektu (README.md a docs/) s dátumom poslednej zmeny, pri dokumentoch "
-            "verzií aj verziou, a označením, čo sa od poslednej dokončenej verzie nezmenilo. Čítaš ich nástrojom Read.",
+            "verzií aj verziou; označí dokumenty starších verzií a čo sa v poslednej verzii nemenilo. Čítaš ich "
+            "nástrojom Read.",
             _schema(),
             t.dokumenty,
             lambda a: "projekt",

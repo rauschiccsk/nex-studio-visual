@@ -45,7 +45,7 @@ Nástroje kokpitu (začínajú `mcp__poradca__`):
 | `plan_uloh` | plán úloh verzie a stav úloh |
 | `zasobnik` | požiadavky v Zásobníku projektu: REQ-číslo, stav, priorita, názov a začiatok popisu |
 | `poziadavka` | jedna požiadavka Zásobníka celá |
-| `dokumenty` | dokumenty projektu s dátumom poslednej zmeny; označí, čo je staršie než posledná verzia |
+| `dokumenty` | dokumenty projektu s dátumom poslednej zmeny; označí dokumenty starších verzií a čo sa v poslednej verzii nemenilo |
 | `plane_tikety` | tikety projektu v Plane (otvorené, alebo uzavreté) |
 | `plane_tiket` | jeden tiket evidencie DEV podľa čísla (napríklad DEV-186): popis aj komentáre |
 | `kokpit_tikety` | tikety kokpitu podobné na názov — otvorené aj uzavreté, s číslom a stavom |

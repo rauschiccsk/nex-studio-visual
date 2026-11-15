@@ -30,6 +30,14 @@ RULE = (
     "O tom, čo projekt používa a ako funguje, rozhodujú dokumenty aktuálnej verzie a živé špecifikácie; starší "
     "dokument je história — keď sa naň odvolávaš, povedz, z ktorého je dátumu."
 )
+#: What the marks mean — a document outside the versions that did not change may still hold (verified live 15.11.2026:
+#: in NEX Inbox 42 of its 43 such documents, the contract with NEX Genesis and the runbooks among them).
+OLDER_VERSION = "dokument staršej verzie"
+UNCHANGED = "v poslednej verzii sa nemenil"
+MARKS = (
+    f"„{OLDER_VERSION}“ je história. Dokument mimo verzií, ktorý „{UNCHANGED}“, môže stále platiť (schéma, návod) — "
+    "keď z neho tvrdíš, čo projekt používa, over to v dokumentoch aktuálnej verzie a povedz jeho dátum."
+)
 
 
 def documents(root: str) -> list[str]:
@@ -87,7 +95,7 @@ def listing(root: str, slug: str, latest: Optional[str]) -> str:
         "zmeny podľa gitu projektu.",
     ]
     if latest:
-        lines.append(f"Posledná dokončená verzia: {latest}" + (f" ({_shown(since)})" if since else "") + ".")
+        lines.append(f"Posledná dokončená verzia: {latest}" + (f" ({_shown(since)})" if since else "") + ". " + MARKS)
     lines.append(RULE)
     for path in found[:DOCS_MAX]:
         when = changed.get(path)
@@ -95,8 +103,10 @@ def listing(root: str, slug: str, latest: Optional[str]) -> str:
         version = _VERSION_DOC.search(path)
         if version:
             line += f", verzia {version.group(1)}"
-        if when and since and when < since:
-            line += f" — starší než verzia {latest}"
+            if latest and version.group(1) != latest:
+                line += f" — {OLDER_VERSION}"
+        elif when and since and when < since:
+            line += f" — {UNCHANGED}"
         lines.append(line)
     if len(found) > DOCS_MAX:
         lines.append(f"(a ďalších {len(found) - DOCS_MAX})")

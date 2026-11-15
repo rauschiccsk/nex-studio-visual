@@ -42,6 +42,7 @@ def inbox(tmp_path) -> Path:
     root = tmp_path / "nex-inbox"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    _commit(root, "docs/specs/versions/v1.0.1/specification.md", "verzia 1.0.1\n", "2026-06-12")
     _commit(root, "docs/specs/summary.md", "AI cez Ollama na vlastnom serveri\n", "2026-06-13", tag="v1.0.1")
     _commit(root, "docs/specs/versions/v1.10.3/specification.md", "AI cez Claude Code\n", "2026-11-12", tag="v1.10.3")
     (root / "docs" / "specs" / "draft.md").write_text("rozpísané, nie v gite\n", encoding="utf-8")
@@ -52,12 +53,17 @@ def _line(text: str, path: str) -> str:
     return next(line for line in text.splitlines() if line.startswith(f"- {path} "))
 
 
-def test_the_old_summary_shows_its_date_and_is_marked_older_than_the_last_version(inbox):
+def test_the_old_summary_shows_its_date_and_that_it_did_not_change_in_the_last_version(inbox):
     text = doc_ages.listing(str(inbox), "nex-inbox", "1.10.3")
 
-    assert "Posledná dokončená verzia: 1.10.3 (12.11.2026)." in text
+    assert f"Posledná dokončená verzia: 1.10.3 (12.11.2026). {doc_ages.MARKS}" in text
     assert doc_ages.RULE in text
-    assert _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — starší než verzia 1.10.3"
+    assert (
+        _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — v poslednej verzii sa nemenil"
+    )
+    assert _line(text, "docs/specs/versions/v1.0.1/specification.md") == (
+        "- docs/specs/versions/v1.0.1/specification.md — 12.06.2026, verzia 1.0.1 — dokument staršej verzie"
+    )
     assert _line(text, "docs/specs/versions/v1.10.3/specification.md") == (
         "- docs/specs/versions/v1.10.3/specification.md — 12.11.2026, verzia 1.10.3"
     )
@@ -67,7 +73,7 @@ def test_the_old_summary_shows_its_date_and_is_marked_older_than_the_last_versio
 def test_before_the_first_finished_version_nothing_is_marked_older(inbox):
     text = doc_ages.listing(str(inbox), "nex-inbox", None)
 
-    assert "Posledná dokončená verzia" not in text and "starší než" not in text
+    assert "Posledná dokončená verzia" not in text and "staršej verzie" not in text and "nemenil" not in text
     assert _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026"
 
 
@@ -92,7 +98,9 @@ async def test_poradca_reads_the_same_list(project_on_disk):
 
     text = await poradca.dokumenty({})
 
-    assert _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — starší než verzia 1.10.3"
+    assert (
+        _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — v poslednej verzii sa nemenil"
+    )
 
 
 async def test_projektant_reads_the_same_list(project_on_disk, monkeypatch, db_session):
@@ -104,7 +112,9 @@ async def test_projektant_reads_the_same_list(project_on_disk, monkeypatch, db_s
 
     text = await idea_tools.IdeaTools(user_id=uuid.uuid4()).dokumentacia_projektu({"projekt": "nex-inbox"})
 
-    assert _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — starší než verzia 1.10.3"
+    assert (
+        _line(text, "docs/specs/summary.md") == "- docs/specs/summary.md — 13.06.2026 — v poslednej verzii sa nemenil"
+    )
 
 
 def test_both_charters_say_what_decides_the_projects_state():
