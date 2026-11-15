@@ -71,6 +71,8 @@ export interface ProjectCreate {
   template?: string | null;
   /** DEV-253: the app runs AI agents (Nastavenia → Agenti); only together with a template. Default false. */
   ai?: boolean;
+  /** DEV-395: the languages the app speaks, the main one first; more than Slovak only with a template. */
+  languages?: string[];
 }
 
 /**
@@ -93,6 +95,8 @@ export interface ProjectUpdate {
   guardian_enabled?: boolean;
   /** DEV-42: applies from the next deploy. */
   private_network?: boolean;
+  /** DEV-395: the languages the app speaks, the main one first; applies from the next build turn. */
+  languages?: string[];
 }
 
 /** Serialised representation of a project row. */
@@ -124,6 +128,8 @@ export interface ProjectRead {
   private_network: boolean;
   /** DEV-253: the app template (nex-app-kit) the project was founded on; ``null`` = none. */
   template?: string | null;
+  /** DEV-395: the languages the app speaks, the main one first. */
+  languages?: string[];
   created_by: string;
   /** Notification owner (CR-NS-012), nullable. */
   owner_id: string | null;

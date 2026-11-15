@@ -239,6 +239,7 @@ def create(db: Session, data: ProjectCreate) -> Project:
         guardian_enabled=data.guardian_enabled,
         custom_development_enabled=data.custom_development_enabled,
         private_network=data.private_network,
+        languages=list(data.languages),
         created_by=data.created_by,
         owner_id=owner_id,
     )
@@ -285,6 +286,8 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
         "guardian_enabled",
         # DEV-42: „Prístup: len súkromná sieť" — applies from the next deploy.
         "private_network",
+        # DEV-395: the app's languages — applies from the next build turn (the agents' rules, Verifikácia).
+        "languages",
     }
 
     # Uniqueness check only for an actually-changing ``name``.
@@ -300,6 +303,12 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
         if field in update_data and update_data[field] is None and getattr(project, field) is not None:
             raise ValueError(ASSIGNED_PORT_STAYS)
 
+    new_languages = update_data.get("languages")
+    if new_languages is not None and list(new_languages) != list(project.languages or []):
+        reason = _languages_refusal(db, project, list(new_languages))
+        if reason:
+            raise ValueError(reason)
+
     for field, value in update_data.items():
         # keeps a value on null: an emptied assigned port is refused above, and the other optional fields (repo_url,
         # source_path, kb_path) are not on the settings screen — clearing them is not offered (DEV-323, DEV-324).
@@ -308,6 +317,31 @@ def update(db: Session, project_id: UUID, data: ProjectUpdate) -> Project:
 
     db.flush()
     return project
+
+
+def _languages_refusal(db: Session, project: Project, languages: list[str]) -> Optional[str]:
+    """DEV-395 — why the project cannot speak *languages* now: anything but Slovak needs the app template on a kit that
+    knows languages, and a language a customer's installations start in is not taken away from under them."""
+    from backend.db.models.customers import Customer
+    from backend.services import app_languages
+
+    reason = app_languages.needs_template_refusal(languages, project.template) or app_languages.old_kit_refusal(
+        languages, project.source_path
+    )
+    if reason:
+        return reason
+    left = db.execute(
+        select(Customer.name, Customer.language).where(
+            Customer.project_id == project.id, Customer.language.is_not(None)
+        )
+    ).all()
+    using = [f"{name} ({app_languages.name_of(code)})" for name, code in left if code not in languages]
+    if using:
+        return (
+            "Jazyk, ktorý aplikácia prestane hovoriť, majú nastavení títo zákazníci: "
+            f"{', '.join(using)}. Najprv im na obrazovke Zákazníci zmeň jazyk inštalácie."
+        )
+    return None
 
 
 def set_uat_slug(

@@ -31,14 +31,15 @@ from backend.db.models.foundation import User
 from backend.db.session import get_db
 from backend.schemas.customer import (
     CustomerCreate,
+    CustomerLanguageOption,
     CustomerRead,
     CustomerSettingRead,
     CustomerSettingsContractRead,
     CustomerUpdate,
     ProdMachineRead,
 )
+from backend.services import app_languages, prod_machines
 from backend.services import customer as customer_service
-from backend.services import prod_machines
 
 router = APIRouter(tags=["Customers"])
 
@@ -56,6 +57,7 @@ def _to_read(customer: Customer, db: Session) -> CustomerRead:
         notes=customer.notes,
         prod_host=customer.prod_host or "",
         prod_machine=prod_machines.label(customer.prod_host),
+        language=customer.language or "",
         has_secret=customer.credential_id is not None,
         settings=dict(customer.settings or {}),
         secret_settings_set=customer_service.secret_setting_keys(db, customer),
@@ -106,6 +108,12 @@ def customer_settings_contract(
         ],
         problems=list(contract.problems),
         legacy_admin=env_contract.declares_legacy_admin(claude_agent.PROJECTS_ROOT / project.slug),
+        # DEV-395: the language the customer's installations start in is offered only where there is a choice.
+        languages=(
+            [CustomerLanguageOption(code=c, label=app_languages.name_of(c)) for c in project.languages]
+            if project.template and app_languages.is_multilingual(project.languages)
+            else []
+        ),
     )
 
 

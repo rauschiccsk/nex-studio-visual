@@ -257,6 +257,7 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
         settings_credential_id = _write_secret_settings(db, project_id, data.slug, None, secret_values)
 
     prod_host = prod_machines.check(data.prod_host)  # DEV-274 — before anything is written
+    language = _checked_language(db, project_id, data.language)  # DEV-395
     customer = Customer(
         project_id=project_id,
         name=data.name,
@@ -265,6 +266,7 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
         integrations=data.integrations,
         notes=data.notes,
         prod_host=prod_host or None,
+        language=language or None,
         credential_id=credential_id,
         settings=_plain_settings(data.settings),
         settings_credential_id=settings_credential_id,
@@ -272,6 +274,22 @@ def create(db: Session, project_id: UUID, data: CustomerCreate) -> Customer:
     db.add(customer)
     db.flush()
     return customer
+
+
+def _checked_language(db: Session, project_id: UUID, language: Optional[str]) -> Optional[str]:
+    """DEV-395 — the customer's starting language as it is stored: ``None`` unchanged, ``""`` the app's main language,
+    else one of the languages the project's app speaks (refused with a sentence otherwise)."""
+    from backend.services import app_languages
+
+    if not language:
+        return language
+    speaks = list(db.execute(select(Project.languages).where(Project.id == project_id)).scalar_one_or_none() or [])
+    if language not in speaks:
+        raise ValueError(
+            f"Aplikácia nehovorí jazykom „{app_languages.name_of(language)}“ — hovorí: "
+            f"{app_languages.describe(speaks or list(app_languages.DEFAULT_LANGUAGES))}."
+        )
+    return language
 
 
 def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
@@ -292,6 +310,7 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
     _check_settings(db, customer.project_id, data.settings, data.secret_settings)
     # DEV-274 — the machine is checked with every other conflict, before any mutation.
     new_prod_host = prod_machines.check(data.prod_host) if data.prod_host is not None else None
+    new_language = _checked_language(db, customer.project_id, data.language)  # DEV-395
 
     # Every conflict check runs BEFORE any mutation — a rejected edit must leave the
     # in-session row untouched, not half-applied waiting on the router's rollback.
@@ -335,6 +354,8 @@ def update(db: Session, customer_id: UUID, data: CustomerUpdate) -> Customer:
         customer.notes = data.notes
     if new_prod_host is not None:
         customer.prod_host = new_prod_host or None
+    if new_language is not None:
+        customer.language = new_language or None
 
     if data.secret is not None:
         if customer.credential_id is not None:

@@ -132,3 +132,21 @@ async def test_a_project_switched_to_web_gives_its_open_conversation_the_web_rul
     assert WEB_RULES not in calls[0].charter_text
     assert "Typ projektu: Štandardný" in calls[0].prompt
     assert WEB_RULES in calls[1].prompt and "Typ projektu: Web" in calls[1].prompt
+
+
+async def test_a_project_given_languages_gives_its_open_conversation_the_languages_rules(world, monkeypatch):  # noqa: F811
+    """DEV-395 — Poradca judges a multilingual project by the rules its build agents read: its languages filled in."""
+    monkeypatch.setattr(runner, "_charter_text", REAL_CHARTER)
+    calls = _capture_calls(monkeypatch)
+    db = world["db"]
+    project = db.get(Project, world["conversation"].project_id)
+    project.template = "nsv-standard"
+    db.commit()
+
+    await _ask(world, "Prvá otázka")
+    project.languages = ["hu", "sk"]
+    db.commit()
+    await _ask(world, "Druhá otázka")
+
+    assert "jazykmi projektu" not in calls[0].charter_text
+    assert "Aplikácia hovorí: **maďarčina (hlavný jazyk), slovenčina**." in calls[1].prompt

@@ -41,7 +41,9 @@ from backend.core.errors import NotFoundError, http_error
 from backend.core.offload import run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
+from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
+from backend.db.models.versions import Version
 from backend.db.session import get_db
 from backend.rag.indexer import RAGIndexer
 from backend.schemas.dedo import (
@@ -60,6 +62,7 @@ from backend.schemas.project import (
     AppTemplateConversionRequest,
     AppTemplateConversionResult,
     GitHubRepoNotFoundError,
+    LanguageOption,
     PortBlockSuggestResponse,
     PortConflictError,
     ProjectCreate,
@@ -74,13 +77,8 @@ from backend.schemas.project import (
 from backend.schemas.version import VersionCreate
 from backend.services import action_labels as action_labels_service
 from backend.services import app_kit as app_kit_service
-from backend.services import app_template as app_template_service
-from backend.services import dedo_project_proposal as dedo_proposal_service
-from backend.services import deploy as deploy_service
-from backend.services import fast_fix as fast_fix_service
-from backend.services import github_validation as github_validation_service
-from backend.services import nexshared as nexshared_service
 from backend.services import (
+    app_languages,
     orchestrator,
     pipeline_runner,
     project_adoption,
@@ -90,6 +88,12 @@ from backend.services import (
     vizual_sandbox,
     workspace_owner,
 )
+from backend.services import app_template as app_template_service
+from backend.services import dedo_project_proposal as dedo_proposal_service
+from backend.services import deploy as deploy_service
+from backend.services import fast_fix as fast_fix_service
+from backend.services import github_validation as github_validation_service
+from backend.services import nexshared as nexshared_service
 from backend.services import port_registry as port_registry_service
 from backend.services import project as project_service
 from backend.services import project_surfaces as project_surfaces_service
@@ -555,6 +559,9 @@ def get_create_presets(db: Session = Depends(get_db)) -> ProjectCreatePresets:
         web_note=None if project_surfaces_service.WEB_PROJECTS_AVAILABLE else project_surfaces_service.WEB_NOT_YET,
         templates=_template_options(),
         default_template=app_template_service.DEFAULT_TEMPLATE,
+        # DEV-395 — the languages an app on a template can speak.
+        languages=[LanguageOption(code=code, label=label) for code, label in app_languages.LANGUAGES.items()],
+        default_languages=list(app_languages.DEFAULT_LANGUAGES),
     )
 
 
@@ -832,7 +839,13 @@ def get_app_kit_status(
     authz.authorize_project(current_user, project)
     if not project.template or not project.source_path:
         return AppKitStatus()
-    return AppKitStatus(**app_kit_service.status_for_source(project.source_path))
+    found = app_kit_service.status_for_source(project.source_path)
+    return AppKitStatus(
+        **found,
+        # DEV-395: the settings offer the upgrade beside the languages when the kit does not know them yet.
+        speaks_languages=app_languages.kit_speaks_languages(found["current"]),
+        languages_from=app_languages.MIN_KIT_VERSION,
+    )
 
 
 @router.post("/{project_id}/app-kit-upgrade", response_model=AppKitUpgradeResult)
@@ -853,6 +866,22 @@ def upgrade_app_kit(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Projekt nie je založený na šablóne aplikácie — nex-app-kit v ňom nie je čo povýšiť.",
+        )
+    # DEV-395: the upgrade is also offered beside the project's languages, while a version may be building — it
+    # rewrites and commits the frame's files, so it waits until no agent is at work in the checkout.
+    working = db.execute(
+        select(Version.version_number)
+        .join(PipelineState, PipelineState.version_id == Version.id)
+        .where(Version.project_id == project.id, PipelineState.status == deploy_service.AGENT_WORKING_STATUS)
+        .limit(1)
+    ).scalar_one_or_none()
+    if working is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Agent práve pracuje na verzii {working} — šablónu povýš, keď dokončí ťah (súbory rámu by mu zmenili "
+                "pod rukami)."
+            ),
         )
     if not app_kit_service.upgrade_source(project.source_path, payload.target_version, project.template):
         raise HTTPException(
@@ -1179,6 +1208,7 @@ def create_project(
                 project_type=project.type,
                 # DEV-253: an adopted project keeps its own frame, so its agents get no template rules either.
                 template=None if adopting else payload.template,
+                languages=list(project.languages or app_languages.DEFAULT_LANGUAGES),
             )
         except ProvisioningError as exc:
             db.rollback()
@@ -1195,11 +1225,15 @@ def create_project(
             # An adopted project keeps its own frame: the template is not filled over it, so it is not remembered
             # on it either — the agents would build it as a project on the template.
             project.template = None
+            # DEV-395: languages live in the template's catalogs — an adopted project speaks what its code speaks.
+            project.languages = list(app_languages.DEFAULT_LANGUAGES)
         elif payload.template:
             try:
                 app_template_service.apply_template(
                     PROJECTS_ROOT / project.slug,
-                    app_template_service.TemplateChoice(template=payload.template, ai=payload.ai),
+                    app_template_service.TemplateChoice(
+                        template=payload.template, ai=payload.ai, languages=tuple(payload.languages)
+                    ),
                     name=project.name,
                     slug=project.slug,
                     auth_mode=project.auth_mode,

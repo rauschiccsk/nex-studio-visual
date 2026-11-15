@@ -91,6 +91,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_VERSION_BUSY,
 )
 from backend.services import (
+    app_languages,
     backend_reach,
     ci_status,
     dedo_project_proposal,
@@ -948,6 +949,7 @@ async def _default_deploy_runner(
     private_network: bool = False,
     customer_values: Optional[dict[str, str]] = None,
     customer_name: Optional[str] = None,
+    installation_language: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
 
@@ -994,6 +996,7 @@ async def _default_deploy_runner(
             admin_password=admin_password,
             customer_values=customer_values,
             customer_name=customer_name,  # DEV-377: the installation shows whom it serves
+            installation_language=installation_language,  # DEV-395: the language it starts in
             # ICCINT-151 — predpis a nastavenia sa zapíšu aj na stroj, kde inštalácia beží. Pri
             # testovacej inštalácii nikdy: tá býva vždy tu.
             deploy_host=deploy_host if is_prod else None,
@@ -1399,6 +1402,12 @@ async def deploy(
             # Only when the app declares customer settings: every runner written before DEV-72 (and its fakes) keeps
             # the interface it has, and an app without markers never needed the values.
             **({"customer_values": customer_values} if contract.customer_keys else {}),
+            # DEV-395: only an app that speaks more than Slovak is told the language its installation starts in.
+            **(
+                {"installation_language": app_languages.installation_language(project.languages, customer.language)}
+                if app_languages.is_multilingual(project.languages)
+                else {}
+            ),
         )
     finally:
         deploy_progress.skonci(instalacia)

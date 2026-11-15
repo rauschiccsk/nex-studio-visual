@@ -168,6 +168,8 @@ class ProjectBrief:
     #: ``change`` (the customer pays) or ``gift`` (ICC for free) — the work kind of the project's ticket (DEV-118).
     work_kind: Optional[str]
     brief: str
+    #: DEV-395 — the languages the app speaks, the main one first; ``None`` when not named or not all known.
+    languages: Optional[list[str]] = None
 
 
 @dataclass(frozen=True)
@@ -207,7 +209,18 @@ def project_brief(text: str) -> Optional[ProjectBrief]:
         ai=_IDEA_YES.get(values.get("ai", "").casefold()),
         work_kind=IDEA_WORK_KINDS.get(values.get("druh", "").casefold()),
         brief=brief,
+        languages=_idea_languages(values.get("jazyky")),
     )
+
+
+def _idea_languages(value: Optional[str]) -> Optional[list[str]]:
+    """DEV-395 — ``jazyky: hu, sk`` as the codes the form takes; a line the cockpit cannot read whole is left out."""
+    from backend.services import app_languages
+
+    if not value:
+        return None
+    codes = [part.strip().casefold() for part in value.replace(";", ",").split(",") if part.strip()]
+    return None if app_languages.refusal(codes) else codes
 
 
 def project_addition(text: str) -> Optional[ProjectAddition]:

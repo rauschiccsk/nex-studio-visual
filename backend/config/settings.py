@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     #: DEV-354 — how long the Príprava brief waits for what a library upgrade brought (git + the change notes).
     library_upgrades_cap_seconds: int = 60
     installation_status_cache_seconds: int = 120
+    # DEV-395: the texts check of a multilingual app at Verifikácia — how long fetching the kit's checker from GitHub
+    # and the parsing may take, and how much source it reads at most (a checkout larger than that is not measured).
+    app_texts_fetch_timeout_seconds: int = 20
+    app_texts_check_timeout_seconds: int = 120
+    app_texts_max_source_bytes: int = 50_000_000
     # DEV-85: the watch of every project's main branch — how often it looks, whether it runs at all (off in tests: the
     # app's real life cycle would ask GitHub and send Telegram messages), how long an undelivered message is retried.
     ci_watch_interval_seconds: int = 60

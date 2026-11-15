@@ -340,7 +340,16 @@ def test_a_project_without_a_template_is_offered_nothing(client, db_session, tmp
 
     body = client.get(f"/api/v1/projects/{project.id}/app-kit-status").json()
 
-    assert body == {"current": None, "latest": None, "behind": 0, "up_to_date": False, "changelog": [], "parts": []}
+    assert body == {
+        "current": None,
+        "latest": None,
+        "behind": 0,
+        "up_to_date": False,
+        "changelog": [],
+        "parts": [],
+        "speaks_languages": False,
+        "languages_from": "",
+    }
     refused = client.post(f"/api/v1/projects/{project.id}/app-kit-upgrade", json={"target_version": "0.4.0"})
     assert refused.status_code == 400
     assert refused.json()["detail"] == (

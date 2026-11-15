@@ -215,6 +215,7 @@ def _refresh_rules(project_slug: str) -> None:
     verified commit nor the Nasadiť button is affected. Best effort: a refresh failure is logged and the turn runs
     on the rules already in the project, which is exactly the situation before DEV-47."""
     from backend.services import (  # local — keeps the CLI primitive light
+        app_languages,
         app_template,
         create_project_postscaffold,
         project_surfaces,
@@ -231,6 +232,8 @@ def _refresh_rules(project_slug: str) -> None:
             project_type=project_type,
             # DEV-253: a project on an app template — its frame is the template's, its agents read so.
             template=app_template.template_of_slug(project_slug),
+            # DEV-395: the languages its app speaks — read at every turn, so the Manažér's change reaches the next one.
+            languages=app_languages.of_slug(project_slug),
         )
     except Exception:  # noqa: BLE001 — a stale rule set must never cost the turn
         logger.warning(

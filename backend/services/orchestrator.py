@@ -64,6 +64,7 @@ from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
     action_labels,
+    app_languages,
     app_template,
     back_to_priprava,
     build_db,
@@ -8781,6 +8782,46 @@ async def _dead_code_check(db: Session, version_id: uuid.UUID, slug: str) -> tup
     return finding, notes
 
 
+#: DEV-395 — how long the languages check of a version may take (fetching the kit's checker and parsing the sources).
+APP_LANGUAGES_CAP = settings.app_texts_fetch_timeout_seconds + settings.app_texts_check_timeout_seconds + 30
+
+
+async def _app_languages_check(
+    db: Session, version_id: uuid.UUID, slug: str
+) -> tuple[Optional[dict[str, Any]], list[str]]:
+    """DEV-395: the blocking finding for an app on the template that does not speak every language of its project (or
+    ``None``), and the sentences saying which part of the check could not run. A project that speaks only Slovak, or is
+    not on the template, is not measured — nothing of DEV-395 applies to it."""
+    found = db.execute(
+        select(Project.template, Project.languages)
+        .join(Version, Version.project_id == Project.id)
+        .where(Version.id == version_id)
+    ).first()
+    if found is None or not found.template or not app_languages.is_multilingual(found.languages):
+        return None, []
+    languages = tuple(found.languages)
+    repo = claude_agent.PROJECTS_ROOT / slug
+    try:
+        problems, not_run = await run_blocking(app_languages.problems, repo, languages, cap=APP_LANGUAGES_CAP)
+    except BlockingWorkTimedOut:
+        logger.warning("app languages check timed out (slug=%s)", slug)
+        return None, [f"{app_languages.CHECK_NAME} neprebehla — nedobehla do {APP_LANGUAGES_CAP} s."]
+    except Exception:  # noqa: BLE001 — the check of a project's code must never take Verifikácia down with it
+        logger.exception("app languages check failed (slug=%s)", slug)
+        return None, [f"{app_languages.CHECK_NAME} neprebehla — v kokpite nastala chyba (je zapísaná v jeho logu)."]
+    if not problems:
+        return None, not_run
+    finding = {
+        "text": (
+            f"Aplikácia má hovoriť: {app_languages.describe(languages)} — {'; '.join(problems)}. Oprav všetko naraz "
+            "(pravidlá agenta, časť „Aplikácia hovorí jazykmi projektu“)."
+        ),
+        "blocking": True,
+        "escapes_tests": False,
+    }
+    return finding, not_run
+
+
 def _scan_task_source(repo: Path, baseline: str, version_label: str) -> list:
     """Off the main loop: the Slovak text one task added — its baseline .. HEAD (DEV-183)."""
     head = _repo_head(repo)
@@ -13231,7 +13272,11 @@ async def _run_verifikacia_round(
     guide_finding = _uat_guide_finding(slug, version_label)
     # DEV-156: and code the version added that nothing uses.
     dead_code_finding, dead_code_notes = await _dead_code_check(db, version_id, slug)
-    floor_findings = [f for f in (language_finding, guide_finding, dead_code_finding) if f is not None]
+    # DEV-395: and an app that does not speak every language of its project — a missing translation, a text in the code.
+    languages_finding, languages_notes = await _app_languages_check(db, version_id, slug)
+    floor_findings = [
+        f for f in (language_finding, guide_finding, dead_code_finding, languages_finding) if f is not None
+    ]
     is_pass = llm_pass and not runtime_floor_red and not floor_findings
     verdict_str = "PASS" if is_pass else "FAIL"
     # CR-V2-056 (layer-1): bind the PASS to the commit it verified + tag it, so version_verified() recomputes
@@ -13255,7 +13300,7 @@ async def _run_verifikacia_round(
         # nikoho. Ide teda do vlákna. Nemá `db` — je to čistá práca so súbormi a sieťou, takže sa
         # sedenie s databázou do cudzieho vlákna nedostane.
         await run_blocking(_push_release_artifacts, claude_agent.PROJECTS_ROOT / slug, version_label, cap=GIT_PUSH_CAP)
-    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90, DEV-156) — the Auditor passed the version.
+    # A FAIL only the cockpit's own measurements made (DEV-65, DEV-90, DEV-156, DEV-395) — the Auditor passed it.
     floor_only = llm_pass and not runtime_floor_red and bool(floor_findings)
     floor_sentences = [
         sentence
@@ -13263,6 +13308,7 @@ async def _run_verifikacia_round(
             (language_finding, "kód, ktorý dostane zákazník, má slovenský text — treba ho preložiť do angličtiny"),
             (guide_finding, "chýba úplný návod na skúšku v UAT — treba ho doplniť"),
             (dead_code_finding, "pridala kód, ktorý nikto nepoužíva — treba ho odstrániť"),
+            (languages_finding, "nehovorí všetkými jazykmi projektu — treba doplniť preklady"),
         )
         if finding is not None
     ]
@@ -13272,7 +13318,7 @@ async def _run_verifikacia_round(
         after_seq=before_turn,
         content=(f"Verzia funguje, ale {' a '.join(floor_sentences)}. " if floor_only else "")
         + (review.summary or f"Verifikácia {verdict_str}.")
-        + "".join(f" {note}" for note in dead_code_notes),
+        + "".join(f" {note}" for note in [*dead_code_notes, *languages_notes]),
         payload={
             "verdict": verdict_str,
             "findings": (
@@ -13304,6 +13350,7 @@ async def _run_verifikacia_round(
                             (language_finding, "source_language"),
                             (guide_finding, "uat_guide"),
                             (dead_code_finding, "dead_code"),
+                            (languages_finding, "app_languages"),
                         )
                         if finding is not None
                     )

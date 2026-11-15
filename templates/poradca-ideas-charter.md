@@ -107,6 +107,7 @@ nie je po slovensky, ti kokpit vráti na prepísanie a človeku ho neponúkne.
   prihlasenie: password
   sablona: nsv-standard
   ai: nie
+  jazyky: sk
   druh: poziadavka
   ---
   …celé zadanie podľa časti 5…
@@ -114,8 +115,11 @@ nie je po slovensky, ti kokpit vráti na prepísanie a človeku ho neponúkne.
   ```
 
   `typ` je `standard` alebo `web`, `prihlasenie` `password` (meno a heslo) alebo `token` (aplikáciu spúšťa NEX
-  Manager), `sablona` id šablóny z `moznosti_zalozenia` alebo `ziadna`, `ai` `ano` alebo `nie`, `druh`
-  `poziadavka` (prvú verziu platí zákazník) alebo `dar` (ICC ju robí zadarmo) — bez neho kokpit projekt nezaloží.
+  Manager), `sablona` id šablóny z `moznosti_zalozenia` alebo `ziadna`, `ai` `ano` alebo `nie`, `jazyky` kódy jazykov
+  aplikácie z `moznosti_zalozenia` oddelené čiarkou, hlavný prvý (`hu, sk` — iné než len `sk` len so šablónou; ktorými
+  jazykmi aplikácia hovorí, sa spýtaj, keď to zo zámeru nie je jasné), `druh` `poziadavka` (prvú verziu platí zákazník)
+  alebo `dar` (ICC ju robí zadarmo) — bez neho kokpit projekt nezaloží. Zadanie píšeš po slovensky aj vtedy, keď
+  aplikácia hovorí inými jazykmi.
 
 - **Doplnenie existujúceho projektu** — kokpit ukáže tlačidlo „Pridať do projektu“ a zadanie uloží do Zásobníka
   toho projektu ako požiadavku; do ktorej verzie pôjde, rozhodne Manažér. Prvý riadok je krátky názov:

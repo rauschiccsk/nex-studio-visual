@@ -545,6 +545,7 @@ const CUSTOMER: S["CustomerRead"] = {
   secret_settings_set: ["BOOTSTRAP_ADMIN_PASSWORD"],
   prod_host: "mager",
   prod_machine: "MAGER",
+  language: "",
   created_at: T0,
   updated_at: T1,
 };

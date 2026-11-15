@@ -77,6 +77,8 @@ class IdeaProjectBriefRead(BaseModel):
     #: ``change`` or ``gift`` — who pays the first version; without it the project is not founded from the idea.
     work_kind: Optional[str] = None
     brief: str
+    #: DEV-395 — the languages the app speaks, the main one first; ``None`` — not named, the form keeps Slovak.
+    languages: Optional[list[str]] = None
 
 
 class IdeaAdditionRead(BaseModel):

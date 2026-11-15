@@ -51,7 +51,7 @@ from backend.db.models.poradca import (
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.services import build_db, build_sandbox, project_surfaces, system_setting, usage_ledger
+from backend.services import app_languages, build_db, build_sandbox, project_surfaces, system_setting, usage_ledger
 from backend.services import create_project_postscaffold as postscaffold
 from backend.services.claude_agent import UsageMetadata, _usage_from
 from backend.services.poradca import attachments, block_language, sandbox
@@ -318,11 +318,13 @@ TYPE_RULES_INTRO = (
 )
 
 
-def _charter_text(project_type: str, template: str | None = None) -> str:
-    """Poradca's rules — and in a project with rules of its own (Web, an app template), the rules its build agents
-    read, from the same files (DEV-171, DEV-253)."""
+def _charter_text(
+    project_type: str, template: str | None = None, languages: Sequence[str] = app_languages.DEFAULT_LANGUAGES
+) -> str:
+    """Poradca's rules — and in a project with rules of its own (Web, an app template, its languages), the rules its
+    build agents read, from the same files (DEV-171, DEV-253, DEV-395)."""
     text = _CHARTER.read_text(encoding="utf-8")
-    rules = postscaffold.project_type_rules(project_type, template)
+    rules = postscaffold.project_type_rules(project_type, template, languages)
     if not rules:
         return text
     return text.rstrip() + "\n\n---\n\n" + TYPE_RULES_INTRO + "\n\n" + rules
@@ -445,7 +447,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             if project is not None:
                 # DEV-171: the rules follow the project's type — a project switched to Web gives its conversation the
                 # Web rules at its next question (the sha differs, DEV-30).
-                charter = _charter_text(project.type, project.template)
+                charter = _charter_text(project.type, project.template, project.languages or ())
                 scope = scope_line(db, project, conversation.version_id)
                 slug, idea_id = project.slug, None
                 from backend.services.poradca.tools import build_tools

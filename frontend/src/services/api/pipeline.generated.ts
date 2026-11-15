@@ -3687,10 +3687,20 @@ export interface components {
             changelog?: components["schemas"]["ChangelogEntry"][];
             /** Current */
             current?: string | null;
+            /**
+             * Languages From
+             * @default
+             */
+            languages_from: string;
             /** Latest */
             latest?: string | null;
             /** Parts */
             parts?: components["schemas"]["AppKitPart"][];
+            /**
+             * Speaks Languages
+             * @default false
+             */
+            speaks_languages: boolean;
             /**
              * Up To Date
              * @default false
@@ -4703,6 +4713,11 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Language
+             * @description DEV-395: the language the customer's installations start in — one of the project's languages; empty = the app's main language. Omitted = unchanged.
+             */
+            language?: string | null;
+            /**
              * Name
              * @description Customer name, e.g. 'ICC s.r.o.'.
              */
@@ -4748,6 +4763,16 @@ export interface components {
             subdomain?: string | null;
         };
         /**
+         * CustomerLanguageOption
+         * @description DEV-395 — a language a customer's installations may start in.
+         */
+        CustomerLanguageOption: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+        };
+        /**
          * CustomerRead
          * @description Serialised customer row. Carries NO secret material.
          *
@@ -4778,6 +4803,12 @@ export interface components {
             integrations?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Language
+             * @description DEV-395: the installations' first language; empty = the main one.
+             * @default
+             */
+            language: string;
             /** Name */
             name: string;
             /** Notes */
@@ -4844,6 +4875,11 @@ export interface components {
          */
         CustomerSettingsContractRead: {
             /**
+             * Languages
+             * @description DEV-395: the languages the app speaks, the main one first — empty for an app that speaks Slovak alone (nothing to choose).
+             */
+            languages?: components["schemas"]["CustomerLanguageOption"][];
+            /**
              * Legacy Admin
              * @description The app takes its admin password from ADMIN_INITIAL_PASSWORD (Inicializačné heslo administrátora).
              */
@@ -4869,6 +4905,11 @@ export interface components {
             integrations?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Language
+             * @description DEV-395: the language the customer's installations start in — one of the project's languages; empty = the app's main language. Omitted = unchanged.
+             */
+            language?: string | null;
             /** Name */
             name?: string | null;
             /** Notes */
@@ -5965,6 +6006,8 @@ export interface components {
             brief: string;
             /** Description */
             description?: string | null;
+            /** Languages */
+            languages?: string[] | null;
             /** Name */
             name?: string | null;
             /** Slug */
@@ -6225,6 +6268,16 @@ export interface components {
             lines: number;
             /** Tokens */
             tokens: number;
+        };
+        /**
+         * LanguageOption
+         * @description DEV-395 — a language an app on the template can speak, as the forms offer it.
+         */
+        LanguageOption: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
         };
         /** LayoutLimitRead */
         LayoutLimitRead: {
@@ -7500,6 +7553,11 @@ export interface components {
              */
             kb_path?: string | null;
             /**
+             * Languages
+             * @description DEV-395: the languages the app speaks, the main one first; more than Slovak needs a template.
+             */
+            languages?: string[];
+            /**
              * Name
              * @description Human-readable project name, unique across the system.
              */
@@ -7560,6 +7618,8 @@ export interface components {
             branch_protection_note?: string | null;
             /** Custom Development Enabled */
             custom_development_enabled: boolean;
+            /** Default Languages */
+            default_languages?: string[];
             /** Default Template */
             default_template?: string | null;
             /** Enable Branch Protection */
@@ -7568,6 +7628,8 @@ export interface components {
             enable_cicd: boolean;
             /** Full Smoke */
             full_smoke: boolean;
+            /** Languages */
+            languages?: components["schemas"]["LanguageOption"][];
             /** Private Network */
             private_network: boolean;
             /** Templates */
@@ -7657,6 +7719,8 @@ export interface components {
             id: string;
             /** Kb Path */
             kb_path?: string | null;
+            /** Languages */
+            languages?: string[];
             /** Name */
             name: string;
             /** Owner Id */
@@ -7822,6 +7886,11 @@ export interface components {
              * @description Updated knowledge base directory path.
              */
             kb_path?: string | null;
+            /**
+             * Languages
+             * @description DEV-395: the languages the app speaks, the main one first; applies from the next build turn.
+             */
+            languages?: string[] | null;
             /**
              * Name
              * @description Updated human-readable project name.

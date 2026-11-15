@@ -21,10 +21,18 @@
  * Slug, project type and login mode are shown DISABLED with the reason rather than
  * hidden: whoever looks for them should see that they exist and why they are fixed.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Pencil } from "lucide-react";
 
-import { updateProjectApi } from "@/services/api/projects";
+import {
+  getAppKitStatusApi,
+  getProjectCreatePresetsApi,
+  updateProjectApi,
+  upgradeAppKitApi,
+  type AppKitStatus,
+} from "@/services/api/projects";
+import { AppLanguagesChoice } from "./AppLanguagesChoice";
+import type { LanguageOption } from "@/lib/appLanguages";
 import { PRIVATE_NETWORK_APPLIES, PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "./privateNetwork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -52,6 +60,24 @@ interface FormState {
   db_port: string;
   guardian_enabled: boolean;
   private_network: boolean;
+  languages: string[];
+}
+
+const SLOVAK_ONLY = ["sk"];
+
+function languagesOf(p: ProjectRead): string[] {
+  return p.languages?.length ? p.languages : SLOVAK_ONLY;
+}
+
+/** DEV-395: anything but Slovak alone — only then the kit has to know languages. */
+function isMultilingual(languages: string[]): boolean {
+  return languages.join(",") !== SLOVAK_ONLY.join(",");
+}
+
+/** „maďarčina (hlavný jazyk), slovenčina“ — as the backend says it in its sentences. */
+function describe(languages: string[], options: LanguageOption[]): string {
+  const names = languages.map((code) => options.find((o) => o.code === code)?.label ?? code);
+  return names.length > 1 ? `${names[0]} (hlavný jazyk), ${names.slice(1).join(", ")}` : (names[0] ?? "");
 }
 
 function toForm(p: ProjectRead): FormState {
@@ -63,6 +89,7 @@ function toForm(p: ProjectRead): FormState {
     db_port: p.db_port?.toString() ?? "",
     guardian_enabled: p.guardian_enabled,
     private_network: p.private_network,
+    languages: languagesOf(p),
   };
 }
 
@@ -88,6 +115,7 @@ function diff(project: ProjectRead, form: FormState): ProjectUpdate {
   if (form.guardian_enabled !== project.guardian_enabled)
     out.guardian_enabled = form.guardian_enabled;
   if (form.private_network !== project.private_network) out.private_network = form.private_network;
+  if (form.languages.join(",") !== languagesOf(project).join(",")) out.languages = form.languages;
   return out;
 }
 
@@ -97,9 +125,61 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  // DEV-395: the languages an app on the template speaks — the options the cockpit offers, and whether the project's
+  // nex-app-kit knows languages (an older one is upgraded here, before the languages are saved).
+  const [languageOptions, setLanguageOptions] = useState<LanguageOption[]>([]);
+  const [kit, setKit] = useState<AppKitStatus | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+  const onTemplate = Boolean(project.template);
+  const wantsLanguages = editing && onTemplate && isMultilingual(form.languages);
+
+  useEffect(() => {
+    if (!onTemplate) return;
+    let cancelled = false;
+    getProjectCreatePresetsApi()
+      .then((p) => {
+        if (!cancelled) setLanguageOptions(p.languages ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [onTemplate]);
+
+  useEffect(() => {
+    if (!wantsLanguages || kit) return;
+    let cancelled = false;
+    getAppKitStatusApi(project.id)
+      .then((status) => {
+        if (!cancelled) setKit(status);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(humanizeApiError(err, "Verziu šablóny aplikácie sa nepodarilo zistiť"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wantsLanguages, kit, project.id]);
+
+  const kitTooOld = wantsLanguages && kit !== null && !kit.speaks_languages;
+
+  const upgradeKit = async () => {
+    if (!kit?.latest) return;
+    setUpgrading(true);
+    setError(null);
+    try {
+      await upgradeAppKitApi(project.id, kit.latest);
+      setKit(await getAppKitStatusApi(project.id));
+    } catch (err) {
+      setError(humanizeApiError(err, "Šablónu aplikácie sa nepodarilo povýšiť"));
+    } finally {
+      setUpgrading(false);
+    }
+  };
 
   const startEdit = () => {
     setForm(toForm(project));
+    setKit(null);
     setError(null);
     setWarnings([]);
     setEditing(true);
@@ -283,6 +363,52 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
           </label>
         </div>
 
+        {onTemplate && languageOptions.length > 0 && (
+          <div className="col-span-2" data-testid="project-languages">
+            <div className={LABEL_CLS}>Jazyky aplikácie</div>
+            {editing ? (
+              <AppLanguagesChoice
+                options={languageOptions}
+                value={form.languages}
+                onChange={(languages) => setForm({ ...form, languages })}
+                disabled={saving || upgrading}
+              />
+            ) : (
+              <p className="text-sm text-[var(--color-text-primary)]">
+                {describe(languagesOf(project), languageOptions)}
+              </p>
+            )}
+            {editing && form.languages.join(",") !== languagesOf(project).join(",") && (
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Zmena platí od najbližšieho ťahu agenta — preklady doplní agent v najbližšej verzii a kokpit ich pri
+                Overení skontroluje.
+              </p>
+            )}
+            {kitTooOld && kit && (
+              <div
+                data-testid="kit-too-old"
+                className="mt-2 rounded-lg border border-[var(--color-status-warning)]/50 bg-[var(--color-status-warning)]/10 p-3 text-xs text-[var(--color-text-secondary)]"
+              >
+                <p>
+                  Jazyky pozná šablóna aplikácie od verzie nex-app-kit {kit.languages_from}, projekt stojí na{" "}
+                  {kit.current ?? "verzii, ktorá sa nedá prečítať"}. Najprv šablónu povýš, potom jazyky ulož.
+                </p>
+                {kit.latest && (
+                  <button
+                    type="button"
+                    onClick={() => void upgradeKit()}
+                    disabled={upgrading || saving}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 font-medium text-[var(--color-text-primary)] disabled:opacity-50"
+                  >
+                    {upgrading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Povýšiť šablónu na {kit.latest}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Disabled, never hidden — whoever looks for these should see that they exist and
             why they cannot change. Paths on disk and the repository hang off the slug; the
             structure generated at creation hangs off type and login mode. */}
@@ -320,7 +446,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving || emptiedPorts.length > 0}
+            disabled={saving || upgrading || emptiedPorts.length > 0 || kitTooOld}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-4 py-2 transition-colors disabled:opacity-50"
           >
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

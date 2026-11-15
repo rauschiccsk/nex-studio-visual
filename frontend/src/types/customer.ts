@@ -22,6 +22,8 @@ export interface CustomerRead {
   prod_host: string;
   /** DEV-274: that machine as the screen names it (ANDROS, MAGER). */
   prod_machine: string;
+  /** DEV-395: the language the customer's installations start in — "" = the app's main language. */
+  language?: string;
   has_secret: boolean;
   /** DEV-72: values of the settings the app marks `@customer`. */
   settings: Record<string, string>;
@@ -48,6 +50,8 @@ export interface CustomerSettingsContract {
   problems: string[];
   /** The app takes its `admin` password from the customer's „Inicializačné heslo administrátora“ (ADMIN_INITIAL_PASSWORD). */
   legacy_admin: boolean;
+  /** DEV-395: the languages the app speaks, the main one first — empty when there is nothing to choose. */
+  languages?: { code: string; label: string }[];
 }
 
 export interface CustomerCreate {
@@ -58,6 +62,8 @@ export interface CustomerCreate {
   notes?: string | null;
   /** DEV-274: the machine PROD runs on — "" = this machine. */
   prod_host?: string | null;
+  /** DEV-395: the installations' starting language — "" = the app's main language. */
+  language?: string | null;
   /** Write-only — handed to the credentials store; never returned. */
   secret?: string | null;
   settings?: Record<string, string> | null;
@@ -73,6 +79,8 @@ export interface CustomerUpdate {
   notes?: string | null;
   /** DEV-274: the machine PROD runs on — "" = this machine; omitted = unchanged. */
   prod_host?: string | null;
+  /** DEV-395: the installations' starting language — "" = the app's main language; omitted = unchanged. */
+  language?: string | null;
   /** Write-only — rotates the stored secret; never returned. */
   secret?: string | null;
   /** Replaces the stored settings; an empty value removes one. */

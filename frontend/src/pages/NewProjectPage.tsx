@@ -16,6 +16,8 @@ import type { UserRead } from "@/types/user";
 import { isAdminAccount } from "@/services/permissions";
 import { personName } from "@/utils/person";
 import { PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "@/components/project/privateNetwork";
+import { AppLanguagesChoice } from "@/components/project/AppLanguagesChoice";
+import type { LanguageOption } from "@/lib/appLanguages";
 import { ANSWER_PARAM, IDEA_PARAM, type FromIdea } from "@/lib/ideas";
 import { getIdeaApi, ideaFoundedApi } from "@/services/api/ideas";
 import type { IdeaProjectBrief } from "@/types/poradca";
@@ -113,6 +115,10 @@ export default function NewProjectPage() {
   const [template, setTemplate] = useState("");
   const [ai, setAi] = useState(false);
   const chosenTemplate = type === "standard" ? template : "";
+  // DEV-395: the languages the app speaks — offered with a template (its texts live in the catalogs of languages).
+  const [languageOptions, setLanguageOptions] = useState<LanguageOption[]>([]);
+  const [languages, setLanguages] = useState<string[]>(["sk"]);
+  const ideaLanguages = useRef<string[] | null>(null);
   function touchOption<T>(set: (v: T) => void) {
     return (v: T) => {
       optionsTouched.current = true;
@@ -171,6 +177,10 @@ export default function NewProjectPage() {
           ideaTemplate.current = brief.template;
           setTemplate(brief.template);
         }
+        if (brief.languages?.length) {
+          ideaLanguages.current = brief.languages;
+          setLanguages(brief.languages);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setIdeaNote(humanizeApiError(e, "Nápad sa nepodarilo načítať").message + " Formulár vyplň sám.");
@@ -217,6 +227,8 @@ export default function NewProjectPage() {
         // The template is offered only once listed, so it cannot have been chosen before — always preset.
         setTemplates(p.templates ?? []);
         setTemplate(ideaTemplate.current ?? p.default_template ?? "");
+        setLanguageOptions(p.languages ?? []);
+        setLanguages(ideaLanguages.current ?? p.default_languages ?? ["sk"]);
         if (optionsTouched.current) return;
         setEnableCicd(p.enable_cicd);
         setFullSmoke(p.full_smoke);
@@ -335,6 +347,7 @@ export default function NewProjectPage() {
         private_network: privateNetwork,
         template: chosenTemplate || null,
         ai: chosenTemplate ? ai : false,
+        languages: chosenTemplate ? languages : ["sk"],
       });
       // DEV-318: the idea learns where it ended — a refusal or a ticket that failed is shown on the project's page.
       const idea = fromIdea && ideaId && answerId ? await ideaOutcome(ideaId, answerId, project.id, fromIdea.title) : undefined;
@@ -526,6 +539,12 @@ export default function NewProjectPage() {
                   <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
                     Šablóna je zatiaľ len pre štandardný projekt — Web projekt sa zakladá bez nej.
                   </p>
+                )}
+                {chosenTemplate && languageOptions.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-[var(--color-text-secondary)] mb-2">Jazyky aplikácie</div>
+                    <AppLanguagesChoice options={languageOptions} value={languages} onChange={setLanguages} />
+                  </div>
                 )}
                 {chosenTemplate && (
                   <label className="mt-3 flex items-start gap-3 text-sm text-[var(--color-text-primary)] cursor-pointer">

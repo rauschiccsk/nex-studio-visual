@@ -106,6 +106,24 @@ class TemplateOption(BaseModel):
     description: str
 
 
+class LanguageOption(BaseModel):
+    """DEV-395 — a language an app on the template can speak, as the forms offer it."""
+
+    code: str
+    label: str
+
+
+def _known_languages(value: Optional[list[str]]) -> Optional[list[str]]:
+    from backend.services import app_languages
+
+    if value is None:
+        return value
+    reason = app_languages.refusal(value)
+    if reason:
+        raise ValueError(reason)
+    return value
+
+
 class ChangelogEntry(BaseModel):
     """One ``## vX.Y.Z`` section of a kit's CHANGELOG — the prompt's „Čo prinesie“."""
 
@@ -130,6 +148,9 @@ class AppKitStatus(BaseModel):
     up_to_date: bool = False
     changelog: list[ChangelogEntry] = Field(default_factory=list)
     parts: list[AppKitPart] = Field(default_factory=list)
+    #: DEV-395: whether the project's kit knows languages, and from which release it does.
+    speaks_languages: bool = False
+    languages_from: str = ""
 
 
 class AppTemplateConversionOffer(BaseModel):
@@ -182,6 +203,9 @@ class ProjectCreatePresets(BaseModel):
     #: DEV-253: the app templates a project can be founded on, the one offered first.
     templates: list[TemplateOption] = Field(default_factory=list)
     default_template: Optional[str] = None
+    #: DEV-395: the languages an app on a template can speak, and what a project speaks unless the Manažér chooses.
+    languages: list[LanguageOption] = Field(default_factory=list)
+    default_languages: list[str] = Field(default_factory=lambda: ["sk"])
 
 
 class ProjectCreate(BaseModel):
@@ -281,6 +305,10 @@ class ProjectCreate(BaseModel):
             "(Tailscale) — named in *.int.isnex.eu, with no public name. Default False (public, as before)."
         ),
     )
+    languages: list[str] = Field(
+        default_factory=lambda: ["sk"],
+        description="DEV-395: the languages the app speaks, the main one first; more than Slovak needs a template.",
+    )
     created_by: Optional[UUID] = Field(
         default=None,
         description="User who created the project. If omitted, resolved from the active session.",
@@ -331,7 +359,17 @@ class ProjectCreate(BaseModel):
             raise ValueError("Šablóna aplikácie je zatiaľ len pre bežný projekt — Web projekt sa zakladá bez nej.")
         if self.ai and self.template is None:
             raise ValueError("AI agentov v šablóne si vyber spolu so šablónou aplikácie.")
+        from backend.services import app_languages
+
+        reason = app_languages.needs_template_refusal(self.languages, self.template)
+        if reason:
+            raise ValueError(reason)
         return self
+
+    @field_validator("languages")
+    @classmethod
+    def _languages_must_be_known(cls, value: list[str]) -> list[str]:
+        return _known_languages(value)
 
     @field_validator("slug")
     @classmethod
@@ -412,6 +450,15 @@ class ProjectUpdate(BaseModel):
         default=None,
         description="DEV-42: reachable only from the private network (Tailscale); applies from the next deploy.",
     )
+    languages: Optional[list[str]] = Field(
+        default=None,
+        description="DEV-395: the languages the app speaks, the main one first; applies from the next build turn.",
+    )
+
+    @field_validator("languages")
+    @classmethod
+    def _languages_must_be_known(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return _known_languages(value)
 
 
 class ProjectDeleted(BaseModel):
@@ -459,6 +506,8 @@ class ProjectRead(BaseModel):
     guardian_enabled: bool
     custom_development_enabled: bool
     private_network: bool = False
+    #: DEV-395: the languages the app speaks, the main one first.
+    languages: list[str] = Field(default_factory=lambda: ["sk"])
     created_by: UUID
     owner_id: Optional[UUID] = None
     created_at: datetime

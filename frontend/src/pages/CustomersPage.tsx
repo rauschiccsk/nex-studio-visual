@@ -79,6 +79,9 @@ export default function CustomersPage() {
   // DEV-274: where the customer's PROD runs — "" = this machine; the choices come from the cockpit's list.
   const [prodHost, setProdHost] = useState("");
   const [machines, setMachines] = useState<ProdMachine[]>([]);
+  // DEV-395: the language the customer's installations start in — "" = the app's main language; offered only for an
+  // app that speaks more than Slovak (the project's languages come with what the app asks of each customer).
+  const [language, setLanguage] = useState("");
   const [secret, setSecret] = useState("");
   // DEV-72: what the app asks of each customer (its `.env.example` markers) and what the form holds for them.
   // `null` = not known yet. DEV-164: a request that failed is said (`contractError`) — 22.10.2026 a 500 here showed a
@@ -149,6 +152,7 @@ export default function CustomersPage() {
   // it would be stored and never used, so it is not offered. Not loaded yet → offered, as before DEV-72; failed to
   // load → not offered: the form says it does not know what the app asks (DEV-164).
   const offersLegacySecret = contractError === null && (contract === null || contract.legacy_admin);
+  const appLanguages = contract?.languages ?? [];
 
   function resetForm() {
     setName("");
@@ -157,6 +161,7 @@ export default function CustomersPage() {
     setIntegrations("");
     setNotes("");
     setProdHost("");
+    setLanguage("");
     setSecret("");
     setSettingValues({});
     setSecretValues({});
@@ -177,6 +182,7 @@ export default function CustomersPage() {
     setIntegrations(c.integrations ? JSON.stringify(c.integrations, null, 2) : "");
     setNotes(c.notes ?? "");
     setProdHost(c.prod_host ?? "");
+    setLanguage(c.language ?? "");
     setSecret("");
     setSettingValues({ ...(c.settings ?? {}) });
     setSecretValues({});
@@ -219,6 +225,8 @@ export default function CustomersPage() {
       integrations: integrationsParsed,
       notes: notes.trim() || null,
       prod_host: prodHost,
+      // DEV-395: sent only where the app speaks more than Slovak — elsewhere there is nothing to choose.
+      ...(appLanguages.length > 0 ? { language } : {}),
       // Write-only: a blank secret sends null, which the PATCH treats as "leave the stored secret unchanged"
       // (the backend skips null fields) — so editing never wipes an existing secret; a typed value rotates it.
       secret: secret ? secret : null,
@@ -399,6 +407,27 @@ export default function CustomersPage() {
                 <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
                   Kam kokpit nasadí PROD tohto zákazníka. Zmena nič nepresunie — inštalácia na pôvodnom stroji ostáva,
                   kým ju niekto neodstráni.
+                </span>
+              </label>
+            )}
+            {appLanguages.length > 0 && (
+              <label className="block text-xs">
+                <span className="text-[var(--color-text-secondary)]">Jazyk inštalácie</span>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                >
+                  <option value="">Hlavný jazyk aplikácie ({appLanguages[0]?.label})</option>
+                  {appLanguages.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  Jazyk, ktorým aplikácia u tohto zákazníka hovorí, kým si človek nevyberie svoj. Platí od najbližšieho
+                  nasadenia.
                 </span>
               </label>
             )}

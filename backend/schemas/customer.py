@@ -100,6 +100,11 @@ class CustomerCreate(BaseModel):
         description="DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of "
         "machines (settings.prod_machines); empty = this machine. Omitted = unchanged.",
     )
+    language: Optional[str] = Field(
+        default=None,
+        description="DEV-395: the language the customer's installations start in — one of the project's languages; "
+        "empty = the app's main language. Omitted = unchanged.",
+    )
     secret: Optional[str] = Field(
         default=None,
         description=(
@@ -155,6 +160,11 @@ class CustomerUpdate(BaseModel):
         default=None,
         description="DEV-274: the machine the customer's PROD runs on — an ssh name from the cockpit's list of "
         "machines (settings.prod_machines); empty = this machine. Omitted = unchanged.",
+    )
+    language: Optional[str] = Field(
+        default=None,
+        description="DEV-395: the language the customer's installations start in — one of the project's languages; "
+        "empty = the app's main language. Omitted = unchanged.",
     )
     secret: Optional[str] = Field(
         default=None,
@@ -223,6 +233,7 @@ class CustomerRead(BaseModel):
         default="", description="DEV-274: the machine the customer's PROD runs on; empty = this one."
     )
     prod_machine: str = Field(default="", description="DEV-274: that machine as the screen names it (ANDROS, MAGER).")
+    language: str = Field(default="", description="DEV-395: the installations' first language; empty = the main one.")
     has_secret: bool = Field(default=False, description="True iff a per-customer secret is recorded in the store.")
     settings: dict[str, str] = Field(default_factory=dict, description="DEV-72: the @customer values.")
     secret_settings_set: list[str] = Field(
@@ -242,6 +253,13 @@ class CustomerSettingRead(BaseModel):
     label: str
 
 
+class CustomerLanguageOption(BaseModel):
+    """DEV-395 — a language a customer's installations may start in."""
+
+    code: str
+    label: str
+
+
 class CustomerSettingsContractRead(BaseModel):
     """What a project asks of each customer, read from its ``.env.example`` (DEV-72)."""
 
@@ -249,6 +267,11 @@ class CustomerSettingsContractRead(BaseModel):
     problems: list[str] = Field(default_factory=list, description="Markers that mean nothing (misspelt, misplaced).")
     legacy_admin: bool = Field(
         description="The app takes its admin password from ADMIN_INITIAL_PASSWORD (Inicializačné heslo administrátora)."
+    )
+    languages: list[CustomerLanguageOption] = Field(
+        default_factory=list,
+        description="DEV-395: the languages the app speaks, the main one first — empty for an app that speaks Slovak "
+        "alone (nothing to choose).",
     )
 
 

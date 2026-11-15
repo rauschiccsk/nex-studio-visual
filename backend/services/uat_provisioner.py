@@ -64,7 +64,14 @@ import httpx
 import jinja2
 import yaml
 
-from backend.services import env_contract, launch_pairing, prod_machines, project_surfaces, remote_instance
+from backend.services import (
+    app_languages,
+    env_contract,
+    launch_pairing,
+    prod_machines,
+    project_surfaces,
+    remote_instance,
+)
 
 # Repo root = .../nex-studio (this file is backend/services/uat_provisioner.py).
 NEX_STUDIO_ROOT = Path(__file__).resolve().parents[2]
@@ -3548,23 +3555,33 @@ def _yaml_block(data: Any) -> str:
 #: the installed app), so nobody has to guess which of many alike windows is whose.
 INSTALLATION_CUSTOMER_KEY = "NEX_CUSTOMER_NAME"
 INSTALLATION_ENVIRONMENT_KEY = "NEX_ENVIRONMENT"
+#: DEV-395 — nex-app-kit ``installation.LANGUAGE_KEY``, kept where the languages are.
+INSTALLATION_LANGUAGE_KEY = app_languages.INSTALLATION_LANGUAGE_KEY
 
 
 def with_installation_identity(
-    compose: dict[str, Any], backend: Optional[str], *, customer_name: Optional[str], environment: str
+    compose: dict[str, Any],
+    backend: Optional[str],
+    *,
+    customer_name: Optional[str],
+    environment: str,
+    language: Optional[str] = None,
 ) -> dict[str, Any]:
     """The compose with the backend service told whom it serves (``customer_name``) and where (``environment``).
 
     Set by the cockpit on every render — a renamed customer is renamed in its installation on the next deploy. Written
     into the service's own ``environment`` (a mapping or a list, as the project has it), so no app has to declare it;
     without a backend service nothing is told. ``customer_name`` is left out when the deploy has no customer (the
-    project-level UAT)."""
+    project-level UAT). DEV-395: ``language`` — the language the installation starts in (``NEX_LANGUAGE``) — is told
+    only for an app that speaks more than Slovak; a Slovak app's installation stays as it was."""
     services = compose.get("services") or {}
     if not backend or backend not in services:
         return compose
     told = {INSTALLATION_ENVIRONMENT_KEY: environment}
     if customer_name and customer_name.strip():
         told[INSTALLATION_CUSTOMER_KEY] = " ".join(customer_name.split())
+    if language:
+        told[INSTALLATION_LANGUAGE_KEY] = language
     service = dict(services[backend])
     current = service.get("environment")
     if isinstance(current, list):
@@ -3782,6 +3799,7 @@ def provision_uat(
     private: bool = False,
     customer_values: Optional[dict[str, str]] = None,
     customer_name: Optional[str] = None,
+    installation_language: Optional[str] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -4237,7 +4255,11 @@ def provision_uat(
             )
         # DEV-377: the installation says whom it serves and where — on every deploy, also a redeploy.
         povysene = with_installation_identity(
-            povysene, roles["backend"], customer_name=customer_name, environment=environment
+            povysene,
+            roles["backend"],
+            customer_name=customer_name,
+            environment=environment,
+            language=installation_language,
         )
         compose_text = render_uat_compose(povysene, routing)
         pred_nasadenim = _parse_env_file(env_path)
@@ -4285,7 +4307,11 @@ def provision_uat(
         instalacia = povysene
     else:
         compose = with_installation_identity(
-            compose, roles["backend"], customer_name=customer_name, environment=environment
+            compose,
+            roles["backend"],
+            customer_name=customer_name,
+            environment=environment,
+            language=installation_language,
         )
         compose_text = render_uat_compose(compose, routing)
         instalacia = compose

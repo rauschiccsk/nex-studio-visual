@@ -57,6 +57,9 @@ class Customer(Base, UUIDMixin, TimestampMixin):
     # beží kokpit. Inak meno cieľa, ktoré Docker otvorí ako ``ssh://<meno>`` — obraz sa postaví
     # NA CIELI, takže register obrazov ani ich prenos netreba. Testovacia inštalácia ide vždy sem.
     prod_host = Column(String(255), nullable=True)
+    # DEV-395: the language the customer's installations start in (``NEX_LANGUAGE``) — one of the project's languages;
+    # NULL = the app's main language. Each person may still choose their own.
+    language = Column(String(8), nullable=True)
     # Per-customer external systems (free-form structured config). Never holds
     # secret material — secrets go to the credentials store via credential_id.
     integrations = Column(JSONB, nullable=True)

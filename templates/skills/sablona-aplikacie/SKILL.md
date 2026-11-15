@@ -91,6 +91,45 @@ Kokpit ju spustí pred Overením a každý problém povie jednou vetou — oprav
    `sessions`, `system-settings`, `user-layout`, `users` — žiadny vlastný dekorátor cesty ani `prefix` v `APIRouter`
    či `include_router` nezačína pod `/api/v1` takým úsekom.
 
+## Jazyky (aplikácia hovorí inak než len po slovensky)
+Platí, keď pravidlá agenta majú časť „Aplikácia hovorí jazykmi projektu“ — jazyky určil Manažér v kokpite. Rám šablóny
+ich pozná od nex-app-kit 0.14.1 (staršiu šablónu povýši Manažér v nastaveniach projektu, ty nie).
+1. Manifest `frontend/app.manifest.json`: `"languages": ["hu", "sk"]` — presne jazyky projektu, hlavný prvý.
+2. Katalóg pre každý jazyk vo `frontend/src/locales/`. Hlavný (napr. `hu.ts`) je zdroj kľúčov:
+   ```ts
+   import type { Message } from "nex-shared";
+
+   export const hu = {
+     "app.nav.areas": "Területek",
+     "app.areas.count": { one: "{count} terület", other: "{count} terület" },
+   } satisfies Record<string, Message>;
+
+   export type AppMessageKey = keyof typeof hu;
+   ```
+   Každý ďalší (napr. `sk.ts`) má tie isté kľúče — chýbajúci preklad sa ani nezostaví:
+   ```ts
+   import type { Message } from "nex-shared";
+
+   import type { AppMessageKey } from "./hu";
+
+   export const sk: Record<AppMessageKey, Message> = {
+     "app.nav.areas": "Oblasti",
+     "app.areas.count": { one: "{count} oblasť", few: "{count} oblasti", other: "{count} oblastí" },
+   };
+   ```
+3. `frontend/src/locales/index.ts` spojí všetky jazyky: `export const messages: AppMessages = { hu, sk };`
+   a `frontend/src/app.ts` ich dá rámu: `defineApp(data, { messages })`.
+4. Obrazovka: `const t = useKitT();` z `nex-app-kit`, potom `t("app.areas.title")`, `t("app.areas.count", { count })`
+   — tvar množného čísla vyberie hodnota `count`; `label` položky v manifeste je kľúč (`"label": "app.nav.areas"`).
+   Dátum a čas `formatDateTime` z `nex-shared`.
+5. Stráž `frontend/src/test/texts.test.ts` (zo šablóny) a `npm run check:texts` vypíšu každý text napísaný v kóde
+   — súbor, riadok a text. Projekt bez nich (starší ako kostra 0.14.1) ich dostane v tvare z kostry šablóny.
+6. Projekt, ktorý jazyky práve dostal: kroky 1–4 a každý text obrazoviek presunieš z kódu do katalógov — kľúč
+   `app.<obrazovka>.<význam>`, preklady do všetkých katalógov naraz.
+
+Kokpit pri Overení zmeria: jazyky manifestu = jazyky projektu, katalóg pre každý jazyk, žiadnemu katalógu nechýba kľúč
+hlavného a nemá kľúč navyše, žiadny text v kóde, nex-app-kit aspoň 0.14.1. Každý nález povie vetou — oprav všetky naraz.
+
 ## Komu inštalácia slúži
 Rám (nex-app-kit od v0.13.0) sám ukáže meno zákazníka a prostredie, ktoré kokpit zapíše pri nasadení
 (`NEX_CUSTOMER_NAME`, `NEX_ENVIRONMENT`): názov okna, ľavý panel, kartu prihlásenia a pás UAT. Do aplikácie meno

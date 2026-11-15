@@ -125,3 +125,19 @@ async def test_poradca_of_a_project_put_on_a_template_reads_its_rules_at_the_nex
 
     assert ADDENDUM.rstrip() not in calls[0].charter_text
     assert ADDENDUM.rstrip() in calls[1].prompt
+
+
+def test_a_new_session_reads_the_project_s_languages(tmp_path, monkeypatch):
+    """DEV-395 — the languages the Manažér set reach both build agents at their next session, filled in."""
+    from backend.services import app_languages
+
+    root = _provision(tmp_path, "nsv-standard")
+    monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
+    monkeypatch.setattr(claude_agent, "_project_type", lambda slug: "standard")
+    monkeypatch.setattr(app_template, "template_of_slug", lambda slug: "nsv-standard")
+    monkeypatch.setattr(app_languages, "of_slug", lambda slug: ("hu", "sk") if slug == "projekt" else ("sk",))
+
+    claude_agent._refresh_rules("projekt")
+
+    for role in cps._V2_AGENTS:
+        assert "Aplikácia hovorí: **maďarčina (hlavný jazyk), slovenčina**." in _charter(root, role), role

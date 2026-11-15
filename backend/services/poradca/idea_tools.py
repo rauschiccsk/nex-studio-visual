@@ -117,6 +117,9 @@ class IdeaTools:
                 "- prihlásenie: password (meno a heslo); token (aplikáciu spúšťa NEX Manager)",
                 f"- šablóny aplikácií: {templates}; predvolená: {presets.default_template or 'žiadna'} — šablóna "
                 "len pre typ standard",
+                "- jazyky aplikácie (len so šablónou; hlavný prvý, každý človek si potom vyberie svoj): "
+                + "; ".join(f"{lang.code} — {lang.label}" for lang in presets.languages)
+                + f"; predvolené: {', '.join(presets.default_languages)}",
                 "- porty pridelí kokpit z evidencie stroja; zákazníka zapíše človek po založení na obrazovke Zákazníci",
             ]
         )

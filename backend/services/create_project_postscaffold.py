@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,7 +22,7 @@ import yaml
 
 from backend.core.agent_env import project_env
 from backend.core.local_time import local_time
-from backend.services import build_provenance, ci_runner, git_push, project_files, project_surfaces
+from backend.services import app_languages, build_provenance, ci_runner, git_push, project_files, project_surfaces
 
 logger = logging.getLogger(__name__)
 
@@ -88,29 +88,55 @@ _WEB_CLAUDE_MD_ADDENDUM = "web-project-claude-md.md"
 #: DEV-253: what the agents of a project on an app template read on top — the frame is the template's, the app adds
 #: only its own screens, settings and tables. A project without a template keeps its files byte-for-byte.
 _APP_TEMPLATE_CHARTER_ADDENDUM = "app-template-charter.md"
+#: DEV-395: what the agents of a project whose app speaks anything but Slovak alone read on top — its languages filled
+#: in. A Slovak project's files stay byte-for-byte as they were.
+_APP_LANGUAGES_CHARTER_ADDENDUM = "app-languages-charter.md"
 
 
 def _is_web(project_type: str) -> bool:
     return project_surfaces.WEB_DIRECTORY in project_surfaces.frontend_directories(project_type)
 
 
-def project_type_rules(project_type: str, template: str | None = None) -> str:
+def project_type_rules(
+    project_type: str, template: str | None = None, languages: Sequence[str] = app_languages.DEFAULT_LANGUAGES
+) -> str:
     """The rules a project adds to the charters — the Web addendum in a Web project (DEV-165), the app template's in a
-    project founded on one (DEV-253), else nothing. The build agents and Poradca (DEV-171) read them from here, so
-    they never judge by different rules."""
+    project founded on one (DEV-253) and its languages' in one whose app speaks anything but Slovak alone (DEV-395),
+    else nothing. The build agents and Poradca (DEV-171) read them from here, so they never judge by different rules."""
     addenda = ([_WEB_CHARTER_ADDENDUM] if _is_web(project_type) else []) + (
         [_APP_TEMPLATE_CHARTER_ADDENDUM] if template else []
     )
-    return _CHARTER_SEP.join(
-        (NEX_STUDIO_TEMPLATES / name).read_text(encoding="utf-8").rstrip() + "\n" for name in addenda
-    )
+    texts = [(NEX_STUDIO_TEMPLATES / name).read_text(encoding="utf-8").rstrip() + "\n" for name in addenda]
+    if template and app_languages.is_multilingual(languages):
+        texts.append(languages_rules(languages))
+    return _CHARTER_SEP.join(texts)
 
 
-def role_charter_text(base_text: str, role_template: Path, project_type: str, template: str | None = None) -> str:
+def languages_rules(languages: Sequence[str]) -> str:
+    """DEV-395 — the languages addendum with the project's languages filled in."""
+    text = (NEX_STUDIO_TEMPLATES / _APP_LANGUAGES_CHARTER_ADDENDUM).read_text(encoding="utf-8").rstrip() + "\n"
+    filled = {
+        "{{LANGUAGES}}": app_languages.describe(languages),
+        "{{MAIN}}": languages[0],
+        "{{CODES}}": json.dumps(list(languages)),
+        "{{MIN_KIT}}": app_languages.MIN_KIT_VERSION,
+    }
+    for token, value in filled.items():
+        text = text.replace(token, value)
+    return text
+
+
+def role_charter_text(
+    base_text: str,
+    role_template: Path,
+    project_type: str,
+    template: str | None = None,
+    languages: Sequence[str] = app_languages.DEFAULT_LANGUAGES,
+) -> str:
     """A role's charter as the project gets it: the shared base, the role's template and the project's addenda —
-    Web (DEV-165), app template (DEV-253)."""
+    Web (DEV-165), app template (DEV-253), languages (DEV-395)."""
     text = base_text + _CHARTER_SEP + role_template.read_text(encoding="utf-8")
-    rules = project_type_rules(project_type, template)
+    rules = project_type_rules(project_type, template, languages)
     if rules:
         text = text.rstrip() + _CHARTER_SEP + rules
     return text
@@ -229,7 +255,12 @@ def role_settings_text(settings_tpl: Path, project_root: Path) -> str:
 
 
 def refresh_v2_agent_charters(
-    project_root: Path, slug: str, *, project_type: str = project_surfaces.STANDARD, template: str | None = None
+    project_root: Path,
+    slug: str,
+    *,
+    project_type: str = project_surfaces.STANDARD,
+    template: str | None = None,
+    languages: Sequence[str] = app_languages.DEFAULT_LANGUAGES,
 ) -> int:
     """Prepíš rolové charty zo šablóny NEX Studia. Vracia počet obnovených rolí (ICCINT-51).
 
@@ -253,6 +284,7 @@ def refresh_v2_agent_charters(
 
     DEV-165: ``project_type`` rozhoduje o dodatku Web projektu — volajúci ho berie z kokpitu (``Project.type``).
     DEV-253: ``template`` (``Project.template``) o doplnku a zručnostiach šablóny aplikácie.
+    DEV-395: ``languages`` (``Project.languages``) o doplnku jazykov aplikácie.
 
     DEV-196: pravidlá agenta nie sú v gite projektu, takže projekt znovu naklonovaný z GitHubu ich nemá — obnova
     preto založí aj chýbajúci priečinok roly a zapíše aj nastavenia roly (``settings.json``), ako pri založení.
@@ -274,7 +306,7 @@ def refresh_v2_agent_charters(
         if not charter_tpl.is_file() or not settings_tpl.is_file():
             continue
         wanted = {
-            role_dir / "CLAUDE.md": role_charter_text(base_text, charter_tpl, project_type, template),
+            role_dir / "CLAUDE.md": role_charter_text(base_text, charter_tpl, project_type, template, languages),
             role_dir / "settings.json": role_settings_text(settings_tpl, project_root),
         }
         try:
@@ -353,6 +385,7 @@ def provision_v2_agent_charters(
     adopted: bool,
     project_type: str = project_surfaces.STANDARD,
     template: str | None = None,
+    languages: Sequence[str] = app_languages.DEFAULT_LANGUAGES,
 ) -> None:
     """Write the v2 two-agent ``Pravidlá agenta`` charters into the freshly-scaffolded project and
     normalise it to v2 shape. HARD requirement (raises :class:`ProvisioningError` on failure).
@@ -408,7 +441,7 @@ def provision_v2_agent_charters(
                 _preserve_before_overwrite(role_dir / "CLAUDE.md", slug=slug)
                 _preserve_before_overwrite(role_dir / "settings.json", slug=slug)
             (role_dir / "CLAUDE.md").write_text(
-                role_charter_text(base_text, charter_tpl, project_type, template),
+                role_charter_text(base_text, charter_tpl, project_type, template, languages),
                 encoding="utf-8",
             )
             (role_dir / "settings.json").write_text(role_settings_text(settings_tpl, project_root), encoding="utf-8")

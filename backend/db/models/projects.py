@@ -91,6 +91,9 @@ class Project(Base, UUIDMixin, TimestampMixin):
     # private zone (``*.int.isnex.eu`` → ANDROS in Tailscale) and no public one. Read at every deploy, so a
     # change applies from the next deploy.
     private_network = Column(Boolean, nullable=False, server_default="false")
+    # DEV-395: the languages the app speaks, the main one first (``backend.services.app_languages``) — anything but
+    # Slovak alone needs the app template. Read at every build turn and Verifikácia, so a change applies from the next.
+    languages = Column(JSONB, nullable=False, server_default='["sk"]')
     created_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),

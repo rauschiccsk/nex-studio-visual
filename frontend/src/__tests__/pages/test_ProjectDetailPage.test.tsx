@@ -106,6 +106,9 @@ vi.mock("@/services/api/projects", () => ({
   getNexsharedStatusApi: vi.fn(() => Promise.resolve({ behind: 0 })),
   upgradeAppKitApi: vi.fn(),
   upgradeNexsharedApi: vi.fn(),
+  // DEV-395: the settings of a project on the template ask which languages its app may speak — none offered here, so
+  // the languages stay out of what these tests measure.
+  getProjectCreatePresetsApi: vi.fn(() => Promise.resolve({ languages: [], default_languages: ["sk"] })),
 }));
 vi.mock("@/services/api/users", () => ({ listUsersApi: listUsersApiMock }));
 vi.mock("@/services/api/versions", () => ({

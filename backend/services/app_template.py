@@ -20,8 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.services import app_languages, nexshared
 from backend.services import create_project_postscaffold as postscaffold
-from backend.services import nexshared
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,8 @@ class TemplateChoice:
     template: str
     #: An agent role „assistant“ in the manifest to start with — the app renames or adds roles later.
     ai: bool
+    #: DEV-395 — the languages the app speaks, the main one first; its catalogs are scaffolded for each.
+    languages: tuple[str, ...] = ("sk",)
 
 
 def template_of_slug(slug: str) -> str | None:
@@ -104,9 +106,19 @@ def initials_of(name: str) -> str:
 
 
 def scaffold_values(
-    *, name: str, slug: str, auth_mode: str, ai: bool, ports: tuple[int, int, int], version: str
+    *,
+    name: str,
+    slug: str,
+    auth_mode: str,
+    ai: bool,
+    ports: tuple[int, int, int],
+    version: str,
+    languages: tuple[str, ...] = ("sk",),
 ) -> dict:
     backend_port, frontend_port, db_port = ports
+    # DEV-395: only a multilingual app names its languages — a kit release before 0.14.1 does not know the key, and a
+    # Slovak app's scaffold stays what it was.
+    told = {"languages": list(languages)} if app_languages.is_multilingual(languages) else {}
     return {
         "app_name": name,
         "app_initials": initials_of(name),
@@ -119,6 +131,7 @@ def scaffold_values(
         "db_port": db_port,
         "kit_frontend": nexshared.git_dependency(KIT_PACKAGE, version),
         "kit_server": kit_server_dependency(version),
+        **told,
     }
 
 
@@ -177,7 +190,15 @@ def apply_template(
         logger.info("App template skipped for %s — no checkout at %s", slug, target)
         return None
     version = latest_kit_version(run)
-    values = scaffold_values(name=name, slug=slug, auth_mode=auth_mode, ai=choice.ai, ports=ports, version=version)
+    values = scaffold_values(
+        name=name,
+        slug=slug,
+        auth_mode=auth_mode,
+        ai=choice.ai,
+        ports=ports,
+        version=version,
+        languages=choice.languages,
+    )
     with tempfile.TemporaryDirectory(prefix="nex-app-kit-") as tmp:
         _render(choice.template, values, "--into", target, Path(tmp), run, fetch_kit)
     lock = run(["npm", "install", "--package-lock-only", "--no-audit", "--no-fund"], cwd=str(target / "frontend"))
@@ -332,7 +353,15 @@ def convert_project(
     run(["git", "reset", "-q", "--", *_CONVERTED_PATHS], cwd=str(target))
     pyproject_text = files["backend/pyproject.toml"].read_text(encoding="utf-8")
     version = latest_kit_version(run)
-    values = scaffold_values(name=name, slug=slug, auth_mode=auth_mode, ai=choice.ai, ports=ports, version=version)
+    values = scaffold_values(
+        name=name,
+        slug=slug,
+        auth_mode=auth_mode,
+        ai=choice.ai,
+        ports=ports,
+        version=version,
+        languages=choice.languages,
+    )
     # DEV-289 — a server whose packages another tool keeps (NEX Manager: Poetry with poetry.lock, built by „poetry
     # export“) is left as it is: a line written without its lock would break the build. The version's Príprava asks the
     # agent to add nex-app-kit with that tool (ICC_STANDARDS „ram_sablony“), and the frame check before Overenie sees

@@ -104,3 +104,56 @@ describe("Nový projekt from an idea (DEV-318)", () => {
     expect(landed.fromIdea).toEqual({ ideaId: "i1", title: "Matrika", ticket: "DEV-400", ticketUrl: "https://plane/DEV-400", problem: null });
   });
 });
+
+describe("Nový projekt from an idea — the app's languages (DEV-395)", () => {
+  it("takes the languages the Projektant named, whichever answers first, the brief or the presets", async () => {
+    ideas.getIdeaApi.mockResolvedValue({
+      id: "i1",
+      title: "Hermenia",
+      conversation: {
+        messages: [
+          {
+            id: "m1",
+            author: "poradca",
+            idea_project: { ...BRIEF, name: "Orthodox Hermenia", slug: "orthodox-hermenia", template: "nsv-standard", languages: ["hu", "sk"] },
+          },
+        ],
+      },
+    });
+    api.getProjectCreatePresetsApi.mockResolvedValue({
+      enable_cicd: true,
+      full_smoke: true,
+      enable_branch_protection: false,
+      custom_development_enabled: false,
+      private_network: false,
+      branch_protection_available: true,
+      branch_protection_note: null,
+      web_available: true,
+      web_note: null,
+      templates: [{ id: "nsv-standard", label: "NSV štandard", description: "d" }],
+      default_template: "nsv-standard",
+      languages: [
+        { code: "sk", label: "slovenčina" },
+        { code: "hu", label: "maďarčina" },
+      ],
+      default_languages: ["sk"],
+    });
+    render(
+      <MemoryRouter initialEntries={["/projects/new?napad=i1&odpoved=m1"]}>
+        <Routes>
+          <Route path="/projects/new" element={<NewProjectPage />} />
+          <Route path="*" element={<Landed />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue("Orthodox Hermenia")).toBeInTheDocument());
+    await waitFor(() => expect((screen.getByRole("combobox", { name: /Hlavný jazyk/ }) as HTMLSelectElement).value).toBe("hu"));
+    expect(screen.getByRole("checkbox", { name: "slovenčina" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /Vytvoriť projekt/ }));
+
+    await waitFor(() => expect(api.createProjectApi).toHaveBeenCalledTimes(1));
+    expect(api.createProjectApi.mock.calls[0]![0]).toMatchObject({ template: "nsv-standard", languages: ["hu", "sk"] });
+  });
+});
