@@ -61,8 +61,8 @@ async def test_poradca_finds_the_closed_ticket_it_was_about_to_remind(plane):
 
     lines = answer.splitlines()
     assert lines[0] == "Podobné tikety kokpitu (otvorené aj uzavreté), najpodobnejší prvý:"
-    assert lines[1].startswith("DEV-372 [Done] ")
-    assert any(line.startswith("DEV-380 [Todo] ") for line in lines[2:])
+    # both share all three words with the question; among equals the newer comes first (DEV-388)
+    assert [line.split(" ", 2)[:2] for line in lines[1:]] == [["DEV-380", "[Todo]"], ["DEV-372", "[Done]"]]
     assert not any("DEV-381" in line for line in lines), "a ticket on another matter is no match"
 
 

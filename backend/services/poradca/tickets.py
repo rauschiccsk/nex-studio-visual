@@ -178,7 +178,7 @@ def similar_tickets(
     if module is None or not wanted:
         return []
     states = plane.state_names()
-    found: list[tuple[int, SimilarTicket]] = []
+    found: list[tuple[int, int, SimilarTicket]] = []
     for issue in plane.module_tickets(module["id"]):
         state, group = states.get(issue.get("state"), ("", ""))
         common = wanted & _words(issue.get("name", ""))
@@ -187,9 +187,11 @@ def similar_tickets(
         ticket = SimilarTicket(
             plane_tickets.identifier(plane, issue), issue.get("name", ""), state, plane.ticket_url(issue)
         )
-        found.append((len(common), ticket))
-    found.sort(key=lambda pair: -pair[0])
-    return [ticket for _, ticket in found[:SIMILAR_MAX]]
+        found.append((len(common), int(issue.get("sequence_id") or 0), ticket))
+    # More words in common first; among equals the newer ticket — the order Plane lists them in decides nothing
+    # (DEV-388: „meno v šablóne projektov“ matched thirteen tickets on two words and DEV-372, the newest, came last).
+    found.sort(key=lambda row: (-row[0], -row[1]))
+    return [ticket for _, _, ticket in found[:SIMILAR_MAX]]
 
 
 def cockpit_similar(plane: PlaneGateway, title: str) -> list[SimilarTicket]:

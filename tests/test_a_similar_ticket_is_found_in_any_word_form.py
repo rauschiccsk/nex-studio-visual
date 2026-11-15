@@ -68,6 +68,14 @@ def test_one_word_in_common_is_still_no_match(gateway):
     assert "DEV-391" not in {t.identifier for t in asked}
 
 
+def test_among_equally_similar_tickets_the_newer_comes_first(gateway):
+    """15.11.2026 live: thirteen tickets shared two words with „meno v šablóne projektov“ and Plane listed them oldest
+    first — DEV-372, the newest, was cut off by the limit of five. Equals now go newest first."""
+    asked = poradca_tickets.cockpit_similar(gateway, "šablóna projektov")  # Plane lists DEV-372 first here
+
+    assert [t.identifier for t in asked][:2] == ["DEV-390", "DEV-372"]
+
+
 @pytest.mark.parametrize(
     ("forms", "stem"),
     [
