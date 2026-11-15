@@ -26,6 +26,11 @@ class InstallationEnvironment(BaseModel):
     links: list[InstallationLink] = []
     #: The newest attempt failed — the version is the last good one, not what was asked for.
     last_attempt_failed: bool = False
+    #: DEV-391 — how „Otvoriť“ opens it: ``link`` its address; ``uat_launch`` a token app in UAT, signed in through
+    #: ``POST /customers/{customer_id}/uat-launch``; ``manager`` a token app in PROD, from the customer's NEX Manager.
+    opens: Literal["link", "uat_launch", "manager"] = "link"
+    #: For ``manager``: the PROD address of the customer's NEX Manager; ``None`` when the cockpit deployed none.
+    manager_url: Optional[str] = None
 
 
 class InstallationApp(BaseModel):

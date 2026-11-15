@@ -983,7 +983,8 @@ export function registerFixtures(): void {
     },
   ]);
   // DEV-378 — „Inštalácie“: a customer with a long name, an app on UAT and PROD, one only on UAT, a Web project's two
-  // frontends — the widest row the page draws.
+  // frontends — the widest row the page draws. DEV-391: a token app opening signed in (UAT) and from the customer's NEX
+  // Manager (PROD, with its address and without).
   answer("get", "/api/v1/installations", [
     {
       key: "mager",
@@ -993,11 +994,19 @@ export function registerFixtures(): void {
           customer_id: "11111111-1111-4111-8111-111111111111",
           project_slug: PROJECT.slug,
           project_name: "NEX Inbox pre MÁGERSTAV s dlhým menom, ktoré sa musí zalomiť",
-          uat: { version: "1.10.3", deployed_at: T1, url: "https://uat-mager-inbox.isnex.eu", links: [], last_attempt_failed: false },
+          uat: {
+            version: "1.10.3",
+            deployed_at: T1,
+            url: "https://uat-mager-inbox.isnex.eu",
+            links: [],
+            last_attempt_failed: false,
+            opens: "uat_launch",
+          },
           prod: {
             version: "1.10.3",
             deployed_at: T1,
             url: "https://mager-inbox.icc.sk",
+            opens: "link",
             links: [
               { label: "Administrácia", url: "https://mager-inbox.icc.sk" },
               { label: "Web", url: "https://mager-inbox-web.icc.sk" },
@@ -1009,8 +1018,45 @@ export function registerFixtures(): void {
           customer_id: "22222222-2222-4222-8222-222222222222",
           project_slug: "nex-manager",
           project_name: "NEX Manager",
-          uat: { version: "1.6.0", deployed_at: T1, url: "https://uat-mager-manager.isnex.eu", links: [], last_attempt_failed: false },
+          uat: {
+            version: "1.6.0",
+            deployed_at: T1,
+            url: "https://uat-mager-manager.isnex.eu",
+            links: [],
+            last_attempt_failed: false,
+            opens: "link",
+          },
           prod: null,
+        },
+        {
+          customer_id: "33333333-3333-4333-8333-333333333333",
+          project_slug: "nex-knowledge",
+          project_name: "NEX Knowledge",
+          uat: null,
+          prod: {
+            version: "1.1.0",
+            deployed_at: T1,
+            url: "https://mager-knowledge.icc.sk",
+            links: [],
+            last_attempt_failed: false,
+            opens: "manager",
+            manager_url: "https://mager-manager.icc.sk",
+          },
+        },
+        {
+          customer_id: "44444444-4444-4444-8444-444444444444",
+          project_slug: "nex-websites",
+          project_name: "NEX Websites",
+          uat: null,
+          prod: {
+            version: "1.2.0",
+            deployed_at: T1,
+            url: "https://mager-websites.icc.sk",
+            links: [],
+            last_attempt_failed: false,
+            opens: "manager",
+            manager_url: null,
+          },
         },
       ],
     },

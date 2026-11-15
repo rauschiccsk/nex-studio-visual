@@ -14,12 +14,21 @@ const { listInstallationsApi, getInstallationStatusApi } = vi.hoisted(() => ({
   getInstallationStatusApi: vi.fn(),
 }));
 vi.mock("@/services/api/installations", () => ({ listInstallationsApi, getInstallationStatusApi }));
+const { uatLaunch } = vi.hoisted(() => ({ uatLaunch: vi.fn() }));
+vi.mock("@/services/api/deploy", () => ({ uatLaunch }));
 
 import InstallationsPage from "@/pages/InstallationsPage";
 import { SETTINGS } from "@/config/settings";
 import { useActiveContextStore } from "@/store/activeContextStore";
 
-const env = (version: string, url: string, extra = {}) => ({ version, url, links: [], last_attempt_failed: false, ...extra });
+const env = (version: string, url: string, extra = {}) => ({
+  version,
+  url,
+  links: [],
+  last_attempt_failed: false,
+  opens: "link",
+  ...extra,
+});
 
 const GROUPS = [
   {
@@ -221,3 +230,86 @@ describe("Inštalácie (DEV-378)", () => {
     expect(await screen.findByText("Kokpit zatiaľ nenasadil žiadnu inštaláciu.")).toBeInTheDocument();
   });
 });
+
+describe("„Otvoriť“ the way the app is really started (DEV-391)", () => {
+  const TOKEN_APPS = [
+    {
+      key: "icc",
+      name: "ICC s.r.o.",
+      apps: [
+        {
+          customer_id: "c-icc-inbox",
+          project_slug: "nex-inbox",
+          project_name: "NEX Inbox",
+          uat: env("1.11.0", "https://uat-icc-inbox.isnex.eu", { opens: "uat_launch" }),
+          prod: env("1.10.3", "https://icc-inbox.icc.sk", { opens: "manager", manager_url: "https://icc-manager.icc.sk" }),
+        },
+      ],
+    },
+    {
+      key: "skit",
+      name: "SKIT o.z.",
+      apps: [
+        {
+          customer_id: "c-skit-typikon",
+          project_slug: "orthodox-typikon",
+          project_name: "Orthodox Typikon",
+          uat: null,
+          prod: env("0.1.0", "https://skit-typikon.icc.sk", { opens: "manager", manager_url: null }),
+        },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    listInstallationsApi.mockResolvedValue(TOKEN_APPS);
+    uatLaunch.mockReset();
+  });
+
+  it("⚠️ a token app opens in UAT signed in — through the launch ticket, not by its bare address", async () => {
+    uatLaunch.mockResolvedValue({ launch_url: "https://uat-icc-inbox.isnex.eu/api/v1/launch?lt=listok" });
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    try {
+      renderPage();
+      const row = within(await screen.findByRole("region", { name: "ICC s.r.o." })).getAllByRole("row")[1]!;
+
+      fireEvent.click(within(row).getByRole("button", { name: "Otvoriť" }));
+
+      await waitFor(() =>
+        expect(opened).toHaveBeenCalledWith("https://uat-icc-inbox.isnex.eu/api/v1/launch?lt=listok", "_blank", "noopener"),
+      );
+      expect(uatLaunch).toHaveBeenCalledWith("c-icc-inbox", "nex-inbox");
+      expect(within(row).queryByRole("link", { name: "Otvoriť" })).toBeNull();
+    } finally {
+      opened.mockRestore();
+    }
+  });
+
+  it("says why a token app did not open in UAT, in the backend's own sentence", async () => {
+    const { ApiError } = await import("@/services/api");
+    uatLaunch.mockRejectedValue(
+      new ApiError(400, "NEX Manager tejto aplikácie nepozná meno „zoltan“. Priraď si v ňom prístup (Používatelia)."),
+    );
+    renderPage();
+    const row = within(await screen.findByRole("region", { name: "ICC s.r.o." })).getAllByRole("row")[1]!;
+
+    fireEvent.click(within(row).getByRole("button", { name: "Otvoriť" }));
+
+    expect(
+      await within(row).findByText("NEX Manager tejto aplikácie nepozná meno „zoltan“. Priraď si v ňom prístup (Používatelia)."),
+    ).toBeInTheDocument();
+  });
+
+  it("⚠️ a live token app opens from the customer's NEX Manager, and says so where there is none", async () => {
+    renderPage();
+    const icc = within(await screen.findByRole("region", { name: "ICC s.r.o." })).getAllByRole("row")[1]!;
+
+    const manager = within(icc).getByRole("link", { name: "Otvoriť v NEX Manageri" });
+    expect([manager.getAttribute("href"), manager.getAttribute("target")]).toEqual(["https://icc-manager.icc.sk", "_blank"]);
+    expect(within(icc).queryByRole("link", { name: "Otvoriť" })).toBeNull();
+    const skit = within(section("SKIT o.z.")).getAllByRole("row")[1]!;
+    expect(within(skit).getByText("spúšťa sa z NEX Managera zákazníka")).toBeInTheDocument();
+    expect(within(skit).queryByRole("link")).toBeNull();
+  });
+});
+

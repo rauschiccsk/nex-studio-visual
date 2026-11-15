@@ -17,10 +17,10 @@ import {
   getDeployMatrix,
   getDeployProgress,
   getUatChecks,
-  uatLaunch,
   type DeployProgress,
 } from "@/services/api/deploy";
 import UatGuidePanel from "@/components/deploy/UatGuidePanel";
+import { openUatApp } from "@/lib/uatLaunch";
 import { ApiError } from "@/services/api";
 import AdoptInstanceDialog from "@/components/deploy/AdoptInstanceDialog";
 import RebuildUatDialog from "@/components/deploy/RebuildUatDialog";
@@ -238,25 +238,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     setLaunching(customerId);
     setRowMsg(customerId, null);
     try {
-      const { launch_url } = await uatLaunch(customerId, slug);
-      window.open(launch_url, "_blank", "noopener");
-    } catch (err) {
-      // This endpoint's 400/404 details are curated plain Slovak WITH a next step (e.g. "launch kľúč pre
-      // UAT nie je nastavený" / "nie je token-launch aplikácia — použi Otvoriť aplikáciu") — show them
-      // directly so a non-expert sees WHAT is wrong; anything else falls back to the generic humanised text.
-      const curated =
-        err instanceof ApiError &&
-        (err.status === 400 || err.status === 404) &&
-        typeof err.message === "string" &&
-        err.message &&
-        err.message !== "[object Object]"
-          ? err.message
-          : null;
-      setRowMsg(
-        customerId,
-        curated ??
-          (err instanceof ApiError ? humanizeApiError(err, "Spustenie zlyhalo").message : "Sieťová chyba pri spúšťaní."),
-      );
+      setRowMsg(customerId, await openUatApp(customerId, slug));
     } finally {
       setLaunching(null);
     }

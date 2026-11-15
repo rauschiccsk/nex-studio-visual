@@ -20,6 +20,7 @@ import {
   type InstallationStatus,
 } from "@/services/api/installations";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
+import { openUatApp } from "@/lib/uatLaunch";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
 
@@ -95,6 +96,58 @@ function reasonOf(asked: Asked | undefined): string {
   return asked && typeof asked === "object" && asked.state === "down" ? asked.detail : "";
 }
 
+const OPEN_CLASS =
+  "inline-flex items-center rounded-md border border-[var(--color-border-default)] px-2 py-0.5 text-xs font-medium text-[var(--color-accent-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 pointer-coarse:min-h-11";
+
+/** DEV-391: why a live token app opens from NEX Manager — the cockpit does not start it with a ticket of its own. */
+const FROM_MANAGER =
+  "Ostrú aplikáciu, ktorú spúšťa NEX Manager, otvoríš z NEX Managera zákazníka — ten rozhoduje, kto ju smie otvoriť.";
+
+/** „Otvoriť“ the way the app is really started (DEV-391): a token app in UAT signed in, in PROD from the customer's NEX
+ *  Manager; any other app by its address. `onMessage` gets the sentence why it did not open. */
+function OpenControl({
+  app,
+  installation,
+  onMessage,
+}: {
+  app: InstallationApp;
+  installation: InstallationEnvironment;
+  onMessage: (message: string | null) => void;
+}) {
+  const [launching, setLaunching] = useState(false);
+  if (installation.opens === "uat_launch") {
+    return (
+      <button
+        type="button"
+        disabled={launching}
+        onClick={async () => {
+          setLaunching(true);
+          onMessage(null);
+          try {
+            onMessage(await openUatApp(app.customer_id, app.project_slug));
+          } finally {
+            setLaunching(false);
+          }
+        }}
+        title="Otvorí aplikáciu prihlásenú tvojím menom, ako „Spustiť“ na stránke UAT"
+        className={OPEN_CLASS}
+      >
+        {launching ? "Otváram…" : "Otvoriť"}
+      </button>
+    );
+  }
+  if (installation.opens === "manager") {
+    return installation.manager_url ? (
+      <a href={installation.manager_url} target="_blank" rel="noopener noreferrer" title={FROM_MANAGER} className={OPEN_CLASS}>
+        Otvoriť v NEX Manageri
+      </a>
+    ) : (
+      <span className="text-xs text-[var(--color-text-muted)]">spúšťa sa z NEX Managera zákazníka</span>
+    );
+  }
+  return <OpenLinks installation={installation} />;
+}
+
 function OpenLinks({ installation }: { installation: InstallationEnvironment }) {
   const links = installation.links?.length ? installation.links : [{ label: "", url: installation.url }];
   return (
@@ -105,7 +158,7 @@ function OpenLinks({ installation }: { installation: InstallationEnvironment }) 
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center rounded-md border border-[var(--color-border-default)] px-2 py-0.5 text-xs font-medium text-[var(--color-accent-primary)] hover:bg-[var(--color-surface-hover)] pointer-coarse:min-h-11"
+          className={OPEN_CLASS}
         >
           {link.label ? `Otvoriť: ${link.label}` : "Otvoriť"}
         </a>
@@ -116,6 +169,7 @@ function OpenLinks({ installation }: { installation: InstallationEnvironment }) 
 
 function EnvironmentCell({ app, environment, asked }: { app: InstallationApp; environment: Environment; asked?: Asked }) {
   const installation = app[environment];
+  const [message, setMessage] = useState<string | null>(null);
   if (!installation) {
     return <span className="text-xs text-[var(--color-text-muted)]">— ešte nenasadené</span>;
   }
@@ -128,9 +182,14 @@ function EnvironmentCell({ app, environment, asked }: { app: InstallationApp; en
         <span className="w-24 shrink-0">
           <StatusChip asked={asked} />
         </span>
-        <OpenLinks installation={installation} />
+        <OpenControl app={app} installation={installation} onMessage={setMessage} />
       </div>
       {reason && <span className="text-xs text-[var(--color-status-error)]">{reason}</span>}
+      {message && (
+        <span role="status" className="text-xs text-[var(--color-status-error)]">
+          {message}
+        </span>
+      )}
       {installation.last_attempt_failed && (
         <span className="text-xs text-[var(--color-status-warning)]">posledný pokus o nasadenie zlyhal</span>
       )}
@@ -223,8 +282,9 @@ export default function InstallationsPage() {
         </div>
       </div>
       <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-        Každá aplikácia, ktorú kokpit nasadil, podľa zákazníka. „Otvoriť“ ju otvorí v novom okne; meno aplikácie vedie
-        na jej stránku nasadenia.
+        Každá aplikácia, ktorú kokpit nasadil, podľa zákazníka. „Otvoriť“ ju otvorí v novom okne — aplikáciu, ktorú
+        spúšťa NEX Manager, v UAT rovno prihlásenú, v PROD cez NEX Manager zákazníka; meno aplikácie vedie na jej stránku
+        nasadenia.
       </p>
 
       <ErrorNote error={error} />

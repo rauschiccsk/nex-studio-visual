@@ -6067,6 +6067,14 @@ export interface components {
              * @default []
              */
             links: components["schemas"]["InstallationLink"][];
+            /** Manager Url */
+            manager_url?: string | null;
+            /**
+             * Opens
+             * @default link
+             * @enum {string}
+             */
+            opens: "link" | "uat_launch" | "manager";
             /** Url */
             url: string;
             /** Version */

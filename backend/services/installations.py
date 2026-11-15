@@ -13,6 +13,12 @@ a time (:func:`status`) — the address is the cockpit's, never the caller's —
 private network (DEV-42) whose gate refuses the cockpit at the address (403 — the gate on ANDROS lets in the private
 network, not the cockpit's container) is asked inside: whether its backend answers on its health path, the deploy's
 own rule for where that is (``uat_provisioner.resolve_be_health_path``).
+
+DEV-391 — 15.11.2026 the Director: „Otvoriť“ did not work for the apps NEX Manager launches with a token — the button
+was a plain link, and such an app lets nobody in without the Manager's ticket. Each installation now says how it opens
+(:data:`OPENS`): a plain link; in UAT a token app opens signed in, as „Spustiť“ on the UAT page does
+(:mod:`uat_launch`); in PROD it opens from the customer's NEX Manager — real users start a live app only through their
+Manager, which decides who may (v4.0.30). On the proposal: „Súhlasím“.
 """
 
 from __future__ import annotations
@@ -34,10 +40,14 @@ from backend.core import authz
 from backend.db.models.customers import Customer
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.services import claude_agent, deploy, orchestrator, uat_provisioner
+from backend.services import claude_agent, deploy, launch_pairing, orchestrator, project_surfaces, uat_provisioner
 
 ENVIRONMENTS = ("uat", "prod")
 HEALTH_PATH = "/api/v1/health"
+#: DEV-391 — how „Otvoriť“ opens an installation: its address; a token app in UAT signed in through the cockpit's
+#: launch (``POST /customers/{id}/uat-launch``); a token app in PROD from the customer's NEX Manager.
+LINK, UAT_LAUNCH, MANAGER = "link", "uat_launch", "manager"
+OPENS = (LINK, UAT_LAUNCH, MANAGER)
 
 #: What the page says of an installation — the three answers a person can act on.
 UP, ANSWERS, DOWN = "up", "answers", "down"
@@ -65,13 +75,38 @@ def _visible_projects(db: Session, user: User) -> list[Project]:
     return list(db.execute(query).scalars().all())
 
 
-def _environment(db: Session, customer: Customer, project: Project, environment: str) -> Optional[dict]:
+def _manager_prod_urls(db: Session) -> dict[str, str]:
+    """DEV-391 — the PROD address of every customer's NEX Manager that is deployed, by the customer's folder name (the
+    customer is one across projects — ``deploy._customer_dir_slug``)."""
+    manager = db.execute(select(Project).where(Project.slug == launch_pairing.MANAGER_PROJECT)).scalar_one_or_none()
+    if manager is None:
+        return {}
+    found = {}
+    for customer in db.execute(select(Customer).where(Customer.project_id == manager.id)).scalars():
+        if deploy.current_version(db, customer.id, "prod"):
+            found[deploy._customer_dir_slug(customer)] = deploy._instance_url(customer, "prod", manager)
+    return found
+
+
+def _opening(customer: Customer, project: Project, environment: str, managers: dict[str, str]) -> dict:
+    """How „Otvoriť“ opens this installation (:data:`OPENS`) and, for a live token app, the Manager it opens from."""
+    if project.auth_mode != project_surfaces.TOKEN:
+        return {"opens": LINK, "manager_url": None}
+    if environment == "uat":
+        return {"opens": UAT_LAUNCH, "manager_url": None}
+    return {"opens": MANAGER, "manager_url": managers.get(deploy._customer_dir_slug(customer))}
+
+
+def _environment(
+    db: Session, customer: Customer, project: Project, environment: str, managers: dict[str, str]
+) -> Optional[dict]:
     version = deploy.current_version(db, customer.id, environment)
     if not version:
         return None
     last = deploy.last_successful_deploy(db, customer.id, environment)
     url = deploy._instance_url(customer, environment, project)
     return {
+        **_opening(customer, project, environment, managers),
         "version": version,
         "deployed_at": last.created_at if last is not None else None,
         "url": url,
@@ -86,10 +121,11 @@ def list_installations(db: Session, user: User) -> list[dict]:
     its UAT and PROD (``None`` where not deployed). A customer is one across projects — known by the name of its
     installations' folder (``deploy._customer_dir_slug``), the same in every project."""
     groups: dict[str, dict] = {}
+    managers = _manager_prod_urls(db)
     for project in _visible_projects(db, user):
         customers = db.execute(select(Customer).where(Customer.project_id == project.id)).scalars().all()
         for customer in customers:
-            environments = {env: _environment(db, customer, project, env) for env in ENVIRONMENTS}
+            environments = {env: _environment(db, customer, project, env, managers) for env in ENVIRONMENTS}
             if not any(environments.values()):
                 continue
             key = deploy._customer_dir_slug(customer)
