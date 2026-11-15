@@ -88,6 +88,7 @@ from backend.services import (
     git_push,
     host_docker_guard,
     instance_data_dirs,
+    library_upgrades,
     nexshared,
     predeploy_backup,
     preview_switch,
@@ -1818,8 +1819,12 @@ def _priprava_directive(
     *,
     flow_type: str = "new_version",
     requirements: Optional[list[BacklogItem]] = None,
+    upgrades: str = "",
 ) -> str:
     """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
+
+    DEV-354: ``upgrades`` is what an upgrade of the app template or nex-shared made when founding the version brought
+    (:func:`library_upgrades.brief_for`, read off the main loop by :func:`run_dispatch`) — empty without one.
 
     DESIGN-BEARING (flagged for the Manažér): this prompt DEFINES the AI Agent's Príprava behaviour —
     the interactive Zadanie→Špecifikácia dialogue. Drafted from ``nex-studio-v2-design.md`` §2.1 / §5.1(1).
@@ -1921,7 +1926,21 @@ def _priprava_directive(
                 db, db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
             ),
         )
+        + upgrades
     )
+
+
+async def _library_upgrades(db: Session, state: PipelineState) -> str:
+    """DEV-354 — what a library upgrade at founding brought, for the Príprava brief. The database half (where the
+    previous version ended) is read here, the git and the change notes off the main loop (ICCINT-74); a reading that
+    does not finish in time tells the agent where to look instead of saying nothing."""
+    version = db.get(Version, state.version_id)
+    steps = delivery_statement.base_plan(db, version)
+    repo = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, state.version_id)
+    try:
+        return await run_blocking(library_upgrades.brief_for, repo, steps, cap=settings.library_upgrades_cap_seconds)
+    except BlockingWorkTimedOut:
+        return library_upgrades.UNKNOWN
 
 
 def _navrh_directive(db: Session, version_id: uuid.UUID) -> str:
@@ -10597,7 +10616,10 @@ async def run_dispatch(
         # systematize → ask until understood → propose → write the Špecifikácia .md). DESIGN-BEARING prompt.
         # Fast-fix (CR-V2-028) takes a lightweight directive-IS-the-brief variant (no spec dialogue).
         handed = _included_requirements(db, state.version_id) if takes_requirements else []
-        prompt = _priprava_directive(db, state.version_id, flow_type=state.flow_type, requirements=handed)
+        upgrades = await _library_upgrades(db, state) if takes_requirements else ""
+        prompt = _priprava_directive(
+            db, state.version_id, flow_type=state.flow_type, requirements=handed, upgrades=upgrades
+        )
     else:
         prompt = _directive_for(stage, state.flow_type)
     if stage == "priprava":

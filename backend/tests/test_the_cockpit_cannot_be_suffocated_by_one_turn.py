@@ -57,6 +57,7 @@ SHELLING_MODULES = {
     "instance_adoption",
     "instance_data_dirs",
     "kb_git",
+    "library_upgrades",
     "machine_disk",
     "nexshared",
     "notify",

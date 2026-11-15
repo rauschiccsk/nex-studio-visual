@@ -103,6 +103,8 @@ class Settings(BaseSettings):
     # environment in the image (the Dockerfile), the same 1.8 line the projects build with; and how long it may take.
     poetry_bin: str = "/opt/poetry/bin/poetry"
     poetry_lock_timeout_seconds: int = 300
+    #: DEV-354 — how long the Príprava brief waits for what a library upgrade brought (git + the change notes).
+    library_upgrades_cap_seconds: int = 60
     installation_status_cache_seconds: int = 120
     # DEV-85: the watch of every project's main branch — how often it looks, whether it runs at all (off in tests: the
     # app's real life cycle would ask GitHub and send Telegram messages), how long an undelivered message is retried.
