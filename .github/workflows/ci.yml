@@ -61,6 +61,11 @@ jobs:
 
       # DEV-395: the TypeScript parser the cockpit reads a project's catalogs and texts with — the same pinned tools the
       # image installs (Dockerfile), so the test of the texts check runs the real runner, not a stand-in.
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
       - name: Tools of the cockpit's project checks
         run: cd templates/dead-code && npm ci --ignore-scripts --no-audit --no-fund
 
