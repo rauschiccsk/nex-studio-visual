@@ -234,7 +234,7 @@ const MESSAGES: S["PipelineMessageRead"][] = [
   },
 ];
 
-const PIPELINE: S["PipelineBoardRead"] = {
+export const PIPELINE: S["PipelineBoardRead"] = {
   state: {
     id: "44444444-4444-4444-8444-444444444444",
     version_id: VERSION.id,
