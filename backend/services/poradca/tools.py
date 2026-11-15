@@ -794,6 +794,27 @@ class PoradcaTools:
             raise ToolError(str(exc)) from exc
         return ticket.document()
 
+    async def kokpit_tikety(self, args: dict) -> str:
+        """DEV-374 — the cockpit's own tickets that resemble a title, open and closed, before Poradca proposes or
+        reminds one: 13.11.2026 it reminded a ticket on a name in the project template forty minutes after DEV-372
+        had been done and closed. The same search the „Založiť tiket“ preview runs (``tickets.similar_tickets``)."""
+        from backend.services import plane_tickets
+        from backend.services.plane_gateway import PlaneError
+        from backend.services.poradca import tickets as poradca_tickets
+
+        title = str(args.get("nazov") or "").strip()
+        if not title:
+            raise ToolError("Napíš názov alebo kľúčové slová tiketu, ktorý chceš navrhnúť či pripomenúť.")
+        try:
+            found = await asyncio.to_thread(poradca_tickets.cockpit_similar, plane_tickets.gateway(), title)
+        except PlaneError as exc:
+            raise ToolError(f"Plane neodpovedal: {exc}") from exc
+        if not found:
+            return "V tiketoch kokpitu nie je podobný tiket — ani otvorený, ani uzavretý."
+        lines = ["Podobné tikety kokpitu (otvorené aj uzavreté), najpodobnejší prvý:"]
+        lines.extend(f"{ticket.identifier} [{ticket.state}] {ticket.title}" for ticket in found)
+        return "\n".join(lines)
+
     async def naklady(self, args: dict) -> str:
         """The Náklady screen: what each version cost and the project in total — in whole euros, as the screen."""
         from backend.services import metrics as metrics_service
@@ -1137,6 +1158,16 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             _schema({"cislo": {"type": "string", "description": "Číslo tiketu, napr. DEV-186."}}, ["cislo"]),
             t.plane_tiket,
             lambda a: str(a.get("cislo") or ""),
+        ),
+        Tool(
+            "kokpit_tikety",
+            "Tikety kokpitu samého (modul NEX Studio Visual v DEV), ktoré sa podobajú na názov — otvorené aj uzavreté, "
+            "s číslom a stavom. Pozri ich, kým navrhneš alebo pripomenieš tiket kokpitu.",
+            _schema(
+                {"nazov": {"type": "string", "description": "Názov alebo kľúčové slová tiketu kokpitu."}}, ["nazov"]
+            ),
+            t.kokpit_tikety,
+            lambda a: str(a.get("nazov") or ""),
         ),
         Tool(
             "naklady",

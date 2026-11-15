@@ -148,8 +148,11 @@ def _words(text: str) -> set[str]:
     return set(_WORD.findall(plain.casefold()))
 
 
-def similar_tickets(plane: PlaneGateway, module: Optional[dict], title: str) -> list[SimilarTicket]:
-    """Open tickets of the module whose titles share the title's words (two, or all of a shorter title)."""
+def similar_tickets(
+    plane: PlaneGateway, module: Optional[dict], title: str, *, closed_too: bool = False
+) -> list[SimilarTicket]:
+    """Tickets of the module whose titles share the title's words (two, or all of a shorter title) — open ones, and with
+    ``closed_too`` also the done and the cancelled (DEV-374: Poradca asks before it proposes or reminds a ticket)."""
     wanted = _words(title)
     if module is None or not wanted:
         return []
@@ -158,7 +161,7 @@ def similar_tickets(plane: PlaneGateway, module: Optional[dict], title: str) -> 
     for issue in plane.module_tickets(module["id"]):
         state, group = states.get(issue.get("state"), ("", ""))
         common = wanted & _words(issue.get("name", ""))
-        if group in plane_tickets.CLOSED_GROUPS or len(common) < min(2, len(wanted)):
+        if (group in plane_tickets.CLOSED_GROUPS and not closed_too) or len(common) < min(2, len(wanted)):
             continue
         ticket = SimilarTicket(
             plane_tickets.identifier(plane, issue), issue.get("name", ""), state, plane.ticket_url(issue)
@@ -166,6 +169,12 @@ def similar_tickets(plane: PlaneGateway, module: Optional[dict], title: str) -> 
         found.append((len(common), ticket))
     found.sort(key=lambda pair: -pair[0])
     return [ticket for _, ticket in found[:SIMILAR_MAX]]
+
+
+def cockpit_similar(plane: PlaneGateway, title: str) -> list[SimilarTicket]:
+    """DEV-374 — the cockpit's own tickets (module NEX Studio Visual) that resemble ``title``, open and closed: what
+    Poradca checks before it proposes or reminds a ticket of the cockpit — the same search as the preview's."""
+    return similar_tickets(plane, plane.find_module(None, COCKPIT_MODULE), title, closed_too=True)
 
 
 def draft(db: Session, plane: PlaneGateway, message: PoradcaMessage, user: Optional[User]) -> Draft:
