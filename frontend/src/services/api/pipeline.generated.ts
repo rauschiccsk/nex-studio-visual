@@ -1943,6 +1943,27 @@ export interface paths {
         patch: operations["update_project_api_v1_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/app-kit-commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Commit App Kit
+         * @description DEV-400: save in the project's git an upgrade of nex-app-kit its files already carry — one whose commit failed.
+         *     Only the kit's own files go into the commit; nothing else in the project is touched.
+         */
+        post: operations["commit_app_kit_api_v1_projects__project_id__app_kit_commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/app-kit-status": {
         parameters: {
             query?: never;
@@ -3697,6 +3718,8 @@ export interface components {
             latest?: string | null;
             /** Parts */
             parts?: components["schemas"]["AppKitPart"][];
+            /** Uncommitted */
+            uncommitted?: string | null;
             /**
              * Up To Date
              * @default false
@@ -12628,6 +12651,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_app_kit_api_v1_projects__project_id__app_kit_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppKitUpgradeResult"];
                 };
             };
             /** @description Validation Error */

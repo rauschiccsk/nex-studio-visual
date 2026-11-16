@@ -123,6 +123,11 @@ export function upgradeAppKitApi(
   return api.post(`/projects/${projectId}/app-kit-upgrade`, { target_version: targetVersion });
 }
 
+/** DEV-400: save in the project's git an upgrade of nex-app-kit its files already carry (its commit had failed). */
+export function commitAppKitApi(projectId: string): Promise<components["schemas"]["AppKitUpgradeResult"]> {
+  return api.post(`/projects/${projectId}/app-kit-commit`, {});
+}
+
 /** One uncommitted entry in the project's working tree (git status --porcelain). */
 interface GitStatusFile {
   code: string;

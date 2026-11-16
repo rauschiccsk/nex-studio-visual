@@ -120,6 +120,37 @@ def server_version(source_path: str) -> Optional[str]:
     return found[0]
 
 
+def _at_head(root: Path, rel: str) -> Optional[str]:
+    """The file *rel* as the project's last commit holds it, or None (no git, no such file in the commit)."""
+    try:
+        shown = subprocess.run(
+            ["git", "-C", str(root), "show", f"HEAD:{rel}"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def uncommitted_version(source_path: str) -> Optional[str]:
+    """DEV-400 — the release of nex-app-kit the project's files name but its git does not hold yet, or None.
+
+    Both sides (the frame's lockfile and the server's pin) must name the same release in the files; the last commit
+    names another on either side. 16.11.2026 Orthodox Hermenia's upgrade to 0.15.2 stayed on disk unsaved — its commit
+    was refused by the project's own pre-commit check — and nothing told the Manažér; the settings offer to save it."""
+    root = Path(source_path)
+    if not (root / ".git").exists():
+        return None
+    frame = nexshared.effective_version(source_path, FRONTEND, app_template.KIT_PACKAGE)
+    if not frame or frame != server_version(source_path):
+        return None
+    lock = _at_head(root, f"{FRONTEND}/package-lock.json")
+    pins = _at_head(root, SERVER_PIN_FILE)
+    committed_frame = nexshared.parse_lock_version(lock, app_template.KIT_PACKAGE) if lock else None
+    found = (_SERVER_PIN_RE.findall(pins) + [v for _m, v in _poetry_pins(pins)]) if pins else []
+    committed_server = found[0] if len(found) == 1 else None
+    return frame if (committed_frame, committed_server) != (frame, frame) else None
+
+
 def status_for_source(
     source_path: str, *, tags: Optional[list[str]] = None, changelog_text: Optional[str] = None
 ) -> dict:
@@ -151,6 +182,8 @@ def status_for_source(
         "up_to_date": bool(current) and behind == 0,
         "changelog": changelog,
         "parts": parts,
+        # DEV-400: an upgrade the files carry but git does not — the settings offer to save it.
+        "uncommitted": uncommitted_version(source_path),
     }
 
 

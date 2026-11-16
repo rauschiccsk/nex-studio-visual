@@ -151,6 +151,8 @@ class AppKitStatus(BaseModel):
     #: DEV-395/DEV-399: the languages the project's kit can speak, and the release each language comes with.
     languages_known: list[str] = Field(default_factory=list)
     languages_from: dict[str, str] = Field(default_factory=dict)
+    #: DEV-400: the release the project's files name but its git does not hold yet — an upgrade left unsaved.
+    uncommitted: Optional[str] = None
 
 
 class AppTemplateConversionOffer(BaseModel):

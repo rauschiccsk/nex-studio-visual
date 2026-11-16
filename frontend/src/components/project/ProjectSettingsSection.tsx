@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Pencil } from "lucide-react";
 
 import {
+  commitAppKitApi,
   getAppKitStatusApi,
   getProjectCreatePresetsApi,
   updateProjectApi,
@@ -137,6 +138,9 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
   const [upgrading, setUpgrading] = useState(false);
   const onTemplate = Boolean(project.template);
   const wantsLanguages = editing && onTemplate && isMultilingual(form.languages);
+  // DEV-400: the kit's status is read whenever the settings of a project on the template are edited — it also says
+  // whether an upgrade stayed in the files unsaved.
+  const readsKit = editing && onTemplate;
 
   useEffect(() => {
     if (!onTemplate) return;
@@ -152,7 +156,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
   }, [onTemplate]);
 
   useEffect(() => {
-    if (!wantsLanguages || kit) return;
+    if (!readsKit || kit) return;
     let cancelled = false;
     getAppKitStatusApi(project.id)
       .then((status) => {
@@ -164,7 +168,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
     return () => {
       cancelled = true;
     };
-  }, [wantsLanguages, kit, project.id]);
+  }, [readsKit, kit, project.id]);
 
   // DEV-399: each language comes with its own release of the kit (English later than Hungarian).
   const kitTooOld = wantsLanguages && kit !== null && unknownToKit(form.languages, kit.languages_known ?? []).length > 0;
@@ -174,10 +178,25 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
     setUpgrading(true);
     setError(null);
     try {
+      // DEV-400: an upgrade whose commit failed is in the status as `uncommitted` — the note below says it and offers
+      // to save it; the result's `committed` is not left unread.
       await upgradeAppKitApi(project.id, kit.latest);
       setKit(await getAppKitStatusApi(project.id));
     } catch (err) {
       setError(humanizeApiError(err, "Šablónu aplikácie sa nepodarilo povýšiť"));
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
+  const saveKit = async () => {
+    setUpgrading(true);
+    setError(null);
+    try {
+      await commitAppKitApi(project.id);
+      setKit(await getAppKitStatusApi(project.id));
+    } catch (err) {
+      setError(humanizeApiError(err, "Povýšenie šablóny sa nepodarilo uložiť do gitu"));
     } finally {
       setUpgrading(false);
     }
@@ -413,6 +432,27 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {readsKit && kit?.uncommitted && (
+          <div
+            data-testid="kit-unsaved"
+            className="col-span-2 rounded-lg border border-[var(--color-status-warning)]/50 bg-[var(--color-status-warning)]/10 p-3 text-xs text-[var(--color-text-secondary)]"
+          >
+            <p>
+              Šablóna aplikácie je v súboroch projektu povýšená na {kit.uncommitted}, ale v gite projektu nie je uložená
+              — agent by ju videl ako cudziu zmenu. Ulož ju.
+            </p>
+            <button
+              type="button"
+              onClick={() => void saveKit()}
+              disabled={upgrading || saving}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 font-medium text-[var(--color-text-primary)] disabled:opacity-50"
+            >
+              {upgrading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Uložiť do gitu
+            </button>
           </div>
         )}
 

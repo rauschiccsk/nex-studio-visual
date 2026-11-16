@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   getProjectCreatePresetsApi: vi.fn(),
   getAppKitStatusApi: vi.fn(),
   upgradeAppKitApi: vi.fn(),
+  commitAppKitApi: vi.fn(),
 }));
 vi.mock("@/services/api/projects", () => api);
 
@@ -128,6 +129,37 @@ describe("ProjectSettingsSection — languages (DEV-395)", () => {
     expect(await screen.findByTestId("kit-too-old")).toHaveTextContent(
       "Jazyky slovenčina, maďarčina, angličtina pozná šablóna aplikácie od verzie nex-app-kit 0.15.0, projekt stojí na 0.14.1.",
     );
+  });
+
+  it("an upgrade left unsaved in the files is said and saved with one click (DEV-400)", async () => {
+    api.getAppKitStatusApi
+      .mockResolvedValueOnce({ ...kit("0.15.0"), uncommitted: "0.15.0" })
+      .mockResolvedValueOnce({ ...kit("0.15.0"), uncommitted: null });
+    api.commitAppKitApi.mockResolvedValue({ upgraded: true, target_version: "0.15.0", committed: true });
+    edit({ ...PROJECT, languages: ["sk", "hu", "en"] } as ProjectRead);
+    await screen.findByTestId("project-languages");
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+
+    const note = await screen.findByTestId("kit-unsaved");
+    expect(note).toHaveTextContent("Šablóna aplikácie je v súboroch projektu povýšená na 0.15.0, ale v gite projektu nie je uložená");
+    fireEvent.click(within(note).getByRole("button", { name: "Uložiť do gitu" }));
+
+    await waitFor(() => expect(api.commitAppKitApi).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(screen.queryByTestId("kit-unsaved")).not.toBeInTheDocument());
+  });
+
+  it("an upgrade whose commit failed shows the unsaved note at once (DEV-400)", async () => {
+    api.getAppKitStatusApi
+      .mockResolvedValueOnce(kit("0.13.0"))
+      .mockResolvedValueOnce({ ...kit("0.15.0"), uncommitted: "0.15.0" });
+    api.upgradeAppKitApi.mockResolvedValue({ upgraded: true, target_version: "0.15.0", committed: false });
+    edit();
+    await screen.findByTestId("project-languages");
+    fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "maďarčina" }));
+    fireEvent.click(within(await screen.findByTestId("kit-too-old")).getByRole("button", { name: /Povýšiť šablónu/ }));
+
+    expect(await screen.findByTestId("kit-unsaved")).toHaveTextContent("povýšená na 0.15.0");
   });
 
   it("a refused upgrade is said and nothing is saved", async () => {

@@ -119,6 +119,7 @@ def test_the_status_names_both_sides_the_newest_release_and_what_it_brings(tmp_p
             {"name": "frontend", "label": "Rám (frontend)", "current": "0.3.0"},
             {"name": "server", "label": "Server", "current": "0.3.0"},
         ],
+        "uncommitted": None,  # DEV-400: no git here, so no upgrade left unsaved in it
     }
 
 
@@ -349,6 +350,7 @@ def test_a_project_without_a_template_is_offered_nothing(client, db_session, tmp
         "parts": [],
         "languages_known": [],
         "languages_from": {},
+        "uncommitted": None,
     }
     refused = client.post(f"/api/v1/projects/{project.id}/app-kit-upgrade", json={"target_version": "0.4.0"})
     assert refused.status_code == 400

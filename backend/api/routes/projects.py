@@ -849,6 +849,25 @@ def get_app_kit_status(
     )
 
 
+def _refuse_while_an_agent_works(db: Session, project: Project) -> None:
+    """DEV-395/DEV-400: the kit's files are rewritten and committed only while no agent is at work in the checkout —
+    they would change under its hands."""
+    working = db.execute(
+        select(Version.version_number)
+        .join(PipelineState, PipelineState.version_id == Version.id)
+        .where(Version.project_id == project.id, PipelineState.status == deploy_service.AGENT_WORKING_STATUS)
+        .limit(1)
+    ).scalar_one_or_none()
+    if working is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Agent práve pracuje na verzii {working} — šablónu povýš, keď dokončí ťah (súbory rámu by mu zmenili "
+                "pod rukami)."
+            ),
+        )
+
+
 @router.post("/{project_id}/app-kit-upgrade", response_model=AppKitUpgradeResult)
 def upgrade_app_kit(
     project_id: UUID,
@@ -868,22 +887,8 @@ def upgrade_app_kit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Projekt nie je založený na šablóne aplikácie — nex-app-kit v ňom nie je čo povýšiť.",
         )
-    # DEV-395: the upgrade is also offered beside the project's languages, while a version may be building — it
-    # rewrites and commits the frame's files, so it waits until no agent is at work in the checkout.
-    working = db.execute(
-        select(Version.version_number)
-        .join(PipelineState, PipelineState.version_id == Version.id)
-        .where(Version.project_id == project.id, PipelineState.status == deploy_service.AGENT_WORKING_STATUS)
-        .limit(1)
-    ).scalar_one_or_none()
-    if working is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Agent práve pracuje na verzii {working} — šablónu povýš, keď dokončí ťah (súbory rámu by mu zmenili "
-                "pod rukami)."
-            ),
-        )
+    # DEV-395: the upgrade is also offered beside the project's languages, while a version may be building.
+    _refuse_while_an_agent_works(db, project)
     if not app_kit_service.upgrade_source(project.source_path, payload.target_version, project.template):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -895,6 +900,43 @@ def upgrade_app_kit(
         )
     committed = app_kit_service.commit_upgrade(project.source_path, payload.target_version)
     return AppKitUpgradeResult(upgraded=True, target_version=payload.target_version, committed=committed)
+
+
+@router.post("/{project_id}/app-kit-commit", response_model=AppKitUpgradeResult)
+def commit_app_kit(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AppKitUpgradeResult:
+    """DEV-400: save in the project's git an upgrade of nex-app-kit its files already carry — one whose commit failed.
+    Only the kit's own files go into the commit; nothing else in the project is touched."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise http_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    if not project.template or not project.source_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Projekt nie je založený na šablóne aplikácie — nex-app-kit v ňom nie je čo uložiť.",
+        )
+    _refuse_while_an_agent_works(db, project)
+    version = app_kit_service.uncommitted_version(project.source_path)
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Šablóna aplikácie je v gite projektu uložená tak, ako ju majú jeho súbory — nie je čo uložiť.",
+        )
+    committed = app_kit_service.commit_upgrade(project.source_path, version)
+    if not committed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Povýšenie šablóny na {version} sa do gitu projektu nepodarilo uložiť ani teraz — podrobnosti sú "
+                "v logu kokpitu."
+            ),
+        )
+    return AppKitUpgradeResult(upgraded=True, target_version=version, committed=True)
 
 
 @router.get("/{project_id}/git-status")
