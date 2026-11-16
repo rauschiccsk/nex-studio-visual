@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
 
 from backend.services.private_access import _HOST_RULE
 
@@ -63,26 +66,65 @@ def route_urls(compose: dict[str, Any]) -> list[str]:
     return sorted(urls)
 
 
-def probe(url: str) -> tuple[str, str]:
+def route_hosts(compose: dict[str, Any]) -> list[str]:
+    """Every name the installation's routers answer to — API routers included: each of them must lead to the machine
+    the installation runs on (DEV-405)."""
+    return sorted({host for attrs in _routers(compose).values() for host in _HOST_RULE.findall(attrs.get("rule", ""))})
+
+
+def _verdict(url: str, code: int) -> tuple[str, str]:
+    return (STATE_OK if code < 500 and code != 404 else STATE_DOWN), f"{url} {code}"
+
+
+def _probe_at(url: str, address: str) -> tuple[str, str]:
+    """:func:`probe` sent to ``address`` with the name of ``url`` in TLS (SNI and the certificate check) and in
+    ``Host`` — as ``curl --resolve`` does. A fresh connection per address: a pooled one would carry the previous
+    name's TLS session."""
+    parts = urlsplit(url)
+    name = parts.hostname or ""
+    netloc = address if parts.port is None else f"{address}:{parts.port}"
+    target = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+    try:
+        with httpx.Client(timeout=ROUTE_PROBE_TIMEOUT_SECONDS) as client:
+            request = client.build_request(
+                "GET",
+                target,
+                headers={"Host": parts.netloc, "User-Agent": "nex-studio-route-check"},
+                extensions={"sni_hostname": name},
+            )
+            response = client.send(request)
+    except httpx.HTTPError as exc:
+        return STATE_SKIP, f"{url} {type(exc).__name__}: {str(exc)[:160]}"
+    return _verdict(url, response.status_code)
+
+
+def probe(url: str, address: Optional[str] = None) -> tuple[str, str]:
     """``(state, what was seen)`` for one address — the same verdicts as the in-network probe: an answer of the app
     (below 500 and not 404) is a working route; Traefik's 404 (no route) or a 5xx is a broken one; no answer at all
-    says nothing about the route."""
+    says nothing about the route.
+
+    DEV-405: with ``address`` (the machine the installation runs on) the name is not looked up here — this machine's
+    resolver may hold an old answer for minutes after a record was created, and the probe must measure the
+    installation, not a cache. Where the name leads is asked of public DNS separately
+    (:func:`installation_names.check`)."""
+    if address:
+        return _probe_at(url, address)
     request = urllib.request.Request(url, headers={"User-Agent": "nex-studio-route-check"})
     try:
         with urllib.request.urlopen(request, timeout=ROUTE_PROBE_TIMEOUT_SECONDS) as response:
             return STATE_OK, f"{url} {response.status}"
     except urllib.error.HTTPError as exc:
-        return (STATE_OK if exc.code < 500 and exc.code != 404 else STATE_DOWN), f"{url} {exc.code}"
+        return _verdict(url, exc.code)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return STATE_SKIP, f"{url} {type(exc).__name__}"
 
 
-def check(urls: list[str]) -> tuple[str, str]:
+def check(urls: list[str], address: Optional[str] = None) -> tuple[str, str]:
     """All of an installation's addresses at once: one broken route makes it ``down``; it is ``ok`` only when every
-    address answered; anything else (no address, no answer) is ``skip``."""
+    address answered; anything else (no address, no answer) is ``skip``. ``address``: see :func:`probe`."""
     if not urls:
         return STATE_SKIP, "inštalácia nemá v smerovaní adresu na štandardnom vstupe (https alebo http)"
-    seen = [probe(url) for url in urls]
+    seen = [probe(url, address) if address else probe(url) for url in urls]
     last = "; ".join(text for _state, text in seen)
     states = {state for state, _text in seen}
     if STATE_DOWN in states:

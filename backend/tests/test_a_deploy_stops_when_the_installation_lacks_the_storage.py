@@ -364,6 +364,8 @@ def test_the_deploy_says_the_application_reports_a_new_problem(
         fe_service = "frontend"
         compose_path = tmp_path / "docker-compose.yml"
 
+    _Result.compose_path.write_text("services: {}\n", encoding="utf-8")  # DEV-405: provisioning wrote it
+
     async def _health(compose, project_slug, deploy_host=None):
         events.append(("health", compose, deploy_host))
         if len([e for e in events if e[0] == "health"]) == 1:
@@ -408,6 +410,8 @@ def test_a_deploy_that_did_not_start_asks_nothing_after(monkeypatch, tmp_path):
         warnings: list[str] = []
         fe_service = "frontend"
         compose_path = tmp_path / "docker-compose.yml"
+
+    _Result.compose_path.write_text("services: {}\n", encoding="utf-8")  # DEV-405: provisioning wrote it
 
     async def _health(*_a, **_k):
         asked.append(1)

@@ -22,6 +22,7 @@ class _Provisioned:
         self.fe_service = "frontend"
         self.warnings: list[str] = []
         self.compose_path = tmp_path / "docker-compose.yml"
+        self.compose_path.write_text("services: {}\n", encoding="utf-8")  # DEV-405: provisioning wrote it
         self.uat_dir = tmp_path
         self.previous_remote_files = {}
 

@@ -197,11 +197,11 @@ def _docker(monkeypatch, compose: Path, fail_on: str | None = None):
     return events
 
 
-def _asked_urls(monkeypatch) -> list[str]:
-    asked: list[str] = []
+def _asked_urls(monkeypatch) -> list[tuple[str, str | None]]:
+    asked: list[tuple[str, str | None]] = []
 
-    def _probe(url):
-        asked.append(url)
+    def _probe(url, address=None):
+        asked.append((url, address))
         return public_route.STATE_OK, f"{url} 200"
 
     monkeypatch.setattr(public_route, "probe", _probe)
@@ -230,7 +230,8 @@ def test_every_docker_command_of_a_deploy_elsewhere_goes_to_that_machine(tmp_pat
     kinds = {cmd[4] if cmd[1] == "compose" else cmd[1] for cmd, _env in docker}
     assert {"run", "build", "up", "exec", "builder", "image"} <= kinds, f"the deploy did not run every step: {kinds}"
     assert any("alembic" in cmd for cmd, _env in docker), "the migration after up did not run"
-    assert asked == ["https://magerstav-inbox.icc.sk/"], "the public route asked was not the installation's own"
+    # DEV-405: asked at MAGER itself with the name — not through this machine's resolver, which may cache an old answer
+    assert asked == [("https://magerstav-inbox.icc.sk/", "100.109.5.21")], "not the installation's own route on MAGER"
     assert tuple(result) == (True, result[1]) and result.new_version_started is True
 
 
@@ -271,7 +272,7 @@ def test_the_deploy_says_whether_the_new_version_was_started(tmp_path, monkeypat
 def test_a_route_that_fails_after_the_start_is_a_failure_of_a_started_version(tmp_path, monkeypatch):
     compose = _instance(tmp_path, monkeypatch)
     _docker(monkeypatch, compose)
-    monkeypatch.setattr(public_route, "probe", lambda url: (public_route.STATE_DOWN, f"{url} 404"))
+    monkeypatch.setattr(public_route, "probe", lambda url, address=None: (public_route.STATE_DOWN, f"{url} 404"))
 
     result = _deploy_to_mager()
 
@@ -297,13 +298,19 @@ class _Provisioned:
     previous_files = {"docker-compose.yml": ("image: nex-inbox-backend:v1.5.6\n", 0o644)}
 
 
-def _runner(monkeypatch, outcome):
+def _runner(monkeypatch, outcome, tmp_path):
     written: list = []
+    provisioned = _Provisioned()
+    # DEV-405: the installation's names are read from the compose provisioning wrote — before anything starts.
+    provisioned.compose_path = tmp_path / "docker-compose.yml"
+    provisioned.compose_path.write_text(
+        yaml.safe_dump({"services": {"frontend": {"labels": MAGER_FRONTEND_LABELS}}}), encoding="utf-8"
+    )
 
     async def _prod(*_a, **_k):
         return outcome
 
-    monkeypatch.setattr(P, "provision_uat", lambda *a, **k: _Provisioned())
+    monkeypatch.setattr(P, "provision_uat", lambda *a, **k: provisioned)
     monkeypatch.setattr(orchestrator, "_run_prod_deploy", _prod)
     monkeypatch.setattr(remote_instance, "write_files", lambda d, files, deploy_host: written.append(files) or None)
     result = asyncio.run(
@@ -318,10 +325,10 @@ def _runner(monkeypatch, outcome):
     return result, written
 
 
-def test_files_stay_new_when_the_new_version_already_runs(monkeypatch):
+def test_files_stay_new_when_the_new_version_already_runs(monkeypatch, tmp_path):
     outcome = orchestrator.InstanceDeployResult(False, "smerovanie zlyhalo", new_version_started=True)
 
-    result, written = _runner(monkeypatch, outcome)
+    result, written = _runner(monkeypatch, outcome, tmp_path)
     ok, detail, _url = result
 
     assert ok is False
@@ -336,10 +343,10 @@ def test_files_stay_new_when_the_new_version_already_runs(monkeypatch):
     )
 
 
-def test_files_go_back_when_the_new_version_never_started(monkeypatch):
+def test_files_go_back_when_the_new_version_never_started(monkeypatch, tmp_path):
     outcome = orchestrator.InstanceDeployResult(False, "exit 1: build failed")
 
-    result, written = _runner(monkeypatch, outcome)
+    result, written = _runner(monkeypatch, outcome, tmp_path)
     ok, detail, _url = result
 
     assert ok is False

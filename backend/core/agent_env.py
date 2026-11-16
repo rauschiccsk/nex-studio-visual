@@ -32,7 +32,9 @@ from collections.abc import Mapping
 #: Environment variables NEVER handed to a spawned agent — not even when a caller passes them in ``extra``.
 #: DEV-117: ``PLANE_API_TOKEN`` is the cockpit's own identity in Plane. Tickets are founded by a person's click; an
 #: agent holding the key could write into the ticket register as the cockpit — the impersonation Dedo's token guards.
-WITHHELD_FROM_AGENTS: tuple[str, ...] = ("DEDO_API_TOKEN", "PLANE_API_TOKEN")
+#: DEV-405: ``CLOUDFLARE_DNS_TOKEN`` writes the DNS of the zone the installations' names live in — with it an agent
+#: could send a customer's name anywhere.
+WITHHELD_FROM_AGENTS: tuple[str, ...] = ("DEDO_API_TOKEN", "PLANE_API_TOKEN", "CLOUDFLARE_DNS_TOKEN")
 
 #: DEV-179 — the names under which git and gh look for a GitHub token; an agent finds the reading token there.
 GITHUB_TOKEN_NAMES: tuple[str, ...] = ("GITHUB_TOKEN", "GH_TOKEN")

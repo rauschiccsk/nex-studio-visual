@@ -97,6 +97,7 @@ from backend.services import (
     dedo_project_proposal,
     deploy_progress,
     deploy_return,
+    installation_names,
     launch_pairing,
     machine_disk,
     private_access,
@@ -1019,6 +1020,19 @@ async def _default_deploy_runner(
     except (FileNotFoundError, ValueError) as exc:
         return RunnerResult(False, f"provision failed: {exc}", None)
 
+    # DEV-405 — on a machine reached by names of its own (MAGER in Tailscale) every name of the installation must lead
+    # there before it starts: a missing one is created in the zone's DNS, a wrong one stops the deploy before anything
+    # is replaced. 16.11.2026 SKIT o.z.'s first PROD was reported „Nasadené“ while its name led to a web hosting.
+    names_note = ""
+    if is_prod and deploy_host:
+        named, names_note = await asyncio.to_thread(
+            installation_names.ensure, result.compose_path, deploy_host, f"{customer_name or customer_slug} / {app}"
+        )
+        if not named:
+            return RunnerResult(
+                False, _vrat_predpis_po_zlyhani(False, names_note, result, deploy_host), None, list(result.warnings)
+            )
+
     # DEV-67: how the running installation reports its health BEFORE the new version replaces it — after the deploy
     # a check that was working and is not any more is said out loud, not hidden behind „Nasadené“.
     health_before = await orchestrator.instance_health(
@@ -1052,6 +1066,8 @@ async def _default_deploy_runner(
             detail = f"{detail} {sentence}"
         if not returned:
             detail = _vrat_predpis_po_zlyhani(ok, detail, result, deploy_host, new_version_started=_started(outcome))
+        if ok and names_note:
+            detail = f"{detail} {names_note}"
         # DEV-283 — the address on the machine it was deployed to.
         url = (
             _prod_url(customer_slug, app, private=private_network, prod_host=deploy_host) if result.fe_service else None

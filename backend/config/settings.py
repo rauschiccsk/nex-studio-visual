@@ -64,6 +64,10 @@ class ProdMachine(BaseModel):
     #: DEV-279: the machine's backup reads only the installations' folders — an app's data outside its database
     #: belongs in its installation's folder, not in a Docker volume (MAGER: the backup runs as icc, without root).
     data_in_installation: bool = False
+    #: DEV-405: the address the installations' names lead to — the machine in Tailscale. The cockpit makes sure every
+    #: name of an installation leads there before the installation starts (it creates a missing record in the zone's
+    #: DNS itself). Empty = the names on this machine are not the cockpit's to look after.
+    address: str = ""
 
 
 class Settings(BaseSettings):
@@ -135,9 +139,21 @@ class Settings(BaseSettings):
             certresolver="cf",
             router_suffix="-sec",
             data_in_installation=True,
+            address="100.109.5.21",
         )
     }
     this_machine_label: str = "ANDROS"
+    # DEV-405: the names of an installation on another machine. Public DNS is asked over HTTPS (a public resolver, not
+    # this machine's, whose cache may still hold the zone's catch-all answer); a missing name is created in Cloudflare
+    # with the cockpit's own key (DNS of the zone only — entered by the Director, never handed to an agent), and the
+    # deploy waits until public DNS shows it.
+    public_dns_url: str = "https://cloudflare-dns.com/dns-query"
+    public_dns_timeout_seconds: float = 10.0
+    cloudflare_api_url: str = "https://api.cloudflare.com/client/v4"
+    cloudflare_dns_token: str = Field(default="", repr=False)
+    cloudflare_timeout_seconds: float = 20.0
+    installation_name_wait_seconds: int = 120
+    installation_name_poll_seconds: float = 5.0
     # DEV-305: the disk of the machine the cockpit builds on. 04.11.2026 the first PROD of NEX Knowledge filled MAGER's
     # system disk while it built a 4.4 GB image, and the Postgres of a customer's app on the same disk restarted. A
     # build takes about 2.5× its image (the build stage, the image, the compressed layers — measured on MAGER

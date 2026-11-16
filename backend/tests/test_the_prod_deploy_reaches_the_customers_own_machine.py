@@ -17,7 +17,6 @@ prevádzky. Keby ho prevzala aj testovacia, prvá skúška zákazníka by mu zas
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 
 import pytest
 
@@ -44,13 +43,16 @@ def _zachyt(monkeypatch) -> list[dict]:
     return videne
 
 
-def _bez_zapisu(monkeypatch) -> None:
+def _bez_zapisu(monkeypatch, tmp_path) -> None:
     """Generátor sa v týchto stráženiach nespúšťa — ide o to, kam sa nasadzuje, nie čo sa vykreslí."""
+    # DEV-405: mená inštalácie sa pred spustením čítajú z predpisu, ktorý príprava zapísala.
+    predpis = tmp_path / "docker-compose.yml"
+    predpis.write_text("services: {}\n", encoding="utf-8")
 
     class _Vysledok:
         fe_service = "frontend"
         warnings: list[str] = []
-        compose_path = Path("/nonexistent/docker-compose.yml")
+        compose_path = predpis
 
     monkeypatch.setattr(instance_adoption.uat_provisioner, "provision_uat", lambda *a, **k: _Vysledok())
     monkeypatch.setattr(deploy_service.uat_provisioner, "provision_uat", lambda *a, **k: _Vysledok())
@@ -60,10 +62,10 @@ def _bez_zapisu(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_prod_deploy_carries_the_target_machine(monkeypatch) -> None:
+async def test_the_prod_deploy_carries_the_target_machine(monkeypatch, tmp_path) -> None:
     """⚠️ Jadro veci: bez tohto sa ostrá prevádzka nasadí na stroj kokpitu."""
     videne = _zachyt(monkeypatch)
-    _bez_zapisu(monkeypatch)
+    _bez_zapisu(monkeypatch, tmp_path)
 
     await deploy_service._default_deploy_runner(
         project_slug="nex-manager",
@@ -77,10 +79,10 @@ async def test_the_prod_deploy_carries_the_target_machine(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_adoption_carries_it_too(monkeypatch) -> None:
+async def test_the_adoption_carries_it_too(monkeypatch, tmp_path) -> None:
     """Prevzatie je druhá cesta k tomu istému nasadeniu — a nesmie o cieli vedieť menej."""
     videne = _zachyt(monkeypatch)
-    _bez_zapisu(monkeypatch)
+    _bez_zapisu(monkeypatch, tmp_path)
     monkeypatch.setattr(instance_adoption, "set_aside_hand_authored", lambda _d, **_k: [])
 
     await instance_adoption.adopting_deploy_runner(
@@ -107,10 +109,10 @@ def test_the_wrapper_passes_it_on_rather_than_dropping_it() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_uat_deploy_never_goes_to_the_customers_machine(monkeypatch) -> None:
+async def test_the_uat_deploy_never_goes_to_the_customers_machine(monkeypatch, tmp_path) -> None:
     """⚠️ Údaj sa volá ``prod_host``. Testovacia inštalácia beží na stroji kokpitu — vždy."""
     videne = _zachyt(monkeypatch)
-    _bez_zapisu(monkeypatch)
+    _bez_zapisu(monkeypatch, tmp_path)
 
     await deploy_service._default_deploy_runner(
         project_slug="nex-manager",
@@ -125,10 +127,10 @@ async def test_the_uat_deploy_never_goes_to_the_customers_machine(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_no_target_means_this_machine(monkeypatch) -> None:
+async def test_no_target_means_this_machine(monkeypatch, tmp_path) -> None:
     """Zákazník bez vlastného servera je bežný prípad — nie chyba."""
     videne = _zachyt(monkeypatch)
-    _bez_zapisu(monkeypatch)
+    _bez_zapisu(monkeypatch, tmp_path)
 
     await deploy_service._default_deploy_runner(
         project_slug="nex-manager",

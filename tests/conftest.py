@@ -521,6 +521,28 @@ def _a_backend_reached_by_its_own_name(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _names_that_lead_to_their_machine(monkeypatch):
+    """DEV-405: before and after a deploy to another machine the cockpit asks public DNS where the installation's names
+    lead, and creates a missing one in Cloudflare.
+
+    By DEFAULT every name in a machine's zone leads to that machine and Cloudflare is never reached — no test asks the
+    real DNS or writes into the real zone. A test about the names sets its own
+    (``backend/tests/test_a_deploy_elsewhere_names_its_installation.py``).
+    """
+    from backend.config.settings import settings
+    from backend.services import installation_names
+
+    def _leads_to_its_machine(name: str) -> list[str]:
+        return [m.address for m in settings.prod_machines.values() if m.address and name.endswith(f".{m.zone}")][:1]
+
+    def _no_cloudflare(*args, **kwargs):
+        raise AssertionError("a test reached Cloudflare — fake it (DEV-405)")
+
+    monkeypatch.setattr(installation_names, "public_addresses", _leads_to_its_machine)
+    monkeypatch.setattr(installation_names, "_cloudflare", _no_cloudflare)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_ci_questions(monkeypatch):
     """ICCINT-70: the Verifikácia CI floor now WAITS for the run it just pushed — it retries for up to two
     minutes, then up to twenty more for the run to finish.

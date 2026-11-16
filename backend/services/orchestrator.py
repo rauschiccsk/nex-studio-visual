@@ -88,6 +88,7 @@ from backend.services import (
     fast_fix,
     git_push,
     host_docker_guard,
+    installation_names,
     instance_data_dirs,
     library_upgrades,
     nexshared,
@@ -7557,7 +7558,7 @@ async def _verify_uat_serves(
         if (deploy_host or "").strip():
             # DEV-68: an installation on another machine is asked at its own addresses, the way its users open them
             # (every router of the installation — a Web project's both addresses).
-            public_host, route_state, route_last = await _verify_remote_public_route(uat_compose)
+            public_host, route_state, route_last = await _verify_remote_public_route(uat_compose, deploy_host)
             checked = [(public_host, route_state, route_last)]
         else:
             checked = []
@@ -8584,21 +8585,36 @@ def _traefik_public_route_probe_src(public_host: str) -> str:
     )
 
 
-async def _verify_remote_public_route(instance_compose: Path) -> tuple[str, str, str]:
+async def _verify_remote_public_route(
+    instance_compose: Path, deploy_host: Optional[str] = None
+) -> tuple[str, str, str]:
     """``(addresses, state, last)`` for an installation on ANOTHER machine (DEV-68): its own routers' addresses
     (:func:`public_route.route_urls`) asked from the cockpit over the network, retried over the readiness budget like
-    the in-network probe — Traefik needs a moment to pick up freshly started containers."""
+    the in-network probe — Traefik needs a moment to pick up freshly started containers.
+
+    DEV-405: an answer is the installation's only when its names lead to its machine — 16.11.2026 the name of SKIT
+    o.z.'s NEX Manager led to a web hosting whose 403 passed for the app's. Public DNS is asked first."""
     try:
         data = yaml.safe_load(instance_compose.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError) as exc:
         return "—", public_route.STATE_SKIP, f"predpis inštalácie sa nedá prečítať: {exc}"
     urls = public_route.route_urls(data)
+    try:
+        names_state, names_seen = await run_blocking(
+            installation_names.check, data, deploy_host, cap=installation_names.check_cap(data)
+        )
+    except BlockingWorkTimedOut as exc:
+        names_state, names_seen = public_route.STATE_SKIP, str(exc)
+    if names_state != public_route.STATE_OK:
+        return ", ".join(urls) or "—", names_state, names_seen
+    target = installation_names.machine(deploy_host)
+    address = target.address if target else None
     cap = public_route.ROUTE_PROBE_TIMEOUT_SECONDS * max(1, len(urls)) + 10
     attempts = max(1, ACCEPTANCE_SMOKE_READY_TIMEOUT // ACCEPTANCE_SMOKE_READY_INTERVAL)
     state, last = public_route.STATE_SKIP, "no response"
     for i in range(attempts):
         try:
-            state, last = await run_blocking(public_route.check, urls, cap=cap)
+            state, last = await run_blocking(public_route.check, urls, address, cap=cap)
         except BlockingWorkTimedOut as exc:
             state, last = public_route.STATE_SKIP, str(exc)
         if state == public_route.STATE_OK:
