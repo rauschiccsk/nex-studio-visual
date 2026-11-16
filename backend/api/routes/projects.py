@@ -889,14 +889,12 @@ def upgrade_app_kit(
         )
     # DEV-395: the upgrade is also offered beside the project's languages, while a version may be building.
     _refuse_while_an_agent_works(db, project)
-    if not app_kit_service.upgrade_source(project.source_path, payload.target_version, project.template):
+    # DEV-414: the step that failed and what it found — not one sentence for every cause.
+    problem = app_kit_service.upgrade_problem(project.source_path, payload.target_version, project.template)
+    if problem is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Povýšenie šablóny sa nepodarilo dokončiť — verzia sa nezapísala do zámku závislostí, takže by sa "
-                "zostavovala pôvodná. Rám ani server sa nezmenili. Skús to znova; ak to potrvá, over dostupnosť "
-                "GitHubu."
-            ),
+            detail=f"Povýšenie šablóny sa nepodarilo dokončiť — {problem}. Rám ani server sa nezmenili.",
         )
     committed = app_kit_service.commit_upgrade(project.source_path, payload.target_version)
     return AppKitUpgradeResult(upgraded=True, target_version=payload.target_version, committed=committed)

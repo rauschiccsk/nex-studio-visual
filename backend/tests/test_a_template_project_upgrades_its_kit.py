@@ -74,8 +74,10 @@ def release(version: str = "0.5.0", shared: str = "0.29.0"):
 
 
 def upgrade(root: Path, target: str = "0.5.0", scaffold_package=None) -> bool:
-    return app_kit.upgrade_source(
-        str(root), target, "nsv-standard", scaffold_package=scaffold_package or release(target)
+    """True when the upgrade went through (DEV-414: :func:`app_kit.upgrade_problem` names nothing)."""
+    return (
+        app_kit.upgrade_problem(str(root), target, "nsv-standard", scaffold_package=scaffold_package or release(target))
+        is None
     )
 
 

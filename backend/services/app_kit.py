@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -73,14 +75,63 @@ def _with_poetry_tag(text: str, target_version: str) -> tuple[str, int]:
 
 def lock_poetry(backend_dir: Path, *, timeout: Optional[int] = None) -> bool:
     """Re-lock a poetry project's dependencies after its kit pin moved (``poetry lock --no-update``: the other
-    packages stay as locked). Network-bound (it resolves the git dependency), hence a seam the tests replace."""
+    packages stay as locked). Network-bound (it resolves the git dependency), hence a seam the tests replace.
+
+    DEV-414: in a clean copy of the project's files that git tracks, never in the project itself. 16.11.2026 NEX
+    Manager's upgrade to 0.15.2 recorded nex-app-kit 0.8.0: poetry reused the old checkout in the project's own
+    ``backend/.venv/src/nex-app-kit`` (3.11.2026) and read the version from its ignored ``nex_app_kit.egg-info``. The
+    lock written in the copy comes back to the project; nothing else does."""
+    backend_dir = Path(backend_dir)
+    root = backend_dir.parent
+    with tempfile.TemporaryDirectory(prefix="kit-lock-") as tmp:
+        work_root = Path(tmp) / root.name
+        for rel in _tracked_files(root) or _poetry_files(backend_dir, root):
+            source = root / rel
+            if source.is_file() or source.is_symlink():
+                target = work_root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target, follow_symlinks=False)
+        work_backend = work_root / backend_dir.relative_to(root)
+        if not (work_backend / "pyproject.toml").is_file():
+            return False
+        if not _run_poetry_lock(work_backend, timeout or settings.poetry_lock_timeout_seconds):
+            return False
+        locked = work_backend / "poetry.lock"
+        if not locked.is_file():
+            return False
+        shutil.copy2(locked, backend_dir / "poetry.lock")
+    return True
+
+
+def _tracked_files(root: Path) -> Optional[list[str]]:
+    """The files git tracks in ``root`` (paths relative to it), or ``None`` when it is not a git checkout."""
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [path for path in proc.stdout.decode("utf-8", "replace").split("\0") if path]
+
+
+def _poetry_files(backend_dir: Path, root: Path) -> list[str]:
+    """Without git: the files poetry reads to lock — nothing the project keeps beside them."""
+    return [
+        str((backend_dir / name).relative_to(root))
+        for name in ("pyproject.toml", "poetry.lock", "poetry.toml")
+        if (backend_dir / name).is_file()
+    ]
+
+
+def _run_poetry_lock(work_backend: Path, timeout: int) -> bool:
+    """``poetry lock --no-update`` in ``work_backend`` — the step the tests replace."""
     try:
         proc = subprocess.run(
             [settings.poetry_bin, "lock", "--no-update"],
-            cwd=str(backend_dir),
+            cwd=str(work_backend),
             capture_output=True,
             text=True,
-            timeout=timeout or settings.poetry_lock_timeout_seconds,
+            timeout=timeout,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -208,13 +259,13 @@ def fetch_scaffold_package(template: str, version: str) -> Optional[dict]:
     return None if any("{{" in str(spec) for spec in specs) else package
 
 
-def upgrade_source(
+def upgrade_problem(
     source_path: str,
     target_version: str,
     template: str,
     *,
     scaffold_package: Optional[Callable[[str, str], Optional[dict]]] = None,
-) -> bool:
+) -> Optional[str]:
     """Move the project's nex-app-kit to ``target_version`` — the frame's pin, nex-shared raised to the release's own
     pin when older, the packages the release's frontend newly needs, the lockfile; then the server's pin (DEV-257: as
     the conversion does, DEV-254).
@@ -222,7 +273,11 @@ def upgrade_source(
     The lockfile must really resolve to the target (``npm ci`` installs what it says), else every file touched is put
     back: a frame and a server on two releases would speak two versions of the standard interface. False when there
     is nothing to rewrite (no pin on either side), the release's packages cannot be read or the lockfile did not
-    follow. Does NOT commit."""
+    follow. Does NOT commit.
+
+    DEV-414: ``None`` when the upgrade went through, else the step that failed and what it found, in a sentence for the
+    Manažér — 16.11.2026 NEX Manager's upgrade said only „over dostupnosť GitHubu“ while its server lock had recorded
+    0.8.0, and every retry would have failed the same way."""
     root = Path(source_path)
     pkg, lock, server = root / FRONTEND / "package.json", root / FRONTEND / "package-lock.json", root / SERVER_PIN_FILE
     poetry_lock, requirements = root / POETRY_LOCK_FILE, root / REQUIREMENTS_FILE
@@ -232,21 +287,23 @@ def upgrade_source(
             for path in (pkg, lock, server, poetry_lock, requirements)
         }
     except OSError:
-        return False
+        return "súbory projektu sa nedajú prečítať"
     if originals[pkg] is None or originals[server] is None:
-        return False
+        return f"projekt nemá {FRONTEND}/package.json alebo {SERVER_PIN_FILE}"
     try:
         project_package = json.loads(originals[pkg])
     except ValueError:
-        return False
+        return f"{FRONTEND}/package.json nie je platný JSON"
     on_kit = app_template.KIT_PACKAGE in (project_package.get("dependencies") or {})
     new_server, pins = _SERVER_PIN_RE.subn(app_template.kit_server_dependency(target_version), originals[server])
     # DEV-383: a server pinned as a poetry git dependency moves in its own spelling and is re-locked below.
     poetry = pins == 0 and originals[poetry_lock] is not None
     if poetry:
         new_server, pins = _with_poetry_tag(originals[server], target_version)
-    if not on_kit or pins != 1:
-        return False
+    if not on_kit:
+        return f"frontend projektu nestojí na šablóne (v {FRONTEND}/package.json chýba {app_template.KIT_PACKAGE})"
+    if pins != 1:
+        return f"v {SERVER_PIN_FILE} nie je šablóna servera zapísaná tak, aby ju kokpit vedel prepísať ({pins}×)"
     # DEV-353: requirements.txt that names the kit moves with pyproject.toml — or, in a spelling the cockpit cannot
     # rewrite, the upgrade stops here, before any file is touched.
     new_requirements = None
@@ -255,10 +312,10 @@ def upgrade_source(
             app_template.kit_server_dependency(target_version), originals[requirements]
         )
         if required != 1:
-            return False
+            return f"{REQUIREMENTS_FILE} uvádza šablónu v zápise, ktorý kokpit nevie prepísať"
     release = (scaffold_package or fetch_scaffold_package)(template, target_version)
     if release is None:
-        return False
+        return f"verziu šablóny {target_version} sa nepodarilo stiahnuť z GitHubu — skús to o chvíľu znova"
     package, specs = app_template.with_template_packages(project_package, release)
     pkg.write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     server.write_text(new_server, encoding="utf-8")
@@ -270,20 +327,38 @@ def upgrade_source(
         for spec in specs
         if spec.startswith(nexshared.git_dependency(name, ""))
     }
-    frontend_followed = nexshared.resolve_lockfile(root / FRONTEND, *specs) and all(
-        nexshared.effective_version(source_path, FRONTEND, name) == version for name, version in wanted.items()
+    problem = _frontend_lock_problem(root, source_path, specs, wanted) or (
+        _server_lock_problem(root, poetry_lock, target_version) if poetry else None
     )
-    server_followed = not poetry or (
-        lock_poetry(root / "backend") and _poetry_locked_version(poetry_lock) == target_version
-    )
-    if frontend_followed and server_followed:
-        return True
+    if problem is None:
+        return None
     for path, original in originals.items():
         if original is not None:
             path.write_text(original, encoding="utf-8")
         else:
             path.unlink(missing_ok=True)
-    return False
+    return problem
+
+
+def _frontend_lock_problem(root: Path, source_path: str, specs: list[str], wanted: dict[str, str]) -> Optional[str]:
+    """Why the frontend's lockfile did not follow the upgrade, or ``None`` when it did."""
+    if not nexshared.resolve_lockfile(root / FRONTEND, *specs):
+        return "zámok frontendu (npm) sa nepodarilo prepočítať"
+    for name, version in wanted.items():
+        locked = nexshared.effective_version(source_path, FRONTEND, name)
+        if locked != version:
+            return f"zámok frontendu ukazuje {name} {locked or 'bez verzie'} namiesto {version}"
+    return None
+
+
+def _server_lock_problem(root: Path, poetry_lock: Path, target_version: str) -> Optional[str]:
+    """Why the server's poetry.lock did not follow the upgrade, or ``None`` when it did."""
+    if not lock_poetry(root / "backend"):
+        return "zámok servera (poetry) sa nepodarilo prepočítať"
+    locked = _poetry_locked_version(poetry_lock)
+    if locked != target_version:
+        return f"zámok servera zapísal {app_template.KIT_PACKAGE} {locked or 'bez verzie'} namiesto {target_version}"
+    return None
 
 
 def commit_upgrade(source_path: str, target_version: str) -> bool:

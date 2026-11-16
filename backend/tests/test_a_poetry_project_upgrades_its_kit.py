@@ -15,7 +15,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.services import app_kit, nexshared
-from backend.tests.test_a_template_project_upgrades_its_kit import _lock, files, npm_resolves_to, release, seed
+from backend.tests.test_a_template_project_upgrades_its_kit import (
+    _lock,
+    files,
+    npm_resolves_to,
+    seed,
+    upgrade,
+)
 
 NEX_MANAGER_PYPROJECT = Path("/opt/projects/nex-manager/backend/pyproject.toml")
 
@@ -84,7 +90,7 @@ def test_a_poetry_project_upgrades_both_sides_and_re_locks_the_server(tmp_path, 
     npm_resolves_to(monkeypatch, "0.5.0")
     locked = poetry_locks_to(monkeypatch, "0.5.0")
 
-    assert app_kit.upgrade_source(str(tmp_path), "0.5.0", "nsv-standard", scaffold_package=release("0.5.0"))
+    assert upgrade(tmp_path)
 
     pyproject = (tmp_path / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     assert 'tag = "v0.5.0", subdirectory = "server"}' in pyproject and 'tag = "v0.3.0"' not in pyproject
@@ -99,7 +105,7 @@ def test_a_poetry_lock_that_does_not_follow_puts_every_file_back(tmp_path, monke
     npm_resolves_to(monkeypatch, "0.5.0")
     poetry_locks_to(monkeypatch, "0.3.0")  # poetry kept the old release
 
-    assert not app_kit.upgrade_source(str(tmp_path), "0.5.0", "nsv-standard", scaffold_package=release("0.5.0"))
+    assert not upgrade(tmp_path)
     assert files(tmp_path) | {"lock": (tmp_path / "backend" / "poetry.lock").read_text(encoding="utf-8")} == before
 
 
@@ -109,7 +115,7 @@ def test_poetry_failing_puts_every_file_back(tmp_path, monkeypatch):
     npm_resolves_to(monkeypatch, "0.5.0")
     poetry_locks_to(monkeypatch, None)
 
-    assert not app_kit.upgrade_source(str(tmp_path), "0.5.0", "nsv-standard", scaffold_package=release("0.5.0"))
+    assert not upgrade(tmp_path)
     assert files(tmp_path) == before
 
 
@@ -118,7 +124,7 @@ def test_the_founding_spelling_is_never_re_locked(tmp_path, monkeypatch):
     npm_resolves_to(monkeypatch, "0.5.0")
     locked = poetry_locks_to(monkeypatch, "0.5.0")
 
-    assert app_kit.upgrade_source(str(tmp_path), "0.5.0", "nsv-standard", scaffold_package=release("0.5.0"))
+    assert upgrade(tmp_path)
     assert locked == []
 
 
