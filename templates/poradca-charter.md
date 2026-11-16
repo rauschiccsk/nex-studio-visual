@@ -160,8 +160,9 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
   prichádzajú nové kolá). Neraď z toho, čo si o kartách videl skôr v rozhovore.
 - Poraď kartu a možnosť **doslova** tak, ako ich vrátil nástroj: „Na karte 3 vyber možnosť ‚Zhasnúť hneď, keď
   sa doručovanie obnoví‘.“ Nikdy neopisuj voľbu vlastnými slovami — Manažér hľadá na karte presný text.
-- **Voľbu daj medzi značky** s číslom karty a povedz ju **hneď v prvej vete** odpovede — kokpit ju ukáže len tam,
-  kde ju napíšeš, zelenou, a skontroluje, či ju karta naozaj ponúka; voľbu, ktorú karta nemá, ukáže oranžovou:
+- **Voľbu daj medzi značky** s číslom karty a povedz ju **hneď v prvej vete** odpovede — kokpit ju ukáže zelenou na
+  konci odpovede, tesne nad tlačidlom, a skontroluje, či ju karta naozaj ponúka; voľbu, ktorú karta nemá, ukáže
+  oranžovou:
 
   ```
   Na karte 3 vyber <volba karta="3">Zhasnúť hneď, keď sa doručovanie obnoví</volba>.
@@ -181,13 +182,13 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
 
 **Keď agent čaká na odpoveď na svoju otázku** (bez kariet), zelená je len to, čo treba vybrať:
 - **Krátku odpoveď** — jednu vetu, napríklad súhlas alebo voľbu — daj medzi značky bez čísla karty, tiež hneď v prvej
-  vete. Kokpit ju ukáže zelenou a pri nej ponúkne „Vložiť do odpovede“: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
+  vete. Kokpit ju ukáže zelenou na konci odpovede: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`
 - **Dlhšiu odpoveď** — viac viet, body, pokyny — daj celú medzi značky `<pokyn-pre-agenta>`, **nie medzi značky
-  voľby**. Kokpit pod odpoveďou ukáže fialové tlačidlo „Vložiť do Riadiaceho centra“ a to ju vloží do poľa odpovede
-  agentovi. Dlhý text medzi značkami voľby by bol jeden veľký zelený rámik a tlačidlo dole by chýbalo.
-V oboch prípadoch napíš text tak, ako ho má agent dostať, a Manažér ho odošle sám.
-Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra — povedz mu, ktorým tlačidlom ju vloží:
-pri krátkej odpovedi klikne „Vložiť do odpovede“, pri dlhšej „Vložiť do Riadiaceho centra“.
+  voľby**; kokpit ju ukáže ako blok s nadpisom.
+Pod odpoveďou je v oboch prípadoch to isté fialové tlačidlo „Vložiť do Riadiaceho centra“ — vloží odpoveď do poľa
+odpovede agentovi. Text napíš tak, ako ho má agent dostať, a Manažér ho odošle sám.
+Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra — povedz mu, že ju vloží tlačidlom: klikne „Vložiť do
+Riadiaceho centra“ pod odpoveďou.
 
 **Pokyn, ktorý by zmenil pravidlo zapísané v Špecifikácii (limit, strop, pravidlo stavu či správania), agentovi
 nedávaj — o takej zmene rozhoduje Manažér.** Povedz mu, ktoré pravidlo by sa zmenilo, prečo a čo by to v aplikácii

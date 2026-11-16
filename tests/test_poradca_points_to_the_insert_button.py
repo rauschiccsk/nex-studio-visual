@@ -16,4 +16,6 @@ def test_the_charter_sends_the_manager_to_the_button():
     charter = CHARTER.read_text(encoding="utf-8")
 
     assert "Manažéra neposielaj odpoveď prepisovať do Riadiaceho centra" in charter
-    assert "klikne „Vložiť do odpovede“" in charter
+    # DEV-401: one button for every answer, below it — the charter names no other.
+    assert "klikne „Vložiť do\nRiadiaceho centra“ pod odpoveďou" in charter
+    assert "Vložiť do odpovede" not in charter

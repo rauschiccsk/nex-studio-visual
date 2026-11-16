@@ -13,7 +13,8 @@
 // DEV-135: the agent's question in Riadiace centrum (a blocked build waiting on the Manažér's answer) goes the same
 // way — Director 16.10.2026: „Chýba mi tu tlačidlo ktorým odošleme pre Poradcu.“ It is a card of its own kind: the
 // question, where the build stands, what the agent found, and the request; Poradca's recommended answer comes back
-// into the answer box through „Vložiť do odpovede“.
+// into the answer box through „Vložiť do Riadiaceho centra“ below the answer (DEV-401; before it the small „Vložiť do
+// odpovede“ beside the green text).
 //
 // DEV-191: „Opýtaj sa Poradcu“ at a finished version goes the same way too — Director 23.10.2026: „Ak kliknem na Opýtať
 // poradcu, malo by sa skutočne opýtať ako to robíme na kartách“. It asks what the version brought, what to try in UAT

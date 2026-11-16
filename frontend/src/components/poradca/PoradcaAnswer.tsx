@@ -18,8 +18,16 @@ import { useCodePaths } from "@/hooks/useCodePaths";
 import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { greenCardChoice, handOffInstruction, instructionTarget, type HandedChoice } from "@/lib/poradcaHandoff";
-import { answerForDisplay, CHOICE_HREF, formatCost, formatDuration, longAnswer, stepLabel } from "@/lib/poradcaAnswer";
-import { InlineChoice } from "@/components/poradca/ChoiceBadge";
+import {
+  answerForDisplay,
+  CHOICE_HREF,
+  formatCost,
+  formatDuration,
+  isLongAnswerChoice,
+  longAnswer,
+  stepLabel,
+} from "@/lib/poradcaAnswer";
+import { ChoiceSummary } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
@@ -80,10 +88,18 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
   const notInSlovak = message.not_in_slovak ?? null;
   // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
   const instruction = held || notInSlovak ? null : (message.instruction ?? longAnswer(message.content ?? ""));
+  // DEV-401: a short answer for the agent's question (one the server recognised) goes the instruction's way — one button
+  // „Vložiť do Riadiaceho centra“, always below the answer (Director 16.11.2026: the small „Vložiť do odpovede“ in the
+  // first sentence was not found).
+  // The choices drawn at the end — a long answer is already the quoted block above, not a choice to pick.
+  const summary = choices.filter((c) => c.card || !isLongAnswerChoice(message.content ?? "", c.label));
+  const answerChoice = held || notInSlovak ? undefined : summary.find((c) => !c.card && c.status === "answer");
+  const insertText = instruction ?? answerChoice?.label ?? null;
 
   function insert() {
     // DEV-333 — the green choice of a card goes with the instruction, and the card has it picked.
     if (instruction) handOff(instruction, greenCardChoice(choices));
+    else if (answerChoice) handOff(answerChoice.label);
   }
 
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
@@ -131,9 +147,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
     }
   }
 
-  // DEV-135 / DEV-205 — „Vložiť do odpovede“ where the answer names the answer for the agent (DEV-208: only there).
-  const answerInsert = { insert: handOff, blocked: instructionBlocked };
-  const hasActions = !!(instruction || message.backlog_request || message.ticket_proposal || agentTickets.length);
+  const hasActions = !!(insertText || message.backlog_request || message.ticket_proposal || agentTickets.length);
 
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
@@ -171,13 +185,8 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
           className="prose-sm text-sm text-[var(--color-text-primary)]"
           components={{
             a({ href, children, ...props }) {
-              if (href?.startsWith(CHOICE_HREF)) {
-                return (
-                  <InlineChoice href={href} choices={choices} answer={notInSlovak ? undefined : answerInsert}>
-                    {children}
-                  </InlineChoice>
-                );
-              }
+              // DEV-401: in the text a choice is plain words — it is drawn green once, at the end, above the button.
+              if (href?.startsWith(CHOICE_HREF)) return <span>{children}</span>;
               return (
                 <a href={href} {...props}>
                   {children}
@@ -202,6 +211,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
           {notInSlovak}
         </p>
       )}
+      {!running && <ChoiceSummary choices={summary} />}
       {!running && hasActions && (
         <div className="mt-2 flex flex-wrap gap-2">
           {agentTickets.length > 0 && (
@@ -220,14 +230,15 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
               {`Priložiť k odpovedi Staviteľovi: ${agentTickets.join(", ")}`}
             </button>
           )}
-          {instruction && (
+          {insertText && (
             <button
               type="button"
               onClick={insert}
               disabled={!!instructionBlocked}
               title={
                 instructionBlocked ??
-                `Vloží pokyn do poľa Riadiaceho centra verzie ${target?.version_number} — odošleš ho sám.`
+                `Vloží ${instruction ? "pokyn" : "odpoveď"} do poľa Riadiaceho centra verzie ${target?.version_number} — ` +
+                  "odošleš ho sám."
               }
               className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-primary-600"
             >
@@ -296,7 +307,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
           onClose={() => setTicketOpen(false)}
         />
       )}
-      {instructionBlocked && (instruction || agentTickets.length > 0) && !running && (
+      {instructionBlocked && (insertText || agentTickets.length > 0) && !running && (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{instructionBlocked}</p>
       )}
       {error && <ErrorNote error={error} />}

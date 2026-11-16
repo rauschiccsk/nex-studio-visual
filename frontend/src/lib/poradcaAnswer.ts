@@ -15,7 +15,8 @@ const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "tiket-pre-agenta", heading: "Tiket pre Staviteľa" },
 ];
 
-/** DEV-83 — the link a marked choice becomes in the rendered answer; `#volba-3` names card 3, `#volba` no card. */
+/** DEV-83 — the link a marked choice becomes in the rendered answer (`#volba-3` names card 3, `#volba` no card); since
+ * DEV-401 it reads as plain words there, and the choice is drawn green once at the end of the answer. */
 export const CHOICE_HREF = "#volba";
 const CHOICE_RE = /<volba(?:\s+karta="(\d{1,3})")?\s*>([\s\S]*?)<\/volba>/g;
 
@@ -34,6 +35,15 @@ function isLongAnswer(text: string): boolean {
   return text.length > SHORT_ANSWER_MAX || text.includes("\n");
 }
 
+/** DEV-401 — whether the no-card choice *label* (as the server reads it) is the long answer of *content* — drawn as the
+ * block „Odpoveď pre Staviteľa“ and inserted as the instruction, so it is no choice to draw green at the end. */
+export function isLongAnswerChoice(content: string, label: string): boolean {
+  for (const [, card, body] of content.matchAll(CHOICE_RE)) {
+    if (!card && isLongAnswer((body ?? "").trim()) && plainChoice(body ?? "") === label) return true;
+  }
+  return false;
+}
+
 /** The answer for the agent Poradca marked as a choice but too long to be one — `null` when there is none. */
 export function longAnswer(content: string): string | null {
   for (const [, card, body] of content.matchAll(CHOICE_RE)) {
@@ -43,13 +53,7 @@ export function longAnswer(content: string): string | null {
   return null;
 }
 
-/** The card a choice link names — `null` for an answer to the agent's question. */
-export function choiceCard(href: string): number | null {
-  const m = /^#volba-(\d+)$/.exec(href);
-  return m ? Number(m[1]) : null;
-}
-
-/** A marked choice as the server reads it — whitespace collapsed, so the badge finds the server's verdict. */
+/** A marked choice as the server reads it — whitespace collapsed. */
 function plainChoice(text: string): string {
   return text.split(/\s+/).filter(Boolean).join(" ");
 }

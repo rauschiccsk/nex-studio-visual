@@ -250,13 +250,16 @@ function renderAnswer(
 }
 
 describe("Poradca's recommended answer comes back into the answer box", () => {
-  // DEV-205 / DEV-208 — the button stands once, beside the answer where Poradca names it in its text.
-  it("one click beside the answer in the text puts it into the box of Riadiace centrum — nothing is sent", () => {
+  // DEV-205 / DEV-208 / DEV-401 — one button, below the answer, the green answer right above it.
+  it("one click on the button below the answer puts it into the box of Riadiace centrum — nothing is sent", () => {
     const { container } = renderAnswer([ANSWER]);
 
-    const button = screen.getByRole("button", { name: "Vložiť do odpovede" }); // throws unless there is exactly one
-    const badge = container.querySelector('[data-choice="answer"]');
-    expect(badge?.parentElement).toContainElement(button);
+    const button = screen.getByRole("button", { name: "Vložiť do Riadiaceho centra" }); // throws unless exactly one
+    const badge = container.querySelector('[data-choice="answer"]') as HTMLElement;
+    expect(screen.getByTestId("poradca-choices")).toContainElement(badge);
+    // The green answer stands right before the button — nothing of the answer's text between them.
+    expect(badge.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Vložiť do odpovede" })).toBeNull();
     fireEvent.click(button);
 
     expect(screen.getByText("na adrese /riadiace-centrum")).toBeInTheDocument();
@@ -265,13 +268,13 @@ describe("Poradca's recommended answer comes back into the answer box", () => {
 
   it("a choice on a decision card is picked on the card, not inserted", () => {
     renderAnswer([ON_CARD]);
-    expect(screen.queryAllByRole("button", { name: "Vložiť do odpovede" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /Vložiť do/ })).toHaveLength(0);
   });
 
   it("when the box would not take it, the buttons say why instead of sending him to an empty box", () => {
     renderAnswer([ANSWER], null);
 
-    const buttons = screen.getAllByRole("button", { name: "Vložiť do odpovede" });
+    const buttons = screen.getAllByRole("button", { name: "Vložiť do Riadiaceho centra" });
     expect(buttons).toHaveLength(1);
     for (const button of buttons) {
       expect(button).toBeDisabled();
@@ -335,13 +338,14 @@ describe("DEV-224 — green is what to pick; a longer answer for the agent is an
     expect(takeHandoff("v1")).toBe(lines);
   });
 
-  it("a short answer stays green with „Vložiť do odpovede“ and brings no purple button", () => {
+  it("a short answer is green at the end and goes in with the same purple button (DEV-401)", () => {
     const { container } = renderContent("Odpovedz agentovi <volba>Áno, súhlasím</volba>.", [
       { card: null, label: "Áno, súhlasím", status: "answer", question: null },
     ]);
 
     expect(container.querySelector('[data-choice="answer"]')?.textContent).toBe("Áno, súhlasím");
-    expect(screen.getByRole("button", { name: "Vložiť do odpovede" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Vložiť do Riadiaceho centra" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Vložiť do odpovede" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Vložiť do Riadiaceho centra" }));
+    expect(takeHandoff("v1")).toBe("Áno, súhlasím");
   });
 });

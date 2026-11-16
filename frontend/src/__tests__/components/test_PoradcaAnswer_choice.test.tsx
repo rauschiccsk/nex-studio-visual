@@ -2,8 +2,11 @@
  * DEV-83 — the choice Poradca tells the manager to make is green, and orange when the card does not offer it.
  * 12.10.2026 the Director: in a long answer the option to pick got lost.
  *
- * DEV-208 — it is drawn once, where the text names it; the summary above the answer showed it a second time.
+ * DEV-208 — it is drawn once; the summary above the answer showed it a second time.
  * 23.10.2026 the Director: „zbytočne je vypísaná 2x čo treba vybrať (zelená) stačí len raz“.
+ *
+ * DEV-401 — once, at the end of the answer right above its button; in the text it is plain words.
+ * 16.11.2026 the Director: „aby zelený text nebol na začiatku, ale na konci pred tlačidlom“.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +57,7 @@ const CONTENT =
   'Na karte 1 <volba karta="1">posielať po kúskoch</volba>.\n\nAgentovi odpovedz <volba>Áno, súhlasím</volba>.';
 
 describe("Poradca's marked choice (DEV-83)", () => {
-  it("is green once, where the text names it — not summed up above the answer a second time", () => {
+  it("is green once, at the end of the answer — in the text it is plain words", () => {
     const { container } = answer(CONTENT, [ON_CARD, PARAPHRASE, ANSWER]);
 
     expect(screen.queryByLabelText("Čo vybrať")).toBeNull();
@@ -63,20 +66,25 @@ describe("Poradca's marked choice (DEV-83)", () => {
       "karta 2:Zhasnúť hneď, keď sa doručovanie obnoví",
       "Áno, súhlasím",
     ]);
-    expect(green[0]?.closest("p")?.textContent).toContain("Na karte 2 vyber");
+    const summary = screen.getByTestId("poradca-choices");
+    for (const badge of green) expect(summary).toContainElement(badge as HTMLElement);
+    // The text keeps the words, plain: no badge, no link inside the paragraphs of the answer.
+    const sentence = [...container.querySelectorAll("p")].find((p) => p.textContent?.includes("Na karte 2 vyber"));
+    expect(sentence?.textContent).toContain("Na karte 2 vyber Zhasnúť hneď, keď sa doručovanie obnoví");
+    expect(sentence?.querySelector("[data-choice], a")).toBeNull();
     expect(screen.queryByText(/<volba/)).toBeNull();
   });
 
-  it("is orange once, with the warning beside it in the text, when the card does not offer it", () => {
+  it("is orange once, with the warning beside it at the end, when the card does not offer it", () => {
     const { container } = answer(CONTENT, [ON_CARD, PARAPHRASE, ANSWER]);
 
     const orange = container.querySelectorAll('[data-choice="not_on_card"]');
     expect([...orange].map((b) => b.textContent)).toEqual(["karta 1:posielať po kúskoch"]);
     expect(orange[0]).toHaveAttribute("title", NOT_ON_CARD_NOTE);
     expect(screen.getAllByText(NOT_ON_CARD_NOTE)).toHaveLength(1);
-    const sentence = orange[0]?.closest("p");
-    expect(sentence).toBeInstanceOf(HTMLElement);
-    expect(within(sentence as HTMLElement).getByText(NOT_ON_CARD_NOTE)).toBeInTheDocument();
+    const summary = screen.getByTestId("poradca-choices");
+    expect(summary).toContainElement(orange[0] as HTMLElement);
+    expect(within(summary).getByText(NOT_ON_CARD_NOTE)).toBeInTheDocument();
   });
 
   it("leaves an answer without a marked choice as it was", () => {

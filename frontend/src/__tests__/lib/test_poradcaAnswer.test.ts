@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   SHORT_ANSWER_MAX,
   answerForDisplay,
-  choiceCard,
   formatCost,
   formatDuration,
   longAnswer,
@@ -32,8 +31,6 @@ describe("answerForDisplay", () => {
     const out = answerForDisplay('Na karte 3 vyber <volba karta="3">Zhasnúť  hneď,\nkeď sa obnoví</volba>. A <volba>Áno</volba>.');
     expect(out).toBe("Na karte 3 vyber [Zhasnúť hneď, keď sa obnoví](#volba-3). A [Áno](#volba).");
     expect(answerForDisplay('<volba karta="1">Voľba [A] a \\ B</volba>')).toBe("[Voľba \\[A\\] a \\\\ B](#volba-1)");
-    expect(choiceCard("#volba-3")).toBe(3);
-    expect(choiceCard("#volba")).toBeNull();
   });
 
   it("DEV-29: an answer from before the change shows its request as one for the Zásobník, never a new version", () => {
