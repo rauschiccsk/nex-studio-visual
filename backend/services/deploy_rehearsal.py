@@ -147,11 +147,12 @@ def render_targets(
         first = provision(root, customer)
         shutil.copyfile(existing, first.compose_path)  # the installation's compose as it stands — not its .env
         # DEV-406 — the synthetic settings were written for the project's layout; the installation's own compose may
-        # call its database service otherwise (MÁGERSTAV's NEX Inbox: „postgres“, the project: „db“). Its settings lead
-        # to its own service, as the installation's real ones do — else the rehearsal's migration finds no database.
-        own_db = P.installation_db_service(existing.read_text(encoding="utf-8"))
-        if own_db and first.db_service and own_db != first.db_service:
-            P.retarget_database_host(first.env_path, first.db_service, own_db)
+        # define its database otherwise (MÁGERSTAV's NEX Inbox: service „postgres“, user „nex_inbox“, database
+        # „nex_inbox_mager“; the project: „db“, both from .env). Its settings lead to its own database, as the
+        # installation's real ones do — else the rehearsal's migration finds no database, or is refused by it.
+        own = P.installation_database(existing.read_text(encoding="utf-8"))
+        if own.service and first.db_service:
+            P.align_database_settings(first.env_path, first.db_service, own)
         again = provision(root, customer)
         rendered.append(Rendered(f"inštalácia zákazníka {customer}", again.compose_path, again.env_path))
     return rendered

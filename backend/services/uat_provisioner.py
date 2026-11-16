@@ -58,7 +58,7 @@ import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, NamedTuple, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 import jinja2
@@ -1184,35 +1184,74 @@ def detect_db_credentials(services: dict[str, Any], db_service: Optional[str], p
     return {"POSTGRES_USER": user, "POSTGRES_DB": db_name}
 
 
-def installation_db_service(compose_text: Optional[str]) -> Optional[str]:
-    """DEV-406 — the database service of an installation's own compose: where every address of the database in its
-    settings leads. A redeploy keeps the installation's compose, and an installation older than the project's layout
-    keeps its own name for it (MÁGERSTAV's NEX Inbox: „postgres“, the project: „db“). 16.11.2026 the redeploy of NEX
-    Inbox 1.10.4 added ``DATABASE_URL`` with the project's name — a host the installation does not have, and 1.10.4
-    prefers that address over ``DB_HOST``."""
-    services = (yaml.safe_load(compose_text) or {}).get("services") if compose_text else None
-    return identify_service_roles(services or {}).get("db")
+class InstallationDatabase(NamedTuple):
+    """DEV-406 — the database an installation's own compose defines: its service, and the user and database it creates
+    when the compose states them (``None`` when they come from the installation's settings)."""
+
+    service: Optional[str]
+    user: Optional[str]
+    name: Optional[str]
 
 
-def retarget_database_host(env_path: Path, old_host: str, new_host: str) -> list[str]:
-    """Point every address of the database in ``env_path`` that names the service ``old_host`` at ``new_host`` — the
-    keys of :data:`DB_CONNECTION_VARS` and ``*_DATABASE_URL``. Returns the keys changed. For settings written for one
-    layout and laid over a compose of another (the deploy rehearsal's first install of an existing installation)."""
+def installation_database(compose_text: Optional[str]) -> InstallationDatabase:
+    """DEV-406 — where and as whom an installation's settings must log in to its database. A redeploy keeps the
+    installation's compose, and an installation older than the project's layout keeps its own database: MÁGERSTAV's NEX
+    Inbox calls the service „postgres“ and creates the user „nex_inbox“ and the database „nex_inbox_mager“ in its
+    compose, the project calls it „db“ and takes both from ``.env``. 16.11.2026 the redeploy of NEX Inbox 1.10.4 added
+    ``DATABASE_URL`` by the project's names — 1.10.4 prefers it over ``DB_HOST`` — and the deploy rehearsal's migration
+    logged in where that database is not."""
+    services = ((yaml.safe_load(compose_text) or {}).get("services") or {}) if compose_text else {}
+    service = identify_service_roles(services).get("db")
+    env = _env_mapa(services.get(service)) if service else {}
+
+    def stated(key: str) -> Optional[str]:
+        value = env.get(key)
+        return str(value) if value not in (None, "") and "$" not in str(value) else None
+
+    return InstallationDatabase(service, stated("POSTGRES_USER"), stated("POSTGRES_DB"))
+
+
+def _aligned_url(value: str, old_host: str, database: InstallationDatabase) -> Optional[str]:
+    """``value`` (an address of the database) led to the installation's database; ``None`` when it names another host.
+    The password and the driver stay as written."""
+    parts = urlsplit(value)
+    if parts.hostname != old_host:
+        return None
+    userinfo, at, _hostport = parts.netloc.rpartition("@")
+    raw_user, colon, raw_password = userinfo.partition(":")
+    user = quote(database.user, safe="") if database.user else raw_user
+    host = database.service or old_host
+    port = f":{parts.port}" if parts.port else ""
+    netloc = f"{user}{colon}{raw_password}{at}{host}{port}" if at else f"{host}{port}"
+    path = f"/{database.name}" if database.name else parts.path
+    return urlunsplit((parts.scheme, netloc, path, parts.query, parts.fragment))
+
+
+def align_database_settings(env_path: Path, old_host: str, database: InstallationDatabase) -> list[str]:
+    """Point the database settings in ``env_path`` at the installation's own database: the addresses that name the
+    service ``old_host`` at its service, and the user and database at the ones its compose creates (when it states
+    them). For settings written for the project's layout and laid under an installation's compose (the deploy
+    rehearsal's first install of an existing installation). Comments, passwords and other hosts stay. Returns the keys
+    changed."""
     lines = env_path.read_text(encoding="utf-8").splitlines()
-    host_in_url = re.compile(rf"@{re.escape(old_host)}(?=[:/]|$)")
     changed: list[str] = []
     for i, line in enumerate(lines):
         key, sep, value = line.partition("=")
-        name = key.strip()
+        name, current = key.strip(), value.strip()
         if not sep or line.lstrip().startswith("#"):
             continue
-        if name in {"DB_HOST", "POSTGRES_HOST"} and value.strip() == old_host:
-            lines[i] = f"{key}={new_host}"
-        elif (name == "DATABASE_URL" or name.lower().endswith(DB_URL_SUFFIX)) and host_in_url.search(value):
-            lines[i] = f"{key}={host_in_url.sub(f'@{new_host}', value)}"
-        else:
-            continue
-        changed.append(name)
+        new: Optional[str] = None
+        if name in {"DB_HOST", "POSTGRES_HOST"} and current == old_host:
+            new = database.service
+        elif name in {"DB_USER", "POSTGRES_USER"}:
+            new = database.user
+        elif name in {"DB_NAME", "POSTGRES_DB"}:
+            new = database.name
+        elif name == "DATABASE_URL" or name.lower().endswith(DB_URL_SUFFIX):
+            new = _aligned_url(current, old_host, database)
+        if new is not None and new != current:
+            lines[i] = f"{key}={new}"
+            changed.append(name)
     if changed:
         env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return changed
@@ -4029,17 +4068,23 @@ def provision_uat(
     # DEV-69: what the installation has now — on a render from scratch over an existing one (a secrets rotation),
     # its own plain values stay. Read where it runs, like everything else above (ICCINT-151).
     existing_env = _parse_env_text(remote_env_text) if deploy_host else _parse_env_file(uat_dir / ".env")
+    own_database = installation_database(existing_compose_text if is_redeploy else None)
     env_content = generate_uat_env(
         slug=uat_slug,
         project=project_slug,
         version=version,
         services=src_services,
         be_service=roles["backend"],
-        # DEV-406 — a redeploy keeps the installation's compose: its own database service is where the addresses lead.
-        db_service=(installation_db_service(existing_compose_text) if is_redeploy else None) or roles["db"],
+        # DEV-406 — a redeploy keeps the installation's compose: a new address of the database leads to its own
+        # database, as whom its settings log in today (or as its compose creates the user and the database).
+        db_service=own_database.service or roles["db"],
         source_env_example=env_example,
-        db_user=db_user,
-        db_name=db_name,
+        db_user=(existing_env.get("DB_USER") or existing_env.get("POSTGRES_USER") or own_database.user or db_user)
+        if is_redeploy
+        else db_user,
+        db_name=(existing_env.get("DB_NAME") or existing_env.get("POSTGRES_DB") or own_database.name or db_name)
+        if is_redeploy
+        else db_name,
         shared_db_password=shared_db_password,
         preserved_secrets=preserved_secrets,
         admin_password=admin_password,
