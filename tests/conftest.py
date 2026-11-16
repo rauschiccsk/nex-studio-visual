@@ -532,13 +532,13 @@ def _names_that_lead_to_their_machine(monkeypatch):
     from backend.config.settings import settings
     from backend.services import installation_names
 
-    def _leads_to_its_machine(name: str) -> list[str]:
-        return [m.address for m in settings.prod_machines.values() if m.address and name.endswith(f".{m.zone}")][:1]
+    def _leads_to_its_machine(name: str) -> tuple[list[str], int]:
+        return [m.address for m in settings.prod_machines.values() if m.address and name.endswith(f".{m.zone}")][:1], 0
 
     def _no_cloudflare(*args, **kwargs):
         raise AssertionError("a test reached Cloudflare — fake it (DEV-405)")
 
-    monkeypatch.setattr(installation_names, "public_addresses", _leads_to_its_machine)
+    monkeypatch.setattr(installation_names, "public_answer", _leads_to_its_machine)
     monkeypatch.setattr(installation_names, "_cloudflare", _no_cloudflare)
 
 

@@ -12,11 +12,17 @@ name of its routers is asked in public DNS. A name that does not lead to the mac
 Cloudflare gets one — ``A`` to the machine's address, not proxied (the machine is reached over Tailscale) — made with
 the cockpit's own key, which writes the DNS of the zone only. A record somebody else made is never rewritten. After
 the deploy the route is believed only when its names lead to the machine (:func:`check`).
+
+The zone is the truth, public resolvers only remember it. 16.11.2026 the redeploy of SKIT o.z. created the record at
+11:13:31 and the check after the deploy still got the catch-all from public resolvers, which keep an answer up to its
+TTL (300 s) — by 11:18 all of them showed MAGER, yet the deploy had been recorded as failed. So a name counts as
+leading to the machine when public DNS says so or the zone itself does; how long devices may still see the old
+answer is said, not waited for.
 """
 
 from __future__ import annotations
 
-import time
+import math
 from pathlib import Path
 from typing import Any, Optional
 
@@ -51,11 +57,11 @@ def machine(deploy_host: Optional[str]) -> Optional[ProdMachine]:
     return found if found and found.address else None
 
 
-def public_addresses(name: str) -> list[str]:
-    """The IPv4 addresses public DNS gives for ``name`` (empty when the name does not exist).
+def public_answer(name: str) -> tuple[list[str], int]:
+    """``(the IPv4 addresses public DNS gives for name, how many seconds a resolver may still keep that answer)`` —
+    no addresses when the name does not exist.
 
-    Asked of a public resolver over HTTPS, not of this machine's resolver: right after a record is created the local
-    cache may still hold the catch-all answer for minutes."""
+    Asked of a public resolver over HTTPS, not of this machine's resolver, whose cache may hold an older answer."""
     try:
         response = httpx.get(
             settings.public_dns_url,
@@ -70,7 +76,9 @@ def public_addresses(name: str) -> list[str]:
     status = answer.get("Status") if isinstance(answer, dict) else None
     if status not in _ANSWERED:
         raise NameLookupFailed(f"DNS status {status}")
-    return sorted({str(rec.get("data")) for rec in answer.get("Answer") or [] if rec.get("type") == _TYPE_A})
+    records = [rec for rec in answer.get("Answer") or [] if rec.get("type") == _TYPE_A]
+    remembered = max((int(rec.get("TTL") or 0) for rec in records), default=0)
+    return sorted({str(rec.get("data")) for rec in records}), remembered
 
 
 def _where(addresses: list[str]) -> str:
@@ -103,10 +111,10 @@ def check(compose: dict[str, Any], deploy_host: Optional[str]) -> tuple[str, str
     wrong: list[str] = []
     for name in names(compose, target):
         try:
-            addresses = public_addresses(name)
+            addresses, _remembered = public_answer(name)
         except NameLookupFailed as exc:
             return public_route.STATE_SKIP, f"verejné DNS na meno {name} neodpovedá ({exc})"
-        if addresses != [target.address]:
+        if addresses != [target.address] and not _zone_leads_there(name, target):
             wrong.append(_elsewhere(name, addresses, target))
     if wrong:
         return public_route.STATE_DOWN, "; ".join(wrong) + " — odpovedá tam iný server"
@@ -146,6 +154,11 @@ def _zone_id(zone: str) -> str:
     return str(zones[0]["id"])
 
 
+def _zone_records(name: str, target: ProdMachine) -> list[dict[str, Any]]:
+    """The records the zone itself holds for ``name`` — what its nameservers serve, not what a resolver remembers."""
+    return _cloudflare("GET", f"/zones/{_zone_id(target.zone)}/dns_records", params={"name": name}) or []
+
+
 def _foreign(records: list[dict[str, Any]], target: ProdMachine) -> Optional[dict[str, Any]]:
     """A record of the name that does not lead straight to the machine — the cockpit does not rewrite it."""
     for record in records:
@@ -154,11 +167,29 @@ def _foreign(records: list[dict[str, Any]], target: ProdMachine) -> Optional[dic
     return None
 
 
+def _zone_leads_there(name: str, target: ProdMachine) -> bool:
+    """The zone says ``name`` leads straight to the machine — public resolvers will follow within their TTL."""
+    if not settings.cloudflare_dns_token:
+        return False
+    try:
+        records = _zone_records(name, target)
+    except CloudflareRefused:
+        return False
+    return bool(records) and _foreign(records, target) is None
+
+
+def _remembered_note(seconds: int) -> str:
+    """How long a device that asked a moment ago may still be sent where the name led before."""
+    if seconds <= 0:
+        return ""
+    return f" Zariadenie, ktoré sa na meno pýtalo pred chvíľou, ho uvidí najneskôr o {math.ceil(seconds / 60)} min."
+
+
 def _ensure_name(name: str, target: ProdMachine, owner: str) -> tuple[bool, str]:
     """``(the name leads to the machine, sentence)`` — creates its record when it has none; the sentence says what was
     done, or why the installation must not start."""
     try:
-        seen = public_addresses(name)
+        seen, remembered = public_answer(name)
     except NameLookupFailed as exc:
         return False, f"Verejné DNS na meno {name} neodpovedá ({exc}) — nasadenie nezačalo; skús ho o chvíľu znova."
     if seen == [target.address]:
@@ -170,8 +201,7 @@ def _ensure_name(name: str, target: ProdMachine, owner: str) -> tuple[bool, str]
             "Cloudflare (CLOUDFLARE_DNS_TOKEN) — nasadenie nezačalo."
         )
     try:
-        zone = _zone_id(target.zone)
-        records = _cloudflare("GET", f"/zones/{zone}/dns_records", params={"name": name}) or []
+        records = _zone_records(name, target)
         foreign = _foreign(records, target)
         if foreign is not None:
             proxy = ", cez proxy Cloudflare" if foreign.get("proxied") else ""
@@ -185,7 +215,7 @@ def _ensure_name(name: str, target: ProdMachine, owner: str) -> tuple[bool, str]
         if created:
             _cloudflare(
                 "POST",
-                f"/zones/{zone}/dns_records",
+                f"/zones/{_zone_id(target.zone)}/dns_records",
                 json={
                     "type": "A",
                     "name": name,
@@ -197,24 +227,12 @@ def _ensure_name(name: str, target: ProdMachine, owner: str) -> tuple[bool, str]
             )
     except CloudflareRefused as exc:
         return False, f"{_first_up(elsewhere)} a záznam v Cloudflare sa nepodarilo založiť: {exc} — nasadenie nezačalo."
-    deadline = time.monotonic() + settings.installation_name_wait_seconds
-    while True:
-        try:
-            seen = public_addresses(name)
-        except NameLookupFailed:
-            seen = []
-        if seen == [target.address]:
-            break
-        if time.monotonic() >= deadline:
-            return False, (
-                f"Meno {name} má v Cloudflare záznam na stroj {target.label} ({target.address}), ale verejné DNS ho "
-                f"do {settings.installation_name_wait_seconds} s neukázalo (vidí {_where(seen)}) — nasadenie "
-                "nezačalo; nasaď znova o pár minút."
-            )
-        time.sleep(settings.installation_name_poll_seconds)
     if not created:
         return True, ""
-    return True, f"Meno {name} dostalo v Cloudflare záznam na stroj {target.label} v Tailscale ({target.address})."
+    return True, (
+        f"Meno {name} dostalo v Cloudflare záznam na stroj {target.label} v Tailscale ({target.address})."
+        + _remembered_note(remembered)
+    )
 
 
 def ensure(compose_path: Path, deploy_host: Optional[str], owner: str) -> tuple[bool, str]:

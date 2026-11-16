@@ -25,7 +25,7 @@ from backend.services import uat_provisioner as P
 from backend.tests.test_a_deploy_elsewhere_leaves_the_target_consistent import _docker, _instance
 
 #: The real lookups, taken before the suite's default (every name leads to its machine) replaces them.
-REAL_PUBLIC_ADDRESSES = installation_names.public_addresses
+REAL_PUBLIC_ANSWER = installation_names.public_answer
 REAL_CLOUDFLARE = installation_names._cloudflare
 
 MAGER = settings.prod_machines["mager"].address
@@ -33,6 +33,9 @@ CATCH_ALL = ["104.21.7.140", "172.67.187.149"]
 NAME = "skit-manager.icc.sk"
 ZONE_ID = "zone-icc"
 TOKEN = "cf-test-key"
+#: How long public resolvers keep an answer of the zone (Cloudflare's automatic TTL), and what the deploy says of it.
+REMEMBERED = 300
+NOTE = " Zariadenie, ktoré sa na meno pýtalo pred chvíľou, ho uvidí najneskôr o 5 min."
 
 
 def _compose(*names: str, tailscale_name: bool = True) -> dict:
@@ -61,15 +64,16 @@ def _written(tmp_path: Path, compose: dict) -> Path:
 
 
 class _Zone:
-    """Public DNS and the zone in Cloudflare, as the cockpit's calls see them."""
+    """Public DNS and the zone in Cloudflare, as the cockpit's calls see them. Public resolvers REMEMBER: a record
+    created in the zone does not change what they answer until their copy expires — as 16.11.2026 on SKIT o.z."""
 
-    def __init__(self, dns: dict[str, list[str]], records: list[dict] | None = None, *, lags: bool = False):
-        self.dns, self.records, self.lags = dns, list(records or []), lags
+    def __init__(self, dns: dict[str, list[str]], records: list[dict] | None = None):
+        self.dns, self.records = dns, list(records or [])
         self.calls: list[tuple] = []
         self.refuse: str | None = None
 
-    def lookup(self, name: str) -> list[str]:
-        return list(self.dns.get(name, CATCH_ALL))
+    def answer(self, name: str) -> tuple[list[str], int]:
+        return list(self.dns.get(name, CATCH_ALL)), REMEMBERED
 
     def request(self, method, url, *, headers, timeout, params=None, json=None):
         path = url.removeprefix(settings.cloudflare_api_url)
@@ -84,8 +88,6 @@ class _Zone:
             return httpx.Response(200, json={"success": True, "result": mine})
         if method == "POST" and path == f"/zones/{ZONE_ID}/dns_records":
             self.records.append(json)
-            if not self.lags:
-                self.dns[json["name"]] = [json["content"]]
             return httpx.Response(200, json={"success": True, "result": {"id": "rec-1", **json}})
         raise AssertionError(f"unexpected call {method} {path}")
 
@@ -97,14 +99,12 @@ class _Zone:
 def zone(monkeypatch):
     """The SKIT world: the name leads to the catch-all, no record of its own; the cockpit has its key."""
     world = _Zone({})
-    monkeypatch.setattr(installation_names, "public_addresses", world.lookup)
+    monkeypatch.setattr(installation_names, "public_answer", world.answer)
     monkeypatch.setattr(installation_names, "_cloudflare", REAL_CLOUDFLARE)
     monkeypatch.setattr(
         installation_names, "httpx", types.SimpleNamespace(request=world.request, HTTPError=httpx.HTTPError)
     )
     monkeypatch.setattr(settings, "cloudflare_dns_token", TOKEN)
-    monkeypatch.setattr(settings, "installation_name_wait_seconds", 0)
-    monkeypatch.setattr(settings, "installation_name_poll_seconds", 0)
     return world
 
 
@@ -118,7 +118,7 @@ def _ensure(tmp_path, *names, owner="SKIT o.z. / manager"):
 def test_a_name_without_a_record_gets_one_leading_to_the_machine_in_tailscale(zone, tmp_path):
     assert _ensure(tmp_path, NAME) == (
         True,
-        f"Meno {NAME} dostalo v Cloudflare záznam na stroj MAGER v Tailscale ({MAGER}).",
+        f"Meno {NAME} dostalo v Cloudflare záznam na stroj MAGER v Tailscale ({MAGER})." + NOTE,
     )
     assert zone.writes() == [
         (
@@ -166,24 +166,34 @@ def test_a_record_somebody_else_made_is_never_rewritten(zone, tmp_path):
     assert zone.writes() == []
 
 
-def test_an_own_record_public_dns_does_not_show_yet_is_waited_for_not_made_twice(zone, tmp_path, monkeypatch):
+def test_an_own_record_resolvers_do_not_show_yet_is_not_made_twice(zone, tmp_path):
     zone.records = [{"type": "A", "name": NAME, "content": MAGER, "proxied": False}]
-    answers = iter([CATCH_ALL, CATCH_ALL, [MAGER]])
-    monkeypatch.setattr(installation_names, "public_addresses", lambda name: next(answers))
-    monkeypatch.setattr(settings, "installation_name_wait_seconds", 60)
 
     assert _ensure(tmp_path, NAME) == (True, "")
     assert zone.writes() == []
 
 
-def test_a_record_public_dns_never_shows_stops_the_deploy(zone, tmp_path):
-    zone.lags = True
+def test_the_check_believes_the_zone_while_resolvers_still_remember_the_old_answer(zone, tmp_path):
+    """16.11.2026 the redeploy of SKIT o.z. created the record at 11:13:31; the check after it still got the catch-all
+    from public resolvers and the deploy was recorded as failed — at 11:18 every resolver showed MAGER."""
+    assert _ensure(tmp_path, NAME)[0] is True
+    assert zone.answer(NAME)[0] == CATCH_ALL, "the resolvers still remember the catch-all"
 
-    assert _ensure(tmp_path, NAME) == (
-        False,
-        f"Meno {NAME} má v Cloudflare záznam na stroj MAGER ({MAGER}), ale verejné DNS ho do 0 s neukázalo (vidí "
-        f"{', '.join(CATCH_ALL)}) — nasadenie nezačalo; nasaď znova o pár minút.",
-    )
+    assert installation_names.check(_compose(NAME), "mager") == (public_route.STATE_OK, "")
+
+
+def test_a_foreign_record_in_the_zone_does_not_count_as_leading_there(zone):
+    zone.records = [{"type": "CNAME", "name": NAME, "content": "skit.example.org", "proxied": True}]
+
+    assert installation_names.check(_compose(NAME), "mager")[0] == public_route.STATE_DOWN
+
+
+def test_without_the_key_a_remembered_answer_cannot_be_overruled(zone, monkeypatch):
+    zone.records = [{"type": "A", "name": NAME, "content": MAGER, "proxied": False}]
+    monkeypatch.setattr(settings, "cloudflare_dns_token", "")
+
+    assert installation_names.check(_compose(NAME), "mager")[0] == public_route.STATE_DOWN
+    assert zone.calls == []
 
 
 def test_without_the_cockpits_key_the_deploy_says_what_is_missing(zone, tmp_path, monkeypatch):
@@ -214,7 +224,7 @@ def test_a_web_project_gets_each_missing_name_and_only_those_are_said(zone, tmp_
     ok, said = _ensure(tmp_path, NAME, "skit-web.icc.sk")
 
     assert ok is True
-    assert said == f"Meno {NAME} dostalo v Cloudflare záznam na stroj MAGER v Tailscale ({MAGER})."
+    assert said == f"Meno {NAME} dostalo v Cloudflare záznam na stroj MAGER v Tailscale ({MAGER})." + NOTE
     assert [call[3]["name"] for call in zone.writes()] == [NAME]
 
 
@@ -222,7 +232,7 @@ def test_public_dns_not_answering_stops_the_deploy(zone, tmp_path, monkeypatch):
     def _silent(name):
         raise installation_names.NameLookupFailed("ConnectTimeout")
 
-    monkeypatch.setattr(installation_names, "public_addresses", _silent)
+    monkeypatch.setattr(installation_names, "public_answer", _silent)
 
     assert _ensure(tmp_path, NAME) == (
         False,
@@ -251,28 +261,28 @@ class _Resolver:
 
 
 @pytest.mark.parametrize(
-    "reply, addresses",
+    "reply, answer",
     [
         (
             {
                 "Status": 0,
                 "Answer": [
-                    {"type": 5, "data": "edge.example."},
-                    {"type": 1, "data": "104.21.7.140"},
-                    {"type": 1, "data": "172.67.187.149"},
+                    {"type": 5, "data": "edge.example.", "TTL": 3600},
+                    {"type": 1, "data": "104.21.7.140", "TTL": 120},
+                    {"type": 1, "data": "172.67.187.149", "TTL": 300},
                 ],
             },
-            ["104.21.7.140", "172.67.187.149"],
+            (["104.21.7.140", "172.67.187.149"], 300),
         ),
-        ({"Status": 0, "Answer": [{"type": 1, "data": MAGER}]}, [MAGER]),
-        ({"Status": 3}, []),
+        ({"Status": 0, "Answer": [{"type": 1, "data": MAGER, "TTL": 60}]}, ([MAGER], 60)),
+        ({"Status": 3}, ([], 0)),
     ],
 )
-def test_public_dns_is_asked_over_https_and_only_addresses_count(monkeypatch, reply, addresses):
+def test_public_dns_is_asked_over_https_and_only_addresses_count(monkeypatch, reply, answer):
     resolver = _Resolver(reply)
     monkeypatch.setattr(installation_names, "httpx", types.SimpleNamespace(get=resolver.get, HTTPError=httpx.HTTPError))
 
-    assert REAL_PUBLIC_ADDRESSES(NAME) == addresses
+    assert REAL_PUBLIC_ANSWER(NAME) == answer
     assert resolver.asked == [
         (settings.public_dns_url, {"name": NAME, "type": "A"}, {"accept": "application/dns-json"})
     ]
@@ -285,7 +295,7 @@ def test_no_answer_from_public_dns_is_no_claim(monkeypatch, reply):
     )
 
     with pytest.raises(installation_names.NameLookupFailed):
-        REAL_PUBLIC_ADDRESSES(NAME)
+        REAL_PUBLIC_ANSWER(NAME)
 
 
 # --- after the deploy ------------------------------------------------------------------------------------------
@@ -371,6 +381,7 @@ def test_the_deploy_creates_the_name_before_the_installation_starts_and_says_so(
     assert started == [1]
     assert result[1] == (
         f"OK Stavba z overeného commitu Meno {NAME} dostalo v Cloudflare záznam na stroj MAGER v Tailscale ({MAGER})."
+        + NOTE
     )
     assert zone.writes()[0][3]["comment"] == "NEX Studio Visual — SKIT o.z. / manager"
 
