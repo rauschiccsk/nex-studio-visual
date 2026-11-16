@@ -326,6 +326,12 @@ def _guard_prod_db_isolation(test_engine):
     _orig_claude_home = _build_sandbox._CLAUDE_HOME_DIR
     _build_sandbox._CLAUDE_HOME_DIR = tempfile.mkdtemp(prefix="test-claude-home-")
 
+    # 8. DEV-413: a sandboxed build turn copies the other projects' documentation into ``project_docs_dir`` — on
+    #    ANDROS the LIVE cockpit's folder, from the LIVE projects. A test process copies nowhere: the folder it is
+    #    given does not exist, so a turn runs without the copy; a test of the copy points it at its own.
+    _orig_project_docs_dir = settings.project_docs_dir
+    settings.project_docs_dir = os.path.join(tempfile.gettempdir(), f"test-project-docs-absent-{os.getpid()}")
+
     yield
 
     # Restore process-global state exactly as we found it.
@@ -335,6 +341,7 @@ def _guard_prod_db_isolation(test_engine):
     _model_pricing.ecb_rate = _orig_ecb_rate
     shutil.rmtree(_build_sandbox._CLAUDE_HOME_DIR, ignore_errors=True)
     _build_sandbox._CLAUDE_HOME_DIR = _orig_claude_home
+    settings.project_docs_dir = _orig_project_docs_dir
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

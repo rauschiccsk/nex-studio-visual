@@ -55,6 +55,7 @@ services:
       # ICCINT-167: Poradca — záznamy rozhovorov, socket každej otázky, prázdny súbor na prekrytie tajomstiev.
       # Na TEJ ISTEJ ceste ako hostiteľ: zdroj ``--mount`` kontajnera otázky rozlúšti docker na hostiteľovi.
       - /opt/data/nex-studio-visual/poradca:/opt/data/nex-studio-visual/poradca:rw
+      - /opt/data/nex-studio-visual/project-docs:/opt/data/nex-studio-visual/project-docs:rw
       - uploads:/app/uploads
       # rw — durable PTY output logs per agent terminal session + the per-turn
       # agent crash diagnostics. Survives BE container restart so the visual

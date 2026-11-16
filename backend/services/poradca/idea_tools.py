@@ -7,7 +7,8 @@ project: the Knowledge Base (by the rights of the person asking), every project 
 DEV-345: every project, whoever it belongs to — until 10.11.2026 only the projects of the person asking. Director: „Pri
 návrhu často potrebujem odkázať sa na riešenie, ktoré sme robili v inom projekte, a kvôli tomu, aby projektant to
 pozrel nechcem zbytočne presúvať projekty medzi manažérmi.“ For everyone in Nápady: „Áno“. Reading only; the screens
-and the project's Poradca keep the owner rule (``authz``).
+keep the owner rule (``authz``). DEV-413: the overview and the documentation reach the project's Poradca too
+(:func:`project_documentation_tools`) — the rest of what it reads stays its own project's.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
-from backend.services import doc_ages, secret_files
+from backend.services import doc_ages, project_docs
 from backend.services.poradca.mcp_server import Tool, ToolError
 from backend.services.poradca.tools import PoradcaTools, _schema, knowledge_tools, latest_finished_number
 
@@ -139,12 +140,12 @@ def _person(user: Optional[User]) -> str:
 
 
 def _read_doc(root: str, wanted: str) -> str:
-    full = os.path.realpath(os.path.join(root, wanted.lstrip("/")))
-    rel = os.path.relpath(full, root)
-    inside_docs = full.startswith(os.path.join(root, doc_ages.DOCS_DIR) + os.sep)
-    if not (inside_docs or rel in doc_ages.ROOT_DOCS) or not rel.endswith(".md"):
+    # DEV-413: what a project's documentation is, is one rule — the Staviteľ's copy is made by it too.
+    found = project_docs.document_path(root, wanted)
+    if found is None:
         raise ToolError("Čítam len dokumentáciu projektu — súbory .md v docs/ a README.md, nie kód.")
-    if secret_files.SECRET_FILE_RE.match(os.path.basename(full)) or not os.path.isfile(full):
+    full, rel = found
+    if project_docs.readable(root, wanted) is None:
         raise ToolError(f"Dokument {rel} v projekte nie je.")
     text: Optional[str] = None
     try:
@@ -156,16 +157,19 @@ def _read_doc(root: str, wanted: str) -> str:
     return text
 
 
-def build_idea_tools(*, user_id: UUID) -> list[Tool]:
-    """Tools of one question in a new idea. The agent reads the descriptions — they say what each returns."""
+_PROJEKT = {"projekt": {"type": "string", "description": "Slug projektu, ako ho vrátil nástroj projekty."}}
+
+
+def project_documentation_tools(*, user_id: UUID, why: str) -> list[Tool]:
+    """Every project of the cockpit and its documentation — the Projektant's pair, and since DEV-413 the project
+    Poradca's too: a project that stands on another one is advised from that one's documentation, not from a file the
+    Manažér is sent to fetch. ``why`` ends the overview's description: what the agent compares the projects with."""
     t = IdeaTools(user_id=user_id)
-    projekt = {"projekt": {"type": "string", "description": "Slug projektu, ako ho vrátil nástroj projekty."}}
     return [
-        *knowledge_tools(PoradcaTools(project_id=None, version_id=None, user_id=user_id)),
         Tool(
             "projekty",
             "Všetky projekty kokpitu, bez ohľadu na to, komu patria: meno, slug, manažér, typ, prihlásenie, šablóna, "
-            "stav, zákazníci, verzie a opis — aby si nový nápad porovnal s tým, čo už máme.",
+            f"stav, zákazníci, verzie a opis — {why}",
             _schema(),
             t.projekty,
             lambda a: "projekty kokpitu",
@@ -175,11 +179,21 @@ def build_idea_tools(*, user_id: UUID) -> list[Tool]:
             "Dokumentácia projektu (súbory .md v docs/ a README.md, nie kód): bez cesty zoznam dokumentov, s cestou "
             "jeden dokument.",
             _schema(
-                {**projekt, "cesta": {"type": "string", "description": "Cesta dokumentu zo zoznamu."}}, ["projekt"]
+                {**_PROJEKT, "cesta": {"type": "string", "description": "Cesta dokumentu zo zoznamu."}}, ["projekt"]
             ),
             t.dokumentacia_projektu,
             lambda a: f"{a.get('projekt', '')}/{a.get('cesta') or 'zoznam'}",
         ),
+    ]
+
+
+def build_idea_tools(*, user_id: UUID) -> list[Tool]:
+    """Tools of one question in a new idea. The agent reads the descriptions — they say what each returns."""
+    t = IdeaTools(user_id=user_id)
+    projekt = _PROJEKT
+    return [
+        *knowledge_tools(PoradcaTools(project_id=None, version_id=None, user_id=user_id)),
+        *project_documentation_tools(user_id=user_id, why="aby si nový nápad porovnal s tým, čo už máme."),
         Tool(
             "moznosti_zalozenia",
             "Čo kokpit pri založení projektu vie: typy, prihlásenie a šablóny aplikácií — tie isté možnosti ako "

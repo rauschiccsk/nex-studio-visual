@@ -1205,7 +1205,20 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             t.fakturacia,
             lambda a: "projekt",
         ),
+        # DEV-413: a project that stands on another one is advised from that one's documentation — 16.11.2026 the
+        # Poradca of NEX HelpDesk saw only the database schema of NEX Knowledge in the Knowledge Base, sent the Manažér
+        # to fetch its specification by hand and claimed a discrepancy the interface does not have.
+        *_project_documentation_tools(user_id),
     ]
+
+
+def _project_documentation_tools(user_id: UUID) -> list[Tool]:
+    from backend.services.poradca.idea_tools import project_documentation_tools  # local — idea_tools imports this
+
+    return project_documentation_tools(
+        user_id=user_id,
+        why="aby si našiel projekt, na ktorom tento projekt stojí, a prečítal si jeho dokumentáciu.",
+    )
 
 
 def latest_finished_number(db, project_id) -> Optional[str]:

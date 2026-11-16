@@ -683,22 +683,28 @@ async def _invoke_once(
         _refresh_rules(project_slug)
     charter_text = _load_charter(charter_path) if starts_session else None
     settings_path = turn_settings_path(settings_path, project_slug, sandboxed=use_sandbox)
-    args = build_claude_argv(
-        force_new_session=force_new_session,
-        streaming=on_event is not None,
-        claude_session_id=claude_session_id,
-        prompt=prompt,
-        charter_text=charter_text,
-        model=model,
-        effort=effort,
-        json_schema=json_schema,
-        settings_path=settings_path,
-        permission_mode=build_sandbox.SANDBOX_PERMISSION_MODE if use_sandbox else None,
-    )
+
+    def _claude_args(turn_prompt: str) -> list[str]:
+        return build_claude_argv(
+            force_new_session=force_new_session,
+            streaming=on_event is not None,
+            claude_session_id=claude_session_id,
+            prompt=turn_prompt,
+            charter_text=charter_text,
+            model=model,
+            effort=effort,
+            json_schema=json_schema,
+            settings_path=settings_path,
+            permission_mode=build_sandbox.SANDBOX_PERMISSION_MODE if use_sandbox else None,
+        )
+
+    turn_prompt = prompt
+    args = _claude_args(turn_prompt)
 
     sandbox_container: Optional[str] = None
     turn_database = None
     turn_network: Optional[str] = None
+    turn_docs: Optional[str] = None
     # THE ``try`` OPENS BEFORE THE DATABASE IS CREATED, and that placement is the whole point. It used to
     # open after ``build_run_argv``, i.e. the composing of the argv sat BETWEEN ``build_db.start`` and the
     # only ``finally`` that reaps it — and ``build_run_argv`` declares ``Raises: BuildSandboxUnavailable``
@@ -717,6 +723,15 @@ async def _invoke_once(
             build_sandbox.log_network_residual_once()
             token = build_sandbox.turn_token()
             sandbox_container = build_sandbox.container_name(project_slug, token)
+            # DEV-413: the other projects' documentation, copied for this turn and mounted read-only — and said in
+            # the brief, because a running build read its charter at its session's first call only. No copy (its
+            # folder missing, a write failed): the turn runs as before, without it and without the sentence.
+            from backend.services import project_docs  # local import — project_docs imports this module lazily
+
+            turn_docs = await asyncio.to_thread(project_docs.snapshot, project_slug, token)
+            if turn_docs is not None:
+                turn_prompt = f"{project_docs.TURN_NOTE}\n\n{prompt}"
+                args = _claude_args(turn_prompt)
             # ICCINT-16 STEP 2: a Programovanie turn gets a throwaway PostgreSQL on a per-build network
             # INSTEAD of the docker socket it used to need — the project's conftest asks for a reachable
             # Postgres and nothing more. Planned first (it can refuse a project needing a service we do not
@@ -741,6 +756,7 @@ async def _invoke_once(
                 claude_argv=args,
                 database=turn_database,
                 network=turn_network,
+                project_docs=turn_docs,
             )
 
         return await _run_turn(
@@ -749,7 +765,7 @@ async def _invoke_once(
             project_slug=project_slug,
             claude_session_id=claude_session_id,
             charter_path=charter_path if starts_session else None,
-            prompt=prompt,
+            prompt=turn_prompt,
             timeout=timeout,
             on_event=on_event,
             log_dir=log_dir,
@@ -757,6 +773,11 @@ async def _invoke_once(
             sandbox_container=sandbox_container,
         )
     finally:
+        if turn_docs is not None:
+            from backend.services import project_docs  # local import — see above
+
+            # DEV-413: the copy dies with the turn, on every way out.
+            await asyncio.to_thread(project_docs.remove, turn_docs)
         # THE DATABASE MUST DIE WITH THE TURN — on the clean return, the crash, the timeout and the cancel
         # alike. ``--rm`` cannot do it (the container has to OUTLIVE the docker CLI that created it), and a
         # forgotten PostgreSQL is the quietest leak there is: nobody notices until the host's disk is full.

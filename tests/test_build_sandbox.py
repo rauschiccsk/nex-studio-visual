@@ -1517,3 +1517,68 @@ def test_the_readiness_line_counts_instead_of_claiming(monkeypatch) -> None:
         assert phase in line
     assert set(build_sandbox.SANDBOXED_PHASES) < set(build_sandbox.ALL_BUILD_PHASES)
     assert "verifikacia" not in build_sandbox.SANDBOXED_PHASES
+
+
+# ---------------------------------------------------------------------------
+# DEV-413 — the copy of the other projects' documentation: mounted read-only, said in the brief, gone after the turn
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def docs_copies(monkeypatch, tmp_path) -> Path:
+    """A folder for the turn's copy — and no other project to copy: the projects root here is the REAL one."""
+    from backend.services import project_docs
+
+    copies = tmp_path / "project-docs"
+    copies.mkdir()
+    monkeypatch.setattr(claude_agent.settings, "project_docs_dir", str(copies))
+    monkeypatch.setattr(project_docs, "_other_slugs", lambda own_slug: [])
+    return copies
+
+
+@pytest.mark.parametrize("stage", build_sandbox.SANDBOXED_PHASES)
+async def test_a_sandboxed_turn_mounts_the_copy_read_only_and_says_so_in_its_brief(monkeypatch, docs_copies, stage):
+    from backend.services import project_docs
+
+    seen: list[bool] = []
+    mock_exec = AsyncMock(return_value=_ok_proc())
+
+    async def _exec(*args, **kwargs):
+        mounts = [a for a in args if a.startswith("type=bind,") and "target=/opt/project-docs" in a]
+        seen.extend(Path(m.split("source=")[1].split(",")[0]).is_dir() for m in mounts)
+        return await mock_exec(*args, **kwargs)
+
+    monkeypatch.setattr(claude_agent.asyncio, "create_subprocess_exec", _exec)
+    await claude_agent.invoke_claude(project_slug="acme", claude_session_id=uuid4(), prompt="zadanie", stage=stage)
+
+    opts, entrypoint_args = _scan(list(mock_exec.call_args.args))
+    [copy] = [m for m in _mount_identity(opts) if m[2] == project_docs.CONTAINER_DIR]
+    assert copy[0] == "bind" and copy[3] is True and copy[1].startswith(f"{docs_copies}/turn-")
+    assert _mount_identity(opts) - {copy} == _expected_mounts("acme")
+    assert entrypoint_args[-1] == f"{project_docs.TURN_NOTE}\n\nzadanie"
+    assert seen == [True], "the copy exists while the turn runs"
+    assert list(docs_copies.iterdir()) == [], "…and is gone after it"
+
+
+async def test_the_copy_is_gone_after_a_turn_that_failed(monkeypatch, docs_copies) -> None:
+    monkeypatch.setattr(
+        claude_agent.asyncio, "create_subprocess_exec", AsyncMock(return_value=_failing_proc(1, b"boom"))
+    )
+
+    with pytest.raises(claude_agent.ClaudeAgentError):
+        await claude_agent.invoke_claude(
+            project_slug="acme", claude_session_id=uuid4(), prompt="zadanie", stage="navrh"
+        )
+
+    assert list(docs_copies.iterdir()) == []
+
+
+async def test_without_a_copy_the_turn_runs_as_before(monkeypatch) -> None:
+    """The folder is missing (the suite's default): no mount, no sentence — the turn is not stopped for it."""
+    from backend.services import project_docs
+
+    argv = await _turn_argv(monkeypatch, stage="priprava", slug="acme")
+    opts, entrypoint_args = _scan(argv)
+
+    assert _mount_identity(opts) == _expected_mounts("acme")
+    assert project_docs.TURN_NOTE not in entrypoint_args[-1]

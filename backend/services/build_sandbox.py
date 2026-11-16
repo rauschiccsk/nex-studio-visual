@@ -779,6 +779,7 @@ def build_run_argv(
     claude_argv: list[str],
     database: Optional["build_db.BuildDatabase"] = None,
     network: Optional[str] = None,
+    project_docs: Optional[str] = None,
 ) -> list[str]:
     """Compose the EXACT ``docker run`` argv for a sandboxed build turn. The mount list IS the guarantee.
 
@@ -806,6 +807,10 @@ def build_run_argv(
         executes** (:func:`frozen_project_paths`) — settings, agent deny profiles, skills, MCP config and
         the hook scripts those settings name;
       * ``~/.local`` read-only (the ``claude`` binary itself, which this image does not bundle);
+      * **only when ``project_docs`` is given (DEV-413)**: the turn's COPY of the other projects' documentation
+        (:func:`project_docs.snapshot` — ``README.md`` and ``.md`` under ``docs/``, nothing else of them) READ-ONLY
+        at :data:`project_docs.CONTAINER_DIR`, so a project that stands on another one reads it instead of asking
+        the Manažér to attach it. A copy, not the projects: their code, configuration and attachments stay out;
       * ``-w`` the project — cwd = project, as in-process;
       * **only when a ``database`` is given (Programovanie, STEP 2)**: ``--network`` the per-build network
         and ``DATABASE_URL`` pointing at the throwaway PostgreSQL on it. That pair is the whole reason
@@ -816,7 +821,8 @@ def build_run_argv(
     ``/var/run/docker.sock``, NO ``/opt/customers``, NO ``/opt/uat``, NO ``/opt/infra``, NO
     ``/home/icc/knowledge``, NO credentials store, NO shared ``~/.claude``. The mount list is IDENTICAL for
     all three sandboxed phases: Programovanie gets a network and one environment variable more, and not one
-    path more. On the FILESYSTEM the sandbox sees its own project, its own transcript and its own binary —
+    path more. On the FILESYSTEM the sandbox sees its own project, its own transcript and its own binary — and,
+    read-only, the knowledge base and a copy of the other projects' documentation —
     the network is a different question and :data:`NETWORK_RESIDUAL` answers it honestly.
 
     WHY ``DATABASE_URL`` IS PASSED BY VALUE when every other variable is passed BY NAME. The by-name rule
@@ -829,9 +835,14 @@ def build_run_argv(
     agent is given that password anyway, in this very variable.
 
     Raises:
-        BuildSandboxUnavailable: unsafe slug, unmappable/escaping host path, or a malformed claude argv.
+        BuildSandboxUnavailable: unsafe slug, unmappable/escaping host path, a ``project_docs`` that is not a turn's
+            copy, or a malformed claude argv.
     """
     container_project_dir, host_project_dir = _host_project_dir(project_slug)
+    from backend.services import project_docs as project_docs_service  # local — it imports claude_agent lazily too
+
+    if project_docs is not None and not project_docs_service.is_snapshot(project_docs):
+        raise BuildSandboxUnavailable(f"{_SANDBOX_LABEL}: {project_docs!r} is not a turn's copy of project docs")
 
     if not claude_argv or not claude_argv[0]:
         raise BuildSandboxUnavailable(f"{_SANDBOX_LABEL}: unexpected claude argv (empty)")
@@ -899,6 +910,12 @@ def build_run_argv(
         frozen_source = os.path.join(host_project_dir, rel)
         frozen_target = os.path.join(container_project_dir, rel)
         argv += ["--mount", f"type=bind,source={frozen_source},target={frozen_target},readonly"]
+    if project_docs is not None:
+        # DEV-413: the other projects' documentation — a COPY of the files the Projektant's tool reads, READ-ONLY.
+        argv += [
+            "--mount",
+            f"type=bind,source={project_docs},target={project_docs_service.CONTAINER_DIR},readonly",
+        ]
     argv += [
         # The claude binary the image does not bundle — read-only: run it, never replace it.
         "--mount",

@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     # it has taken more than the budget since it began, or when the server has less than the floor left
     # (04.10.2026 a project's tests filled ANDROS's root disk).
     release_smoke_tmp_root: str = "/opt/data/nex-studio-visual/smoke"
+    # DEV-413 — the copy of the other projects' documentation a sandboxed build turn gets read-only
+    # (``backend/services/project_docs.py``): mounted into the cockpit's backend in the PROD compose at THE SAME path,
+    # like ``poradca_data_dir``, because the sandbox's ``--mount`` source is resolved by docker on the host.
+    project_docs_dir: str = "/opt/data/nex-studio-visual/project-docs"
 
     # DEV-166: how much build cache a deploy target keeps after a deploy (GB) — the cleanup removes only what is above
     # it, least recently used first, so the next build of an unchanged project does not start from nothing. Sized for

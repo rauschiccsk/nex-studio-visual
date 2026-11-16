@@ -113,6 +113,12 @@ pripnutého projektu (DEV-318, `ideas.md`); po založení projektu z nápadu ten
      okno správ. Charta: pri verdikte Audítora či karte rozhodnutia prečítaj tieto tikety nástrojom `plane_tiket` aj
      s komentármi, zmerané má prednosť pred úvahou; pokyn, ktorý by zmenil pravidlo Špecifikácie, nedávaj agentovi —
      polož ho Manažérovi ako otázku. Stráž `tests/test_poradca_knows_what_the_build_is_for.py`.
+   - **Dokumentácia iných projektov** (DEV-413): nástroje `projekty` a `dokumentacia_projektu` — tie isté ako
+     Projektant v Nápadoch (`idea_tools.project_documentation_tools`), súbory `.md` v `docs/` a `README.md` ktoréhokoľvek
+     projektu kokpitu, nie kód. 16.11.2026 Poradca NEX HelpDesk videl z NEX Knowledge len databázovú schému v Znalostnej
+     báze, poslal Manažéra stiahnuť špecifikáciu ručne a tvrdil rozpor, ktorý rozhranie nemá. Staviteľ tú istú
+     dokumentáciu dostáva v izolovanom ťahu ako kópiu len na čítanie v `/opt/project-docs/<slug>/`
+     (`project_docs.snapshot`). Stráž `tests/test_other_projects_docs_reach_the_builder_and_poradca.py`.
 3. **Čo robil agent stavby** — rozobrané na kroky: ktoré súbory čítal, aké príkazy spustil, kde zlyhal.
 4. **Kontajnery a logy** tohto projektu: živý náhľad z Vizuálu, dočasná databáza stavby, inštalácie UAT
    (tie isté, ktoré človek vidí na obrazovke UAT).

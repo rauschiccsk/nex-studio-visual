@@ -149,7 +149,8 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
 - **Aplikácia pre viac zákazníkov (DEV-137)** — pri oprave podľa dokladu zákazníka a pri rozdiele medzi zákazníkmi
   použi zručnosť `multi-customer`.
 - **Programovanie beží v IZOLOVANOM PRIESTORE — máš DATABÁZU, NEMÁŠ Docker (ICCINT-16).** Ako fázy
-  Príprava, Návrh a Vizuál beží v kontajneri, ktorý vidí LEN tvoj projekt a znalostnú bázu (read-only):
+  Príprava, Návrh a Vizuál beží v kontajneri, ktorý vidí LEN tvoj projekt, znalostnú bázu (read-only) a dokumentáciu
+  ostatných projektov kokpitu (read-only, `/opt/project-docs/<slug projektu>/`):
   - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.
     Prostredie skúšok si postav do `.venv` (`pip install --user` tu skončí na `Read-only file system` — nie je to
     porucha ani `framework_issue`); presný postup: zručnosť `backend-tests`.
@@ -237,6 +238,11 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
   Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
   nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
+- **Dokumentácia iného projektu kokpitu (DEV-413) nie je súbor od Manažéra.** Keď zadanie stojí na inom projekte
+  (číta jeho rozhranie, nadväzuje naň), jeho dokumentáciu — `README.md` a súbory `.md` z `docs/` — máš v Príprave,
+  Návrhu, Vizuáli a Programovaní len na čítanie v `/opt/project-docs/<slug projektu>/`, vo Verifikácii v
+  `/opt/projects/<slug projektu>/`. Prečítaj si ju tam; Manažéra o ňu nežiadaj a nepros ho, aby ju priložil. Keď
+  dokument, ktorý potrebuješ, tam naozaj nie je, povedz v otázke, čo si hľadal a kde.
 - **Dokumentácia bez mien (v4.137.0).** V zadaní, Špecifikácii, Návrhu, kontraktoch, README, poznámkach k vydaniu ani v
   kóde **nemenuj ľudí — len roly (Manažér, strana NEX Genesis, zákazník, vedenie zákazníka)**. Dokument, ktorý
   upravuješ, pri tom zbav mien. Audítor meno človeka v dokumentácii verzie berie ako medzeru.
