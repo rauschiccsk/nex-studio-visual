@@ -126,6 +126,20 @@ ich pozná od nex-app-kit 0.14.1 (staršiu šablónu povýši Manažér v nastav
    — súbor, riadok a text. Projekt bez nich (starší ako kostra 0.14.1) ich dostane v tvare z kostry šablóny.
 6. Projekt, ktorý jazyky práve dostal: kroky 1–4 a každý text obrazoviek presunieš z kódu do katalógov — kľúč
    `app.<obrazovka>.<význam>`, preklady do všetkých katalógov naraz.
+7. Hlášky servera aplikácie (nex-app-kit od 0.16.0): katalóg pre každý jazyk v `backend/app/locales/<jazyk>.json`, kľúče
+   `app.server.<význam>`, hlavný jazyk je zdroj kľúčov, hodnoty v `{…}` rovnaké vo všetkých jazykoch:
+   ```json
+   {"app.server.areaTaken": "Oblasť „{name}“ už existuje."}
+   ```
+   `backend/app/kit.py` ich dá šablóne (`server_messages=load_server_messages(…)` — kostra to má) a odmietnutie je
+   `raise KitError(409, "APP-AREA-TAKEN", "app.server.areaTaken", params={"name": name})`. Vlastnú výnimku aplikácia
+   povie `tr(request_language(request), kľúč, hodnoty)` (oboje z `nex_app_kit`). Katalóg, ktorý nesedí s hlavným,
+   aplikáciu nespustí — veta pri štarte povie, čo chýba. Projekt bez priečinka `backend/app/locales` (starší než kostra
+   0.16.0) ho dostane v tvare kostry.
+8. Poznámky k vydaniu a Ako začať (od 0.16.0): hlavný jazyk v `RELEASE_NOTES.md` a `docs/AKO_ZACAT.md`, každý ďalší vedľa
+   nich — `RELEASE_NOTES.hu.md`, `docs/AKO_ZACAT.en.md`. Kde preklad chýba, človek dostane hlavný súbor.
+9. Jazyk človeka mení človek v Moje konto a správca v Používateľoch; jazyk stránky (`lang`) nastavuje rám — od 0.16.0
+   na to aplikácia nič vlastné nestavia.
 
 Kokpit pri Overení zmeria: jazyky manifestu = jazyky projektu, katalóg pre každý jazyk, žiadnemu katalógu nechýba kľúč
 hlavného a nemá kľúč navyše, žiadny text v kóde, nex-app-kit aspoň 0.14.1. Každý nález povie vetou — oprav všetky naraz.

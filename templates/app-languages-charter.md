@@ -18,7 +18,14 @@ ako text, do všetkých katalógov naraz — nikdy „preložím neskôr“.
 - Súbor, ktorý hovorí k agentovi, nie k človeku (vzorové údaje náhľadu Vizuálu), začína riadkom `// texts: for the agent`.
 - `frontend/app.manifest.json` má `"languages": {{CODES}}` (hlavný prvý); stráž `frontend/src/test/texts.test.ts`
   zo šablóny nevypínaš ani neobchádzaš.
-- Hlášky servera aplikácie (`backend/app/`) píšeš v hlavnom jazyku; hlášky rámu a servera šablóny preloží šablóna sama.
+- Hlášky rámu a servera šablóny preloží šablóna sama. **Vlastné hlášky servera aplikácie** (`backend/app/`) sú od
+  nex-app-kit 0.16.0 kľúče `app.server.…` v katalógoch `backend/app/locales/<jazyk>.json` — hlavný jazyk je zdroj kľúčov,
+  preklad do všetkých jazykov naraz, hodnoty v `{…}` rovnaké — a odmietnutie je `KitError(409, "APP-…", "app.server.…",
+  params={…})`; server ho povie v jazyku človeka. Na staršej šablóne ich píšeš v hlavnom jazyku.
+- **Poznámky k vydaniu a Ako začať** píšeš v hlavnom jazyku do `RELEASE_NOTES.md` a `docs/AKO_ZACAT.md` a od nex-app-kit
+  0.16.0 aj v každom ďalšom jazyku vedľa nich: `RELEASE_NOTES.<jazyk>.md`, `docs/AKO_ZACAT.<jazyk>.md`.
+- Jazyk človeka mení človek v Nastavenia → Moje konto a správca v Nastavenia → Používatelia; jazyk stránky (`lang`)
+  nastaví rám. Od nex-app-kit 0.16.0 to vie šablóna — vlastné tlačidlo, cestu servera ani úložisko na to nestavaj.
 
 Projekt, ktorý jazyky práve dostal (manifest ich ešte nemá), prejde na ne podľa zručnosti `sablona-aplikacie`, časť
 „Jazyky“: manifest, katalóg pre každý jazyk, `src/locales/index.ts` a texty obrazoviek presunuté z kódu do katalógov.
