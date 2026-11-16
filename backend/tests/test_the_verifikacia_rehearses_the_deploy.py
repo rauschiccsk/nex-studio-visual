@@ -438,3 +438,63 @@ def test_a_required_customer_value_gets_the_smoke_s_test_value(tmp_path, monkeyp
     assert env["AUTHOR_USERNAME"] == O.SMOKE_CUSTOMER_VALUE
     assert len(env["AUTHOR_INITIAL_PASSWORD"]) >= 32, "a secret gets a random value by UAT's own rule"
     assert not env.get("EGRESS_EXTRA_DENY"), "an optional customer value stays as a real first install leaves it"
+
+
+# ── DEV-406: a failure brings the log of what failed ───────────────────────────────────────────────────────────────
+
+MIGRATION_LOG = 'INFO  [alembic.runtime.migration] Context impl\nOperationalError: could not translate host name "db"\n'
+
+
+@pytest.fixture()
+def failing_step(docker, monkeypatch):
+    """16.11.2026 NEX Inbox 1.10.4: ``up`` fails because the one-shot ``alembic-init`` exited 1."""
+    calls, state = docker
+    state["up"] = (1, 'service "alembic-init" didn\'t complete successfully: exit 1')
+
+    async def step(cmd, timeout, env=None):
+        calls.append(cmd)
+        if "up" in cmd:
+            return state["up"]
+        if "ps" in cmd:
+            return 0, "postgres\trunning\t0\nalembic-init\texited\t1\nmigrate\texited\t0\nbackend\tcreated\t0\n"
+        if "logs" in cmd:
+            return 0, MIGRATION_LOG if cmd[-1] == "alembic-init" else "backend says hello\n"
+        return 0, ""
+
+    monkeypatch.setattr(O, "_compose_smoke_step", step)
+    return calls, state
+
+
+async def test_a_failed_step_brings_its_own_log_into_the_finding(tmp_path, failing_step):
+    calls, _state = failing_step
+
+    ok, why = await R._run_one(_target(tmp_path), "nex-inbox-skuska-nasadenia-1", tmp_path, "1.10.4")
+
+    assert not ok
+    assert why == (
+        "inštalácia sa nepostavila alebo nespustila:\n"
+        'service "alembic-init" didn\'t complete successfully: exit 1\n\n'
+        "Záznam služby alembic-init (skončila kódom 1):\n"
+        "INFO  [alembic.runtime.migration] Context impl\n"
+        'OperationalError: could not translate host name "db"'
+    )
+    asked = [c for c in calls if "logs" in c]
+    assert [c[-1] for c in asked] == ["alembic-init"], "only what failed — a step that ended well is not asked"
+    down = next(i for i, c in enumerate(calls) if c[-len(O._SMOKE_DOWN) :] == O._SMOKE_DOWN)
+    assert calls.index(asked[0]) < down, "the log is read before the rehearsal is taken down"
+
+
+async def test_a_backend_that_does_not_answer_brings_its_log(tmp_path, failing_step):
+    _calls, state = failing_step
+    state["up"] = (0, "Container started")
+    state["ready"] = (False, "connection refused")
+
+    ok, why = await R._run_one(_target(tmp_path), "n-1", tmp_path, "1.1.0")
+
+    assert (ok, why) == (False, "backend neodpovedá (connection refused)\n\nZáznam služby backend:\nbackend says hello")
+
+
+def test_what_counts_as_failed():
+    listed = "a\texited\t1\nb\texited\t0\nc\trestarting\t0\nd\tdead\t137\ne\trunning\t0\nmalformed line\n"
+
+    assert R._failed(listed) == [("a", "1"), ("c", "0"), ("d", "137")]

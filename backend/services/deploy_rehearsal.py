@@ -146,6 +146,12 @@ def render_targets(
         root = work / f"zakaznik-{customer}"
         first = provision(root, customer)
         shutil.copyfile(existing, first.compose_path)  # the installation's compose as it stands — not its .env
+        # DEV-406 — the synthetic settings were written for the project's layout; the installation's own compose may
+        # call its database service otherwise (MÁGERSTAV's NEX Inbox: „postgres“, the project: „db“). Its settings lead
+        # to its own service, as the installation's real ones do — else the rehearsal's migration finds no database.
+        own_db = P.installation_db_service(existing.read_text(encoding="utf-8"))
+        if own_db and first.db_service and own_db != first.db_service:
+            P.retarget_database_host(first.env_path, first.db_service, own_db)
         again = provision(root, customer)
         rendered.append(Rendered(f"inštalácia zákazníka {customer}", again.compose_path, again.env_path))
     return rendered
@@ -229,6 +235,53 @@ def _tail(text: str) -> str:
     return "\n".join(lines[-_LOG_TAIL_LINES:])
 
 
+#: How ``docker compose ps`` lists a service for :func:`_failed_services` — a template, not JSON (its shape changes
+#: between Compose releases).
+_PS_FORMAT = "{{.Service}}\t{{.State}}\t{{.ExitCode}}"
+
+
+def _failed(ps_output: str) -> list[tuple[str, str]]:
+    """``(service, exit code)`` of every service that stopped with an error or keeps restarting."""
+    failed: list[tuple[str, str]] = []
+    for line in ps_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        service, state, code = (part.strip() for part in parts)
+        if (state in {"exited", "dead"} and code not in {"", "0"}) or state == "restarting":
+            failed.append((service, code))
+    return failed
+
+
+async def _logs_of(base: list[str], env: dict[str, str], services: list[tuple[str, str]]) -> str:
+    """DEV-406 — the end of the log of each service named, for the finding. 16.11.2026 NEX Inbox 1.10.4: the finding
+    carried only the tail of ``up`` („alembic-init didn't complete successfully: exit 1“) and the installation was taken
+    down at once; the Staviteľ guessed for five rounds and changed the app's connection to its database blind."""
+    from backend.services import orchestrator as O
+
+    parts = []
+    for service, code in services:
+        rc, log = await O._compose_smoke_step(
+            [*base, "logs", "--no-color", "--tail", str(_LOG_TAIL_LINES), service], 60, env=env
+        )
+        if rc == 0 and log.strip():
+            ended = f" (skončila kódom {code})" if code not in {"", "0"} else ""
+            parts.append(f"Záznam služby {service}{ended}:\n{_tail(log)}")
+    return "\n\n".join(parts)
+
+
+async def _failed_services(base: list[str], env: dict[str, str]) -> str:
+    """The logs of the services that stopped with an error — asked before the rehearsal is taken down."""
+    from backend.services import orchestrator as O
+
+    rc, out = await O._compose_smoke_step([*base, "ps", "--all", "--format", _PS_FORMAT], 60, env=env)
+    return await _logs_of(base, env, _failed(out)) if rc == 0 else ""
+
+
+def _with_logs(why: str, logs: str) -> str:
+    return f"{why}\n\n{logs}" if logs else why
+
+
 async def _run_one(target: Rendered, name: str, project_path: Path, version: str) -> tuple[bool, str]:
     """Build and start one rehearsal installation, check its backend answers, take it down. ``(ok, why)``."""
     from backend.services import orchestrator as O  # the smoke's own steps; imported here — it imports this module
@@ -251,7 +304,8 @@ async def _run_one(target: Rendered, name: str, project_path: Path, version: str
             [*base, "up", "-d", "--build", "--wait"], O.ACCEPTANCE_SMOKE_TIMEOUT, env=env
         )
         if rc != 0:
-            return False, f"inštalácia sa nepostavila alebo nespustila:\n{_tail(out)}"
+            why = f"inštalácia sa nepostavila alebo nespustila:\n{_tail(out)}"
+            return False, _with_logs(why, await _failed_services(base, env))
         services = compose.get("services") or {}
         backend = P.identify_service_roles(services).get("backend")
         if backend:
@@ -259,7 +313,7 @@ async def _run_one(target: Rendered, name: str, project_path: Path, version: str
             path_ = P.resolve_be_health_path(services[backend], project_path)
             ready, last = await O._await_http_ready(base, backend, port, path=path_, env=env)
             if not ready:
-                return False, f"backend neodpovedá ({last})"
+                return False, _with_logs(f"backend neodpovedá ({last})", await _logs_of(base, env, [(backend, "")]))
         return True, ""
     finally:
         await O._compose_smoke_step([*base, *O._SMOKE_DOWN], 120, env=env)

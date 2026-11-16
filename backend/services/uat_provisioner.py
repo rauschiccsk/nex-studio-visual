@@ -1184,6 +1184,40 @@ def detect_db_credentials(services: dict[str, Any], db_service: Optional[str], p
     return {"POSTGRES_USER": user, "POSTGRES_DB": db_name}
 
 
+def installation_db_service(compose_text: Optional[str]) -> Optional[str]:
+    """DEV-406 — the database service of an installation's own compose: where every address of the database in its
+    settings leads. A redeploy keeps the installation's compose, and an installation older than the project's layout
+    keeps its own name for it (MÁGERSTAV's NEX Inbox: „postgres“, the project: „db“). 16.11.2026 the redeploy of NEX
+    Inbox 1.10.4 added ``DATABASE_URL`` with the project's name — a host the installation does not have, and 1.10.4
+    prefers that address over ``DB_HOST``."""
+    services = (yaml.safe_load(compose_text) or {}).get("services") if compose_text else None
+    return identify_service_roles(services or {}).get("db")
+
+
+def retarget_database_host(env_path: Path, old_host: str, new_host: str) -> list[str]:
+    """Point every address of the database in ``env_path`` that names the service ``old_host`` at ``new_host`` — the
+    keys of :data:`DB_CONNECTION_VARS` and ``*_DATABASE_URL``. Returns the keys changed. For settings written for one
+    layout and laid over a compose of another (the deploy rehearsal's first install of an existing installation)."""
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+    host_in_url = re.compile(rf"@{re.escape(old_host)}(?=[:/]|$)")
+    changed: list[str] = []
+    for i, line in enumerate(lines):
+        key, sep, value = line.partition("=")
+        name = key.strip()
+        if not sep or line.lstrip().startswith("#"):
+            continue
+        if name in {"DB_HOST", "POSTGRES_HOST"} and value.strip() == old_host:
+            lines[i] = f"{key}={new_host}"
+        elif (name == "DATABASE_URL" or name.lower().endswith(DB_URL_SUFFIX)) and host_in_url.search(value):
+            lines[i] = f"{key}={host_in_url.sub(f'@{new_host}', value)}"
+        else:
+            continue
+        changed.append(name)
+    if changed:
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return changed
+
+
 def _rewrite_db_connection_var(key: str, value: Any, *, user: str, db_name: str, password: str, db_host: str) -> str:
     """Rewrite a DB connection env var to the UAT db service host + detected creds + shared password."""
     if key in {"DB_HOST", "POSTGRES_HOST"}:
@@ -4001,7 +4035,8 @@ def provision_uat(
         version=version,
         services=src_services,
         be_service=roles["backend"],
-        db_service=roles["db"],
+        # DEV-406 — a redeploy keeps the installation's compose: its own database service is where the addresses lead.
+        db_service=(installation_db_service(existing_compose_text) if is_redeploy else None) or roles["db"],
         source_env_example=env_example,
         db_user=db_user,
         db_name=db_name,
