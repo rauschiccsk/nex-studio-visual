@@ -107,13 +107,14 @@ def test_the_links_on_the_deploy_screen_follow_the_project():
 # ── the deploy runner: hand the option over, check afterwards ────────────────────────────────────────────────────
 
 
-def _runner(monkeypatch, *, private: bool, problems=None, uat_slug="icc-uat", deploy_host=None):
+def _runner(monkeypatch, *, private: bool, problems=None, uat_slug="icc-uat", deploy_host=None, compose_path=None):
     captured: dict = {"check": []}
+    _compose_path = compose_path
 
     class _Result:
         warnings: list[str] = []
         fe_service = "web"
-        compose_path = Path("/opt/uat/icc/career-asistent/docker-compose.yml")
+        compose_path = _compose_path or Path("/opt/uat/icc/career-asistent/docker-compose.yml")
 
     def _fake_provision(project_slug, uat_slug, *, version, rotate_secrets, **kw):
         captured["provision"] = kw
@@ -179,8 +180,23 @@ def test_a_public_deploy_is_not_checked_and_stays_as_before(monkeypatch):
     assert url == "https://uat-icc-career-asistent.isnex.eu"
 
 
-def test_a_prod_on_another_machine_is_routed_by_that_machine(monkeypatch):
-    _, captured = _runner(monkeypatch, private=True, uat_slug="icc-prod", deploy_host="mager")
+def test_a_prod_on_another_machine_is_routed_by_that_machine(monkeypatch, tmp_path):
+    # DEV-405: before the start the cockpit reads the installation's names from the compose provisioning wrote — a
+    # file of this test's own, not a path that happens to exist on one machine (ANDROS has the live UAT there; CI not).
+    compose = _write(
+        tmp_path,
+        {
+            "services": {
+                "web": {
+                    "labels": [
+                        "traefik.http.routers.icc-career-asistent-sec.rule=Host(`icc-career-asistent.icc.sk`)",
+                        "traefik.http.routers.icc-career-asistent-sec.entrypoints=websecure",
+                    ]
+                }
+            }
+        },
+    )
+    _, captured = _runner(monkeypatch, private=True, uat_slug="icc-prod", deploy_host="mager", compose_path=compose)
 
     assert captured["check"] == []
     # DEV-102: that machine's own check after the deploy asks the private address too.
