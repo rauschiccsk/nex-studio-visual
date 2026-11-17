@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -3712,6 +3713,123 @@ def _manazer_signoff(db: Session, version_id: uuid.UUID) -> Optional[dict[str, A
     return row.payload or {}
 
 
+#: DEV-416: the part of a project that is the cockpit's own record of its versions — specifications, plans, release
+#: notes. A commit there (the first-PROD note move, the next version's specification) does not change what a deploy
+#: builds; everything else does, ``docs/AKO_ZACAT.md`` too (the image carries it).
+VERSION_RECORDS_DIR = "docs/specs"
+
+#: DEV-416: statuses of a version whose work has reached the project's code (``planned`` has not begun).
+STARTED_VERSION_STATUSES = ("active", "done", "released")
+
+
+@functools.lru_cache(maxsize=512)
+def _code_moved_between(root: str, anchor: str, head: str) -> bool:
+    """:func:`_code_moved` for a pair of commits — kept, commits never change. A git failure raises (never kept)."""
+    r = subprocess.run(
+        ["git", "-C", root, "diff", "--quiet", anchor, head, "--", ".", f":(exclude){VERSION_RECORDS_DIR}"],
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    # 0 — nothing outside the records; 1 — code changed; else the anchor is not in the repository: not this code.
+    return r.returncode != 0
+
+
+def _code_moved(root: str, anchor: str, head: str) -> Optional[bool]:
+    """DEV-416: did anything a deploy builds change between ``anchor`` and ``head`` — every tracked file outside
+    :data:`VERSION_RECORDS_DIR`? ``None`` when git cannot answer (our own read failure)."""
+    try:
+        return _code_moved_between(root, anchor, head)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def newer_version_started(db: Session, version: Version) -> Optional[str]:
+    """DEV-416: the newest version of the project numbered above ``version`` whose work has begun — its commits are
+    in the code, so ``version`` can no longer be checked or built on that code. ``None`` when there is none."""
+    from backend.services.version import number_order_key
+
+    numbers = db.execute(
+        select(Version.version_number).where(
+            Version.project_id == version.project_id,
+            Version.id != version.id,
+            Version.status.in_(STARTED_VERSION_STATUSES),
+        )
+    ).scalars()
+    mine = number_order_key(version.version_number)
+    newer = [n for n in numbers if number_order_key(n) > mine]
+    return max(newer, key=number_order_key) if newer else None
+
+
+def _drift_or_superseded(db: Session, version: Optional[Version], anchor: str, head: str, drift: str) -> str:
+    """DEV-416: why a version's code is no longer the code it was checked at. ``superseded`` when a newer version has
+    begun and the code (not only :data:`VERSION_RECORDS_DIR`) moved — re-checking it would check the newer version's
+    unfinished work under its number, and a deploy would ship it (17.11.2026: NEX Manager 1.6.0 during 1.7.0). Else
+    ``drift`` — „Over znova“ re-checks it on the current code."""
+    if version is None or newer_version_started(db, version) is None:
+        return drift
+    root = str(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id))
+    return "superseded" if _code_moved(root, anchor, head) is not False else drift
+
+
+def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str]:
+    """DEV-416: the commit a released version was released with and the drift that names its re-check — its Hotovo
+    signature's commit, else the commit of its newest Verifikácia PASS, else its version tag. ``(None, …)`` when it
+    has none."""
+    signoff = _manazer_signoff(db, version.id)
+    if signoff is not None and signoff.get("hotovo_sha"):
+        return signoff["hotovo_sha"], "hotovo_drift"
+    verdicts = db.execute(
+        select(PipelineMessage.payload)
+        .where(
+            PipelineMessage.version_id == version.id,
+            PipelineMessage.stage == "verifikacia",
+            PipelineMessage.kind == "verdict",
+        )
+        .order_by(PipelineMessage.seq.desc())
+    ).scalars()
+    for payload in verdicts:
+        sha = (payload or {}).get("verified_sha")
+        if sha and sha != "legacy":
+            return sha, "sha_drift"
+    root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id)
+    try:
+        tag = subprocess.run(
+            ["git", "-C", str(root), "rev-list", "-n1", f"v{version.version_number}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, "sha_drift"
+    return (tag.stdout.strip() or None) if tag.returncode == 0 else None, "sha_drift"
+
+
+def _released_version_verified(db: Session, version: Version, head: Optional[str]) -> tuple[bool, str]:
+    """DEV-416: a released version is verified while the code a deploy would build is the code it was released
+    with — HEAD is its commit, or only :data:`VERSION_RECORDS_DIR` changed since (the first-PROD note move, the next
+    version's specification). Otherwise it is ``superseded`` (a newer version has begun) or drifted (``sha_drift`` /
+    ``hotovo_drift`` — „Over znova“ re-checks it); a released version with no commit on record is
+    ``released_unanchored``. Our own failure to read the repository never un-verifies (``repo_unreadable``)."""
+    if head is None:
+        head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id))
+    if head is None:
+        return True, "repo_unreadable"
+    anchor, drift = _released_anchor(db, version)
+    if anchor is None:
+        return False, "released_unanchored"
+    if anchor == head:
+        return True, "released"
+    root = str(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id))
+    moved = _code_moved(root, anchor, head)
+    if moved is None:
+        return True, "repo_unreadable"
+    if not moved:
+        return True, "released"
+    return False, ("superseded" if newer_version_started(db, version) is not None else drift)
+
+
 def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] = None) -> tuple[bool, str]:
     """CR-V2-056 (layer-1 reality-anchoring): is a version VERIFIED *right now*, COMPUTED from real git state
     — not a stored ``done`` snapshot. A version is verified iff its latest Verifikácia PASS verdict is bound
@@ -3720,15 +3838,16 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
 
     Returns ``(is_verified, provenance)``. TOTAL function (never raises, always a definite answer — a flaky
     git read never silently un-verifies):
-      * ``status == 'released'`` → ``(True, 'released')`` — a shipped release is an immutable, already-shipped
-        record; its verification happened at release and NO post-release commit may un-verify it (checked
-        FIRST, before any SHA/HEAD comparison). This is the general fix for the §3.6 graduation note-move
-        (deploy._move_release_note_dir) — and any future maintenance commit — advancing HEAD past the anchored
-        ``verified_sha``/``hotovo_sha``: without it the just-graduated ``v1.0.0`` would read ``sha_drift`` and
-        drop out of ``list_verified_versions``, hard-blocking every later deploy (2nd customer / redeploy) of
-        a version that can no longer be re-verified. Guardrail: ONLY ``released`` short-circuits — every
-        non-released status keeps the byte-identical drift detection below (the real safeguard that catches
-        code changing after a Verifikácia PASS).
+      * ``status == 'released'`` → :func:`_released_version_verified` (checked FIRST): ``(True, 'released')``
+        while the code a deploy would build is the code it was released with — HEAD is its commit, or only
+        :data:`VERSION_RECORDS_DIR` changed since (the §3.6 graduation note-move, deploy._move_release_note_dir,
+        must not hard-block a 2nd customer's deploy of the just-graduated version). DEV-416: it used to be
+        ``(True, 'released')`` whatever HEAD held, and a deploy builds HEAD — NEX Manager 1.2.2 was offered with
+        127 commits of later work under its number. Code moved → ``superseded`` / ``sha_drift`` /
+        ``hotovo_drift``; no commit on record → ``(False, 'released_unanchored')``.
+      * DEV-416: a drift while a NEWER version has begun (its work is in the code) → ``(False, 'superseded')`` —
+        „Over znova“ would check the newer version's unfinished code under this number, so it is not offered
+        and the deploy screen names the newer version instead.
       * no PASS on record, or a fix directive is newer (CR-V2-055) → ``(False, 'no_pass')``.
       * PASS with ``verified_sha == 'legacy'`` (pre-anchoring backfill) → ``(True, 'legacy')`` — grandfathered.
       * PASS with no ``verified_sha`` (repo unreadable at PASS time, so never anchored) → ``(True, 'unbound')``.
@@ -3747,13 +3866,12 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
     present (and fresh), apply the SAME SHA-anchor ladder to its ``hotovo_sha`` and short-circuit; provenance
     strings are the ``hotovo_*`` variants so the FE can tell a manager signoff from an Auditor PASS. Legacy
     builds have no signature → fall through to the UNCHANGED verdict path byte-identically."""
-    # A RELEASED version is verified BY DEFINITION — checked FIRST, before any SHA/HEAD drift comparison. The
-    # §3.6 graduation note-move commit (or any later maintenance commit) advances HEAD past the anchored SHA;
-    # a shipped, immutable release must never un-verify from that. ONLY 'released' short-circuits — the drift
-    # detection below is unchanged for every non-released status (the real guardrail).
+    # DEV-416: a RELEASED version is checked FIRST, against the commit it was released with — no longer verified
+    # by definition. Until 17.11.2026 it was, whatever HEAD held: NEX Manager 1.2.2 stayed the one version on offer
+    # while a deploy would have built 127 commits of later work under its number (:func:`_released_version_verified`).
     version = db.get(Version, version_id)
     if version is not None and version.status == "released":
-        return True, "released"
+        return _released_version_verified(db, version, head)
     signoff = _manazer_signoff(db, version_id)
     if signoff is not None:
         pass_sha = signoff.get("hotovo_sha")
@@ -3763,7 +3881,9 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
             head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
         if head is None:
             return True, "repo_unreadable"  # our own read failure — never un-verifies
-        return (pass_sha == head), ("hotovo_match" if pass_sha == head else "hotovo_drift")
+        if pass_sha == head:
+            return True, "hotovo_match"
+        return False, _drift_or_superseded(db, version, pass_sha, head, "hotovo_drift")
     if not _verifikacia_passed(db, version_id):
         return False, "no_pass"
     latest = db.execute(
@@ -3785,7 +3905,9 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
         head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id))
     if head is None:
         return True, "repo_unreadable"  # our own read failure — never un-verifies
-    return (pass_sha == head), ("sha_match" if pass_sha == head else "sha_drift")
+    if pass_sha == head:
+        return True, "sha_match"
+    return False, _drift_or_superseded(db, version, pass_sha, head, "sha_drift")
 
 
 # (CR-V2-013: the Gate-E milestone / gap / coverage helpers — ``_gate_e_coverage_complete``,
@@ -17022,6 +17144,14 @@ async def apply_action(
             )
             _begin_dispatch(db, state)
             return state
+        if provenance == "superseded":
+            # DEV-416: the code holds a newer version's work — a fresh PASS would bind this number to it.
+            superseded = db.get(Version, version_id)
+            raise OrchestratorError(
+                f"Verziu {superseded.version_number} už znova overiť nejde: kód projektu už obsahuje prácu na verzii "
+                f"{newer_version_started(db, superseded)} a overenie by prebehlo na ňom. K zákazníkovi sa nasadzuje "
+                "novšia verzia."
+            )
         raise OrchestratorError("Over znova je platné len keď je overenie zastarané (kód sa pohol za overený commit).")
 
     if action == "overit_bez_opravy":

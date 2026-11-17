@@ -222,6 +222,10 @@ DEPLOY_CAUSE_AWAITING_SIGNOFF = "awaiting_signoff"
 DEPLOY_CAUSE_STALE_SIGNOFF = "stale_signoff"
 #: No version of this project was ever finished — nothing to deploy, and nothing to re-verify.
 DEPLOY_CAUSE_NONE_FINISHED = "none_finished"
+#: DEV-416: the finished version's code moved on with a NEWER version's work (that version has begun). A deploy would
+#: ship the newer version's code under this number and a re-check would check it — no button; the screen names the
+#: newer version (``next_version_*``), the one that will be deployed when it is finished.
+DEPLOY_CAUSE_SUPERSEDED = "superseded"
 #: DEV-51: the version is finished, but the project's checks (CI) on the code that would be deployed FAILED —
 #: including a run that started after the Verifikácia gate (the version tag's own release gate).
 DEPLOY_CAUSE_CI_RED = "ci_red"
@@ -241,6 +245,7 @@ DeployCause = Literal[
     "none_finished",
     "ci_red",
     "ci_running",
+    "superseded",
 ]
 
 
@@ -263,7 +268,8 @@ class DeployBlock(BaseModel):
             "'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | "
             "'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | "
             "'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that "
-            "would be deployed failed) | 'ci_running' (those checks are still running)."
+            "would be deployed failed) | 'ci_running' (those checks are still running) | 'superseded' (the code "
+            "holds a newer version's work — that version, in next_version_*, is the one to deploy when finished)."
         ),
     )
     version_number: Optional[str] = Field(
@@ -294,10 +300,13 @@ class DeployBlock(BaseModel):
         default=None,
         description=(
             "For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and "
-            "not finished (a fast fix or a new version). The screen leads there instead of offering a new fix."
+            "not finished (a fast fix or a new version). The screen leads there instead of offering a new fix. "
+            "For 'superseded' (DEV-416): the newest version whose work is in the code."
         ),
     )
-    next_version_number: Optional[str] = Field(default=None, description="For 'ci_red': that version's number.")
+    next_version_number: Optional[str] = Field(
+        default=None, description="For 'ci_red' and 'superseded': that version's number."
+    )
     dedo_brief: Optional[str] = Field(
         default=None,
         description=(

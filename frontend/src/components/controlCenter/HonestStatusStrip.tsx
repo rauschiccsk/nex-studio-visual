@@ -19,6 +19,7 @@ import {
   TONE_BANNER,
   TONE_DOT,
   verificationDrifted,
+  verificationSuperseded,
   verificationUnconfirmed,
 } from "../cockpit/labels";
 import type { BuildPhase, StatusTone } from "../cockpit/labels";
@@ -121,21 +122,25 @@ function HonestStatusStrip({
   // merely fail to confirm the check, we KNOW it no longer describes the current code, so a green "pripravené
   // na nasadenie" is an outright false statement (and the deploy screen refuses that version anyway).
   const drifted = state?.status === "done" && verificationDrifted(verifiedProvenance);
+  // DEV-416: the code moved on with a newer version's work — neither deployable nor re-checkable.
+  const superseded = state?.status === "done" && verificationSuperseded(verifiedProvenance);
   // DEV-51: NEX Inbox 1.7.0, 10.10.2026 — "Zostavenie zlyhalo" above, "Hotovo — pripravené na nasadenie" here.
   const ciBlock = state?.status === "done" ? ciDeployBlock(ci) : null;
-  const text = drifted
-    ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
-    : ciBlock === "red"
-      ? "Hotovo — kontroly projektu zlyhali, nasadenie je zastavené"
-      : ciBlock === "running"
-        ? "Hotovo — kontroly projektu ešte bežia, nasadenie počká"
-        : unconfirmed
-          ? "Hotovo — overenie sa nedá potvrdiť"
-          : statusText(state, projectName, versionNumber, ciGate);
+  const text = superseded
+    ? "Hotovo — nasadí sa už novšia verzia"
+    : drifted
+      ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
+      : ciBlock === "red"
+        ? "Hotovo — kontroly projektu zlyhali, nasadenie je zastavené"
+        : ciBlock === "running"
+          ? "Hotovo — kontroly projektu ešte bežia, nasadenie počká"
+          : unconfirmed
+            ? "Hotovo — overenie sa nedá potvrdiť"
+            : statusText(state, projectName, versionNumber, ciGate);
   const tone: StatusTone =
     (ciBlock === "red" && !drifted) || (state?.status === "awaiting_manazer" && ciGate?.state === "red")
       ? "red"
-      : unconfirmed || drifted || ciBlock
+      : unconfirmed || drifted || superseded || ciBlock
         ? "amber"
         : statusTone(state);
   const working = state?.status === "agent_working";

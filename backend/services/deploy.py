@@ -88,6 +88,7 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_OK,
     DEPLOY_CAUSE_REVERIFY_RUNNING,
     DEPLOY_CAUSE_STALE_SIGNOFF,
+    DEPLOY_CAUSE_SUPERSEDED,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
 from backend.services import (
@@ -481,6 +482,9 @@ def _where_the_fix_is(db: Session, project: Project, version_id: UUID) -> dict:
 #: ``version_verified`` provenances that mean "was verified, the code then moved on" (both anchor shapes).
 DRIFT_PROVENANCES = ("hotovo_drift", "sha_drift")
 
+#: DEV-416: the ``version_verified`` provenance of a version whose code moved on with a newer version's work.
+SUPERSEDED_PROVENANCE = "superseded"
+
 #: Pipeline statuses ``apply_action('overit_znovu')`` accepts — it fail-closes on everything else. The
 #: button may be offered ONLY for these, or it would 400 the moment a manager trusted it.
 REVERIFIABLE_STATUSES = ("done", "awaiting_manazer")
@@ -533,6 +537,7 @@ def deployability(
     from backend.services.orchestrator import (
         _repo_head,
         ever_signed_off,
+        newer_version_started,
         reverify_in_flight,
         version_verified,
     )
@@ -560,6 +565,20 @@ def deployability(
 
     for version_id, version_number, stage, status, is_regate in candidates:
         is_verified, provenance = version_verified(db, version_id, head=head)
+        if provenance == SUPERSEDED_PROVENANCE:
+            # DEV-416: its code moved on with a newer version's work — that version is the one to deploy.
+            newer = newer_version_started(db, db.get(Version, version_id))
+            newer_id = db.execute(
+                select(Version.id).where(Version.project_id == project.id, Version.version_number == newer)
+            ).scalar_one_or_none()
+            return {
+                "cause": DEPLOY_CAUSE_SUPERSEDED,
+                "version_number": version_number,
+                "version_id": version_id,
+                "can_reverify": False,
+                "next_version_id": newer_id,
+                "next_version_number": newer,
+            }
         if provenance in DRIFT_PROVENANCES:
             if status in REVERIFIABLE_STATUSES:
                 cause = DEPLOY_CAUSE_DRIFT
@@ -1245,6 +1264,14 @@ async def deploy(
     from backend.services.orchestrator import version_verified
 
     _ok, _prov = version_verified(db, version.id)
+    if _prov == SUPERSEDED_PROVENANCE:
+        # DEV-416: a deploy builds the current code — here the newer version's work, under this number.
+        from backend.services.orchestrator import newer_version_started
+
+        raise ConflictError(
+            f"Nasadenie zastavené: kód projektu už obsahuje prácu na verzii {newer_version_started(db, version)} — "
+            f"nasadil by sa jej kód pod číslom {version_number}. Nasadiť sa dá novšia verzia, keď je hotová."
+        )
     if not _ok:
         raise ConflictError(
             f"Nasadenie zastavené: verzia {version_number!r} nie je overená na aktuálnom kóde ({_prov}) — pred "

@@ -185,6 +185,25 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
       );
       break;
 
+    case "superseded": {
+      // DEV-416 (17.11.2026, NEX Manager): the code already holds a newer version's work. A deploy builds the
+      // current code, so "1.6.0" would ship 1.7.0's unfinished work — and re-checking 1.6.0 would check that work.
+      const next = fmtVer(block.next_version_number);
+      title = `Nasadí sa až verzia ${next}`;
+      body =
+        `Verzia ${version} je hotová, ale v projekte už pribudla práca na verzii ${next}. To, čo by sa teraz ` +
+        `nasadilo, by bol jej kód pod číslom ${version} — preto ${version} k zákazníkovi nepúšťame. ` +
+        `Nasadiť sa bude dať verzia ${next}, keď bude hotová.`;
+      if (block.next_version_id) {
+        action = {
+          label: `Otvoriť verziu ${next}`,
+          icon: "open",
+          run: () => navigate(`/projects/${projectSlug}/versions/${block.next_version_id}`),
+        };
+      }
+      break;
+    }
+
     case "none_finished":
       title = "Zatiaľ nie je čo nasadiť";
       body =

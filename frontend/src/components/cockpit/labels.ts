@@ -226,6 +226,14 @@ export function ciDeployBlock(ci: { stav: string; bezi?: boolean } | null | unde
   return null;
 }
 
+/**
+ * DEV-416 — a finished version whose code moved on with a NEWER version's work (`superseded`). Neither deployable
+ * nor re-checkable: a deploy would ship the newer version's code under this number, and "Over znova" would check it.
+ */
+export function verificationSuperseded(provenance: string | null | undefined): boolean {
+  return provenance === "superseded";
+}
+
 export function verificationDrifted(
   provenance: string | null | undefined,
 ): boolean {

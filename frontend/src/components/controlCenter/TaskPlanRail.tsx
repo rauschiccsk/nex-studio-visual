@@ -61,6 +61,7 @@ import {
   TONE_DOT,
   ciDeployBlock,
   verificationDrifted,
+  verificationSuperseded,
   verificationUnconfirmed,
 } from "../cockpit/labels";
 import { SpecMarkdown } from "../markdown/SpecMarkdown";
@@ -842,7 +843,13 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
               na nasadenie" and offer a primary button into a deploy screen that refuses the version. Say the
               truth and point at the ONE action that fixes it — "Over znova", which sits on this same screen
               (ReverifyBar). The button stays visible but disabled with its reason (disabled-over-hidden). */}
-          {verificationDrifted(board?.verified_provenance) ? (
+          {verificationSuperseded(board?.verified_provenance) ? (
+            // DEV-416: the code holds a newer version's work — no deploy and no "Over znova" for this one.
+            <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
+              V projekte už pribudla práca na novšej verzii — túto verziu už nasadiť ani znova overiť nejde.
+              K zákazníkovi pôjde novšia verzia, keď bude hotová.
+            </p>
+          ) : verificationDrifted(board?.verified_provenance) ? (
             <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
               Kód sa po označení za hotové zmenil — verziu treba znova overiť. Tlačidlo „Over znova" nájdeš
               nižšie na tejto obrazovke.
@@ -865,11 +872,15 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
           <button
             type="button"
             onClick={() => navigate("/uat")}
-            disabled={verificationDrifted(board?.verified_provenance)}
+            disabled={
+              verificationDrifted(board?.verified_provenance) || verificationSuperseded(board?.verified_provenance)
+            }
             title={
-              verificationDrifted(board?.verified_provenance)
-                ? "Najprv verziu znova over — kým sa kód nezhoduje s overením, nasadenie je pozastavené."
-                : "Prejsť na nasadenie k zákazníkovi"
+              verificationSuperseded(board?.verified_provenance)
+                ? "Túto verziu už nasadiť nejde — v projekte pribudla práca na novšej verzii."
+                : verificationDrifted(board?.verified_provenance)
+                  ? "Najprv verziu znova over — kým sa kód nezhoduje s overením, nasadenie je pozastavené."
+                  : "Prejsť na nasadenie k zákazníkovi"
             }
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >

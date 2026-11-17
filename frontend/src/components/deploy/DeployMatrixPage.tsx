@@ -29,7 +29,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
 import { acceptanceTesting, combineProgress } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
-import { fmtDeployTime, fmtVer } from "./version";
+import { fmtDeployTime, fmtVer, isOlderVersion } from "./version";
 import { progressDescription } from "./progressDescription";
 
 /**
@@ -279,9 +279,17 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     );
   }
 
-  /** The version a row's Nasadiť will deploy: the explicit pick, else newest verified. */
+  /**
+   * The version a row's Nasadiť will deploy: the explicit pick, else the newest verified — unless the customer runs
+   * a newer one (DEV-416, 17.11.2026: NEX Manager offered and preselected 1.2.2 to customers on 1.6.0). Going back
+   * to an older version is never a default; the Manažér picks it.
+   */
   function pickedVersion(row: DeployMatrixRow): string | undefined {
-    return picked[row.customer_id] ?? matrix?.verified_versions[0];
+    const explicit = picked[row.customer_id];
+    if (explicit) return explicit;
+    const newest = matrix?.verified_versions[0];
+    const running = environment === "uat" ? row.uat_version : row.prod_version;
+    return newest && running && isOlderVersion(newest, running) ? undefined : newest;
   }
 
   /**
@@ -307,6 +315,13 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       return { title: DEPLOY_PROD_ROLE_REASON, note: "nasadzuje Manažér" };
     }
     const version = pickedVersion(row);
+    if (!version && (matrix?.verified_versions.length ?? 0) > 0) {
+      const running = fmtVer(environment === "uat" ? row.uat_version : row.prod_version);
+      return {
+        title: `U zákazníka beží novšia verzia ${running} — staršiu nasadíš, len keď ju vyberieš.`,
+        note: "beží novšia — vyber verziu",
+      };
+    }
     if (!version) return { title: "Žiadna overená verzia na nasadenie.", note: "pozastavené — dôvod hore" };
     if (environment === "prod" && !row.accepted_versions.includes(version)) {
       return {
@@ -648,13 +663,20 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         </span>
                       ) : (
                         <select
-                          value={chosen}
+                          aria-label={`Verzia na nasadenie — ${row.customer_name}`}
+                          value={chosen ?? ""}
                           disabled={isBusy}
                           onChange={(e) =>
                             setPicked((prev) => ({ ...prev, [row.customer_id]: e.target.value }))
                           }
                           className="rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 font-mono text-xs text-[var(--color-text-primary)]"
                         >
+                          {/* DEV-416: no default older than what the customer runs — the Manažér picks it himself. */}
+                          {!chosen && (
+                            <option value="" disabled>
+                              vyber verziu
+                            </option>
+                          )}
                           {verified.map((v) => (
                             <option key={v} value={v}>
                               {fmtVer(v)}

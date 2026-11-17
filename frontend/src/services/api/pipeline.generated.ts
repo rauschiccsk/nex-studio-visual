@@ -5336,11 +5336,11 @@ export interface components {
             can_reverify: boolean;
             /**
              * Cause
-             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that would be deployed failed) | 'ci_running' (those checks are still running).
+             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that would be deployed failed) | 'ci_running' (those checks are still running) | 'superseded' (the code holds a newer version's work — that version, in next_version_*, is the one to deploy when finished).
              * @default ok
              * @enum {string}
              */
-            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished" | "ci_red" | "ci_running";
+            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished" | "ci_red" | "ci_running" | "superseded";
             /**
              * Ci Detail
              * @description For 'ci_red' / 'ci_running': which check, which run, what it said (the human sentence).
@@ -5358,12 +5358,12 @@ export interface components {
             dedo_brief?: string | null;
             /**
              * Next Version Id
-             * @description For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and not finished (a fast fix or a new version). The screen leads there instead of offering a new fix.
+             * @description For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and not finished (a fast fix or a new version). The screen leads there instead of offering a new fix. For 'superseded' (DEV-416): the newest version whose work is in the code.
              */
             next_version_id?: string | null;
             /**
              * Next Version Number
-             * @description For 'ci_red': that version's number.
+             * @description For 'ci_red' and 'superseded': that version's number.
              */
             next_version_number?: string | null;
             /**

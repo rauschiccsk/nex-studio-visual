@@ -8,10 +8,13 @@ repo AFTER the version was released + SHA-anchored. That commit advances HEAD pa
 out of ``list_verified_versions`` → every later deploy of it was hard-blocked, and a released version
 can't be re-verified (fatal for instance-per-customer: the 2nd customer deploy + any redeploy break).
 
-Fix: ``version_verified`` short-circuits to verified for ``status == 'released'`` (a shipped release is
-immutable + verified by definition — no post-release commit may un-verify it). Guardrail asserted here:
-a NOT-released version whose HEAD moved past its anchor STILL reports drift (unchanged — that IS the real
-safeguard catching code changing after a Verifikácia PASS).
+Fix: ``version_verified`` short-circuited to verified for ``status == 'released'``. DEV-416 (17.11.2026, Director:
+„súhlasím“) narrowed it: a released version stays verified while only the version records (``docs/specs``) changed
+after it — the note move — and no longer when the code moved (a deploy builds HEAD: NEX Manager 1.2.2 was offered with
+127 commits of later work). Both halves are proven on a real repository in
+``test_a_version_is_deployed_only_on_its_own_code.py``. Guardrail asserted here: a NOT-released version whose HEAD
+moved past its anchor STILL reports drift (that IS the real safeguard catching code changing after a Verifikácia
+PASS).
 """
 
 from __future__ import annotations
@@ -81,18 +84,6 @@ def _seed_sha_anchored_version(db, *, version_number: str, status: str) -> Versi
     )
     db.flush()
     return version
-
-
-def test_released_version_stays_verified_after_head_moves_past_anchor(db_session):
-    """After graduation (status='released', the note-move commit advanced HEAD past ``verified_sha``),
-    ``version_verified`` returns verified — NOT drift. This is the exact gap the graduation test missed:
-    it only checked the moved file/tree, never called ``version_verified`` afterward."""
-    version = _seed_sha_anchored_version(db_session, version_number="1.0.0", status="released")
-
-    is_verified, provenance = orchestrator.version_verified(db_session, version.id, head=MOVED_HEAD)
-
-    assert is_verified is True, "a released version must never un-verify on a post-release commit"
-    assert provenance == "released"
 
 
 def test_not_released_version_still_drifts_when_head_moves(db_session):
