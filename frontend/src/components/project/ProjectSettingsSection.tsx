@@ -33,6 +33,7 @@ import {
   type AppKitStatus,
 } from "@/services/api/projects";
 import { AppLanguagesChoice } from "./AppLanguagesChoice";
+import { AppKitUpgradePrompt } from "@/components/controlCenter/AppKitUpgradePrompt";
 import { kitNeeded, unknownToKit, type LanguageOption } from "@/lib/appLanguages";
 import { PRIVATE_NETWORK_APPLIES, PRIVATE_NETWORK_HINT, PRIVATE_NETWORK_LABEL } from "./privateNetwork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
@@ -136,6 +137,8 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
   const [languageOptions, setLanguageOptions] = useState<LanguageOption[]>([]);
   const [kit, setKit] = useState<AppKitStatus | null>(null);
   const [upgrading, setUpgrading] = useState(false);
+  // DEV-417: the Manažér chose to stay on the template's current release for now — the offer goes until he reopens.
+  const [kitStayed, setKitStayed] = useState(false);
   const onTemplate = Boolean(project.template);
   const wantsLanguages = editing && onTemplate && isMultilingual(form.languages);
   // DEV-400: the kit's status is read whenever the settings of a project on the template are edited — it also says
@@ -173,14 +176,20 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
   // DEV-399: each language comes with its own release of the kit (English later than Hungarian).
   const kitTooOld = wantsLanguages && kit !== null && unknownToKit(form.languages, kit.languages_known ?? []).length > 0;
 
-  const upgradeKit = async () => {
-    if (!kit?.latest) return;
+  // DEV-417: a project behind the template's newest release is offered the upgrade here whatever its languages need —
+  // until 17.11.2026 only when they needed it, so NEX Manager 1.7.0, already in Príprava, could not reach nex-app-kit
+  // 0.16.0 anywhere (the other offer stands only where a version is founded). The languages' own note keeps its button.
+  const kitBehind = readsKit && kit !== null && (kit.behind ?? 0) > 0 && Boolean(kit.latest) && !kit.uncommitted;
+
+  const upgradeKit = async (target?: string) => {
+    const version = target ?? kit?.latest;
+    if (!version) return;
     setUpgrading(true);
     setError(null);
     try {
       // DEV-400: an upgrade whose commit failed is in the status as `uncommitted` — the note below says it and offers
       // to save it; the result's `committed` is not left unread.
-      await upgradeAppKitApi(project.id, kit.latest);
+      await upgradeAppKitApi(project.id, version);
       setKit(await getAppKitStatusApi(project.id));
     } catch (err) {
       setError(humanizeApiError(err, "Šablónu aplikácie sa nepodarilo povýšiť"));
@@ -432,6 +441,17 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {kitBehind && kit && !kitTooOld && !kitStayed && (
+          <div className="col-span-2" data-testid="kit-upgrade">
+            <AppKitUpgradePrompt
+              status={kit}
+              busy={upgrading}
+              onUpgrade={(target) => void upgradeKit(target)}
+              onStay={() => setKitStayed(true)}
+            />
           </div>
         )}
 
