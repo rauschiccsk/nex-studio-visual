@@ -124,7 +124,14 @@ def _runner(monkeypatch, *, private: bool, problems=None, uat_slug="icc-uat", de
         return True, "OK"
 
     async def _fake_run_prod(
-        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
+        project_slug,
+        customer_slug,
+        app,
+        full_project_slug,
+        version_number=None,
+        deploy_host=None,
+        private=False,
+        commit=None,
     ):
         captured["prod_private"] = private
         return True, "OK"

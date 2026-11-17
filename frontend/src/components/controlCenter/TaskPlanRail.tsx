@@ -842,17 +842,19 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
           {/* v4.0.56: when the code moved on after the sign-off, this card used to state "hotová a pripravená
               na nasadenie" and offer a primary button into a deploy screen that refuses the version. Say the
               truth and point at the ONE action that fixes it — "Over znova", which sits on this same screen
-              (ReverifyBar). The button stays visible but disabled with its reason (disabled-over-hidden). */}
+              (ReverifyBar). DEV-420: a deploy builds the commit the check is bound to, so the button stays live and the
+              card says that the verified state is what goes out. */}
           {verificationSuperseded(board?.verified_provenance) ? (
-            // DEV-416: the code holds a newer version's work — no deploy and no "Over znova" for this one.
+            // DEV-416 + DEV-420: the code holds a newer version's work — no "Over znova", but its own code deploys.
             <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-              V projekte už pribudla práca na novšej verzii — túto verziu už nasadiť ani znova overiť nejde.
-              K zákazníkovi pôjde novšia verzia, keď bude hotová.
+              V projekte už pribudla práca na novšej verzii — túto verziu už znova overiť nejde. Nasadiť sa dá
+              s kódom, s ktorým bola overená.
             </p>
           ) : verificationDrifted(board?.verified_provenance) ? (
+            // DEV-420: a deploy builds the commit the check is bound to — later changes go out once re-checked.
             <p className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-              Kód sa po označení za hotové zmenil — verziu treba znova overiť. Tlačidlo „Over znova" nájdeš
-              nižšie na tejto obrazovke.
+              Kód sa po označení za hotové zmenil — nasadí sa stav, ktorý bol overený. Aby išli k zákazníkovi aj
+              novšie úpravy, over ich tlačidlom „Over znova" nižšie na tejto obrazovke.
             </p>
           ) : ciDeployBlock(ci) === "red" ? (
             // DEV-51: the deploy screen refuses this version — the card must not promise otherwise.
@@ -872,16 +874,7 @@ function TaskPlanRail({ versionId, messages, board, onBoard, ci, focusTask }: Pr
           <button
             type="button"
             onClick={() => navigate("/uat")}
-            disabled={
-              verificationDrifted(board?.verified_provenance) || verificationSuperseded(board?.verified_provenance)
-            }
-            title={
-              verificationSuperseded(board?.verified_provenance)
-                ? "Túto verziu už nasadiť nejde — v projekte pribudla práca na novšej verzii."
-                : verificationDrifted(board?.verified_provenance)
-                  ? "Najprv verziu znova over — kým sa kód nezhoduje s overením, nasadenie je pozastavené."
-                  : "Prejsť na nasadenie k zákazníkovi"
-            }
+            title="Prejsť na nasadenie k zákazníkovi"
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Rocket className="h-3.5 w-3.5" />

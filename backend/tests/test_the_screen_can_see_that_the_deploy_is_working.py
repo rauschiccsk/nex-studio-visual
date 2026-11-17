@@ -136,7 +136,8 @@ def test_the_deploy_refuses_a_second_start_while_one_runs() -> None:
 
     from backend.services import deploy as D
 
-    zdroj = inspect.getsource(D.deploy)
+    # DEV-420: the deploy's gates and its run past the export of the version's commit are two functions.
+    zdroj = inspect.getsource(D.deploy) + inspect.getsource(D._deploy_from)
 
     assert "deploy_progress.bezi(instalacia)" in zdroj, "druhé spustenie sa neodmieta"
     assert "deploy_progress.zacni(instalacia)" in zdroj

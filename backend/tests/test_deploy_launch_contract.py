@@ -33,11 +33,14 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import deploy as deploy_service
 from backend.services import orchestrator, uat_provisioner
+from tests.test_deploy_service import _verified_commit
 
 
-def _write_project(tmp_path, slug: str, *, env_example: dict, compose_backend_env: dict):
+def _write_project(tmp_path, slug: str, *, env_example: dict, compose_backend_env: dict, db=None):
+    """The project's files. With ``db`` they are committed and the project's version checked on them — DEV-420: a
+    deploy reads the project from the commit its version's check is bound to."""
     project = tmp_path / slug
-    project.mkdir(parents=True)
+    project.mkdir(parents=True, exist_ok=True)
     (project / ".env.example").write_text(
         "\n".join(f"{k}={v}" for k, v in env_example.items()) + "\n", encoding="utf-8"
     )
@@ -48,6 +51,20 @@ def _write_project(tmp_path, slug: str, *, env_example: dict, compose_backend_en
         }
     }
     (project / "docker-compose.yml").write_text(yaml.safe_dump(compose), encoding="utf-8")
+    if db is not None:
+        row = db.query(Project).filter(Project.slug == slug).one()
+        version = db.query(Version).filter(Version.project_id == row.id).one()
+        orchestrator._record_message(
+            db,
+            version_id=version.id,
+            stage="verifikacia",
+            author="auditor",
+            recipient="manazer",
+            kind="verdict",
+            content="PASS",
+            payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": _verified_commit(row)},
+        )
+        db.flush()
     return project
 
 
@@ -97,8 +114,7 @@ def deploy_fixture(db_session):
             )
         )
         db_session.flush()
-        # A PASS with no verified_sha → provenance 'unbound' → verified, so the deploy reaches the gate
-        # under test rather than tripping the reality-anchor guard first.
+        # A PASS bound to the project's commit (DEV-420), so the deploy reaches the gate under test.
         orchestrator._record_message(
             db_session,
             version_id=version.id,
@@ -107,7 +123,7 @@ def deploy_fixture(db_session):
             recipient="manazer",
             kind="verdict",
             content="PASS",
-            payload={"verdict": "PASS", "phase": "verifikacia"},
+            payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": _verified_commit(project)},
         )
         customer = Customer(project_id=project.id, name="ICC", slug=f"icc{suffix}", subdomain=f"icc{suffix}")
         db_session.add(customer)
@@ -125,7 +141,7 @@ class TestMissingLaunchEnvKeys:
             env_example={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
             compose_backend_env={},
         )
-        assert deploy_service.missing_launch_env_keys("app-env") == []
+        assert deploy_service.missing_launch_env_keys(projects_root / "app-env") == []
 
     def test_declared_in_compose_is_wireable(self, projects_root, tmp_path):
         """The REAL shape of both live token-launch apps: the launch vars live in the backend service's
@@ -141,7 +157,7 @@ class TestMissingLaunchEnvKeys:
                 "MANAGER_DEPLOY_SLUG": "${MANAGER_DEPLOY_SLUG:-}",
             },
         )
-        assert deploy_service.missing_launch_env_keys("app-compose") == []
+        assert deploy_service.missing_launch_env_keys(projects_root / "app-compose") == []
 
     def test_app_naming_it_its_own_way_is_reported(self, projects_root, tmp_path):
         """The actual incident: the app declares the same CONCEPT under its own name. The provisioner keys
@@ -152,7 +168,9 @@ class TestMissingLaunchEnvKeys:
             env_example={"NEX_MANAGER_LAUNCH_KEY": "", "LOG_LEVEL": "info"},
             compose_backend_env={"NEX_MANAGER_LAUNCH_KEY": "${NEX_MANAGER_LAUNCH_KEY:-}"},
         )
-        assert deploy_service.missing_launch_env_keys("app-own-name") == list(deploy_service.LAUNCH_ENV_KEYS)
+        assert deploy_service.missing_launch_env_keys(projects_root / "app-own-name") == list(
+            deploy_service.LAUNCH_ENV_KEYS
+        )
 
     def test_partial_declaration_reports_only_the_gap(self, projects_root, tmp_path):
         _write_project(
@@ -164,12 +182,12 @@ class TestMissingLaunchEnvKeys:
                 "MANAGER_MODULE_SLUG": "app-partial",
             },
         )
-        assert deploy_service.missing_launch_env_keys("app-partial") == ["MANAGER_DEPLOY_SLUG"]
+        assert deploy_service.missing_launch_env_keys(projects_root / "app-partial") == ["MANAGER_DEPLOY_SLUG"]
 
     def test_unreadable_project_fails_OPEN(self, projects_root):
         """We must not block a deploy on a guess. When nothing is readable the post-deploy proof decides —
         it judges on evidence instead of inference."""
-        assert deploy_service.missing_launch_env_keys("no-such-project") == []
+        assert deploy_service.missing_launch_env_keys(projects_root / "no-such-project") == []
 
 
 class TestUpFrontGate:
@@ -180,7 +198,7 @@ class TestUpFrontGate:
         self, db_session, projects_root, tmp_path, deploy_fixture
     ):
         customer, project = deploy_fixture(auth_mode="token")
-        _write_project(tmp_path, project.slug, env_example={"LOG_LEVEL": "info"}, compose_backend_env={})
+        _write_project(tmp_path, project.slug, db=db_session, env_example={"LOG_LEVEL": "info"}, compose_backend_env={})
 
         with pytest.raises(ValueError) as exc:
             await deploy_service.deploy(
@@ -202,7 +220,7 @@ class TestUpFrontGate:
     ):
         """A password app has no launch ticket — the contract is irrelevant and must not block it."""
         customer, project = deploy_fixture(auth_mode="password")
-        _write_project(tmp_path, project.slug, env_example={"LOG_LEVEL": "info"}, compose_backend_env={})
+        _write_project(tmp_path, project.slug, db=db_session, env_example={"LOG_LEVEL": "info"}, compose_backend_env={})
 
         event, url, _ = await deploy_service.deploy(
             db_session,
@@ -240,6 +258,7 @@ class TestPostDeployLaunchProof:
         _write_project(
             tmp_path,
             project.slug,
+            db=db_session,
             env_example={},
             compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
         )
@@ -274,6 +293,7 @@ class TestPostDeployLaunchProof:
         _write_project(
             tmp_path,
             project.slug,
+            db=db_session,
             env_example={},
             compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
         )
@@ -301,6 +321,7 @@ class TestPostDeployLaunchProof:
         _write_project(
             tmp_path,
             project.slug,
+            db=db_session,
             env_example={},
             compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
         )
@@ -328,6 +349,7 @@ class TestPostDeployLaunchProof:
         _write_project(
             tmp_path,
             project.slug,
+            db=db_session,
             env_example={},
             compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
         )
@@ -351,7 +373,7 @@ class TestPostDeployLaunchProof:
         """A password app is opened with a login — minting a ticket is meaningless, so an unwired result
         must never fail its deploy."""
         customer, project = deploy_fixture(auth_mode="password")
-        _write_project(tmp_path, project.slug, env_example={}, compose_backend_env={})
+        _write_project(tmp_path, project.slug, db=db_session, env_example={}, compose_backend_env={})
 
         def _must_not_run(*a, **k):  # pragma: no cover - asserts absence
             raise AssertionError("a password app must never be launch-checked")
@@ -377,6 +399,7 @@ class TestPostDeployLaunchProof:
         _write_project(
             tmp_path,
             project.slug,
+            db=db_session,
             env_example={},
             compose_backend_env={k: "" for k in deploy_service.LAUNCH_ENV_KEYS},
         )
@@ -412,7 +435,7 @@ class TestWarningsChannel:
         self, db_session, projects_root, tmp_path, deploy_fixture, monkeypatch
     ):
         customer, project = deploy_fixture(auth_mode="password")
-        _write_project(tmp_path, project.slug, env_example={}, compose_backend_env={})
+        _write_project(tmp_path, project.slug, db=db_session, env_example={}, compose_backend_env={})
 
         async def _warning_runner(**kwargs):
             return deploy_service.RunnerResult(
@@ -437,7 +460,7 @@ class TestWarningsChannel:
         """The runner seam stays a 3-tuple: every injected/faked runner in the suite returns one, and the
         warnings ride along as an attribute rather than a fourth element nobody unpacks."""
         customer, project = deploy_fixture(auth_mode="password")
-        _write_project(tmp_path, project.slug, env_example={}, compose_backend_env={})
+        _write_project(tmp_path, project.slug, db=db_session, env_example={}, compose_backend_env={})
 
         outcome = await deploy_service.deploy(
             db_session,

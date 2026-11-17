@@ -38,6 +38,7 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import deploy as deploy_service
 from backend.services import orchestrator
+from tests.test_deploy_service import _verified_commit
 
 # ---------------------------------------------------------------------------
 # Fixtures — a project with two customers and two verified versions
@@ -64,6 +65,7 @@ def fake_deploy_runner(monkeypatch):
         deploy_host=None,
         private_network=False,
         customer_name=None,
+        source=None,
     ):
         calls.append(
             {
@@ -102,6 +104,7 @@ def prod_failing_deploy_runner(monkeypatch):
         deploy_host=None,
         private_network=False,
         customer_name=None,
+        source=None,
     ):
         calls.append(
             {
@@ -163,7 +166,7 @@ def _seed_verified_version(db, project: Project, version_number: str) -> Version
         recipient="manazer",
         kind="verdict",
         content="PASS",
-        payload={"verdict": "PASS", "phase": "verifikacia"},
+        payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": _verified_commit(project)},
     )
     db.flush()
     return version
@@ -802,9 +805,23 @@ def _seed_signed_off_version(db, project: Project, version_number: str) -> Versi
 class TestDeployabilityCause:
     """The matrix EXPLAINS a closed Nasadiť: cause + implicated version + who may recover it (v4.0.54)."""
 
+    def test_a_drifted_version_stays_deployable_from_its_verified_commit(self, db_session, monkeypatch, fake_repo_head):
+        """DEV-420 (Director 17.11.2026: „Súhlasím“): a deploy builds the commit the check is bound to, so a version
+        whose code moved on stays on offer — until then the incident below emptied the list."""
+        owner = _seed_user(db_session, role="ri", prefix="drift_kept")
+        project = _seed_project(db_session, creator=owner)
+        _seed_verified_version(db_session, project, "0.1.0")
+        _force_provenance(monkeypatch, "hotovo_drift")
+
+        matrix = deploy_service.build_matrix(db_session, project)
+
+        assert matrix["verified_versions"] == ["0.1.0"]
+        assert matrix["deployability"]["cause"] == "ok"
+
     def test_drift_names_the_affected_version(self, db_session, monkeypatch, fake_repo_head):
         """⚠ THE INCIDENT (2026-07-26): a finished version whose code moved on leaves ``verified_versions``
         EMPTY — the matrix must then say WHY and NAME the version, never grey the button out in silence.
+        DEV-420: that is now a drifted version without the commit of its check (none recorded, or gone).
 
         The version is identified by id too: that id is what the re-verify action is posted against.
         """
@@ -812,6 +829,7 @@ class TestDeployabilityCause:
         project = _seed_project(db_session, creator=owner)
         version = _seed_verified_version(db_session, project, "0.1.0")
         _force_provenance(monkeypatch, "hotovo_drift")  # signed at a commit the repo has since moved past
+        monkeypatch.setattr(orchestrator, "deployable_commit", lambda db, vid: (None, "commit_missing"))
 
         matrix = deploy_service.build_matrix(db_session, project)
 
@@ -991,6 +1009,8 @@ class TestDeployabilityCause:
         _seed_verified_version(db_session, project, "0.1.0")
         _seed_customer(db_session, project, "andros")
         _force_provenance(monkeypatch, "hotovo_drift")
+        # DEV-420: only a drifted version without the commit of its check closes Nasadiť.
+        monkeypatch.setattr(orchestrator, "deployable_commit", lambda db, vid: (None, "commit_missing"))
 
         resp = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix")
 

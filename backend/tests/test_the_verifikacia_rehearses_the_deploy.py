@@ -229,7 +229,7 @@ def docker(monkeypatch):
 
     monkeypatch.setattr(O, "_compose_smoke_step", step)
     monkeypatch.setattr(O, "_await_http_ready", ready)
-    monkeypatch.setattr(verified_build, "prepare", lambda compose: verified_build.Preparation(None))
+    monkeypatch.setattr(verified_build, "prepare", lambda compose, commit=None: verified_build.Preparation(None))
 
     async def throw_away(reference, env):
         calls.append(["remove-images", reference])

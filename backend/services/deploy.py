@@ -59,7 +59,7 @@ import asyncio
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Sequence
 from uuid import UUID
 
 from sqlalchemy import or_, select, update
@@ -88,7 +88,6 @@ from backend.schemas.deploy import (
     DEPLOY_CAUSE_OK,
     DEPLOY_CAUSE_REVERIFY_RUNNING,
     DEPLOY_CAUSE_STALE_SIGNOFF,
-    DEPLOY_CAUSE_SUPERSEDED,
     DEPLOY_CAUSE_VERSION_BUSY,
 )
 from backend.services import (
@@ -98,6 +97,7 @@ from backend.services import (
     dedo_project_proposal,
     deploy_progress,
     deploy_return,
+    deploy_source,
     installation_names,
     launch_pairing,
     machine_disk,
@@ -369,34 +369,72 @@ def _is_pre_release(version_number: str) -> bool:
 
 
 def list_verified_versions(db: Session, project_id: UUID) -> list[str]:
-    """The project's VERIFIED version_numbers — deployable via Nasadiť (design §3.4).
+    """The project's deployable version_numbers — offered by Nasadiť (design §3.4).
 
-    CR-V2-056 (layer-1 reality-anchoring): "verified" is COMPUTED from the live repo, not read as a stored
-    ``done`` snapshot. Candidates = versions whose pipeline reached the ``done`` phase (the cache); each is
-    then kept only if :func:`orchestrator.version_verified` still holds — i.e. its latest PASS verdict is
-    bound to a commit SHA that STILL equals the repo HEAD. So a version whose HEAD drifted past its verified
-    commit silently drops out of the deployable list (no frozen PASS). The repo HEAD is read ONCE per project
-    (batch), then each candidate's stored SHA is compared in-DB — never a git subprocess per version.
+    Candidates = versions whose pipeline reached the ``done`` phase; each is kept when it has the commit its check is
+    bound to (:func:`orchestrator.deployable_commit`, DEV-420) — the deploy builds that commit, so where the project's
+    code went since does not matter. Until 17.11.2026 a version was kept only while that commit still was ``HEAD``
+    (CR-V2-056), because a deploy built ``HEAD``: NEX Manager 1.6.0 dropped out of the offer the moment 1.7.0 began.
 
-    Ordered ``version_number`` descending so the newest verified version is the natural default.
+    Ordered ``version_number`` descending so the newest deployable version is the natural default.
     """
-    from backend.services import claude_agent
-    from backend.services.orchestrator import _repo_head, version_verified
+    from backend.services.orchestrator import deployable_commit
 
     rows = db.execute(
         select(Version.id, Version.version_number)
         .join(PipelineState, PipelineState.version_id == Version.id)
         .where(Version.project_id == project_id, PipelineState.current_stage == VERIFIED_STAGE)
     ).all()
-    if not rows:
-        return []
-    slug = db.execute(select(Project.slug).where(Project.id == project_id)).scalar_one_or_none()
-    head = _repo_head(claude_agent.PROJECTS_ROOT / slug) if slug else None  # read HEAD ONCE per project
-    verified = [num for (vid, num) in rows if version_verified(db, vid, head=head)[0]]
+    verified = [num for (vid, num) in rows if deployable_commit(db, vid)[0]]
     # Sort SEMANTICALLY, not by the SQL string order: version_number mixes 'v1.0.0' (the graduated first-PROD)
     # and '1.1.0', so a string desc put the OLDER 'v1.0.0' first ('v' > '1' in ASCII) and the Nasadiť dropdown
     # (verified_versions[0]) defaulted to an OLD version → accidental old-version deploy risk on UAT + PROD.
     return sorted(verified, key=number_order_key, reverse=True)
+
+
+def older_than_running(db: Session, project: Project, offered: Sequence[str], running: Optional[str]) -> list[str]:
+    """DEV-420: which of ``offered`` are older code than ``running``, the version an installation runs — their
+    database migrations do not know its schema, and the app would not start. The commits decide (a version's commit an
+    ancestor of the running one's): a first PROD deploy renames its version to 1.0.0, so a version founded before it
+    keeps a lower number with newer code. Without both commits, the numbers. The deploy action and the screen ask this
+    one rule."""
+    if not running or not offered:
+        return []
+    from backend.services import claude_agent
+    from backend.services.orchestrator import deployable_commit, is_ancestor
+
+    ids = dict(
+        db.execute(
+            select(Version.version_number, Version.id).where(
+                Version.project_id == project.id, Version.version_number.in_([*offered, running])
+            )
+        ).all()
+    )
+    root = str(claude_agent.PROJECTS_ROOT / project.slug)
+    theirs = deployable_commit(db, ids[running])[0] if running in ids else None
+    older = []
+    for number in offered:
+        mine = deployable_commit(db, ids[number])[0] if number in ids else None
+        if number == running or (mine and mine == theirs):
+            continue
+        ancestor = is_ancestor(root, mine, theirs) if mine and theirs else None
+        by_numbers = number_order_key(number) < number_order_key(running)
+        if ancestor if ancestor is not None else by_numbers:
+            older.append(number)
+    return older
+
+
+def newest_deployable_commit(db: Session, project: Project) -> Optional[str]:
+    """DEV-420: the commit a deploy of the newest deployable version builds — whose checks (CI) the screen shows."""
+    from backend.services.orchestrator import deployable_commit
+
+    offered = list_verified_versions(db, project.id)
+    if not offered:
+        return None
+    version_id = db.execute(
+        select(Version.id).where(Version.project_id == project.id, Version.version_number == offered[0])
+    ).scalar_one_or_none()
+    return deployable_commit(db, version_id)[0] if version_id else None
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +446,7 @@ def ci_deploy_cause(ci: Optional[ci_status.StavZostavenia]) -> Optional[str]:
     """Whether the CI state of the code that would be deployed closes Nasadiť — the ONE rule for the matrix and
     for the deploy action itself (DEV-51). ``None`` = CI does not block.
 
-    A deploy builds the project's CURRENT code (HEAD), so that is the commit whose CI counts. Red blocks; a run
+    A deploy builds the version's own commit (DEV-420), so that is the commit whose CI counts. Red blocks; a run
     still going blocks until it finishes; ``unknown`` (unreachable GitHub, a project without checks) does not —
     the same stance as the Verifikácia gate, where a check that cannot be read is no evidence of broken code.
 
@@ -482,9 +520,6 @@ def _where_the_fix_is(db: Session, project: Project, version_id: UUID) -> dict:
 #: ``version_verified`` provenances that mean "was verified, the code then moved on" (both anchor shapes).
 DRIFT_PROVENANCES = ("hotovo_drift", "sha_drift")
 
-#: DEV-416: the ``version_verified`` provenance of a version whose code moved on with a newer version's work.
-SUPERSEDED_PROVENANCE = "superseded"
-
 #: Pipeline statuses ``apply_action('overit_znovu')`` accepts — it fail-closes on everything else. The
 #: button may be offered ONLY for these, or it would 400 the moment a manager trusted it.
 REVERIFIABLE_STATUSES = ("done", "awaiting_manazer")
@@ -536,8 +571,8 @@ def deployability(
     from backend.services import claude_agent
     from backend.services.orchestrator import (
         _repo_head,
+        deployable_commit,
         ever_signed_off,
-        newer_version_started,
         reverify_in_flight,
         version_verified,
     )
@@ -565,21 +600,11 @@ def deployability(
 
     for version_id, version_number, stage, status, is_regate in candidates:
         is_verified, provenance = version_verified(db, version_id, head=head)
-        if provenance == SUPERSEDED_PROVENANCE:
-            # DEV-416: its code moved on with a newer version's work — that version is the one to deploy.
-            newer = newer_version_started(db, db.get(Version, version_id))
-            newer_id = db.execute(
-                select(Version.id).where(Version.project_id == project.id, Version.version_number == newer)
-            ).scalar_one_or_none()
-            return {
-                "cause": DEPLOY_CAUSE_SUPERSEDED,
-                "version_number": version_number,
-                "version_id": version_id,
-                "can_reverify": False,
-                "next_version_id": newer_id,
-                "next_version_number": newer,
-            }
-        if provenance in DRIFT_PROVENANCES:
+        if stage == VERIFIED_STAGE and deployable_commit(db, version_id)[0] is None and is_verified:
+            # DEV-420: finished and checked, but with no commit to deploy from (passed while the repository could not be
+            # read, or its commit is gone) — the remedy is the version's own: check it again and sign it.
+            cause = DEPLOY_CAUSE_STALE_SIGNOFF
+        elif provenance in DRIFT_PROVENANCES:
             if status in REVERIFIABLE_STATUSES:
                 cause = DEPLOY_CAUSE_DRIFT
             elif status == AGENT_WORKING_STATUS and reverify_in_flight(
@@ -608,7 +633,7 @@ def deployability(
     return {"cause": DEPLOY_CAUSE_NONE_FINISHED, **none_implicated}
 
 
-def missing_launch_env_keys(project_slug: str) -> list[str]:
+def missing_launch_env_keys(project_path: Path) -> list[str]:
     """Which :data:`LAUNCH_ENV_KEYS` a token-launch app fails to declare (v4.0.58). Empty list = wireable.
 
     Reads the SAME MERGED source ``uat_provisioner.generate_uat_env`` renders from — the project's
@@ -621,9 +646,6 @@ def missing_launch_env_keys(project_slug: str) -> list[str]:
     the post-deploy :func:`uat_launch_wired` proof still catches a genuinely unlaunchable instance, and it
     catches it on evidence rather than on inference.
     """
-    from backend.services import claude_agent
-
-    project_path = claude_agent.PROJECTS_ROOT / project_slug
     declared: dict = {}
     try:
         declared.update(uat_provisioner._parse_env_file(project_path / ".env.example"))
@@ -872,6 +894,10 @@ def build_matrix(
         )
 
     verified = list_verified_versions(db, project.id)
+    # DEV-420: per installation, the offered versions it cannot go back to — the same rule the deploy action asks.
+    for row in rows:
+        row["uat_older_versions"] = older_than_running(db, project, verified, row["uat_version"])
+        row["prod_older_versions"] = older_than_running(db, project, verified, row["prod_version"])
     # DEV-51: a finished version is still not deployable while the checks on the code that would be deployed are
     # red or running. ``ci`` is read by the caller (it asks GitHub); ``None`` = not known, never a block.
     ci_block = _ci_block(db, project, verified, ci)
@@ -970,8 +996,13 @@ async def _default_deploy_runner(
     customer_values: Optional[dict[str, str]] = None,
     customer_name: Optional[str] = None,
     installation_language: Optional[str] = None,
+    source: Optional[deploy_source.DeploySource] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Provision (preserve-by-default) then bring up a customer instance — environment-aware.
+
+    DEV-420: ``source`` — the export of the deployed version's commit — is what the installation is rendered from, and
+    its commit is what the images are built from; without it (a deploy outside a version) the project's folder and
+    ``HEAD``, as before.
 
     The environment + PROD layout are derived from the instance slug (``<base>-<env>``, see
     :func:`_instance_slug`): a ``-prod`` suffix selects PROD — provisioning the clean
@@ -1021,6 +1052,7 @@ async def _default_deploy_runner(
             # testovacej inštalácii nikdy: tá býva vždy tu.
             deploy_host=deploy_host if is_prod else None,
             private=private_network,
+            source_path=source.path if source else None,
         )
 
     if force_fresh and not is_prod:
@@ -1068,6 +1100,7 @@ async def _default_deploy_runner(
             version_number=version_number,
             deploy_host=deploy_host,
             private=private_network,
+            commit=source.commit if source else None,
         )
         ok, detail = outcome
         if not ok and _started(outcome):
@@ -1105,6 +1138,7 @@ async def _default_deploy_runner(
             full_project_slug=project_slug,
             version_number=version_number,
             private=private_network,
+            commit=source.commit if source else None,
         )
         ok, detail = outcome
         url = _url_for_instance_slug(f"{customer_slug}-{app}", private=private_network) if result.fe_service else None
@@ -1258,33 +1292,69 @@ async def deploy(
     project = _get_project(db, customer.project_id)
     # Validate the requested version exists for the project (verified boundary).
     version = _resolve_version(db, project.id, version_number)
-    # CR-V2-056 (layer-1): fail-closed verified guard on the ACTION itself (not just the dropdown) —
-    # version_verified recomputes against the live HEAD, so a stale-done version whose HEAD drifted (or that
-    # never actually passed) is refused here, closing the direct-POST bypass of the deployable-list filter.
-    from backend.services.orchestrator import version_verified
+    # DEV-420: the deploy builds the version's own code — the commit its check is bound to — and reads the project from
+    # it, whatever the project's working folder holds now. A version without one is refused on the action itself (not
+    # just the dropdown), closing the direct-POST bypass of the deployable-list filter (CR-V2-056).
+    from backend.core.offload import run_blocking
+    from backend.services import claude_agent
+    from backend.services.orchestrator import VERIFIED_BUILD_CAP, deployable_commit
 
-    _ok, _prov = version_verified(db, version.id)
-    if _prov == SUPERSEDED_PROVENANCE:
-        # DEV-416: a deploy builds the current code — here the newer version's work, under this number.
-        from backend.services.orchestrator import newer_version_started
-
-        raise ConflictError(
-            f"Nasadenie zastavené: kód projektu už obsahuje prácu na verzii {newer_version_started(db, version)} — "
-            f"nasadil by sa jej kód pod číslom {version_number}. Nasadiť sa dá novšia verzia, keď je hotová."
+    commit, why = deployable_commit(db, version.id)
+    if commit is None:
+        sentence = NO_DEPLOYABLE_COMMIT.get(why, NO_DEPLOYABLE_COMMIT[deploy_source.NO_COMMIT])
+        raise ConflictError(sentence.format(version=version_number))
+    # DEV-420: an older version over a newer one's database — its migrations do not know the newer schema and the app
+    # would not start. On PROD never; on UAT only built anew (its data go).
+    running = current_version(db, customer.id, environment)
+    if older_than_running(db, project, [version.version_number], running):
+        if environment == "prod":
+            raise ConflictError(OLDER_ON_PROD.format(version=version_number, running=running))
+        if not force_fresh:
+            raise ConflictError(OLDER_ON_UAT.format(version=version_number, running=running))
+    source = await run_blocking(
+        deploy_source.export, claude_agent.PROJECTS_ROOT / project.slug, commit, cap=VERIFIED_BUILD_CAP
+    )
+    try:
+        return await _deploy_from(
+            db,
+            customer,
+            project,
+            version,
+            source,
+            customer_id=customer_id,
+            version_number=version_number,
+            environment=environment,
+            actor_id=actor_id,
+            force_fresh=force_fresh,
+            runner=runner,
         )
-    if not _ok:
-        raise ConflictError(
-            f"Nasadenie zastavené: verzia {version_number!r} nie je overená na aktuálnom kóde ({_prov}) — pred "
-            "nasadením spusti Verifikáciu znova."
-        )
+    finally:
+        deploy_source.remove(source)
 
-    # DEV-51: the same rule as the matrix, asked fresh — the action decides, the screen only shows. A deploy
-    # builds the current code, so its CI is the CI that counts.
+
+async def _deploy_from(
+    db: Session,
+    customer: Customer,
+    project: Project,
+    version: Version,
+    source: deploy_source.DeploySource,
+    *,
+    customer_id: UUID,
+    version_number: str,
+    environment: str,
+    actor_id: Optional[UUID],
+    force_fresh: bool,
+    runner: DeployRunner,
+) -> DeployOutcome:
+    """:func:`deploy` past its gates, reading the project from ``source`` — the export of the deployed version's commit
+    (DEV-420)."""
+    # DEV-51: the same rule as the matrix, asked fresh — the action decides, the screen only shows. DEV-420: the deploy
+    # builds the version's own commit, so its CI is the CI that counts.
     from backend.services import claude_agent
     from backend.services.orchestrator import _project_has_ci
 
     _root = claude_agent.PROJECTS_ROOT / project.slug
-    ci = await ci_status.stav_commitu(_root, cerstvy=True)
+    ci = await ci_status.stav_commitu(_root, source.commit, cerstvy=True)
     if ci_deploy_cause(ci) == DEPLOY_CAUSE_CI_RED:
         raise ConflictError(
             f"Nasadenie zastavené: kontroly projektu na kóde, ktorý by sa nasadil, zlyhali — {ci.detail}. "
@@ -1338,9 +1408,9 @@ async def deploy(
     # Block the deploy UP-FRONT (before any teardown) with a clear, actionable message, rather than shipping a
     # lockout. Reads the SAME ``<project>/.env.example`` the provisioner renders from.
     if customer.credential_id is None:
-        from backend.services import claude_agent, env_contract
+        from backend.services import env_contract
 
-        _env_example = claude_agent.PROJECTS_ROOT / project.slug / ".env.example"
+        _env_example = source.path / ".env.example"
         try:
             _declares_admin = uat_provisioner.ADMIN_LOGIN_ENV_KEY in uat_provisioner._parse_env_file(_env_example)
         except OSError:
@@ -1358,7 +1428,7 @@ async def deploy(
     # deploy "successfully" and only fail hours later, at the click (incident 2026-07-26, nex-websites). Block
     # BEFORE any teardown and name exactly what is missing, so the fix is obvious without reading our source.
     if project.auth_mode == "token":
-        _missing = missing_launch_env_keys(project.slug)
+        _missing = missing_launch_env_keys(source.path)
         if _missing:
             raise ValueError(
                 "Nasadenie sa nedá spustiť: táto aplikácia sa otvára jedným kliknutím (bez hesla), ale "
@@ -1370,11 +1440,10 @@ async def deploy(
     # DEV-72 — what the app's ``.env.example`` asks of the customer (``@customer`` / ``@customer-secret``) and what
     # the manager entered. Checked here, BEFORE any teardown, like the two gates above: a missing required setting,
     # or an admin password the deploy would fill with a random value nobody knows, stops it with what to do.
-    from backend.services import claude_agent as _agent
     from backend.services import customer as customer_service
     from backend.services import env_contract
 
-    _project_path = _agent.PROJECTS_ROOT / project.slug
+    _project_path = source.path
     contract = env_contract.for_project(_project_path)
     customer_values = env_contract.customer_values(
         contract, customer.settings or {}, customer_service.read_secret_settings(db, customer)
@@ -1442,6 +1511,7 @@ async def deploy(
             deploy_host=deploy_host,
             private_network=bool(project.private_network),
             customer_name=customer.name,  # DEV-377
+            source=source,  # DEV-420: the project as the version has it — its files and the commit its images come from
             # Only when the app declares customer settings: every runner written before DEV-72 (and its fakes) keeps
             # the interface it has, and an app without markers never needed the values.
             **({"customer_values": customer_values} if contract.customer_keys else {}),
@@ -1772,6 +1842,26 @@ def _move_release_note_dir(proj_root: Path, old_number: str, target: str, day: d
         ["commit", "-m", f"docs(release-notes): graduate notes to v{target.lstrip('v')}", "--", *paths],
     )
 
+
+#: DEV-420 — why the deploy action refuses a version it has no code of (keys: :mod:`deploy_source`).
+NO_DEPLOYABLE_COMMIT = {
+    deploy_source.NO_PASS: "Nasadenie zastavené: verzia {version} nie je overená — nasadiť sa dá len verzia, ktorej "
+    "kontrola prešla.",
+    deploy_source.NO_COMMIT: "Nasadenie zastavené: pri verzii {version} nie je zapísaný kód, s ktorým bola overená, "
+    "takže kokpit nevie, čo postaviť. Verziu treba nanovo prekontrolovať.",
+    deploy_source.COMMIT_MISSING: "Nasadenie zastavené: kód, s ktorým bola verzia {version} overená, v repozitári "
+    "projektu už nie je. Verziu treba nanovo prekontrolovať.",
+}
+
+#: DEV-420 — an older version over a newer one: its database migrations do not know the newer schema.
+OLDER_ON_PROD = (
+    "Nasadenie zastavené: u zákazníka beží novšia verzia {running}. Staršia verzia {version} nepozná jej databázu "
+    "a nenaštartovala by — návrat na staršiu verziu sa na PROD nerobí."
+)
+OLDER_ON_UAT = (
+    "Nasadenie zastavené: na UAT beží novšia verzia {running}. Staršia verzia {version} nepozná jej databázu — "
+    "nasadíš ju len cez „Postaviť nanovo“, ktoré údaje UAT zmaže."
+)
 
 #: DEV-147 — what the Manažér reads when the graduation commit stayed on the cockpit's server.
 GRADUATION_NOT_PUSHED = (

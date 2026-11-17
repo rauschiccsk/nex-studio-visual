@@ -103,8 +103,11 @@ def get_deploy_matrix(
     # v4.0.54: the user is passed through so the matrix can answer whether THIS user may re-verify a drifted
     # version (the pipeline action is ri-or-owner while this read is wider — the frontend cannot derive it).
     # DEV-51: the checks (CI) on the code that would be deployed — asked of GitHub here, in the event loop the
-    # sync route hands back to, so the matrix itself stays a database read.
-    ci = anyio.from_thread.run(ci_status.stav_commitu, claude_agent.PROJECTS_ROOT / project.slug)
+    # sync route hands back to, so the matrix itself stays a database read. DEV-420: that code is the newest deployable
+    # version's own commit, not the project's HEAD (a version in progress may have red checks of its own).
+    commit = deploy_service.newest_deployable_commit(db, project)
+    root = claude_agent.PROJECTS_ROOT / project.slug
+    ci = anyio.from_thread.run(ci_status.stav_commitu, root, commit) if commit else None
     return DeployMatrix.model_validate(deploy_service.build_matrix(db, project, _current_user, ci=ci))
 
 

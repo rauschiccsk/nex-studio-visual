@@ -261,7 +261,14 @@ def test_default_deploy_runner_prod_derives_layout(monkeypatch):
         return _Result()
 
     async def _fake_run_prod(
-        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
+        project_slug,
+        customer_slug,
+        app,
+        full_project_slug,
+        version_number=None,
+        deploy_host=None,
+        private=False,
+        commit=None,
     ):
         captured["prod_deploy"] = (project_slug, customer_slug, app, full_project_slug)
         # ICCINT-151: napodobenina, ktorá cieľ zahodí, si nevšimne, keď ho služba prestane posielať.
@@ -387,7 +394,9 @@ async def test_run_prod_deploy_uses_customer_root_compose(monkeypatch):
     # would export the real repository behind the real /opt/customers path. Own tests:
     # backend/tests/test_a_deploy_builds_from_the_verified_commit.py.
     monkeypatch.setattr(
-        orchestrator.verified_build, "prepare", lambda _compose: orchestrator.verified_build.Preparation(None)
+        orchestrator.verified_build,
+        "prepare",
+        lambda _compose, _commit=None: orchestrator.verified_build.Preparation(None),
     )
 
     ok, detail = await orchestrator._run_prod_deploy("nex-payables", "andros", "payables", "nex-payables")

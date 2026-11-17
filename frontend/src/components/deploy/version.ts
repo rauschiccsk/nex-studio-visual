@@ -14,20 +14,6 @@ import { formatDateTime } from "@/utils/format";
 export const fmtVer = (v: string | null | undefined): string => (v ?? "").replace(/^v/i, "");
 
 /**
- * DEV-416 — is version `a` older than `b`? Compared as numbers, a leading "v" ignored, a part that is not a number
- * counts as 0 — the one order of versions in the cockpit (backend `services/version.py` `number_order_key`).
- */
-export const isOlderVersion = (a: string, b: string): boolean => {
-  const key = (v: string) => fmtVer(v).split(".").map((part) => (/^\d+$/.test(part) ? Number(part) : 0));
-  const [x, y] = [key(a), key(b)];
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] ?? 0) - (y[i] ?? 0);
-    if (d !== 0) return d < 0;
-  }
-  return false;
-};
-
-/**
  * Kedy sa nasadilo — v ľudskej podobe, v čase čitateľa (ICCINT-117).
  *
  * Server posiela ISO 8601 v UTC; Manažér číta miestny čas v jednom tvare dátumu kokpitu (DEV-153,

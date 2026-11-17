@@ -221,12 +221,12 @@ async def test_the_deploy_tells_the_installation_its_language(
     async def _green(project_root, sha=None, *, cerstvy=False):
         return red_ci._ci("green", detail="CI zelené")
 
+    monkeypatch.setattr(red_ci.orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
     project, _version = red_ci._finished_version(db_session)
     project.template, project.languages = "nsv-standard", list(languages)
     customer = red_ci.customer_service.create(
         db_session, project.id, red_ci.CustomerCreate(name="SKIT o.z.", slug="skit", language=customer_language)
     )
-    monkeypatch.setattr(red_ci.orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
     monkeypatch.setattr(red_ci.orchestrator, "_project_has_ci", lambda root: False)
     monkeypatch.setattr(ci_status, "stav_commitu", _green)
 

@@ -201,6 +201,8 @@ def _stub_repo_head(monkeypatch, sha):
     from there at call time, so both the ``apply_action`` anchor AND the deploy reality-axis observe the pin."""
     monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: sha)
     monkeypatch.setattr(orchestrator, "_git_tag_version", lambda *a, **k: None)
+    # DEV-420: a deploy builds the signed commit — the pinned SHAs stand for commits of the project's repository.
+    monkeypatch.setattr(orchestrator, "_commit_in_repo", lambda _root, commit: True)
 
 
 async def _sign_hotovo(db_session, version_id):
@@ -330,7 +332,7 @@ class TestHotovoDeployEligibility:
         # candidate axis (current_stage=='done') + reality axis (signoff) → in the deployable list.
         assert version.version_number in deploy.list_verified_versions(db_session, project.id)
 
-    async def test_head_drift_auto_un_verifies_and_excludes(self, db_session, monkeypatch):
+    async def test_head_drift_auto_un_verifies_yet_the_signed_commit_stays_deployable(self, db_session, monkeypatch):
         version, project = _make_version(db_session)
         _seed_ready_for_hotovo(db_session, version.id)
         _stub_repo_head(monkeypatch, "abc123")
@@ -339,7 +341,9 @@ class TestHotovoDeployEligibility:
         monkeypatch.setattr(orchestrator, "_repo_head", lambda _root: "def456")
         verified, provenance = orchestrator.version_verified(db_session, version.id)
         assert verified is False and provenance == "hotovo_drift"
-        assert version.version_number not in deploy.list_verified_versions(db_session, project.id)
+        # DEV-420 (Director 17.11.2026: „Súhlasím“): a deploy builds the signed commit, not HEAD — still offered.
+        assert version.version_number in deploy.list_verified_versions(db_session, project.id)
+        assert orchestrator.deployable_commit(db_session, version.id) == ("abc123", "commit")
 
     async def test_unbound_when_repo_unreadable_at_sign(self, db_session, monkeypatch):
         version, project = _make_version(db_session)
@@ -348,7 +352,8 @@ class TestHotovoDeployEligibility:
         await _sign_hotovo(db_session, version.id)
         verified, provenance = orchestrator.version_verified(db_session, version.id)
         assert verified is True and provenance == "hotovo_unbound"  # do NOT un-verify an unanchored signature
-        assert version.version_number in deploy.list_verified_versions(db_session, project.id)
+        # DEV-420: but with no commit there is no code to deploy — not offered.
+        assert version.version_number not in deploy.list_verified_versions(db_session, project.id)
 
 
 # ── (e) honest re-open + MD-2 terminal: stale-aware probes; done board offers nothing ──

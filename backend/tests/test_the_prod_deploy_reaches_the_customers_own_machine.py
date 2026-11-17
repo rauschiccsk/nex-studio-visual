@@ -29,7 +29,14 @@ def _zachyt(monkeypatch) -> list[dict]:
     videne: list[dict] = []
 
     async def _fake_prod(
-        project_slug, customer_slug, app, full_project_slug, version_number=None, deploy_host=None, private=False
+        project_slug,
+        customer_slug,
+        app,
+        full_project_slug,
+        version_number=None,
+        deploy_host=None,
+        private=False,
+        commit=None,
     ):
         videne.append({"kde": "prod", "deploy_host": deploy_host, "customer_slug": customer_slug})
         return True, "OK"
@@ -147,7 +154,8 @@ async def test_no_target_means_this_machine(monkeypatch, tmp_path) -> None:
 
 def test_the_service_reads_the_target_off_the_customer() -> None:
     """Vykonávateľ dostane hotový údaj; databázy sa pýta ten, kto zákazníka drží v ruke."""
-    zdroj = inspect.getsource(deploy_service.deploy)
+    # DEV-420: the deploy's gates and its run past the export of the version's commit are two functions.
+    zdroj = inspect.getsource(deploy_service.deploy) + inspect.getsource(deploy_service._deploy_from)
 
     assert "customer.prod_host" in zdroj, "cieľ sa od zákazníka vôbec nečíta"
     assert "deploy_host=deploy_host" in zdroj, "prečítaný cieľ sa vykonávateľovi neposiela"

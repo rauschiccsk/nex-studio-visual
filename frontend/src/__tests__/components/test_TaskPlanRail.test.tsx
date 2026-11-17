@@ -762,7 +762,7 @@ describe("TaskPlanRail — Hotovo trigger (STEP 6)", () => {
   // "pripravená na nasadenie" and offer a live button into a deploy screen that refuses it — the cockpit
   // contradicting itself across three surfaces on one screen (Director report, 2026-07-26).
   it.each(["sha_drift", "hotovo_drift"])(
-    "tells the truth and disables the deploy button when the sign-off drifted ('%s')",
+    "tells the truth: the verified state is what a deploy builds when the sign-off drifted ('%s')",
     async (prov) => {
       render(
         <TaskPlanRail
@@ -777,13 +777,12 @@ describe("TaskPlanRail — Hotovo trigger (STEP 6)", () => {
         />,
       );
 
-      expect(await screen.findByText(/Kód sa po označení za hotové zmenil/)).toBeInTheDocument();
+      expect(await screen.findByText(/Kód sa po označení za hotové zmenil — nasadí sa stav, ktorý bol overený/)).toBeInTheDocument();
       // The false claim is GONE, not merely accompanied by a warning.
       expect(screen.queryByText(/Verzia je hotová a pripravená na nasadenie/)).not.toBeInTheDocument();
-      // The button stays visible (disabled-over-hidden) but cannot walk the manager into the paused screen.
-      const deploy = screen.getByRole("button", { name: /Prejsť na nasadenie/ });
-      expect(deploy).toBeDisabled();
-      expect(deploy).toHaveAttribute("title", expect.stringContaining("znova over"));
+      // DEV-420 (Director 17.11.2026: „Súhlasím“): a deploy builds the commit the check is bound to — the way to the
+      // deploy screen stays open; until then the paused screen refused the drifted version.
+      expect(screen.getByRole("button", { name: /Prejsť na nasadenie/ })).toBeEnabled();
     },
   );
 });

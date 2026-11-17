@@ -3833,6 +3833,12 @@ def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str,
             return sha, "sha_drift", None
         if unanchored is None and (payload or {}).get("verdict") == "PASS":
             unanchored = "legacy" if sha == "legacy" else "unbound"
+    found = _version_tag_commit(db, version)
+    return (found, "sha_drift", None) if found else (None, "sha_drift", unanchored)
+
+
+def _version_tag_commit(db: Session, version: Version) -> Optional[str]:
+    """The commit of the version's tag ``v<number>`` (CR-V2-056 tags every PASS) — ``None`` without one."""
     root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id)
     try:
         tag = subprocess.run(
@@ -3843,9 +3849,86 @@ def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return None, "sha_drift", unanchored
-    found = tag.stdout.strip() if tag.returncode == 0 else ""
-    return (found, "sha_drift", None) if found else (None, "sha_drift", unanchored)
+        return None
+    return (tag.stdout.strip() or None) if tag.returncode == 0 else None
+
+
+@functools.lru_cache(maxsize=4096)
+def is_ancestor(root: str, older: str, newer: str) -> Optional[bool]:
+    """Is commit ``older`` an ancestor of ``newer`` in the repository at ``root``? ``None`` when git cannot tell."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", root, "merge-base", "--is-ancestor", older, newer],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {0: True, 1: False}.get(r.returncode)
+
+
+#: Commits found in a repository — a commit, once there, stays (one git call per commit, not per read of the screen).
+_COMMITS_FOUND: set[tuple[str, str]] = set()
+
+
+def _commit_in_repo(root: Path, commit: str) -> Optional[bool]:
+    """Is ``commit`` a commit of the repository at ``root``? ``None`` when git cannot answer."""
+    if (str(root), commit) in _COMMITS_FOUND:
+        return True
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}"],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0:
+        _COMMITS_FOUND.add((str(root), commit))
+    return r.returncode == 0
+
+
+def deployable_commit(db: Session, version_id: uuid.UUID) -> tuple[Optional[str], str]:
+    """DEV-420: the commit a deploy of the version builds — the one its check is bound to — or ``(None, why)``.
+
+    The commit of its Hotovo signature, else of its Verifikácia PASS (a PASS that is no longer current — a fix directive
+    after it, CR-V2-055 — is none), a released version the one it was released with (:func:`_released_anchor`), and
+    without a recorded commit its version tag. The commit must be in the project's repository. Where the project's code
+    went since does not matter: the deploy exports exactly this commit (17.11.2026: NEX Manager 1.6.0 could not be
+    deployed while 1.7.0 was being built — every deploy built HEAD). Director: „Súhlasím“."""
+    from backend.services.deploy_source import COMMIT_MISSING, NO_COMMIT, NO_PASS
+
+    version = db.get(Version, version_id)
+    if version is None:
+        return None, NO_PASS
+    commit: Optional[str]
+    if version.status == "released":
+        commit, _drift, _unanchored = _released_anchor(db, version)
+    else:
+        signoff = _manazer_signoff(db, version_id)
+        if signoff is not None:
+            commit = signoff.get("hotovo_sha") or None
+        elif _verifikacia_passed(db, version_id):
+            latest = db.execute(
+                select(PipelineMessage.payload)
+                .where(
+                    PipelineMessage.version_id == version_id,
+                    PipelineMessage.stage == "verifikacia",
+                    PipelineMessage.kind == "verdict",
+                )
+                .order_by(PipelineMessage.seq.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            sha = (latest or {}).get("verified_sha")
+            commit = sha if sha and sha != "legacy" else _version_tag_commit(db, version)
+        else:
+            return None, NO_PASS
+    if not commit:
+        return None, NO_COMMIT
+    root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version_id)
+    return (commit, "commit") if _commit_in_repo(root, commit) else (None, COMMIT_MISSING)
 
 
 def _released_version_verified(db: Session, version: Version, head: Optional[str]) -> tuple[bool, str]:
@@ -7180,6 +7263,7 @@ async def _run_uat_deploy(
     version_number: Optional[str] = None,
     deploy_host: Optional[str] = None,
     private: bool = False,
+    commit: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Plain redeploy of an instance's EXISTING compose (``docker compose -f … up -d --build --force-recreate``).
 
@@ -7236,7 +7320,8 @@ async def _run_uat_deploy(
     # folder, each image once. The working folder (agent caches, untracked files) no longer travels to the target
     # — 17.10.2026 it was ~600 MB up ANDROS's 4.6 Mbit/s line for a 24 MB commit.
     try:
-        prepared = await run_blocking(verified_build.prepare, compose, cap=VERIFIED_BUILD_CAP)
+        # DEV-420: the version's own commit when the deploy names it, else HEAD.
+        prepared = await run_blocking(verified_build.prepare, compose, commit, cap=VERIFIED_BUILD_CAP)
     except BlockingWorkTimedOut:
         prepared = verified_build.Preparation(
             None, f"Stavba z pracovného priečinka — príprava overeného commitu nestihla {VERIFIED_BUILD_CAP} s."
@@ -7373,6 +7458,7 @@ async def _run_prod_deploy(
     version_number: Optional[str] = None,
     deploy_host: Optional[str] = None,
     private: bool = False,
+    commit: Optional[str] = None,
 ) -> tuple[bool, str]:
     """PROD sibling of :func:`_run_uat_deploy` — redeploy the customer's PROD compose (§2).
 
@@ -7394,6 +7480,7 @@ async def _run_prod_deploy(
         version_number=version_number,
         deploy_host=deploy_host,
         private=private,
+        commit=commit,
     )
 
 

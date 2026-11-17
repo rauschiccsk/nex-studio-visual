@@ -1,28 +1,25 @@
 /**
- * DEV-416 — 17.11.2026, NEX Manager: customers ran 1.6.0, yet „Nasadiť verziu“ offered and preselected the released
- * 1.2.2, and a deploy would have built the code of the 1.7.0 in progress under that number. The backend now offers a
- * version only on its own code; the screen says why a finished version is missing (`superseded`), never goes back to
- * an older version by default, and the version's own screen does not call it ready to deploy. Director: „súhlasím“.
+ * DEV-416 + DEV-420 — 17.11.2026, NEX Manager: customers ran 1.6.0, yet „Nasadiť verziu“ offered and preselected the
+ * released 1.2.2, and a deploy would have built the code of the 1.7.0 in progress under that number. Since DEV-420 a
+ * deploy builds the version's own verified commit (Director: „Súhlasím“): the screen offers every finished version,
+ * never preselects one older than the installation runs, refuses it on PROD, allows it on UAT only built anew, and the
+ * version's own screen says the verified state is what goes out.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
 
-import DeployBlockNotice from "@/components/deploy/DeployBlockNotice";
 import DeployMatrixPage from "@/components/deploy/DeployMatrixPage";
 import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
 import TaskPlanRail from "@/components/controlCenter/TaskPlanRail";
-import { isOlderVersion } from "@/components/deploy/version";
 import { getDeployMatrix } from "@/services/api/deploy";
 import type { PipelineBoard, PipelineState } from "@/services/api/pipeline";
 import type { DeployMatrix } from "@/types/deploy";
 
-const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
-
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
-  return { ...actual, useNavigate: () => navigateMock };
+  return { ...actual, useNavigate: () => vi.fn() };
 });
 vi.mock("@/services/api/deploy", () => ({
   getDeployMatrix: vi.fn(),
@@ -33,7 +30,6 @@ vi.mock("@/services/api/deploy", () => ({
   getUatGuide: vi.fn(() => new Promise(() => {})),
   getUatChecks: vi.fn(() => Promise.reject(new Error("not in this test"))),
 }));
-
 vi.mock("@/services/api/versions", () => ({
   getTaskPlan: vi.fn(() => Promise.resolve({ plan: [], epic_count: 0, feat_count: 0, task_count: 0 })),
 }));
@@ -46,14 +42,14 @@ vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: typeof contextMock) => unknown) => selector(contextMock),
 }));
 
-function row(customer: string, uatVersion: string | null) {
+function row(customer: string, running: string | null, older: string[] = [], environment: "uat" | "prod" = "uat") {
   return {
     customer_id: `cust-${customer}`,
     customer_name: customer,
     customer_slug: customer,
     subdomain: customer,
-    uat_version: uatVersion,
-    prod_version: null,
+    uat_version: running,
+    prod_version: running,
     uat_last_attempt_failed: false,
     prod_last_attempt_failed: false,
     uat_last_deploy_at: null,
@@ -62,87 +58,87 @@ function row(customer: string, uatVersion: string | null) {
     prod_last_deploy_at: null,
     prod_last_deploy_detail: null,
     prod_last_deploy_warnings: [],
-    accepted_versions: [],
+    accepted_versions: ["1.6.0", "1.2.2"],
+    // Only the tab's own list says what is older — the other one is empty, so reading the wrong one shows.
+    uat_older_versions: environment === "uat" ? older : [],
+    prod_older_versions: environment === "prod" ? older : [],
     uat_url: null,
     prod_url: null,
   };
 }
 
-function matrix(rows: ReturnType<typeof row>[]): DeployMatrix {
+function matrix(rows: ReturnType<typeof row>[], verified = ["1.6.0", "1.2.2"]): DeployMatrix {
   return {
     project_slug: "nex-manager",
     auth_mode: "password",
-    verified_versions: ["1.2.2"],
+    verified_versions: verified,
     deployability: { cause: "ok", version_number: null, version_id: null, can_reverify: false },
-    can_accept: false,
-    can_deploy_prod: false,
+    can_accept: true,
+    can_deploy_prod: true,
     can_deploy: true,
     rows,
   } as DeployMatrix;
 }
 
-describe("DeployMatrixPage — never back to an older version by default (DEV-416)", () => {
+const picker = (customer: string) => screen.findByRole("combobox", { name: `Verzia na nasadenie — ${customer}` });
+
+describe("DeployMatrixPage — every finished version, never back to an older one by default (DEV-416, DEV-420)", () => {
   beforeEach(() => vi.mocked(getDeployMatrix).mockReset());
 
-  it("a customer on a newer version gets no preselected older one, and Nasadiť says why it waits", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("skit", "1.6.0")]));
+  it("while 1.7.0 is in progress, 1.6.0 is offered and preselected for a customer on 1.6.0", async () => {
+    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("skit", "1.6.0", ["1.2.2"])]));
     render(<DeployMatrixPage environment="uat" />);
 
-    const picker = await screen.findByRole("combobox", { name: "Verzia na nasadenie — skit" });
-    expect(picker).toHaveValue("");
-    expect(screen.getByRole("option", { name: "vyber verziu" })).toBeDisabled();
-    expect(screen.getByText("beží novšia — vyber verziu")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeDisabled();
-
-    fireEvent.change(picker, { target: { value: "1.2.2" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeEnabled());
-  });
-
-  it("a customer on an older version gets the newest verified one, as before", async () => {
-    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("icc", "1.0.0")]));
-    render(<DeployMatrixPage environment="uat" />);
-
-    expect(await screen.findByRole("combobox", { name: "Verzia na nasadenie — icc" })).toHaveValue("1.2.2");
+    const versions = await picker("skit");
+    expect(versions).toHaveValue("1.6.0");
+    expect(within(versions).getAllByRole("option").map((o) => o.textContent)).toEqual(["1.6.0", "1.2.2"]);
     expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeEnabled();
   });
-});
 
-describe("DeployBlockNotice — a finished version whose code holds a newer version's work (DEV-416)", () => {
-  beforeEach(() => navigateMock.mockReset());
+  it("a customer on a version newer than any offered gets no preselected older one", async () => {
+    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("icc", "1.7.0", ["1.6.0", "1.2.2"])]));
+    render(<DeployMatrixPage environment="uat" />);
 
-  it("names the newer version, offers no re-check and leads there", () => {
-    render(
-      <DeployBlockNotice
-        block={{
-          cause: "superseded",
-          version_number: "1.6.0",
-          version_id: "ver-160",
-          can_reverify: false,
-          next_version_id: "ver-170",
-          next_version_number: "1.7.0",
-        }}
-        projectSlug="nex-manager"
-        onReverifyStarted={vi.fn()}
-      />,
+    expect(await picker("icc")).toHaveValue("");
+    expect(within(await picker("icc")).getByRole("option", { name: "vyber verziu" })).toBeDisabled();
+    expect(screen.getByText("beží novšia verzia")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeDisabled();
+  });
+
+  it("on UAT an older version goes only through „Postaviť nanovo“", async () => {
+    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("skit", "1.6.0", ["1.2.2"])]));
+    render(<DeployMatrixPage environment="uat" />);
+
+    fireEvent.change(await picker("skit"), { target: { value: "1.2.2" } });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Nasadiť/ })).toHaveAttribute(
+      "title",
+      "Na UAT beží novšia verzia 1.6.0. Staršia verzia 1.2.2 nepozná jej databázu — nasadíš ju len cez „Postaviť " +
+        "nanovo“, ktoré údaje UAT zmaže.",
     );
+    expect(screen.getByText("staršia verzia — len „Postaviť nanovo“")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Postaviť nanovo/ })).toBeEnabled();
+  });
 
-    expect(screen.getByText("Nasadí sa až verzia 1.7.0")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Verzia 1.6.0 je hotová, ale v projekte už pribudla práca na verzii 1.7.0. To, čo by sa teraz nasadilo, " +
-          "by bol jej kód pod číslom 1.6.0 — preto 1.6.0 k zákazníkovi nepúšťame. Nasadiť sa bude dať verzia 1.7.0, " +
-          "keď bude hotová.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Over znova/ })).not.toBeInTheDocument();
+  it("on PROD an older version is never deployed", async () => {
+    vi.mocked(getDeployMatrix).mockResolvedValue(matrix([row("skit", "1.6.0", ["1.2.2"], "prod")]));
+    render(<DeployMatrixPage environment="prod" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Otvoriť verziu 1.7.0" }));
-    expect(navigateMock).toHaveBeenCalledWith("/projects/nex-manager/versions/ver-170");
+    fireEvent.change(await picker("skit"), { target: { value: "1.2.2" } });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Nasadiť/ })).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Nasadiť/ })).toHaveAttribute(
+      "title",
+      "U zákazníka beží novšia verzia 1.6.0. Staršia verzia 1.2.2 nepozná jej databázu a nenaštartovala by — návrat na " +
+        "staršiu verziu sa na PROD nerobí.",
+    );
+    expect(screen.getByText("beží novšia verzia")).toBeInTheDocument();
   });
 });
 
-describe("HonestStatusStrip — a superseded version is not ready to deploy (DEV-416)", () => {
-  it("reads amber: the newer version is the one that will be deployed", () => {
+describe("the version's own screen — a drifted or superseded version deploys its verified state (DEV-420)", () => {
+  it("the strip says a newer version has begun, amber", () => {
     render(
       <HonestStatusStrip
         state={{ current_stage: "done", status: "done" } as PipelineState}
@@ -154,12 +150,10 @@ describe("HonestStatusStrip — a superseded version is not ready to deploy (DEV
       />,
     );
 
-    expect(screen.getByText("Hotovo — nasadí sa už novšia verzia")).toBeInTheDocument();
+    expect(screen.getByText("Hotovo — v projekte už pribudla novšia verzia")).toBeInTheDocument();
   });
-});
 
-describe("TaskPlanRail — a superseded version's card does not lead to a deploy (DEV-416)", () => {
-  it("says the newer version will be deployed and closes „Prejsť na nasadenie“", async () => {
+  it("the card says it cannot be checked again, and leads to the deploy of its verified code", async () => {
     const board = {
       state: { current_stage: "done", status: "done", id: "s1", version_id: "v1" },
       recent_messages: [],
@@ -170,25 +164,11 @@ describe("TaskPlanRail — a superseded version's card does not lead to a deploy
 
     expect(
       await screen.findByText(
-        "V projekte už pribudla práca na novšej verzii — túto verziu už nasadiť ani znova overiť nejde. " +
-          "K zákazníkovi pôjde novšia verzia, keď bude hotová.",
+        "V projekte už pribudla práca na novšej verzii — túto verziu už znova overiť nejde. Nasadiť sa dá s kódom, " +
+          "s ktorým bola overená.",
         { normalizer: (text) => text.replace(/\s+/g, " ").trim() },
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Prejsť na nasadenie/ })).toBeDisabled();
-    expect(screen.queryByText(/pripravená na nasadenie/)).not.toBeInTheDocument();
-  });
-});
-
-describe("isOlderVersion — the cockpit's one order of versions", () => {
-  it.each([
-    ["1.2.2", "1.6.0", true],
-    ["1.6.0", "1.2.2", false],
-    ["1.9.0", "1.10.0", true],
-    ["v1.0.0", "1.0.0", false],
-    ["1.6", "1.6.0", false],
-    ["1.6.0", "1.6.1", true],
-  ])("%s older than %s → %s", (a, b, older) => {
-    expect(isOlderVersion(a, b)).toBe(older);
+    expect(screen.getByRole("button", { name: /Prejsť na nasadenie/ })).toBeEnabled();
   });
 });

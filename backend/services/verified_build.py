@@ -138,7 +138,7 @@ def _local_extra(extra: object) -> list[tuple[str, str]]:
     return [(k, v) for k, v in pairs if "://" not in v and not v.startswith(("service:", "target:", "git@"))]
 
 
-def _export(repo: Path, commit: str, dest: Path) -> int:
+def export_commit(repo: Path, commit: str, dest: Path) -> int:
     """``git archive <commit>`` unpacked into *dest* → bytes of the tracked files. Raises on failure."""
     archive = dest.parent / "commit.tar"
     done = subprocess.run(
@@ -174,8 +174,11 @@ def _override_text(entries: list[tuple[str, Optional[Path], dict[str, Path]]]) -
     return "\n".join(lines) + "\n"
 
 
-def prepare(compose: Path) -> Preparation:
+def prepare(compose: Path, commit: Optional[str] = None) -> Preparation:
     """Export the verified commit of *compose*'s build contexts and write the override that builds from it.
+
+    DEV-420: ``commit`` is the commit the deployed version's check is bound to — a deploy builds the version's own code,
+    whatever the project's working folder holds now; ``None`` (a build outside a deploy of a version) exports ``HEAD``.
 
     Blocking (git, tar) — call it off the event loop. Never raises."""
     builders = _builders(compose)
@@ -189,12 +192,12 @@ def prepare(compose: Path) -> Preparation:
     if None in toplevels or len(toplevels) != 1:
         return Preparation(None, "Stavba z pracovného priečinka — kontexty stavby neležia v jednom repozitári gitu.")
     repo = Path(str(toplevels.pop()))
-    commit = _git(repo, "rev-parse", "HEAD")
+    commit = _git(repo, "rev-parse", "--verify", f"{commit}^{{commit}}" if commit else "HEAD")
     if not commit:
         return Preparation(None, "Stavba z pracovného priečinka — commit repozitára sa nedal zistiť.")
     root = Path(tempfile.mkdtemp(prefix="nsv-verified-build-"))
     try:
-        size = _export(repo, commit, root / _SOURCE_DIR)
+        size = export_commit(repo, commit, root / _SOURCE_DIR)
         entries: list[tuple[str, Optional[Path], dict[str, Path]]] = []
         built: set[tuple[str, str, str]] = set()
         reused: list[str] = []

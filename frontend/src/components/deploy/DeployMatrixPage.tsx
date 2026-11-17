@@ -29,7 +29,7 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import type { DeployEnvironment, DeployMatrix, DeployMatrixRow, DeployResult } from "@/types/deploy";
 import { acceptanceTesting, combineProgress } from "@/lib/uatTesting";
 import DeployBlockNotice from "./DeployBlockNotice";
-import { fmtDeployTime, fmtVer, isOlderVersion } from "./version";
+import { fmtDeployTime, fmtVer } from "./version";
 import { progressDescription } from "./progressDescription";
 
 /**
@@ -288,8 +288,12 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     const explicit = picked[row.customer_id];
     if (explicit) return explicit;
     const newest = matrix?.verified_versions[0];
-    const running = environment === "uat" ? row.uat_version : row.prod_version;
-    return newest && running && isOlderVersion(newest, running) ? undefined : newest;
+    return newest && olderThanRunning(row).includes(newest) ? undefined : newest;
+  }
+
+  /** DEV-420: the offered versions older code than what this installation runs — the backend's one rule. */
+  function olderThanRunning(row: DeployMatrixRow): string[] {
+    return (environment === "uat" ? row.uat_older_versions : row.prod_older_versions) ?? [];
   }
 
   /**
@@ -318,8 +322,10 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
     if (!version && (matrix?.verified_versions.length ?? 0) > 0) {
       const running = fmtVer(environment === "uat" ? row.uat_version : row.prod_version);
       return {
-        title: `U zákazníka beží novšia verzia ${running} — staršiu nasadíš, len keď ju vyberieš.`,
-        note: "beží novšia — vyber verziu",
+        title:
+          `U zákazníka beží verzia ${running}, novšia než tie, ktoré sa dajú nasadiť — návrat na staršiu verziu ` +
+          "sa nepredvolí.",
+        note: "beží novšia verzia",
       };
     }
     if (!version) return { title: "Žiadna overená verzia na nasadenie.", note: "pozastavené — dôvod hore" };
@@ -330,6 +336,30 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
       };
     }
     return null;
+  }
+
+  /**
+   * DEV-420 — the picked version is older than the one the installation runs: its database migrations do not know the
+   * newer schema, and the app would not start. PROD never goes back; UAT only built anew („Postaviť nanovo“ — its data
+   * go). The backend refuses the same (deploy.OLDER_ON_PROD / OLDER_ON_UAT); this says it before the click.
+   */
+  function olderBlock(row: DeployMatrixRow): { title: string; note: string } | null {
+    const version = pickedVersion(row);
+    const running = (environment === "uat" ? row.uat_version : row.prod_version) ?? "";
+    if (!version || !olderThanRunning(row).includes(version)) return null;
+    return environment === "prod"
+      ? {
+          title:
+            `U zákazníka beží novšia verzia ${fmtVer(running)}. Staršia verzia ${fmtVer(version)} nepozná jej ` +
+            "databázu a nenaštartovala by — návrat na staršiu verziu sa na PROD nerobí.",
+          note: "beží novšia verzia",
+        }
+      : {
+          title:
+            `Na UAT beží novšia verzia ${fmtVer(running)}. Staršia verzia ${fmtVer(version)} nepozná jej databázu — ` +
+            "nasadíš ju len cez „Postaviť nanovo“, ktoré údaje UAT zmaže.",
+          note: "staršia verzia — len „Postaviť nanovo“",
+        };
   }
 
   async function handleDeploy(row: DeployMatrixRow, fresh = false) {
@@ -523,6 +553,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                 const progress = running[row.customer_id];
                 const isBusy = busy === row.customer_id || progress !== undefined;
                 const blocked = deployBlock(row);
+                const older = blocked ? null : olderBlock(row);
                 const current = currentCol(row);
                 const chosen = pickedVersion(row);
                 // Env-generic live link (UAT or PROD), the last successful deploy result, and the UAT-accepted flag.
@@ -757,10 +788,11 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         )}
                         <button
                           onClick={() => handleDeploy(row)}
-                          disabled={isBusy || verified.length === 0 || blocked !== null}
+                          disabled={isBusy || verified.length === 0 || blocked !== null || older !== null}
                           title={
                             (progress ? RUNNING_REASON : null) ??
                             blocked?.title ??
+                            older?.title ??
                             (redeploy
                               ? `Verzia ${fmtVer(chosen)} už na ${labels.title} beží — toto ju postaví a nasadí znova.`
                               : `Nasadiť verziu ${fmtVer(chosen)} do ${labels.title}`)
@@ -775,7 +807,7 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                         >
                           {isBusy ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : blocked && environment === "prod" ? (
+                          ) : (blocked || older) && environment === "prod" ? (
                             <Lock className="h-3.5 w-3.5" />
                           ) : (
                             <UploadCloud className="h-3.5 w-3.5" />
@@ -803,9 +835,9 @@ export default function DeployMatrixPage({ environment }: DeployMatrixPageProps)
                           UAT (the incident tab) a disabled button got no visible line at all, and on PROD it
                           asserted a cause that was often not the real one. Now both tabs get a line, and it
                           names which of the three blocks (role / nothing deployable / acceptance) is in force. */}
-                      {blocked && (
+                      {(blocked ?? older) && (
                         <div className="mt-1 text-right text-[11px] text-[var(--color-text-muted)]">
-                          {blocked.note}
+                          {(blocked ?? older)?.note}
                         </div>
                       )}
                     </td>

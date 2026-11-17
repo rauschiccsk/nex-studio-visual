@@ -14,17 +14,19 @@ from __future__ import annotations
 import subprocess
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from backend.api.routes.pipeline import _board
 from backend.core.errors import ConflictError
+from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.schemas.customer import CustomerCreate
-from backend.services import claude_agent, orchestrator
+from backend.services import ci_status, claude_agent, deploy_source, orchestrator
 from backend.services import customer as customer_service
 from backend.services import deploy as deploy_service
 
@@ -225,51 +227,215 @@ def _the_17_november_project(p: _Project) -> tuple[Version, Version, Version]:
     return released, finished, newer
 
 
-def test_nothing_is_offered_and_the_screen_names_the_newer_version(db_session, nex_manager) -> None:
-    _, finished, newer = _the_17_november_project(nex_manager)
+def test_while_a_newer_version_is_built_every_finished_version_is_offered(db_session, nex_manager) -> None:
+    """DEV-420 (Director 17.11.2026: „Súhlasím“): a deploy builds the version's own commit, so a version stays on offer
+    while the project's code moves on — 1.6.0 during the work on 1.7.0. Until DEV-420 nothing was offered."""
+    nex_manager.version("0.9.0", status="done")  # finished, but no commit on record: nothing to build
+    _the_17_november_project(nex_manager)
     p = nex_manager.project
 
     offer = deploy_service.list_verified_versions(db_session, p.id)
-    block = deploy_service.deployability(db_session, p, verified_versions=offer, user=nex_manager.owner)
 
-    assert offer == []
-    assert block == {
-        "cause": "superseded",
-        "version_number": "1.6.0",
-        "version_id": finished.id,
-        "can_reverify": False,
-        "next_version_id": newer.id,
-        "next_version_number": "1.7.0",
-    }
+    assert offer == ["1.6.0", "1.2.2"]
+    assert deploy_service.deployability(db_session, p, verified_versions=offer, user=nex_manager.owner)["cause"] == "ok"
+
+
+def _customer(db, p: _Project, slug: str = "skit"):
+    return customer_service.create(db, p.project.id, CustomerCreate(name=slug.upper(), slug=slug, subdomain=slug))
+
+
+#: Where the deploys handed their runners the project — gone once the deploy is over.
+exports: list = []
+
+
+def _runner_reading_the_source(seen: list):
+    """A runner that reads what a real one renders from — the project's app file in the source it is handed."""
+
+    async def _runner(**kwargs):
+        source = kwargs["source"]
+        seen.append((source.commit, (source.path / "backend" / "app.py").read_text()))
+        exports.append(source.path)
+        return True, "OK", "https://uat-skit.isnex.eu"
+
+    return _runner
 
 
 @pytest.mark.asyncio
-async def test_a_deploy_of_the_released_version_is_refused(db_session, nex_manager) -> None:
-    _the_17_november_project(nex_manager)
-    customer = customer_service.create(
-        db_session, nex_manager.project.id, CustomerCreate(name="SKIT", slug="skit", subdomain="skit", secret=None)
-    )
-    calls: list = []
+async def test_an_older_version_is_deployed_from_its_own_commit_not_from_the_project_folder(
+    db_session, nex_manager, monkeypatch
+) -> None:
+    released, _finished, _newer = _the_17_november_project(nex_manager)
+    anchor = orchestrator.deployable_commit(db_session, released.id)[0]
+    asked: list = []
 
-    async def _runner(**kwargs):
-        calls.append(kwargs)
-        return True, "OK", "https://uat-skit.isnex.eu"
+    async def _ci(root, sha=None, *, cerstvy=False):
+        asked.append(sha)
+        return ci_status.StavZostavenia("green", "CI zelené", sha, 0.0)
+
+    monkeypatch.setattr(ci_status, "stav_commitu", _ci)
+    seen: list = []
+
+    event, _url, _bumped = await deploy_service.deploy(
+        db_session,
+        _customer(db_session, nex_manager).id,
+        version_number="1.2.2",
+        environment="uat",
+        actor_id=nex_manager.owner.id,
+        deploy_runner=_runner_reading_the_source(seen),
+    )
+
+    assert event.status == "ok"
+    assert seen == [(anchor, "v = '1.2.2'\n")], "the deploy read the project's folder (1.7.0 in progress)"
+    assert asked == [anchor], "the checks (CI) of another commit were asked"
+    assert (nex_manager.repo / "backend" / "app.py").read_text() == "v = '1.7.0 in progress'\n"
+    assert not exports[-1].exists(), "the export outlived the deploy"
+
+
+@pytest.mark.asyncio
+async def test_the_default_runner_renders_from_the_source_and_builds_its_commit(monkeypatch, tmp_path) -> None:
+    seen: dict = {}
+
+    def _provision(*args, **kwargs):
+        seen["source_path"] = kwargs.get("source_path")
+        raise ValueError("rendered — stop here")
+
+    monkeypatch.setattr(deploy_service.uat_provisioner, "provision_uat", _provision)
+    source = deploy_source.DeploySource("abc123", tmp_path / "nex-manager")
+
+    outcome = await deploy_service._default_deploy_runner(
+        project_slug="nex-manager", uat_slug="icc-uat", version_number="1.6.0", force_fresh=False, source=source
+    )
+
+    assert seen == {"source_path": tmp_path / "nex-manager"}
+    assert outcome[0] is False
+
+    async def _built(*args, **kwargs):
+        seen["commit"] = kwargs.get("commit")
+        return False, "stop"
+
+    monkeypatch.setattr(deploy_service.uat_provisioner, "provision_uat", lambda *a, **k: _rendered(tmp_path))
+    monkeypatch.setattr(orchestrator, "instance_health", _no_health)
+    monkeypatch.setattr(orchestrator, "_run_uat_deploy", _built)
+    await deploy_service._default_deploy_runner(
+        project_slug="nex-manager", uat_slug="icc-uat", version_number="1.6.0", force_fresh=False, source=source
+    )
+
+    assert seen["commit"] == "abc123"
+
+    async def _built_prod(*args, **kwargs):
+        seen["prod_commit"] = kwargs.get("commit")
+        return False, "stop"
+
+    monkeypatch.setattr(orchestrator, "_run_prod_deploy", _built_prod)
+    await deploy_service._default_deploy_runner(
+        project_slug="nex-manager", uat_slug="icc-prod", version_number="1.6.0", force_fresh=False, source=source
+    )
+
+    assert seen["prod_commit"] == "abc123"
+
+
+async def _no_health(*_a, **_k):
+    return None
+
+
+def _rendered(tmp_path):
+    compose = tmp_path / "uat" / "docker-compose.yml"
+    compose.parent.mkdir(parents=True, exist_ok=True)
+    compose.write_text("services: {}\n", encoding="utf-8")
+    return SimpleNamespace(compose_path=compose, fe_service=None, warnings=[])  # what the runner reads off the render
+
+
+def _running(db, customer, version_number: str, environment: str) -> None:
+    db.add(
+        DeployEvent(
+            customer_id=customer.id,
+            project_id=customer.project_id,
+            environment=environment,
+            version_number=version_number,
+            event_type="deploy",
+            status="ok",
+            actor_id=None,
+        )
+    )
+    db.flush()
+
+
+@pytest.mark.asyncio
+async def test_prod_never_goes_back_to_an_older_version(db_session, nex_manager) -> None:
+    _the_17_november_project(nex_manager)
+    customer = _customer(db_session, nex_manager)
+    _running(db_session, customer, "1.6.0", "prod")
+    seen: list = []
 
     with pytest.raises(ConflictError) as refused:
         await deploy_service.deploy(
             db_session,
             customer.id,
             version_number="1.2.2",
-            environment="uat",
+            environment="prod",
             actor_id=nex_manager.owner.id,
-            deploy_runner=_runner,
+            deploy_runner=_runner_reading_the_source(seen),
         )
 
     assert str(refused.value) == (
-        "Nasadenie zastavené: kód projektu už obsahuje prácu na verzii 1.7.0 — nasadil by sa jej kód pod číslom "
-        "1.2.2. Nasadiť sa dá novšia verzia, keď je hotová."
+        "Nasadenie zastavené: u zákazníka beží novšia verzia 1.6.0. Staršia verzia 1.2.2 nepozná jej databázu a "
+        "nenaštartovala by — návrat na staršiu verziu sa na PROD nerobí."
     )
-    assert calls == []
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_uat_goes_back_only_built_anew(db_session, nex_manager, monkeypatch) -> None:
+    _the_17_november_project(nex_manager)
+    customer = _customer(db_session, nex_manager)
+    _running(db_session, customer, "1.6.0", "uat")
+    monkeypatch.setattr(deploy_service.uat_provisioner, "compose_down_with_volumes", lambda path, **_: (True, "OK"))
+    seen: list = []
+    run = dict(
+        version_number="1.2.2",
+        environment="uat",
+        actor_id=nex_manager.owner.id,
+        deploy_runner=_runner_reading_the_source(seen),
+    )
+
+    with pytest.raises(ConflictError, match="nasadíš ju len cez „Postaviť nanovo“"):
+        await deploy_service.deploy(db_session, customer.id, **run)
+    await deploy_service.deploy(db_session, customer.id, force_fresh=True, **run)
+
+    assert [code for _commit, code in seen] == ["v = '1.2.2'\n"]
+
+
+def test_a_version_founded_before_the_first_prod_is_newer_code_despite_its_number(db_session, nex_manager) -> None:
+    """A first PROD deploy renames its version to 1.0.0; 0.2.0, founded before it, keeps its number with newer code.
+    The commits decide what is older, not the numbers."""
+    first = _commit(nex_manager.repo, {"backend/app.py": "v = 'first'\n"}, "0.1.0")
+    nex_manager.version("1.0.0", status="released", anchor=first)
+    later = _commit(nex_manager.repo, {"backend/app.py": "v = 'second'\n"}, "0.2.0")
+    nex_manager.version("0.2.0", status="done", anchor=later)
+    p = nex_manager.project
+
+    assert deploy_service.older_than_running(db_session, p, ["1.0.0", "0.2.0"], "1.0.0") == []
+    assert deploy_service.older_than_running(db_session, p, ["1.0.0", "0.2.0"], "0.2.0") == ["1.0.0"]
+
+
+def test_a_version_without_its_commit_is_not_deployable_and_says_why(db_session, nex_manager) -> None:
+    _commit(nex_manager.repo, {"backend/app.py": "v = 1\n"}, "code")
+    unbound = nex_manager.version("1.0.0", status="done")
+    orchestrator._record_message(
+        db_session,
+        version_id=unbound.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
+    )
+    gone = nex_manager.version("1.1.0", status="done", anchor="0" * 40)
+
+    assert orchestrator.deployable_commit(db_session, unbound.id) == (None, "no_commit")
+    assert orchestrator.deployable_commit(db_session, gone.id) == (None, "commit_missing")
+    assert deploy_service.list_verified_versions(db_session, nex_manager.project.id) == []
 
 
 @pytest.mark.asyncio

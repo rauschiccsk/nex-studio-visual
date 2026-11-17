@@ -58,11 +58,11 @@ async def test_a_deploy_without_it_names_the_field_and_where_to_set_it(db_sessio
 
     user = _make_user(db_session)
     project = _make_project(db_session, user=user)
-    _make_version(db_session, project, "0.1.0")
-    customer = _make_customer(db_session, project)
     monkeypatch.setattr(claude_agent, "PROJECTS_ROOT", tmp_path)
     (tmp_path / project.slug).mkdir()
     (tmp_path / project.slug / ".env.example").write_text("ADMIN_INITIAL_PASSWORD=\n", encoding="utf-8")
+    _make_version(db_session, project, "0.1.0")  # DEV-420: the checked code carries the .env.example
+    customer = _make_customer(db_session, project)
     runner = _FakeRunner()
 
     with pytest.raises(ValueError) as refused:

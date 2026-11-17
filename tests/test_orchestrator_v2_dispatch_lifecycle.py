@@ -315,7 +315,9 @@ async def test_run_uat_deploy_redeploys_existing_compose_with_version(monkeypatc
     # DEV-139 (build from the verified commit) has its own tests — test_a_deploy_builds_from_the_verified_commit.py;
     # here the real /opt/uat path must not decide what this test sees.
     monkeypatch.setattr(
-        orchestrator.verified_build, "prepare", lambda _compose: orchestrator.verified_build.Preparation(None)
+        orchestrator.verified_build,
+        "prepare",
+        lambda _compose, _commit=None: orchestrator.verified_build.Preparation(None),
     )
     ok, detail = await orchestrator._run_uat_deploy("nex-ledger", "ledger", version_number="0.1.42")
 

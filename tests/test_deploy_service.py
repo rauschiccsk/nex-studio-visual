@@ -88,12 +88,36 @@ def _make_project(db_session, *, user: User | None = None, **overrides) -> Proje
     return project
 
 
+def _verified_commit(project) -> str:
+    """DEV-420: the project's repository with what its folder holds committed — the code its finished version was
+    checked at, which a deploy exports and reads the project from. A test's own repository is kept and committed on."""
+    import subprocess
+
+    from backend.services import claude_agent
+
+    repo = claude_agent.PROJECTS_ROOT / project.slug
+    repo.mkdir(parents=True, exist_ok=True)
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+
+    if not any(repo.iterdir()):
+        (repo / "README.md").write_text("the app\n", encoding="utf-8")  # a repository is never empty
+    if not (repo / ".git").exists():
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-q", "--allow-empty", "-m", "the checked code")
+    return git("rev-parse", "HEAD").strip()
+
+
 def _make_version(db_session, project, version_number="0.1.0") -> Version:
     version = Version(project_id=project.id, version_number=version_number, name="dev")
     db_session.add(version)
     db_session.flush()
     # CR-V2-056: a deployable version must be VERIFIED — record the Verifikácia PASS verdict that
-    # version_verified reads. No verified_sha in the test repo → 'unbound' → verified (grandfathered).
+    # version_verified reads. DEV-420: bound to a commit of the project's repository — the deploy builds it.
     orchestrator._record_message(
         db_session,
         version_id=version.id,
@@ -102,7 +126,7 @@ def _make_version(db_session, project, version_number="0.1.0") -> Version:
         recipient="manazer",
         kind="verdict",
         content="PASS",
-        payload={"verdict": "PASS", "phase": "verifikacia"},
+        payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": _verified_commit(project)},
     )
     db_session.flush()
     return version
@@ -129,6 +153,7 @@ class _FakeRunner:
         self._detail = detail
         self._url = url
         self.calls: list[dict] = []
+        self.sources: list = []
 
     async def __call__(
         self,
@@ -141,7 +166,10 @@ class _FakeRunner:
         deploy_host=None,
         private_network=False,
         customer_name=None,
+        source=None,
     ):
+        # DEV-420: what the deploy reads the project from — the export of the version's commit, while the deploy runs.
+        self.sources.append((source.commit, source.path.is_dir()) if source else None)
         self.calls.append(
             {
                 "project_slug": project_slug,
@@ -662,6 +690,7 @@ def _fake_default_runner(monkeypatch):
         deploy_host=None,
         private_network=False,
         customer_name=None,
+        source=None,
     ):
         calls.append(
             {

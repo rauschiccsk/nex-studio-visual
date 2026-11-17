@@ -2736,6 +2736,37 @@ def backend_traefik_labels(
 # ---------------------------------------------------------------------------
 
 
+def builds_from(compose: dict[str, Any], read_from: Path, build_at: Path) -> dict[str, Any]:
+    """DEV-420: *compose* with every build folder under ``read_from`` (the export the deploy read the project from)
+    pointing under ``build_at`` (the project's folder) instead. The export is gone after the deploy; the installation's
+    compose keeps naming the project's folder, from which verified_build exports the deployed commit when it builds."""
+    if read_from == build_at:
+        return compose
+
+    def moved(path: str) -> str:
+        if os.path.isabs(path) and Path(path).is_relative_to(read_from):
+            return str(build_at / Path(path).relative_to(read_from))
+        return path
+
+    services = {}
+    for name, svc in (compose.get("services") or {}).items():
+        build = svc.get("build") if isinstance(svc, dict) else None
+        if isinstance(build, dict):
+            build = {**build, "context": moved(str(build.get("context", ".")))}
+            extra = build.get("additional_contexts")
+            if isinstance(extra, dict):
+                build["additional_contexts"] = {k: moved(str(v)) for k, v in extra.items()}
+            elif isinstance(extra, list):
+                build["additional_contexts"] = [
+                    f"{k}={moved(v)}" if sep else item for item in extra for k, sep, v in [str(item).partition("=")]
+                ]
+            svc = {**svc, "build": build}
+        elif isinstance(build, str):
+            svc = {**svc, "build": moved(build)}
+        services[name] = svc
+    return {**compose, "services": services}
+
+
 def _abs_build_context(context: str, project_path: Path) -> str:
     """Resolve a source build ``context`` to an absolute path under the source project."""
     if os.path.isabs(context):
@@ -3873,6 +3904,7 @@ def provision_uat(
     customer_values: Optional[dict[str, str]] = None,
     customer_name: Optional[str] = None,
     installation_language: Optional[str] = None,
+    source_path: Optional[Path] = None,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -3912,8 +3944,12 @@ def provision_uat(
         validate_uat_slug(app)
         validate_uat_slug(full_project_slug)
 
-    project_path = projects_root / project_slug
-    if not project_path.is_dir():
+    # DEV-420: the project's files — its compose, ``.env.example``, the settings contract, the files it mounts — are
+    # read from ``source_path``, an export of the commit the deployed version's check is bound to; the installation's
+    # builds still point at the project's folder, from which verified_build exports that same commit when it builds.
+    project_dir = projects_root / project_slug
+    project_path = source_path or project_dir
+    if not project_dir.is_dir() or not project_path.is_dir():
         raise FileNotFoundError(f"project directory not found: {project_path}")
 
     source = load_source_compose(project_path)
@@ -4218,7 +4254,7 @@ def provision_uat(
         )
         # DEV-164: a project switched to Web after this installation was made gets its frontends now — the one
         # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
-        surfaces = project_surfaces.surfaces_of_slug(project_path.name)
+        surfaces = project_surfaces.surfaces_of_slug(project_dir.name)
         pridane: list[str] = []
         vynechane: list[str] = []
         if len(surfaces) > 1:
@@ -4261,7 +4297,7 @@ def provision_uat(
         verzia_instalacie = installed_version(
             yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}, project_slug
         )
-        priniesla = services_the_version_brought(project_path, source, verzia_instalacie)
+        priniesla = services_the_version_brought(project_dir, source, verzia_instalacie)
         doplnene_sluzby, vynechane_sluzby = new_services_into_installation(
             povysene,
             cockpits_render,
@@ -4341,7 +4377,7 @@ def provision_uat(
             environment=environment,
             language=installation_language,
         )
-        compose_text = render_uat_compose(povysene, routing)
+        compose_text = render_uat_compose(builds_from(povysene, project_path, project_dir), routing)
         pred_nasadenim = _parse_env_file(env_path)
         mala = set(pred_nasadenim)
         adresy = {key: f"https://{public_host}" for key in contract.public_url_keys} | further_public_urls
@@ -4393,7 +4429,7 @@ def provision_uat(
             environment=environment,
             language=installation_language,
         )
-        compose_text = render_uat_compose(compose, routing)
+        compose_text = render_uat_compose(builds_from(compose, project_path, project_dir), routing)
         instalacia = compose
 
     # DEV-235: before anything is written, what the installation will RUN with — on a redeploy its own ``.env``, not

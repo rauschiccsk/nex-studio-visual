@@ -120,16 +120,16 @@ function HonestStatusStrip({
   const unconfirmed = state?.status === "done" && verificationUnconfirmed(verifiedProvenance);
   // v4.0.56: the same applies — MORE strongly — when the code moved on after the sign-off. Here we do not
   // merely fail to confirm the check, we KNOW it no longer describes the current code, so a green "pripravené
-  // na nasadenie" is an outright false statement (and the deploy screen refuses that version anyway).
+  // na nasadenie" is an outright false statement. DEV-420: the deploy builds the verified state — the strip says so.
   const drifted = state?.status === "done" && verificationDrifted(verifiedProvenance);
   // DEV-416: the code moved on with a newer version's work — neither deployable nor re-checkable.
   const superseded = state?.status === "done" && verificationSuperseded(verifiedProvenance);
   // DEV-51: NEX Inbox 1.7.0, 10.10.2026 — "Zostavenie zlyhalo" above, "Hotovo — pripravené na nasadenie" here.
   const ciBlock = state?.status === "done" ? ciDeployBlock(ci) : null;
   const text = superseded
-    ? "Hotovo — nasadí sa už novšia verzia"
+    ? "Hotovo — v projekte už pribudla novšia verzia"
     : drifted
-      ? "Hotovo — kód sa odvtedy zmenil, treba znova overiť"
+      ? "Hotovo — kód sa odvtedy zmenil, nasadí sa overený stav"
       : ciBlock === "red"
         ? "Hotovo — kontroly projektu zlyhali, nasadenie je zastavené"
         : ciBlock === "running"

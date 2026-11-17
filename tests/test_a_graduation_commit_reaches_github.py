@@ -47,9 +47,10 @@ async def _first_prod_deploy(db_session, monkeypatch, tmp_path, *, push_to: Path
     project = _make_project(db_session, user=user)
     origin = tmp_path / "origin.git"
     work = _checkout_with_notes(projects_root, project.slug, origin)
+    _make_version(db_session, project, "0.1.0")
+    _git(work, "push", "-q", "origin", "main")  # DEV-420: the checked code is on GitHub, as a checked version's is
     if push_to is not None:
         _git(work, "remote", "set-url", "--push", "origin", str(push_to))
-    _make_version(db_session, project, "0.1.0")
     customer = _make_customer(db_session, project)
     runner = _FakeRunner()
     await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)

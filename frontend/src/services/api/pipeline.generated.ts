@@ -5336,11 +5336,11 @@ export interface components {
             can_reverify: boolean;
             /**
              * Cause
-             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that would be deployed failed) | 'ci_running' (those checks are still running) | 'superseded' (the code holds a newer version's work — that version, in next_version_*, is the one to deploy when finished).
+             * @description 'ok' (a version is deployable) | 'drift' (code moved past the checked commit — re-verifiable in place, the only cause with a button) | 'reverify_running' (that re-verification is running now) | 'version_busy' (drifted, but mid-work or stuck — re-verify would be rejected) | 'awaiting_signoff' (the check passed; it only needs the manager's Hotovo approval) | 'stale_signoff' (later work outranked the sign-off — must be re-checked on the version) | 'none_finished' (no version was ever finished) | 'ci_red' (the project's checks on the code that would be deployed failed) | 'ci_running' (those checks are still running).
              * @default ok
              * @enum {string}
              */
-            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished" | "ci_red" | "ci_running" | "superseded";
+            cause: "ok" | "drift" | "reverify_running" | "version_busy" | "awaiting_signoff" | "stale_signoff" | "none_finished" | "ci_red" | "ci_running";
             /**
              * Ci Detail
              * @description For 'ci_red' / 'ci_running': which check, which run, what it said (the human sentence).
@@ -5358,12 +5358,12 @@ export interface components {
             dedo_brief?: string | null;
             /**
              * Next Version Id
-             * @description For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and not finished (a fast fix or a new version). The screen leads there instead of offering a new fix. For 'superseded' (DEV-416): the newest version whose work is in the code.
+             * @description For 'ci_red' (DEV-57): the fix already begun — the newest version started after the blocked one and not finished (a fast fix or a new version). The screen leads there instead of offering a new fix.
              */
             next_version_id?: string | null;
             /**
              * Next Version Number
-             * @description For 'ci_red' and 'superseded': that version's number.
+             * @description For 'ci_red': that version's number.
              */
             next_version_number?: string | null;
             /**
@@ -5533,6 +5533,11 @@ export interface components {
              */
             prod_machine: string;
             /**
+             * Prod Older Versions
+             * @description DEV-420: the offered versions older than the one this PROD runs — never deployed there.
+             */
+            prod_older_versions?: string[];
+            /**
              * Prod Url
              * @description Link to the customer's live PROD instance (the PROD tab link); None until a PROD deploy.
              */
@@ -5570,6 +5575,11 @@ export interface components {
              * @description DEV-129: that deploy's warnings, one sentence each — the only place the page reads them from, so each is said once.
              */
             uat_last_deploy_warnings?: string[];
+            /**
+             * Uat Older Versions
+             * @description DEV-420: the offered versions older than the one this UAT runs — deployable there only built anew (force_fresh), never preselected.
+             */
+            uat_older_versions?: string[];
             /**
              * Uat Url
              * @description Link to the customer's live UAT instance (the UAT tab link, §3.5); None until a UAT deploy.

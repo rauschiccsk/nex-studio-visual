@@ -30,6 +30,7 @@ from backend.schemas.customer import CustomerCreate
 from backend.services import ci_status, orchestrator
 from backend.services import customer as customer_service
 from backend.services import deploy as deploy_service
+from tests.test_deploy_service import _verified_commit
 
 TAG = "v1.7.0"
 RELEASE_GATE = "on:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\nname: Release smoke gate\njobs: {}\n"
@@ -254,7 +255,7 @@ def _finished_version(db) -> tuple[Project, Version]:
         recipient="manazer",
         kind="verdict",
         content="PASS",
-        payload={"verdict": "PASS", "phase": "verifikacia"},
+        payload={"verdict": "PASS", "phase": "verifikacia", "verified_sha": _verified_commit(project)},
     )
     db.flush()
     return project, version
@@ -291,6 +292,7 @@ def test_green_or_unknown_ci_leaves_nasadit_open(db_session, ci):
 
 
 async def _deploy(db, monkeypatch, ci, *, with_workflows=True, tmp_path):
+    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)  # DEV-420: the repository lives here
     project, _version = _finished_version(db)
     customer = customer_service.create(
         db, project.id, CustomerCreate(name="MÁGERSTAV", slug="mager", subdomain="mager")
@@ -299,7 +301,6 @@ async def _deploy(db, monkeypatch, ci, *, with_workflows=True, tmp_path):
     if with_workflows:
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "ci.yml").write_text(BRANCH_CI, encoding="utf-8")
-    monkeypatch.setattr(orchestrator.claude_agent, "PROJECTS_ROOT", tmp_path)
     monkeypatch.setattr(orchestrator, "_project_has_ci", lambda root: (root / ".github" / "workflows").is_dir())
     asked: list[dict] = []
 

@@ -93,6 +93,10 @@ export interface DeployMatrixRow {
    * Nasadiť is open (the never-bypassed acceptance gate, §3.5).
    */
   accepted_versions: string[];
+  /** DEV-420: offered versions older than the one this UAT runs — only „Postaviť nanovo“, never preselected. */
+  uat_older_versions?: string[];
+  /** DEV-420: offered versions older than the one this PROD runs — never deployed there. */
+  prod_older_versions?: string[];
   /** Link to the customer's live UAT instance (the UAT tab link, §3.5); null until a UAT deploy. */
   uat_url: string | null;
   /** Link to the customer's live PROD instance (the PROD tab link); null until a PROD deploy. */

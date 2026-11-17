@@ -67,7 +67,8 @@ describe("HonestStatusStrip — a drifted sign-off never reads green", () => {
     "reads amber 'kód sa odvtedy zmenil' on a done version with drifted provenance '%s'",
     (prov) => {
       render(stripV({ current_stage: "done", status: "done", mode: "conversation" }, prov));
-      expect(screen.getByText("Hotovo — kód sa odvtedy zmenil, treba znova overiť")).toBeInTheDocument();
+      // DEV-420: the deploy builds the verified state — the strip says that is what goes out.
+      expect(screen.getByText("Hotovo — kód sa odvtedy zmenil, nasadí sa overený stav")).toBeInTheDocument();
       expect(screen.queryByText("Hotovo — pripravené na nasadenie")).not.toBeInTheDocument();
     },
   );

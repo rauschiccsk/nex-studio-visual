@@ -227,8 +227,8 @@ export function ciDeployBlock(ci: { stav: string; bezi?: boolean } | null | unde
 }
 
 /**
- * DEV-416 — a finished version whose code moved on with a NEWER version's work (`superseded`). Neither deployable
- * nor re-checkable: a deploy would ship the newer version's code under this number, and "Over znova" would check it.
+ * DEV-416 — a finished version whose code moved on with a NEWER version's work (`superseded`): "Over znova" would check
+ * that work under its number, so it is not offered. DEV-420: a deploy still builds the version's own verified commit.
  */
 export function verificationSuperseded(provenance: string | null | undefined): boolean {
   return provenance === "superseded";
