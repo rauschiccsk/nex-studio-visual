@@ -2983,6 +2983,42 @@ def web_frontends_into_installation(
     return missing, []
 
 
+#: DEV-423 — what a redeploy says when it moved the cockpit's routing to the project's zone.
+ZONE_MOVED = "Smerovanie: {why} — inštalácia je odteraz na adrese {host}; doterajšie meno {former} už do nej nevedie."
+ZONE_PRIVATE = "projekt má prístup len zo súkromnej siete"
+ZONE_PUBLIC = "projekt už nemá prístup len zo súkromnej siete"
+
+
+def cockpits_routing_into_the_projects_zone(
+    bumped: dict[str, Any], cockpits_render: dict[str, Any], former_render: dict[str, Any], *, network: str
+) -> bool:
+    """DEV-423 — a routing the cockpit wrote under the project's former zone moves to its zone now.
+
+    17.11.2026 NEX Manager 1.7.0 was deployed to the UAT of SKIT o.z. NEX Manager had been switched to the private
+    network the day before, so the cockpit named and checked the installation ``uat-skit-manager.int.isnex.eu``; but a
+    redeploy keeps the installation's routing (ICCINT-133), the installation stayed at ``uat-skit-manager.isnex.eu`` and
+    the check after the deploy got 404. The routing was the cockpit's own: exactly what it writes in the public zone.
+
+    ``bumped`` is the installation's compose as the redeploy raised it, ``cockpits_render`` what the cockpit writes into
+    a new installation of the project now, ``former_render`` the same in the machine's other zone. Only an installation
+    routed exactly as ``former_render`` is moved: the Traefik labels of its routed services become the cockpit's now
+    (the others of their labels stay), on ``network``. A routing of its own (adopted, hand-written, a name changed by
+    hand) matches neither and stays. Nothing else of the installation changes.
+
+    Returns whether it moved."""
+    routed = _routing_of(bumped)
+    if not routed or routed != _routing_of(former_render):
+        return False
+    services = bumped.get("services") or {}
+    rendered = cockpits_render.get("services") or {}
+    for name in sorted(set(routed) | set(_routing_of(cockpits_render))):
+        if name in services and name in rendered:
+            own = [label for label in _labels_as_list(services[name].get("labels")) if not label.startswith("traefik.")]
+            services[name]["labels"] = own + _traefik_labels(rendered[name])
+            _add_proxy_network(services[name], network)
+    return True
+
+
 def _awaited(svc: dict[str, Any]) -> dict[str, Any]:
     """The services *svc* waits for, each with its condition — ``depends_on`` in either of its two forms."""
     waits = svc.get("depends_on")
@@ -4340,6 +4376,34 @@ def provision_uat(
             private=private,
             deploy_host=deploy_host,
         )
+        # DEV-423: the project's zone changed since the cockpit routed this installation (the private network switched
+        # on or off) — the cockpit's own routing moves with it; the installation's own routing stays.
+        former_zone = not private
+        if routing_for(deploy_host, private=former_zone).zone != routing.zone:
+            former_render = build_compose_for_instance(
+                project_path=project_path,
+                slug=uat_slug,
+                project=project_slug,
+                environment=environment,
+                customer_slug=customer_slug,
+                app=app,
+                version=version,
+                preserve_extra_hosts=False,
+                loopback_base_port=loopback_base_port,
+                private=former_zone,
+                deploy_host=deploy_host,
+            )
+            if cockpits_routing_into_the_projects_zone(
+                povysene, cockpits_render, former_render, network=routing.network
+            ):
+                _nb_former, former_host = _instance_naming(
+                    environment, uat_slug, customer_slug, app, private=former_zone, deploy_host=deploy_host
+                )
+                warnings.append(
+                    ZONE_MOVED.format(
+                        why=ZONE_PRIVATE if private else ZONE_PUBLIC, host=public_host, former=former_host
+                    )
+                )
         # DEV-164: a project switched to Web after this installation was made gets its frontends now — the one
         # thing a redeploy adds besides the version, and only where the cockpit wrote the routing itself.
         surfaces = project_surfaces.surfaces_of_slug(project_dir.name)
