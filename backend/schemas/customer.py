@@ -248,7 +248,7 @@ class CustomerSettingRead(BaseModel):
 
     key: str
     # DEV-164: every kind ``env_contract`` reads — one missing here answered the customer form with a 500 (22.10.2026).
-    kind: Literal["customer", "customer_secret", "public_url", "public_url_admin"]
+    kind: Literal["customer", "customer_secret", "public_url", "public_url_admin", "public_ingress"]
     required: bool
     label: str
 

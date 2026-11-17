@@ -54,6 +54,7 @@ from tests.conftest import (  # noqa: F401
     _guard_prod_db_isolation,
     _isolate_system_setting_cache,
     _names_that_lead_to_their_machine,
+    _no_check_from_the_internet,
     db_connection,
     db_session,
     host_ports,

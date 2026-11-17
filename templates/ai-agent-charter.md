@@ -75,7 +75,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   - `# @customer: „E-mail prvého správcu — ním sa prvý raz prihlásiš“` — bežné nastavenie zákazníka;
   - `# @customer-secret: „Heslo k schránke s faktúrami“` — tajomstvo (uloží sa do trezoru, späť sa neukáže);
   - `required` za značkou (`# @customer required: „…“`) — bez hodnoty sa nasadenie nespustí;
-  - `# @public-url` — kokpit zapíše verejnú adresu inštalácie (presne tú, ktorú otvára prehliadač).
+  - `# @public-url` — kokpit zapíše verejnú adresu inštalácie (presne tú, ktorú otvára prehliadač);
+  - `# @public-ingress: /public/v1/` nad `PUBLIC_INGRESS_URL` — úzky verejný vstup (DEV-409): z internetu ide do
+    aplikácie len cesta s touto predponou, cez tunel Cloudflare, ktorý zriadi kokpit; adresu vstupu zapíše kokpit.
+    Každá taká cesta overuje volajúceho (tajný kľúč, podpis); obrazovky a `/api/v1` von nikdy nejdú.
   Aplikácia s vlastným prihlásením (`auth_mode=password`) zakladá **prvého správcu z povinných nastavení
   zákazníka** (e-mail `@customer required`, heslo `@customer-secret required`, pri prvom prihlásení vynútená
   zmena hesla), alebo z `ADMIN_INITIAL_PASSWORD`. Heslo správcu, ktoré nič z toho neoznačí, by dostalo náhodnú

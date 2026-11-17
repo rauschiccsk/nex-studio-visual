@@ -964,6 +964,57 @@ def knowledge_address(knowledge_dir: Path, deploy_host: Optional[str]) -> Option
     return _backend_internal_url(text)
 
 
+def with_public_ingress(
+    installation: dict[str, Any],
+    contract: "env_contract.Contract",
+    *,
+    environment: str,
+    customer_slug: Optional[str],
+    app: Optional[str],
+) -> tuple[dict[str, Any], dict[str, str], list[str]]:
+    """DEV-409: an installation whose app declares the narrow public entry (``@public-ingress``) — with its tunnel
+    set up in Cloudflare, the connector beside the app, and the settings for its ``.env`` (the entry's address, the
+    tunnel's run key). ``(installation, settings, warnings)``; unchanged when the app declares none."""
+    from backend.services import public_ingress  # it imports installation_names, which imports this module's peers
+
+    declared = contract.public_ingress
+    if not declared or not customer_slug or not app:
+        return installation, {}, []
+    key, prefix = next(iter(declared.items()))
+    backend_url = _backend_internal_url(yaml.safe_dump(installation))
+    if not backend_url:
+        return installation, {}, [public_ingress.NOT_SET_UP.format(why="inštalácia nemá backend s menom kontajnera")]
+    entry, said = public_ingress.ensure(
+        name=public_ingress.host(environment, customer_slug, app), prefix=prefix, backend_url=backend_url
+    )
+    if entry is None:
+        return installation, {}, [said] if said else []
+    services = dict(installation.get("services") or {})
+    backend = next(
+        svc
+        for svc in services.values()
+        if isinstance(svc, dict) and str(svc.get("container_name") or "").endswith("-backend")
+    )
+    connector = public_ingress.connector(str(backend["container_name"]).removesuffix("-backend") + "-ingress")
+    if backend.get("networks"):
+        connector["networks"] = backend["networks"]  # where the backend is, so its name answers
+    services[public_ingress.SERVICE] = connector
+    return {**installation, "services": services}, {key: entry.url, public_ingress.TUNNEL_TOKEN_ENV: entry.token}, []
+
+
+def _env_text_with(text: str, values: dict[str, str]) -> str:
+    """``.env`` text with ``values`` written — a line that has the key gets the value, a missing key is added."""
+    lines = text.splitlines()
+    written = set()
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0]
+        if "=" in line and key in values:
+            lines[i] = f"{key}={values[key]}"
+            written.add(key)
+    lines += [f"{key}={value}" for key, value in values.items() if key not in written]
+    return "\n".join(lines) + "\n"
+
+
 #: DEV-272 — what a deploy into an existing installation says when it paired the app with its Manager anew.
 PAIRING_RENEWED = "Aplikácia sa znova prepojila s NEX Managerom zákazníka ({what}) — otvorenie z neho vyskúšaj."
 #: The pairing values in words, in the order the sentence names them — never a value.
@@ -4414,6 +4465,11 @@ def provision_uat(
             environment=environment,
             language=installation_language,
         )
+        # DEV-409 — the narrow public entry the app declares: its tunnel, its connector, its settings.
+        povysene, ingress_values, ingress_said = with_public_ingress(
+            povysene, contract, environment=environment, customer_slug=customer_slug, app=app
+        )
+        warnings.extend(ingress_said)
         compose_text = render_uat_compose(builds_from(povysene, project_path, project_dir), routing)
         pred_nasadenim = _parse_env_file(env_path)
         mala = set(pred_nasadenim)
@@ -4450,6 +4506,7 @@ def provision_uat(
         # DEV-410 — the address of the customer's NEX Knowledge is the cockpit's, like the pairing: written on every
         # deploy (an installation keeps its own values, ICCINT-104; this is not one of them).
         env_riadky.update({key: url for key, url in knowledge_values.items() if key in env_riadky})
+        env_riadky.update(ingress_values)  # DEV-409 — the entry's address and the tunnel's run key, every deploy
         # DEV-330 — said against the installation as it was before this deploy: a key the version adds (NEX Websites
         # 1.1.0 asks the Manager with a key 1.0 never had) is written by the version bump above, before the pairing.
         prepojene = [
@@ -4469,6 +4526,12 @@ def provision_uat(
             environment=environment,
             language=installation_language,
         )
+        compose, ingress_values, ingress_said = with_public_ingress(
+            compose, contract, environment=environment, customer_slug=customer_slug, app=app
+        )
+        warnings.extend(ingress_said)
+        if ingress_values:
+            env_content = _env_text_with(env_content, ingress_values)
         compose_text = render_uat_compose(builds_from(compose, project_path, project_dir), routing)
         instalacia = compose
 

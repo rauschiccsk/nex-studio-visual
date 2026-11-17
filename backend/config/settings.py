@@ -151,6 +151,16 @@ class Settings(BaseSettings):
     cloudflare_api_url: str = "https://api.cloudflare.com/client/v4"
     cloudflare_dns_token: str = Field(default="", repr=False)
     cloudflare_timeout_seconds: float = 20.0
+    # DEV-409: the narrow public entry of an installation — a Cloudflare tunnel the cockpit sets up with a key of its
+    # own that edits the account's tunnels only (entered by the Director beside the DNS key, with the account's id);
+    # its name lives in the zone below and is written with the DNS key. The tunnel's connector runs in the
+    # installation, from an image of a fixed version; the entry is checked from outside by a service on the internet.
+    cloudflare_account_id: str = ""
+    cloudflare_tunnel_token: str = Field(default="", repr=False)
+    public_ingress_zone: str = "icc.sk"
+    cloudflared_image: str = "cloudflare/cloudflared:2025.4.0"
+    public_ingress_check_url: str = "https://check-host.net"
+    public_ingress_check_timeout_seconds: float = 90.0
     # DEV-305: the disk of the machine the cockpit builds on. 04.11.2026 the first PROD of NEX Knowledge filled MAGER's
     # system disk while it built a 4.4 GB image, and the Postgres of a customer's app on the same disk restarted. A
     # build takes about 2.5× its image (the build stage, the image, the compressed layers — measured on MAGER

@@ -528,6 +528,16 @@ def _a_backend_reached_by_its_own_name(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_check_from_the_internet(monkeypatch):
+    """DEV-409: after a deploy with a narrow public entry the cockpit asks a service on the internet. By DEFAULT the
+    suite never goes there — the service does not answer. A test about it sets its own
+    (``backend/tests/test_the_narrow_public_entry_goes_through_a_tunnel.py``)."""
+    from backend.services import public_ingress
+
+    monkeypatch.setattr(public_ingress, "_codes", lambda url: None)
+
+
+@pytest.fixture(autouse=True)
 def _an_app_that_reads_no_knowledge(monkeypatch):
     """DEV-410: after every deploy the cockpit reads NEX Knowledge once from an app that links it. By DEFAULT the
     suite's apps link none — no test reaches a real Docker. A test about it sets its own

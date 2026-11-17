@@ -105,6 +105,7 @@ from backend.services import (
     private_access,
     prod_machines,
     project_surfaces,
+    public_ingress,
     uat_provisioner,
 )
 from backend.services.version import number_order_key
@@ -1540,6 +1541,16 @@ async def _deploy_from(
         if reads:
             detail = f"{detail} {reads}" if detail else reads
         warnings.extend(w for w in unread if w not in warnings)
+        # DEV-409 — the narrow public entry the app declares, checked from outside (a service on the internet).
+        if contract.public_ingress and public_ingress.set_up(warnings):
+            name = public_ingress.host(
+                environment, _customer_dir_slug(customer), uat_provisioner.derive_uat_slug(project.slug)
+            )
+            prefix = next(iter(contract.public_ingress.values()))
+            opened, closed = await asyncio.to_thread(public_ingress.check_outside, f"https://{name}", prefix)
+            if opened:
+                detail = f"{detail} {opened}" if detail else opened
+            warnings.extend(closed)
     else:
         detail = machine_disk.said_plainly(detail, deploy_host)
     # DEV-68: the same seam carries whether the new version was started — a failed deploy that started it is

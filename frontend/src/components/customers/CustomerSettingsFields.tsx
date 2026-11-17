@@ -27,8 +27,10 @@ export default function CustomerSettingsFields({ contract, values, onValue, secr
   const fields = customerSettings(contract);
   // DEV-164: a Web project's administration has an address of its own — the cockpit fills it in like the web's.
   const publicUrl = (contract?.settings ?? []).filter((s) => s.kind === "public_url" || s.kind === "public_url_admin");
+  // DEV-409: the narrow public entry — the cockpit sets its tunnel up and writes its address; the label is the prefix.
+  const ingress = (contract?.settings ?? []).filter((s) => s.kind === "public_ingress");
   const problems = contract?.problems ?? [];
-  if (fields.length === 0 && publicUrl.length === 0 && problems.length === 0) return null;
+  if (fields.length === 0 && publicUrl.length === 0 && ingress.length === 0 && problems.length === 0) return null;
 
   return (
     <fieldset className="space-y-3 rounded-lg border border-[var(--color-border-default)] p-3">
@@ -81,6 +83,12 @@ export default function CustomerSettingsFields({ contract, values, onValue, secr
           ktorej inštalácia beží.
         </p>
       )}
+      {ingress.map((s) => (
+        <p key={s.key} className="text-[11px] text-[var(--color-text-muted)]">
+          Úzky verejný vstup: z internetu pôjdu do aplikácie len cesty {s.label} — tunel Cloudflare zriadi kokpit pri
+          nasadení a adresu ({s.key}) zapíše sám.
+        </p>
+      ))}
       {fields.some((s) => s.required) && (
         <p className="text-[11px] text-[var(--color-text-muted)]">* povinné — bez nich sa nasadenie nespustí.</p>
       )}

@@ -14,6 +14,8 @@ The app says it in its own ``.env.example``, in a comment of the block right abo
 * ``required`` after the marker (``# @customer required: „…“``) — no deploy without a value;
 * ``# @public-url`` — the cockpit writes the installation's public address (in a Web project: the web's).
 * ``# @public-url-admin`` — a Web project's administration address (``…-admin``; DEV-164).
+* ``# @public-ingress: /public/v1/`` — the narrow public entry (DEV-409): only paths under the prefix reach the app
+  from the internet, through a Cloudflare tunnel the cockpit sets up; the cockpit writes the entry's address.
 
 The text is in quotes because it is shown to a person (the cockpit's language rule: Slovak only in displayed text).
 """
@@ -30,13 +32,18 @@ CUSTOMER_SECRET = "customer_secret"
 PUBLIC_URL = "public_url"
 #: DEV-164: a Web project's administration has an address of its own (``…-admin``); ``@public-url`` is the web's.
 PUBLIC_URL_ADMIN = "public_url_admin"
+#: DEV-409: the narrow public entry — its label is the path prefix that goes out (``/public/v1/``).
+PUBLIC_INGRESS = "public_ingress"
 
 _KINDS = {
     "customer": CUSTOMER,
     "customer-secret": CUSTOMER_SECRET,
     "public-url": PUBLIC_URL,
     "public-url-admin": PUBLIC_URL_ADMIN,
+    "public-ingress": PUBLIC_INGRESS,
 }
+#: DEV-409: a path prefix of the narrow entry — absolute, ending in ``/``, plain path characters only.
+INGRESS_PREFIX = re.compile(r"^/[A-Za-z0-9._~/-]*/$")
 
 #: ``# @<word> [required][: text]`` — any ``# @word`` is a marker, so a misspelt one is reported, not ignored.
 _MARKER = re.compile(r"^#\s*@([\w-]+)(?:\s+(required))?\s*(?::\s*(.*?))?\s*$")
@@ -88,6 +95,11 @@ class Contract:
     def public_url_admin_keys(self) -> set[str]:
         return {s.key for s in self.of_kind(PUBLIC_URL_ADMIN)}
 
+    @property
+    def public_ingress(self) -> dict[str, str]:
+        """DEV-409: ``{variable: path prefix}`` of the narrow public entry the app declares (at most one)."""
+        return {s.key: s.label for s in self.of_kind(PUBLIC_INGRESS)}
+
 
 def _label(raw: str | None, key: str) -> str:
     text = (raw or "").strip()
@@ -120,7 +132,10 @@ def parse(text: str) -> Contract:
         if not variable:
             continue
         key = variable.group(1)
-        for _n, kind, required, label in pending:
+        for n, kind, required, label in pending:
+            if kind == PUBLIC_INGRESS and not INGRESS_PREFIX.match(_label(label, "")):
+                problems.append(f"značka @public-ingress na riadku {n} potrebuje predponu ciest, napr. „/public/v1/“")
+                continue
             settings.append(Setting(key=key, kind=kind, required=required, label=_label(label, key)))
         if len(pending) > 1:
             problems.append(f"premenná {key} má viac značiek naraz")

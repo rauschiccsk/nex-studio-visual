@@ -126,14 +126,14 @@ def check_cap(compose: dict[str, Any]) -> float:
     return settings.public_dns_timeout_seconds * max(1, len(public_route.route_hosts(compose))) + 10
 
 
-def _cloudflare(method: str, path: str, **kwargs: Any) -> Any:
+def _cloudflare(method: str, path: str, *, token: Optional[str] = None, **kwargs: Any) -> Any:
     """One call of Cloudflare's API with the cockpit's key — its ``result``, or :class:`CloudflareRefused` with
-    Cloudflare's own words."""
+    Cloudflare's own words. ``token``: another key of the cockpit (DEV-409: the tunnels'); by default the DNS one."""
     try:
         response = httpx.request(
             method,
             f"{settings.cloudflare_api_url}{path}",
-            headers={"Authorization": f"Bearer {settings.cloudflare_dns_token}"},
+            headers={"Authorization": f"Bearer {token or settings.cloudflare_dns_token}"},
             timeout=settings.cloudflare_timeout_seconds,
             **kwargs,
         )

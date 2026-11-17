@@ -4882,7 +4882,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "customer" | "customer_secret" | "public_url" | "public_url_admin";
+            kind: "customer" | "customer_secret" | "public_url" | "public_url_admin" | "public_ingress";
             /** Label */
             label: string;
             /** Required */
