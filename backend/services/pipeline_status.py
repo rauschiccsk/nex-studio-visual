@@ -127,6 +127,18 @@ class TaskPlanFeat(BaseModel):
     tasks: list[TaskPlanTask] = Field(min_length=1)
 
 
+def _clean_translations(value: Any) -> dict[str, str]:
+    """DEV-418: ``{"hu": "…"}`` with lowercase codes and non-empty texts — anything else is dropped, so a stray value
+    never reaches a note (a missing translation is said by the plan's own check)."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(code).strip().lower(): str(text).strip()
+        for code, text in value.items()
+        if isinstance(text, str) and text.strip() and re.fullmatch(r"[a-z]{2}", str(code).strip().lower())
+    }
+
+
 class TaskPlanEpic(BaseModel):
     """An epic groups ≥1 feat (always project-level — multi-module removed in v2)."""
 
@@ -134,7 +146,14 @@ class TaskPlanEpic(BaseModel):
     #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner — the Epic's ONLY prose (no technical
     #: ``description`` on an Epic). Default empty so an omission parses.
     plain_description: str = ""
+    #: DEV-418: ``plain_description`` in the app's other languages — the release note in each language is made of them.
+    plain_translations: dict[str, str] = Field(default_factory=dict)
     feats: list[TaskPlanFeat] = Field(min_length=1)
+
+    @field_validator("plain_translations", mode="before")
+    @classmethod
+    def _translations(cls, value: Any) -> dict[str, str]:
+        return _clean_translations(value)
 
 
 class TaskPlan(BaseModel):
@@ -195,7 +214,14 @@ class TaskPlanSkeletonEpic(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     #: STEP 3 (step3-plan-design.md FIX4): plain-language one-liner — the Epic's ONLY prose. Default empty.
     plain_description: str = ""
+    #: DEV-418: ``plain_description`` in each of the app's other languages (``{"hu": "…", "en": "…"}``).
+    plain_translations: dict[str, str] = Field(default_factory=dict)
     feats: list[TaskPlanSkeletonFeat] = Field(min_length=1)
+
+    @field_validator("plain_translations", mode="before")
+    @classmethod
+    def _translations(cls, value: Any) -> dict[str, str]:
+        return _clean_translations(value)
 
     @model_validator(mode="before")
     @classmethod

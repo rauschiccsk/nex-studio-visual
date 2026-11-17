@@ -3246,7 +3246,41 @@ GREEN_MAIN_PLAN_RULE = (
 )
 
 
-def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
+def plain_translations_rule(languages: Sequence[str]) -> str:
+    """DEV-418: what the skeleton pass adds for an app that speaks more than Slovak — each Epic's plain description in
+    every other language of the app, from which the cockpit makes the release note in that language. Empty for an app
+    that speaks only Slovak."""
+    from backend.services import release_note_writer
+
+    others = release_note_writer.translation_languages(languages)
+    if not others:
+        return ""
+    shape = ", ".join(f'"{code}": "…"' for code in others)
+    names = ", ".join(app_languages.name_of(code) for code in others)
+    return (
+        f"JAZYKY APLIKÁCIE: aplikácia hovorí aj ďalšími jazykmi — {names}. KAŽDÝ epik, ktorý má "
+        f"`plain_description`, má aj pole `plain_translations` — ten istý ľudský text v každom z týchto jazykov "
+        f"({{{shape}}}), rovnako jednoriadkový a "
+        "bez žargónu, preložený, nie skrátený. Z nich kokpit skladá poznámky k vydaniu (Aktualizácie) v jazyku "
+        "človeka; epik bez prekladu kokpit vráti."
+    )
+
+
+def plain_translations_gap(skeleton: Any, languages: Sequence[str]) -> Optional[str]:
+    """DEV-418: which Epics of the skeleton lack the translation of their plain description into which language
+    (``None`` when none) — the sentence the skeleton is asked again with."""
+    from backend.services import release_note_writer
+
+    others = release_note_writer.translation_languages(languages)
+    missing = [
+        f"„{epic.title}“ ({', '.join(app_languages.name_of(c) for c in others if not epic.plain_translations.get(c))})"
+        for epic in skeleton.epics
+        if epic.plain_description.strip() and any(not epic.plain_translations.get(c) for c in others)
+    ]
+    return ("chýba preklad `plain_description` v `plain_translations`: " + "; ".join(missing)) if missing else None
+
+
+def _task_plan_skeleton_directive(director_note: Optional[str] = None, languages: Sequence[str] = ("sk",)) -> str:
     """Pass 1 prompt (v0.7.3, CR-1; v2 CR-V2-011 — folds into Návrh): the AI Agent emits the EPIC + FEAT
     **skeleton** only — NO tasks, in a ``<<<TASK_PLAN_JSON>>>`` sentinel fence (``structured_output`` is dead
     in this CLI — see the fence rule).
@@ -3255,6 +3289,7 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
     passes). On a Manažér ``uprav`` (re-plan) the framed comment is prepended so the AI Agent applies the
     edit on the resumed warm session, not a blind re-plan.
     """
+    translations_rule = plain_translations_rule(languages)  # DEV-418
     base = (
         "Doplň POSLEDNÚ časť návrhu — plán úloh. Najprv vytvor jeho KOSTRU: emituj IBA epiky a funkcie "
         "(EPIC + FEAT), BEZ úloh. "
@@ -3297,6 +3332,7 @@ def _task_plan_skeleton_directive(director_note: Optional[str] = None) -> str:
         "(tvrdý strop — jemnejší rozklad engine ODMIETNE a budeš musieť kostru prerobiť)."
         + "\n\n"
         + GREEN_MAIN_PLAN_RULE
+        + (f"\n\n{translations_rule}" if translations_rule else "")
         + "\n\n"
         + _TASK_PLAN_FENCE_RULE
         + "\n\n"
@@ -4401,6 +4437,7 @@ def _write_task_plan(
                         version_id=state.version_id,
                         title=epic_in.title,
                         plain_description=epic_in.plain_description,
+                        plain_translations=epic_in.plain_translations or None,
                     ),
                 )
                 n_epics += 1
@@ -6306,12 +6343,15 @@ async def _commit_release_note(
     try:
         _apply_customer_note_to_fix_epic(db, version_id)  # ICCINT-53 — before the note is rendered
         path = release_note_writer.write_release_note(db, version_id, project_root)
+        # DEV-418: the note in the app's other languages, in the same commit — only beside a note that is ours.
+        translated = release_note_writer.write_translated_notes(db, version_id, project_root) if path else []
     except Exception:  # noqa: BLE001 — best-effort artifact; a generator failure must not sink the sign-off
         return
     files: list[str] = []
     if path is not None:
         try:
             files.append(str(path.relative_to(project_root)))
+            files.extend(str(note.relative_to(project_root)) for note in translated)
         except ValueError:
             return
         # DEV-104: what the project derives from its notes goes into the same commit — or the note does not go in.
@@ -6476,6 +6516,7 @@ def _write_release_note_to_disk(db: Session, version_id: uuid.UUID, project_root
     try:
         _apply_customer_note_to_fix_epic(db, version_id)  # ICCINT-53 — before the note is rendered
         if release_note_writer.write_release_note(db, version_id, project_root) is not None:
+            release_note_writer.write_translated_notes(db, version_id, project_root)  # DEV-418: the smoke build too
             # DEV-104: the smoke image is built from this tree — what the app derives from its notes must match.
             _derived, why = _regenerate_release_note_derivatives(project_root)
             if why:
@@ -11559,14 +11600,30 @@ async def _generate_incremental_plan(
     # conversation plan round overrides it to 'navrh' while stage stays 'priprava'; None → phase == stage.
     phase = metrics_phase if metrics_phase is not None else stage
 
+    # DEV-418: an app speaking more than Slovak gets each Epic's plain description in its other languages, too.
+    languages = tuple(
+        db.execute(
+            select(Project.languages).join(Version, Version.project_id == Project.id).where(Version.id == version_id)
+        ).scalar_one_or_none()
+        or ("sk",)
+    )
     skeleton_parser: Callable[[dict], Any] = parse_task_plan_skeleton
+    if plain_translations_rule(languages):
+
+        def skeleton_parser(obj: dict, _parse: Callable[[dict], Any] = skeleton_parser) -> Any:
+            parsed = _parse(obj)
+            if isinstance(parsed, ParseFailure):
+                return parsed
+            gap = plain_translations_gap(parsed, languages)
+            return ParseFailure(f"kostra plánu nemá preklady opisov epík — {gap}") if gap else parsed
+
     if review_notes:
         version_number = db.execute(select(Version.version_number).where(Version.id == version_id)).scalar_one()
         notes_brief = _review_notes_directive(version_number, review_notes)
         directive = f"{notes_brief}\n\n{directive}" if directive else notes_brief
 
-        def skeleton_parser(obj: dict) -> Any:
-            parsed = parse_task_plan_skeleton(obj)
+        def skeleton_parser(obj: dict, _parse: Callable[[dict], Any] = skeleton_parser) -> Any:
+            parsed = _parse(obj)
             if isinstance(parsed, ParseFailure):
                 return parsed
             gap = _review_notes_gap(parsed, len(review_notes))
@@ -11576,7 +11633,7 @@ async def _generate_incremental_plan(
     skeleton = await _invoke_plan_pass(
         db,
         state,
-        prompt=_task_plan_skeleton_directive(directive),
+        prompt=_task_plan_skeleton_directive(directive, languages),
         json_schema=TASK_PLAN_SKELETON_JSON_SCHEMA,
         parser=skeleton_parser,
         label_fn=lambda s: (
@@ -11674,6 +11731,7 @@ async def _generate_incremental_plan(
                 TaskPlanEpic(
                     title=epic.title,
                     plain_description=epic.plain_description,
+                    plain_translations=epic.plain_translations,
                     feats=[
                         TaskPlanFeat(
                             title=feat.title,

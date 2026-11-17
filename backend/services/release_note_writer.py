@@ -29,12 +29,14 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 
@@ -89,14 +91,14 @@ def version_notes_dir(proj_root: Path, version_number: str) -> Path:
     return Path(proj_root) / "docs" / "specs" / "versions" / f"v{_bare(version_number)}"
 
 
-def _epic_bullets(db: Session, version: Version) -> list[str]:
-    """One plain-language bullet per Epic (ordered by number).
+def _note_epics(db: Session, version: Version) -> list[tuple[Epic, str]]:
+    """The Epics the note is made of (ordered by number), each with its bullet in Slovak.
 
     ``plain_description`` is the user-facing prose; fall back to the ``title``
     (code-stripped) when it is null/blank. Epics that carry neither are skipped.
     """
     epics = db.execute(select(Epic).where(Epic.version_id == version.id).order_by(Epic.number)).scalars().all()
-    bullets: list[str] = []
+    made_of: list[tuple[Epic, str]] = []
     for epic in epics:
         # Skip the internal re-verify fix-loop Epics — they are churn, not user-facing changelog entries, and
         # including them caused a recurring RELEASE_NOTES drift that blocked every Verifikácia (one duplicate
@@ -107,8 +109,55 @@ def _epic_bullets(db: Session, version: Version) -> list[str]:
         if not text:
             text = _strip_codes((epic.title or "").strip())
         if text:
-            bullets.append(text)
-    return bullets
+            made_of.append((epic, text))
+    return made_of
+
+
+def _epic_bullets(db: Session, version: Version) -> list[str]:
+    """One plain-language bullet per Epic (ordered by number), in Slovak."""
+    return [text for _epic, text in _note_epics(db, version)]
+
+
+#: DEV-418: the language the Epics' ``plain_description`` is written in — the cockpit's. Their
+#: ``plain_translations`` carry it into the app's other languages.
+SOURCE_LANGUAGE = "sk"
+
+
+def translation_languages(languages: Sequence[str] | None) -> tuple[str, ...]:
+    """DEV-418: the app's languages an Epic's plain description is translated into — every one but Slovak."""
+    return tuple(code for code in (languages or (SOURCE_LANGUAGE,)) if code != SOURCE_LANGUAGE)
+
+
+def _translated_bullets(db: Session, version: Version, language: str) -> list[str] | None:
+    """The note's bullets in ``language`` — ``None`` when an Epic of the note has no translation into it: a note
+    half in one language is not said; the app then says the main one (nex-app-kit: a missing translation falls
+    back to the main file)."""
+    bullets: list[str] = []
+    for epic, _text in _note_epics(db, version):
+        translated = str((epic.plain_translations or {}).get(language) or "").strip()
+        if not translated:
+            return None
+        bullets.append(translated)
+    return bullets or None
+
+
+def _signed(lines: list[str]) -> str:
+    # Podpis na konci nesie ODTLAČOK tela (ICCINT-116): pri ďalšom behu sa podľa neho pozná nielen to,
+    # že text je náš, ale aj to, že sa ho odvtedy nikto nedotkol. Holá značka to rozlíšiť nevedela.
+    telo = "\n".join(lines)
+    return "\n".join([*lines, "", _marker_for(telo)]) + "\n"
+
+
+def render_release_note_in(db: Session, version: Version, language: str) -> str | None:
+    """DEV-418: the note of *version* in ``language`` — Slovak from ``plain_description`` (:func:`render_release_note`),
+    any other language from the Epics' translations, headed by the version number alone (the version's name is
+    Slovak; the app shows the number from the heading). ``None`` when a translation is missing."""
+    if language == SOURCE_LANGUAGE:
+        return render_release_note(db, version)
+    bullets = _translated_bullets(db, version, language)
+    if bullets is None:
+        return None
+    return _signed([f"## v{_bare(version.version_number)}", "", *(f"- {b}" for b in bullets)])
 
 
 def render_release_note(db: Session, version: Version) -> str:
@@ -131,13 +180,7 @@ def render_release_note(db: Session, version: Version) -> str:
     else:
         # Never emit an empty note — a version with no Epics still ships one honest line.
         lines.append("- Nová verzia.")
-
-    # Podpis na konci nesie ODTLAČOK tela (ICCINT-116): pri ďalšom behu sa podľa neho pozná nielen to,
-    # že text je náš, ale aj to, že sa ho odvtedy nikto nedotkol. Holá značka to rozlíšiť nevedela.
-    telo = "\n".join(lines)
-    lines.append("")
-    lines.append(_marker_for(telo))
-    return "\n".join(lines) + "\n"
+    return _signed(lines)
 
 
 #: Podpis, ktorým sa generovaná poznámka priznáva (ICCINT-96). Bez neho sa nedá odlíšiť text, ktorý
@@ -280,7 +323,7 @@ def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
     notes_dir = version_notes_dir(proj_root, version.version_number)
     notes_dir.mkdir(parents=True, exist_ok=True)
     path = notes_dir / "RELEASE_NOTES.md"
-    rendered = render_release_note(db, version)
+    rendered = _main_note(db, version)
 
     if path.is_file():
         try:
@@ -297,3 +340,55 @@ def write_release_note(db: Session, version_id, proj_root: Path) -> Path | None:
 
     path.write_text(rendered, encoding="utf-8")
     return path
+
+
+def _languages_of(db: Session, version: Version) -> tuple[str, ...]:
+    """The languages the version's app speaks, the main one first (``projects.languages``, DEV-395)."""
+    found = db.execute(select(Project.languages).where(Project.id == version.project_id)).scalar_one_or_none()
+    return tuple(found or (SOURCE_LANGUAGE,))
+
+
+def _main_note(db: Session, version: Version) -> str:
+    """DEV-418: the note of ``RELEASE_NOTES.md`` — in the app's main language, else (a translation missing, or an
+    app whose main language is Slovak) in Slovak, as before."""
+    return render_release_note_in(db, version, _languages_of(db, version)[0]) or render_release_note(db, version)
+
+
+def write_translated_notes(db: Session, version_id, proj_root: Path) -> list[Path]:
+    """DEV-418: (re)write the note in each of the app's other languages beside ``RELEASE_NOTES.md`` —
+    ``RELEASE_NOTES.<language>.md``, which nex-app-kit 0.16.0 says to a person reading in that language — and remove
+    one of ours that a translation no longer covers (the app then says the main note). Returns every path written or
+    removed, for the same commit as the main note.
+
+    The rules of the main note hold: a ``released`` version is never touched, and neither is a file somebody wrote
+    (ICCINT-96). Call it only when the main note is ours — a note the project wrote is not translated from the Epics.
+    17.11.2026: the notes the cockpit wrote were Slovak only; Director, on writing the translations with the plan:
+    „Súhlasím“."""
+    version = db.get(Version, version_id)
+    if version is None or version.status == "released":
+        return []
+    languages = _languages_of(db, version)
+    main_in_its_language = render_release_note_in(db, version, languages[0]) is not None
+    notes_dir = version_notes_dir(proj_root, version.version_number)
+    touched: list[Path] = []
+    for language in languages[1:]:
+        path = notes_dir / f"RELEASE_NOTES.{language}.md"
+        # The main note fell back to Slovak — a Slovak file beside it would only repeat it.
+        said_by_main = language == SOURCE_LANGUAGE and not main_in_its_language
+        rendered = None if said_by_main else render_release_note_in(db, version, language)
+        try:
+            existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        except OSError:
+            continue
+        if existing is not None and not _is_ours(existing, rendered or ""):
+            logger.info("%s pre %s si projekt napísal sám — nechávam ho (DEV-418)", path.name, version.version_number)
+            continue
+        if rendered is None:
+            if existing is not None:
+                path.unlink()
+                touched.append(path)
+            continue
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered, encoding="utf-8")
+        touched.append(path)
+    return touched

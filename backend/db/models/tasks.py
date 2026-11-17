@@ -10,7 +10,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
@@ -40,6 +40,9 @@ class Epic(Base, UUIDMixin, TimestampMixin):
     # ``plain_description`` is its ONLY prose. Nullable Text (migration 080); an omission parses (default
     # empty on the generating schema), and the FE shows a muted placeholder rather than technical text.
     plain_description = Column(Text, nullable=True)
+    # DEV-418: ``plain_description`` in the app's other languages (``{"hu": "…"}``) — the plan writer writes them with
+    # it, and the cockpit's release note in each language is assembled from them. NULL on epics planned before.
+    plain_translations = Column(JSONB, nullable=True)
     status = Column(String(20), nullable=False, server_default="planned")
 
     __table_args__ = (

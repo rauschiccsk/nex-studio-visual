@@ -69,6 +69,13 @@ class EpicCreate(BaseModel):
             "the AI partner emitted no one-liner."
         ),
     )
+    plain_translations: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            'DEV-418: ``plain_description`` in the app\'s other languages (``{"hu": "…"}``) — the cockpit '
+            "assembles the release note in each language from them. ``None`` on epics planned before."
+        ),
+    )
     status: EpicStatus = Field(
         default="planned",
         description="Lifecycle status: planned | in_progress | done.",
