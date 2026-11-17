@@ -23,6 +23,11 @@ from tests.test_deploy_service import _deploy, _FakeRunner, _make_customer, _mak
 
 NOTE = "## v0.2.1 — Rýchla oprava\n\n- Aplikácia ukladá súbory tak, aby ich nočná záloha vždy zálohovala.\n"
 DATES = {"v0.1.0": "2026-10-30", "v0.2.0": "2026-10-30", "v0.2.1": "2026-11-04"}
+#: DEV-418: the same note in the app's other languages (nex-app-kit 0.16.0 says Aktualizácie in the person's language).
+TRANSLATIONS = {
+    "RELEASE_NOTES.hu.md": "## v0.2.1 — Gyors javítás\n\n- Az éjszakai mentés minden fájlt ment.\n",
+    "RELEASE_NOTES.en.md": "## v0.2.1 — Quick fix\n\n- The nightly backup saves every file.\n",
+}
 
 
 def _git(root: Path, *args: str) -> str:
@@ -35,6 +40,9 @@ def _checkout(projects_root: Path, slug: str, origin: Path) -> Path:
     for number, text in (("v0.2.0", "## v0.2.0\n\n- Druhá verzia.\n"), ("v0.2.1", NOTE)):
         (versions / number).mkdir(parents=True)
         (versions / number / "RELEASE_NOTES.md").write_text(text, encoding="utf-8")
+    for name, text in TRANSLATIONS.items():
+        (versions / "v0.2.1" / name).write_text(text, encoding="utf-8")
+    (versions / "v0.2.1" / "specification.md").write_text("# not a note\n", encoding="utf-8")
     (versions / "release-dates.json").write_text(json.dumps(DATES, indent=2) + "\n", encoding="utf-8")
     _git(work, "init", "-q", "-b", "main")
     _git(work, "config", "user.email", "studio@isnex.eu")
@@ -86,7 +94,11 @@ async def test_it_is_one_commit_and_nothing_is_left_behind(graduated):
     assert _git(graduated, "log", "-1", "--format=%s") == "docs(release-notes): graduate notes to v1.0.0"
     assert sorted(_git(graduated, "show", "--no-renames", "--name-only", "--format=", "HEAD").split()) == [
         "docs/specs/versions/release-dates.json",
+        "docs/specs/versions/v0.2.1/RELEASE_NOTES.en.md",
+        "docs/specs/versions/v0.2.1/RELEASE_NOTES.hu.md",
         "docs/specs/versions/v0.2.1/RELEASE_NOTES.md",
+        "docs/specs/versions/v1.0.0/RELEASE_NOTES.en.md",
+        "docs/specs/versions/v1.0.0/RELEASE_NOTES.hu.md",
         "docs/specs/versions/v1.0.0/RELEASE_NOTES.md",
     ]
     assert _git(graduated, "status", "--porcelain") == ""
@@ -100,3 +112,20 @@ def test_only_the_version_of_the_heading_changes():
         "# Aktualizácie\n\n## v1.0.0\n\n- Oprava z v0.2.1 na v0.2.0 sa nevracia.\n"
     )
     assert deploy_service.note_headed_by("## v0.2.10\n", "0.2.1", "1.0.0") == "## v0.2.10\n"
+
+
+@pytest.mark.asyncio
+async def test_the_note_in_every_language_moves_with_it_in_the_same_commit(graduated):
+    """DEV-418 — 17.11.2026: only RELEASE_NOTES.md moved; the translations stayed under 0.2.1 and the app said
+    Aktualizácie of 1.0.0 in Slovak only."""
+    versions = graduated / "docs" / "specs" / "versions"
+
+    assert sorted(p.name for p in (versions / "v1.0.0").iterdir()) == [
+        "RELEASE_NOTES.en.md",
+        "RELEASE_NOTES.hu.md",
+        "RELEASE_NOTES.md",
+    ]
+    for name, text in TRANSLATIONS.items():
+        assert (versions / "v1.0.0" / name).read_text(encoding="utf-8") == text.replace("## v0.2.1 —", "## v1.0.0 —", 1)
+    assert sorted(p.name for p in (versions / "v0.2.1").iterdir()) == ["specification.md"]
+    assert _git(graduated, "status", "--porcelain") == ""

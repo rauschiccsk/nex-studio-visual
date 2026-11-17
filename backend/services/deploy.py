@@ -1717,6 +1717,10 @@ def _prod_url(customer_slug: str, app: str, *, private: bool = False, prod_host:
     return f"https://{customer_slug}-{app}.{uat_provisioner.routing_for(prod_host, private=private).zone}"
 
 
+#: DEV-418: a version's release note — the main one, or its translation into one of the app's languages.
+RELEASE_NOTE_NAME = re.compile(r"RELEASE_NOTES(\.[a-z]{2,3}(-[A-Z]{2})?)?\.md")
+
+
 def note_headed_by(text: str, old_number: str, target: str) -> str:
     """DEV-307 — *text* (a version's release note) with the first heading that names *old_number* naming *target*;
     the body, and any other mention of the old number, as it is."""
@@ -1734,22 +1738,30 @@ def _move_release_note_dir(proj_root: Path, old_number: str, target: str, day: d
 
     DEV-307: the note's heading names the new number and ``release-dates.json`` carries the *day* under it, in the
     same commit — 04.11.2026 NEX Knowledge's moved note still said „## v0.2.1“ and had no day, and the app's own guard
-    turned its main branch red."""
+    turned its main branch red.
+
+    DEV-418: the note in every language the app speaks moves with it, headed the same — ``RELEASE_NOTES.md`` and each
+    ``RELEASE_NOTES.<language>.md`` (nex-app-kit 0.16.0 says Aktualizácie in the person's language from them); until
+    17.11.2026 only the main one moved and the translations stayed behind under the old number."""
     from backend.services import release_note_writer
     from backend.services.orchestrator import _git_ok
 
-    old_file = release_note_writer.version_notes_dir(proj_root, old_number) / "RELEASE_NOTES.md"
+    old_dir = release_note_writer.version_notes_dir(proj_root, old_number)
     new_dir = release_note_writer.version_notes_dir(proj_root, target)
-    new_file = new_dir / "RELEASE_NOTES.md"
-    if new_file == old_file or not old_file.is_file():
+    notes = sorted(n for n in old_dir.glob("RELEASE_NOTES*.md") if RELEASE_NOTE_NAME.fullmatch(n.name))
+    if new_dir == old_dir or not (old_dir / "RELEASE_NOTES.md").is_file():
         return
+    paths: list[str] = []
     try:
         new_dir.mkdir(parents=True, exist_ok=True)
-        old_file.replace(new_file)
-        new_file.write_text(note_headed_by(new_file.read_text(encoding="utf-8"), old_number, target), encoding="utf-8")
+        for old_file in notes:
+            new_file = new_dir / old_file.name
+            old_file.replace(new_file)
+            text = note_headed_by(new_file.read_text(encoding="utf-8"), old_number, target)
+            new_file.write_text(text, encoding="utf-8")
+            paths += [str(old_file.relative_to(proj_root)), str(new_file.relative_to(proj_root))]
     except OSError:
         return
-    paths = [str(old_file.relative_to(proj_root)), str(new_file.relative_to(proj_root))]
     dates = release_note_writer.move_release_date(proj_root, old_number, target, day)
     if dates is not None:
         paths.append(str(dates.relative_to(proj_root)))

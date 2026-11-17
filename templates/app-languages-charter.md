@@ -23,7 +23,10 @@ ako text, do všetkých katalógov naraz — nikdy „preložím neskôr“.
   preklad do všetkých jazykov naraz, hodnoty v `{…}` rovnaké — a odmietnutie je `KitError(409, "APP-…", "app.server.…",
   params={…})`; server ho povie v jazyku človeka. Na staršej šablóne ich píšeš v hlavnom jazyku.
 - **Poznámky k vydaniu a Ako začať** píšeš v hlavnom jazyku do `RELEASE_NOTES.md` a `docs/AKO_ZACAT.md` a od nex-app-kit
-  0.16.0 aj v každom ďalšom jazyku vedľa nich: `RELEASE_NOTES.<jazyk>.md`, `docs/AKO_ZACAT.<jazyk>.md`.
+  0.16.0 aj v každom ďalšom jazyku vedľa nich: `RELEASE_NOTES.<jazyk>.md`, `docs/AKO_ZACAT.<jazyk>.md`. Obraz servera
+  ich musí niesť všetky: `backend/Dockerfile` berie `docs/AKO_ZACAT*.md` a `RELEASE_NOTES*.md` priečinkov verzií
+  (kostra od nex-app-kit 0.16.1). Keď tvoj `Dockerfile` berie len `AKO_ZACAT.md` či len `RELEASE_NOTES.md`, doplň
+  hviezdičku — inak sa Ako začať a Aktualizácie v ďalšom jazyku k človeku nedostanú.
 - Jazyk človeka mení človek v Nastavenia → Moje konto a správca v Nastavenia → Používatelia; jazyk stránky (`lang`)
   nastaví rám. Od nex-app-kit 0.16.0 to vie šablóna — vlastné tlačidlo, cestu servera ani úložisko na to nestavaj.
 
