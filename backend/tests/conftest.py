@@ -49,6 +49,7 @@ from backend.main import app
 from tests.conftest import (  # noqa: F401
     _a_backend_reached_by_its_own_name,
     _a_machine_with_room,
+    _an_app_that_reads_no_knowledge,
     _deterministic_host_port_probe,
     _guard_prod_db_isolation,
     _isolate_system_setting_cache,

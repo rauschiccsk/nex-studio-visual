@@ -909,7 +909,7 @@ class PairedManager:
         Parsed as YAML, per service. A line scan looked simpler and was wrong: it took the LAST port label in the
         file, which belongs to the frontend, and produced ``http://…-backend:80``. ``None`` when no Manager compose
         is there (the app then keeps whatever it had; token-launch stays off)."""
-        return _manager_internal_url(self.compose_text)
+        return _backend_internal_url(self.compose_text)
 
 
 def load_paired_manager(manager_dir: Path, deploy_host: Optional[str]) -> PairedManager:
@@ -939,6 +939,29 @@ def _own_https_addresses(compose_text: Optional[str]) -> list[str]:
         return []
     urls = public_route.route_urls(data if isinstance(data, dict) else {})
     return [url.rstrip("/") for url in urls if url.startswith("https://")]
+
+
+#: DEV-410 — the setting an app reads its customer's NEX Knowledge at (``/api/v1/app-read/…``), and the project that
+#: answers it. Like the Manager's address (ICCINT-59), the cockpit writes it: the backend of the customer's NEX
+#: Knowledge in the same environment on the same machine, straight over the machine's proxy network — NEX Knowledge
+#: refuses every call that came through a proxy or Cloudflare.
+KNOWLEDGE_URL_ENV = "NEX_KNOWLEDGE_BASE_URL"
+KNOWLEDGE_PROJECT = "nex-knowledge"
+KNOWLEDGE_MISSING = (
+    "Prepojenie s NEX Knowledge: NEX Knowledge zákazníka v tomto prostredí na tomto stroji nie je nasadená — aplikácia "
+    "ju nečíta; po jej nasadení nasaď znova aj túto aplikáciu."
+)
+
+
+def knowledge_address(knowledge_dir: Path, deploy_host: Optional[str]) -> Optional[str]:
+    """DEV-410: the customer's NEX Knowledge backend on the network of the machine, from its installation's compose —
+    ``None`` when it is not installed there (or the machine cannot be read)."""
+    if deploy_host:
+        text, _error = remote_instance.read_text(knowledge_dir, "docker-compose.yml", deploy_host=deploy_host)
+    else:
+        compose = knowledge_dir / "docker-compose.yml"
+        text = compose.read_text(encoding="utf-8") if compose.is_file() else None
+    return _backend_internal_url(text)
 
 
 #: DEV-272 — what a deploy into an existing installation says when it paired the app with its Manager anew.
@@ -997,9 +1020,9 @@ def _module_display_name(project_slug: str) -> str:
     return " ".join(p.upper() if p == "nex" else p.capitalize() for p in parts) or project_slug
 
 
-def _manager_internal_url(compose_text: Optional[str]) -> Optional[str]:
-    """The Manager backend's ``http://<container_name>:<port>`` from its compose — see
-    :meth:`PairedManager.internal_url`."""
+def _backend_internal_url(compose_text: Optional[str]) -> Optional[str]:
+    """An installation's backend ``http://<container_name>:<port>`` from its compose — the Manager's
+    (:meth:`PairedManager.internal_url`) or NEX Knowledge's (:func:`knowledge_address`)."""
     try:
         data = yaml.safe_load(compose_text or "")
     except yaml.YAMLError:
@@ -4069,6 +4092,18 @@ def provision_uat(
     further_public_urls = _further_public_urls(
         contract, environment, uat_slug, customer_slug, app, private, project_slug, deploy_host
     )
+    # DEV-410 — an app that reads its customer's NEX Knowledge gets its address, written by the cockpit like the
+    # Manager's: the knowledge installation of the same customer and environment on the same machine.
+    knowledge_values: dict[str, str] = {}
+    knowledge_missing = False
+    if per_customer and customer_slug and KNOWLEDGE_URL_ENV in env_example:
+        knowledge_url = knowledge_address(
+            (prod_root if environment == "prod" else uat_root) / customer_slug / KNOWLEDGE_PROJECT, deploy_host
+        )
+        if knowledge_url:
+            knowledge_values[KNOWLEDGE_URL_ENV] = knowledge_url
+        else:
+            knowledge_missing = True
 
     # ICCINT-59: finish the pairing. Wiring the launch key alone left the app able to VERIFY a token but unable
     # to finish a sign-in: it must ask the Manager who the visitor is, which needs the Manager's address and a
@@ -4134,7 +4169,7 @@ def provision_uat(
         customer_values=customer_values,
         public_url_keys=frozenset(contract.public_url_keys),
         public_url=f"https://{public_host}",
-        public_urls=further_public_urls,
+        public_urls=further_public_urls | knowledge_values,
     )
 
     # H1 (CR-1): driver↔URL self-validation BEFORE any file is written — fail LOUD at provision time for
@@ -4142,6 +4177,8 @@ def provision_uat(
     # leaving NOTHING on disk; WARN for every ambiguous case. The source DATABASE_URL must be fixed, not the
     # render — so the message says SOURCE FIX REQUIRED.
     warnings: list[str] = []
+    if knowledge_missing:
+        warnings.append(KNOWLEDGE_MISSING)
     if kept_identity and not is_redeploy:
         warnings.append(
             "Inštalácia si ponechala vlastné nastavenia, ktoré vzor projektu predpisuje inak: "
@@ -4410,6 +4447,9 @@ def provision_uat(
             paired_manager, manager_base_url=manager_base_url, manager_api_key=manager_api_key
         )
         renew_pairing(env_riadky, hodnoty_prepojenia)
+        # DEV-410 — the address of the customer's NEX Knowledge is the cockpit's, like the pairing: written on every
+        # deploy (an installation keeps its own values, ICCINT-104; this is not one of them).
+        env_riadky.update({key: url for key, url in knowledge_values.items() if key in env_riadky})
         # DEV-330 — said against the installation as it was before this deploy: a key the version adds (NEX Websites
         # 1.1.0 asks the Manager with a key 1.0 never had) is written by the version bump above, before the pairing.
         prepojene = [

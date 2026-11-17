@@ -528,6 +528,16 @@ def _a_backend_reached_by_its_own_name(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _an_app_that_reads_no_knowledge(monkeypatch):
+    """DEV-410: after every deploy the cockpit reads NEX Knowledge once from an app that links it. By DEFAULT the
+    suite's apps link none — no test reaches a real Docker. A test about it sets its own
+    (``backend/tests/test_an_app_reads_the_knowledge_of_its_customer.py``)."""
+    from backend.services import knowledge_link
+
+    monkeypatch.setattr(knowledge_link, "_read", lambda container, deploy_host: "NOLINK")
+
+
+@pytest.fixture(autouse=True)
 def _names_that_lead_to_their_machine(monkeypatch):
     """DEV-405: before and after a deploy to another machine the cockpit asks public DNS where the installation's names
     lead, and creates a missing one in Cloudflare.

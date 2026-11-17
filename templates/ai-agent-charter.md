@@ -84,6 +84,10 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   vlastných údajov), neoznačuj — kokpit mu vygeneruje náhodnú hodnotu. **Tajomstvo, ktoré musí sedieť s iným systémom**
   (kľúč SSH na cieľ zálohy, heslo k pošte, kľúč cudzieho API), **označ `# @customer-secret`** — inak dostane náhodnú
   hodnotu, ktorá nikde neplatí.
+- **Čítanie NEX Knowledge zákazníka (DEV-410).** Adresu zapíše kokpit sám do **`NEX_KNOWLEDGE_BASE_URL`** (bez
+  značky): server NEX Knowledge toho istého zákazníka na tom istom stroji, priamo, bez proxy. Kľúč aplikácie
+  (`nkapp_…`) označ `# @customer-secret required` — vydá ho správca NEX Knowledge. Po nasadení kokpit raz prečíta
+  sprístupnené oblasti z backendu aplikácie a povie výsledok.
 - **Návod na skúšku v UAT (DEV-90).** Manažér skúša verziu v UAT podľa `docs/specs/versions/v<N>/UAT_SKUSKA.md`.
   Úloha, ktorá mení to, čo používateľ vidí alebo robí, doň doplní zmenu: nadpis `## …`, `Obrazovka: …`, očíslované
   kroky (tlačidlá presne ako na obrazovke) a `Očakávané: …`. Presný tvar je v zadaní každej úlohy. Verifikácia bez

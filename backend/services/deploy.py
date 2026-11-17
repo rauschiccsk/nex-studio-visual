@@ -99,6 +99,7 @@ from backend.services import (
     deploy_return,
     deploy_source,
     installation_names,
+    knowledge_link,
     launch_pairing,
     machine_disk,
     private_access,
@@ -1534,6 +1535,11 @@ async def _deploy_from(
     # ICCINT-154 / DEV-166.)
     if ok:
         warnings.extend(await asyncio.to_thread(backend_reach.check, instalacia / "docker-compose.yml", deploy_host))
+        # DEV-410 — an app that reads its customer's NEX Knowledge: one read from its backend says whether it does.
+        reads, unread = await asyncio.to_thread(knowledge_link.check, instalacia / "docker-compose.yml", deploy_host)
+        if reads:
+            detail = f"{detail} {reads}" if detail else reads
+        warnings.extend(w for w in unread if w not in warnings)
     else:
         detail = machine_disk.said_plainly(detail, deploy_host)
     # DEV-68: the same seam carries whether the new version was started — a failed deploy that started it is
