@@ -3772,13 +3772,15 @@ def _drift_or_superseded(db: Session, version: Optional[Version], anchor: str, h
     return "superseded" if _code_moved(root, anchor, head) is not False else drift
 
 
-def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str]:
-    """DEV-416: the commit a released version was released with and the drift that names its re-check — its Hotovo
-    signature's commit, else the commit of its newest Verifikácia PASS, else its version tag. ``(None, …)`` when it
-    has none."""
+def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str, Optional[str]]:
+    """DEV-416: the commit a released version was released with, the drift that names its re-check, and — when it has
+    no commit — what its check on record says. The commit is its Hotovo signature's, else its newest Verifikácia PASS's,
+    else its version tag's. Without one: ``hotovo_unbound`` / ``unbound`` (signed or passed while the repository could
+    not be read — our own read failure, never un-verifying, as for any version), ``legacy`` (passed before anchoring),
+    or ``None`` (nothing on record)."""
     signoff = _manazer_signoff(db, version.id)
     if signoff is not None and signoff.get("hotovo_sha"):
-        return signoff["hotovo_sha"], "hotovo_drift"
+        return signoff["hotovo_sha"], "hotovo_drift", None
     verdicts = db.execute(
         select(PipelineMessage.payload)
         .where(
@@ -3788,10 +3790,13 @@ def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str]
         )
         .order_by(PipelineMessage.seq.desc())
     ).scalars()
+    unanchored: Optional[str] = "hotovo_unbound" if signoff is not None else None
     for payload in verdicts:
         sha = (payload or {}).get("verified_sha")
         if sha and sha != "legacy":
-            return sha, "sha_drift"
+            return sha, "sha_drift", None
+        if unanchored is None and (payload or {}).get("verdict") == "PASS":
+            unanchored = "legacy" if sha == "legacy" else "unbound"
     root = claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id)
     try:
         tag = subprocess.run(
@@ -3802,23 +3807,25 @@ def _released_anchor(db: Session, version: Version) -> tuple[Optional[str], str]
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return None, "sha_drift"
-    return (tag.stdout.strip() or None) if tag.returncode == 0 else None, "sha_drift"
+        return None, "sha_drift", unanchored
+    found = tag.stdout.strip() if tag.returncode == 0 else ""
+    return (found, "sha_drift", None) if found else (None, "sha_drift", unanchored)
 
 
 def _released_version_verified(db: Session, version: Version, head: Optional[str]) -> tuple[bool, str]:
     """DEV-416: a released version is verified while the code a deploy would build is the code it was released
     with — HEAD is its commit, or only :data:`VERSION_RECORDS_DIR` changed since (the first-PROD note move, the next
     version's specification). Otherwise it is ``superseded`` (a newer version has begun) or drifted (``sha_drift`` /
-    ``hotovo_drift`` — „Over znova“ re-checks it); a released version with no commit on record is
-    ``released_unanchored``. Our own failure to read the repository never un-verifies (``repo_unreadable``)."""
+    ``hotovo_drift`` — „Over znova“ re-checks it). Without a commit it reads as its check on record does
+    (``unbound`` / ``hotovo_unbound`` / ``legacy`` — verified, the screen says the check cannot be confirmed), and with
+    no check at all ``released_unanchored``. Our own failure to read the repository never un-verifies."""
     if head is None:
         head = _repo_head(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id))
     if head is None:
         return True, "repo_unreadable"
-    anchor, drift = _released_anchor(db, version)
+    anchor, drift, unanchored = _released_anchor(db, version)
     if anchor is None:
-        return False, "released_unanchored"
+        return (True, unanchored) if unanchored else (False, "released_unanchored")
     if anchor == head:
         return True, "released"
     root = str(claude_agent.PROJECTS_ROOT / _project_slug_for_version(db, version.id))
@@ -3844,7 +3851,8 @@ def version_verified(db: Session, version_id: uuid.UUID, *, head: Optional[str] 
         must not hard-block a 2nd customer's deploy of the just-graduated version). DEV-416: it used to be
         ``(True, 'released')`` whatever HEAD held, and a deploy builds HEAD — NEX Manager 1.2.2 was offered with
         127 commits of later work under its number. Code moved → ``superseded`` / ``sha_drift`` /
-        ``hotovo_drift``; no commit on record → ``(False, 'released_unanchored')``.
+        ``hotovo_drift``; no commit on record → as its check says (``unbound`` / ``hotovo_unbound`` / ``legacy``), no
+        check at all → ``(False, 'released_unanchored')``.
       * DEV-416: a drift while a NEWER version has begun (its work is in the code) → ``(False, 'superseded')`` —
         „Over znova“ would check the newer version's unfinished code under this number, so it is not offered
         and the deploy screen names the newer version instead.

@@ -159,11 +159,34 @@ def test_a_released_version_without_a_commit_on_record_falls_back_to_its_tag(db_
     assert orchestrator.version_verified(db_session, released.id) == (False, "sha_drift")
 
 
-def test_a_released_version_with_no_commit_at_all_is_not_offered(db_session, nex_manager) -> None:
+def test_a_released_version_with_no_check_at_all_is_not_offered(db_session, nex_manager) -> None:
     _commit(nex_manager.repo, {"backend/app.py": "v = 1\n"}, "code")
     released = nex_manager.version("1.2.2", status="released")
 
     assert orchestrator.version_verified(db_session, released.id) == (False, "released_unanchored")
+
+
+def test_a_released_version_that_passed_while_the_repository_could_not_be_read_reads_as_unconfirmed(
+    db_session, nex_manager
+) -> None:
+    """Its PASS was never bound to a commit — our own read failure, which never un-verifies (any version: ``unbound``,
+    the screen says the check cannot be confirmed). A first PROD deploy of such a version must not lock out the
+    next customer."""
+    _commit(nex_manager.repo, {"backend/app.py": "v = 1\n"}, "code")
+    released = nex_manager.version("1.0.0", status="released")
+    orchestrator._record_message(
+        db_session,
+        version_id=released.id,
+        stage="verifikacia",
+        author="auditor",
+        recipient="manazer",
+        kind="verdict",
+        content="PASS",
+        payload={"verdict": "PASS", "phase": "verifikacia"},
+    )
+    db_session.flush()
+
+    assert orchestrator.version_verified(db_session, released.id) == (True, "unbound")
 
 
 # --- a finished version once a newer one has begun ---------------------------------------------------------------
