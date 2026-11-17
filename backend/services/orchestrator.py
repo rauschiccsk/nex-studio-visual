@@ -15021,8 +15021,7 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     with its state and address; the top-level fields speak for all of them — ``running`` only when every preview
     runs, the first one's address, and the first reason a preview is down, named by its frontend.
     """
-    state = _get_state(db, version_id)
-    if state is None or state.current_stage != "vizual" or has_vizual_mockup(db, version_id):
+    if not _live_preview_needed(db, version_id):
         return {"needed": False, "state": "not_needed", "url": None, "reason": None}
     from backend.services import vizual_sandbox
 
@@ -15069,32 +15068,36 @@ async def _rebuild_preview_on_current_libraries(slug: str, private: bool, surfac
     )
 
 
+def _live_preview_needed(db: Session, version_id: uuid.UUID) -> bool:
+    """A live preview runs only in the Vizuál step, and only when the AI's self-contained mockup is not the preview."""
+    state = _get_state(db, version_id)
+    return state is not None and state.current_stage == "vizual" and not has_vizual_mockup(db, version_id)
+
+
 async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     """DEV-127: start the live preview again without an agent turn — one click of the Manažér.
 
-    Only in the Vizuál step and only for a live preview (a mockup needs no container). ``spin_up`` removes a
-    stopped leftover and creates the preview anew; it runs off the event loop like every spin-up (ICCINT-74).
-    DEV-162: every frontend whose preview is down is started; one that runs is left alone. DEV-241: one that runs on
-    old libraries is built anew already by :func:`vizual_preview`, which this asks first.
+    Only in the Vizuál step and only for a live preview (a mockup needs no container). ``spin_up`` creates the preview
+    anew; it runs off the event loop like every spin-up (ICCINT-74). DEV-419: EVERY frontend's preview is replaced,
+    running or not — the Manažér presses the button when a preview does not work, and one that „runs“ may serve a blank
+    page (17.11.2026 NEX Manager 1.7.0: a running preview whose pre-bundled libraries an AI Agent's npm ci had removed;
+    until then the button returned at once for a running preview and was not even shown for it).
     Raises :class:`OrchestratorError` with a sentence for the Manažér when it cannot start.
     """
-    now = await vizual_preview(db, version_id)
-    if not now["needed"]:
+    # Asked without looking at the previews first: a look builds one on old libraries anew (DEV-241), and the button
+    # builds every one anew anyway — the preview is built once, not twice.
+    if not _live_preview_needed(db, version_id):
         raise OrchestratorError("Živý náhľad sa spúšťa len v kroku Vizuál, a len keď náhľadom nie je hotový návrh.")
-    if now["state"] == "running":
-        return now
     from backend.services import vizual_sandbox
 
     slug = _project_slug_for_version(db, version_id)
-    running = {f["directory"] for f in now.get("frontends", []) if f["state"] == "running"}
     for surface in _surfaces_for_version(db, version_id):
-        if surface.directory in running:
-            continue
         try:
             await run_blocking(
                 vizual_sandbox.spin_up,
                 slug,
                 private=_project_private_network(db, version_id),
+                fresh=True,
                 **_preview_of(surface),
                 cap=VIZUAL_SPINUP_CAP,
             )

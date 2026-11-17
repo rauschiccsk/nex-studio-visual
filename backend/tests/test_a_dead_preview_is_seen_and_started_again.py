@@ -86,9 +86,9 @@ def _preview(monkeypatch, states: list[str], spins: list[str] | None = None, *, 
             "reason": reason,
         }
 
-    def _spin(slug, frontend_path=None, *, private=False):
+    def _spin(slug, frontend_path=None, *, private=False, fresh=False):
         if spins is not None:
-            spins.append(slug)
+            spins.append(slug if fresh else f"{slug} (reused if running)")
         if fail:
             raise fail
         return f"https://vizual-{slug}.isnex.eu"
@@ -137,20 +137,22 @@ async def test_start_again_brings_a_dead_preview_back(db_session, monkeypatch) -
     version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
     spins: list[str] = []
-    _preview(monkeypatch, ["stopped", "running"], spins)
+    _preview(monkeypatch, ["running"], spins)
     after = await orchestrator.restart_vizual_preview(db_session, version.id)
     assert spins == [project.slug]
     assert (after["state"], after["url"]) == ("running", f"https://vizual-{project.slug}.isnex.eu")
 
 
 @pytest.mark.asyncio
-async def test_start_again_leaves_a_running_preview_alone(db_session, monkeypatch) -> None:
-    version, _ = _make_version(db_session)
+async def test_start_again_replaces_a_running_preview_too(db_session, monkeypatch) -> None:
+    """DEV-419 — 17.11.2026 NEX Manager 1.7.0: a preview that „ran“ served a blank page; the button returned at once
+    for a running preview. The Manažér presses it when a preview does not work: it is built anew, running or not."""
+    version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
     spins: list[str] = []
     _preview(monkeypatch, ["running"], spins)
     assert (await orchestrator.restart_vizual_preview(db_session, version.id))["state"] == "running"
-    assert spins == []
+    assert spins == [project.slug]
 
 
 @pytest.mark.asyncio

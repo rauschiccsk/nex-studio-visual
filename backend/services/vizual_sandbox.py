@@ -120,6 +120,14 @@ _OVERRIDE_CONTAINER_NAME = "vite.vizual.config.mts"
 #: project tree is never polluted with cache artefacts. Mode 1777 so uid 1000 can create files inside.
 _VITE_SCRATCH_DIRS = ("/app/node_modules/.vite", "/app/node_modules/.vite-temp")
 
+#: DEV-419: where Vite keeps the libraries it pre-bundles (``cacheDir`` in the override config) — a tmpfs of its own,
+#: OUTSIDE the bind-mounted project. A tmpfs over ``/app/node_modules/.vite`` sits on the ``node_modules`` directory
+#: the preview started with; when the AI Agent reinstalls the libraries (``npm ci`` deletes and recreates
+#: ``node_modules``), that mount is left on the deleted directory and the running Vite finds its pre-bundled react
+#: gone — every ``/node_modules/.vite/deps/…`` answers 504 and the page stays blank. 17.11.2026 NEX Manager 1.7.0:
+#: the preview started at 15:09:30, the Vizuál's first step ran ``npm ci`` at 15:10, and no checklist link opened.
+VITE_CACHE_DIR = "/vite-cache"
+
 #: Bound the one-shot ``npm install`` fallback (node_modules is normally scaffolded already).
 _NPM_INSTALL_TIMEOUT = 600
 #: Bound the short-lived ``docker`` control calls (run/inspect/rm).
@@ -273,6 +281,7 @@ def _render_override_config() -> str:
         "      allowedHosts: [publicHost],\n"
         "      hmr: { host: publicHost, clientPort: hmrClientPort, protocol: hmrProtocol },\n"
         "    },\n"
+        f'    cacheDir: "{VITE_CACHE_DIR}",\n'
         '    optimizeDeps: { include: ["msw", "msw/browser"] },\n'
         "  });\n"
         "});\n"
@@ -395,6 +404,8 @@ def build_run_argv(
         # Writable RAM scratch shadowing Vite's node_modules cache/temp — keeps the host node_modules
         # pristine AND immune to pre-existing root-owned scratch dirs (see _VITE_SCRATCH_DIRS).
         argv += ["--tmpfs", f"{scratch}:rw,mode=1777"]
+    # DEV-419: the pre-bundled libraries outside the project — an AI Agent's npm ci cannot pull them away.
+    argv += ["--tmpfs", f"{VITE_CACHE_DIR}:rw,mode=1777"]
     argv += [
         # Public origin + HMR transport for the override config.
         "-e",
@@ -561,7 +572,12 @@ def _ensure_node_modules(frontend_host_path: Path, *, slug: str) -> None:
 
 
 def spin_up(
-    slug: str, frontend_path: Optional[str] = None, *, private: bool = False, directory: str = MAIN_FRONTEND
+    slug: str,
+    frontend_path: Optional[str] = None,
+    *,
+    private: bool = False,
+    directory: str = MAIN_FRONTEND,
+    fresh: bool = False,
 ) -> str:
     """Start (idempotently) an isolated Vite dev-server sandbox for ``slug`` and return its public URL.
 
@@ -584,12 +600,16 @@ def spin_up(
 
     host = public_host(slug, private=private, directory=directory)
     with _spin_lock(name):
-        return _spin_up_locked(slug, name, host, frontend_host_path, private=private, directory=directory)
+        return _spin_up_locked(slug, name, host, frontend_host_path, private=private, directory=directory, fresh=fresh)
 
 
-def _spin_up_locked(slug: str, name: str, host: str, frontend_host_path: Path, *, private: bool, directory: str) -> str:
+def _spin_up_locked(
+    slug: str, name: str, host: str, frontend_host_path: Path, *, private: bool, directory: str, fresh: bool = False
+) -> str:
     state = _inspect_state(name)
-    if state["running"] and _running_public_host(name) == host:
+    # DEV-419: ``fresh`` — the Manažér asked for the preview anew („Spustiť náhľad znova“): a running one is replaced,
+    # whatever it looks like from outside; he presses the button exactly when it does not work.
+    if not fresh and state["running"] and _running_public_host(name) == host:
         if _running_dependencies(name) == dependencies_fingerprint(frontend_host_path):
             logger.info("vizual sandbox: %s already running — reusing", name)
             return public_url(slug, private=private, directory=directory)

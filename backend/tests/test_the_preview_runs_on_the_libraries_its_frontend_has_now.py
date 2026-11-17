@@ -194,7 +194,7 @@ def _cockpit(monkeypatch, *, current: list[bool], fail: Exception | None = None)
     def _state(slug, *, private=False):
         return {"state": "running", "url": f"https://vizual-{slug}.isnex.eu", "reason": None}
 
-    def _spin(slug, frontend_path=None, *, private=False):
+    def _spin(slug, frontend_path=None, *, private=False, fresh=False):
         spins.append(slug)
         if fail:
             raise fail
@@ -247,10 +247,12 @@ async def test_a_rebuild_that_fails_reads_as_a_preview_that_does_not_run(db_sess
 
 
 @pytest.mark.asyncio
-async def test_start_again_builds_a_preview_on_old_libraries_anew(db_session, monkeypatch) -> None:
+async def test_start_again_builds_a_preview_on_old_libraries_anew_once(db_session, monkeypatch) -> None:
+    """DEV-419: the button builds the preview anew without a look first — a look would build one on old libraries
+    anew already, and the button would build it a second time."""
     version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
-    spins = _cockpit(monkeypatch, current=[False])
+    spins = _cockpit(monkeypatch, current=[True])
 
     after = await orchestrator.restart_vizual_preview(db_session, version.id)
 

@@ -177,7 +177,7 @@ def _previews(monkeypatch, states: dict[str, str]) -> list[str]:
             "reason": "Error: port 5173 is in use" if state == "stopped" else None,
         }
 
-    def _spin(slug, frontend_path=None, *, private=False, directory="frontend"):
+    def _spin(slug, frontend_path=None, *, private=False, directory="frontend", fresh=False):
         started.append(directory)
         states[directory] = "running"
         return vizual_sandbox.public_url(slug, directory=directory)
@@ -204,14 +204,15 @@ async def test_a_web_project_sees_each_preview_and_which_one_is_down(db_session,
 
 
 @pytest.mark.asyncio
-async def test_start_again_starts_only_the_preview_that_is_down(db_session, monkeypatch):
+async def test_start_again_builds_every_preview_anew(db_session, monkeypatch):
+    """DEV-419: a running preview may serve a blank page — the button replaces every preview of the version."""
     version, project = _web_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
     started = _previews(monkeypatch, {"frontend": "running", "web": "stopped"})
 
     preview = await orchestrator.restart_vizual_preview(db_session, version.id)
 
-    assert started == ["web"]
+    assert started == ["frontend", "web"]
     assert preview["state"] == "running"
     assert [f["url"] for f in preview["frontends"]] == [
         f"https://vizual-{project.slug}.isnex.eu",

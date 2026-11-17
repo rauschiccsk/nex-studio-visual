@@ -106,3 +106,51 @@ describe("LivePreviewBar — a Web project (DEV-162)", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 });
+
+describe("LivePreviewBar — start again beside a running preview (DEV-419)", () => {
+  // 17.11.2026 NEX Manager 1.7.0: a preview that „ran“ served a blank page and the strip offered only its link.
+  const address = "https://vizual-nex-manager.isnex.eu";
+  const running: VizualPreview = { needed: true, state: "running", url: address, reason: null };
+
+  it("a running preview can be started again with one click", () => {
+    const onRestart = vi.fn();
+    render(<LivePreviewBar board={board("vizual", address)} preview={running} onRestart={onRestart} />);
+
+    expect(screen.getByRole("link", { name: "Otvoriť živý náhľad" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Spustiť náhľad znova" }));
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it("while it starts again the button waits and a failure is said", () => {
+    render(
+      <LivePreviewBar
+        board={board("vizual", address)}
+        preview={running}
+        restarting
+        error="Docker neodpovedá."
+        onRestart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Spúšťam náhľad…" })).toBeDisabled();
+    expect(screen.getByText("Docker neodpovedá.")).toBeInTheDocument();
+  });
+
+  it("with a preview for each frontend the button stands beside their links", () => {
+    const onRestart = vi.fn();
+    const admin = { directory: "frontend", label: "Administrácia", state: "running", url: address, reason: null };
+    const web = { ...admin, directory: "web", label: "Web", url: "https://vizualweb-nex-manager.isnex.eu" };
+    const both = { ...running, frontends: [admin, web] } as unknown as VizualPreview;
+    render(<LivePreviewBar board={board("vizual", address)} preview={both} onRestart={onRestart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Spustiť náhľad znova" }));
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+  });
+
+  it("without a way to start it again there is no button", () => {
+    render(<LivePreviewBar board={board("vizual", address)} preview={running} />);
+
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+});
