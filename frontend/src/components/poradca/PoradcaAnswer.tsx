@@ -17,7 +17,13 @@ import { useActiveContextStore } from "@/store/activeContextStore";
 import { useCodePaths } from "@/hooks/useCodePaths";
 import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { greenCardChoice, handOffInstruction, instructionTarget, type HandedChoice } from "@/lib/poradcaHandoff";
+import {
+  greenCardChoice,
+  handOffChoice,
+  handOffInstruction,
+  instructionTarget,
+  type HandedChoice,
+} from "@/lib/poradcaHandoff";
 import {
   answerForDisplay,
   CHOICE_HREF,
@@ -30,7 +36,7 @@ import {
 import { ChoiceSummary } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
 import { modelDisplayName } from "@/utils/modelLabel";
-import type { PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
+import type { PoradcaChoice, PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
 interface Props {
   message: PoradcaMessage;
@@ -100,6 +106,22 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
     // DEV-333 — the green choice of a card goes with the instruction, and the card has it picked.
     if (instruction) handOff(instruction, greenCardChoice(choices));
     else if (answerChoice) handOff(answerChoice.label);
+  }
+
+  // DEV-427: with nothing to put into the box, the green choice of a card is itself the way there — it picks the option
+  // on the card, nothing lands in the box and nothing is sent (with an instruction the button above carries it, DEV-333).
+  const pickable = !running && !held && !notInSlovak && !insertText;
+
+  function pick(choice: PoradcaChoice) {
+    if (!target || typeof choice.card !== "number") return;
+    try {
+      handOffChoice(target.id, { card: choice.card, label: choice.label });
+    } catch (e: unknown) {
+      setError({ message: e instanceof Error ? e.message : "Odovzdanie voľby zlyhalo" });
+      return;
+    }
+    setSelectedVersion({ versionId: target.id, versionNumber: target.version_number });
+    navigate("/riadiace-centrum");
   }
 
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
@@ -211,7 +233,13 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
           {notInSlovak}
         </p>
       )}
-      {!running && <ChoiceSummary choices={summary} />}
+      {!running && (
+        <ChoiceSummary
+          choices={summary}
+          onPick={pickable ? pick : undefined}
+          pickRefused={pickable ? instructionBlocked : null}
+        />
+      )}
       {!running && hasActions && (
         <div className="mt-2 flex flex-wrap gap-2">
           {agentTickets.length > 0 && (

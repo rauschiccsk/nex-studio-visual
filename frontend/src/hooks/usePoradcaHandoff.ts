@@ -58,9 +58,10 @@ export function usePoradcaHandoff({
     if (!live || !versionId) return;
     const take = () => {
       const incoming = takeHandoff(versionId);
-      if (!incoming) return;
-      const choice = takeHandedChoice(versionId); // taken with the text — never left for a later instruction
+      // Taken with the text — never left for a later instruction; DEV-427: also alone, when Poradca had no instruction.
+      const choice = takeHandedChoice(versionId);
       if (choice) onChoiceRef.current?.(choice);
+      if (!incoming) return;
       const next = appendInstruction(textRef.current, incoming);
       textRef.current = next;
       setText(next);

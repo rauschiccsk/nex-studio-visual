@@ -104,6 +104,17 @@ export function handOffInstruction(versionId: string, instruction: string, choic
   window.dispatchEvent(new CustomEvent(HANDOFF_EVENT, { detail: { versionId } }));
 }
 
+/** DEV-427 — hand off only the green choice of a card, when Poradca has no instruction to go with it: the card has it
+ * picked, nothing lands in the box and nothing is sent. Throws when the browser refuses to store it. */
+export function handOffChoice(versionId: string, choice: HandedChoice): void {
+  try {
+    window.localStorage.setItem(pendingKey(versionId) + CHOICE_SUFFIX, JSON.stringify(choice));
+  } catch {
+    throw new Error("Prehliadač nedovolil uložiť voľbu — vyber ju na karte ručne.");
+  }
+  window.dispatchEvent(new CustomEvent(HANDOFF_EVENT, { detail: { versionId } }));
+}
+
 /** The pending instruction for this version, removed from the slot (a box takes it exactly once). */
 export function takeHandoff(versionId: string): string | null {
   try {

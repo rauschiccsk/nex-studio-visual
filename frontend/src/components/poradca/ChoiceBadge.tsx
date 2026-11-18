@@ -38,13 +38,38 @@ function ChoiceBadge({ choice }: { choice: PoradcaChoice }) {
  * plain words; here it is green when the card offers it or when it is the answer for the agent's question, orange with
  * the warning in words when the card does not offer it (DEV-83, DEV-208 — once, not twice).
  */
-export function ChoiceSummary({ choices }: { choices: PoradcaChoice[] }) {
+export function ChoiceSummary({
+  choices,
+  onPick,
+  pickRefused = null,
+}: {
+  choices: PoradcaChoice[];
+  /** DEV-427 — when Poradca has nothing to put into Riadiace centrum, a green choice of a card picks it there. */
+  onPick?: (choice: PoradcaChoice) => void;
+  /** Why the choice cannot go now (no version takes it) — the button is grey with this reason. */
+  pickRefused?: string | null;
+}) {
   if (choices.length === 0) return null;
   return (
     <div data-testid="poradca-choices" className="mt-2 flex flex-col items-start gap-1 text-sm">
       {choices.map((choice) => (
         <span key={`${choice.card ?? ""}:${choice.label}`} className="inline-flex flex-wrap items-baseline gap-1">
-          <ChoiceBadge choice={choice} />
+          {onPick && typeof choice.card === "number" && choice.status === "on_card" ? (
+            <button
+              type="button"
+              onClick={() => onPick(choice)}
+              disabled={!!pickRefused}
+              title={
+                pickRefused ??
+                `Otvorí Riadiace centrum a na karte ${choice.card} vyberie túto voľbu — rozhodnutie potvrdíš sám.`
+              }
+              className="rounded hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChoiceBadge choice={choice} />
+            </button>
+          ) : (
+            <ChoiceBadge choice={choice} />
+          )}
           {choice.status === "not_on_card" && (
             <span className="text-xs text-[var(--color-state-warning-fg)]">{NOT_ON_CARD_NOTE}</span>
           )}
