@@ -83,7 +83,7 @@ export interface HandedChoice {
 const CHOICE_SUFFIX = ".choice";
 
 /** The green card choice among an answer's choices — the first one, as the answer names it first. */
-export function greenCardChoice(
+function greenCardChoice(
   choices: ReadonlyArray<{ card?: number | null; label: string; status: string }>,
 ): HandedChoice | null {
   const green = choices.find((c) => typeof c.card === "number" && c.status === "on_card");
@@ -207,7 +207,7 @@ export function handOffOffer(message: PoradcaMessage): HandOffOffer {
 }
 
 /** DEV-432 — the answer puts something into Riadiace centrum. */
-export function offersHandOff(message: PoradcaMessage): boolean {
+function offersHandOff(message: PoradcaMessage): boolean {
   const offer = handOffOffer(message);
   return !!(offer.instruction || offer.answer || offer.card);
 }
