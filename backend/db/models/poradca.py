@@ -133,6 +133,8 @@ class PoradcaMessage(Base, UUIDMixin, TimestampMixin):
     plane_issue_id = Column(String(64), nullable=True)
     plane_identifier = Column(String(32), nullable=True)
     plane_url = Column(String(500), nullable=True)
+    #: DEV-431 — when the answer was last put into Riadiace centrum (its instruction, answer or green card choice).
+    handed_off_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(f"author IN ({_in(MESSAGE_AUTHORS)})", name="ck_poradca_messages_author"),

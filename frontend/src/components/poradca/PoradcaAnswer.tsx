@@ -15,13 +15,19 @@ import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useCodePaths } from "@/hooks/useCodePaths";
-import { attachAgentTicketsApi, saveRequestToBacklogApi, stopPoradcaApi } from "@/services/api/poradca";
+import {
+  attachAgentTicketsApi,
+  markHandedOffApi,
+  saveRequestToBacklogApi,
+  stopPoradcaApi,
+} from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import {
-  greenCardChoice,
   handOffChoice,
   handOffInstruction,
+  handOffOffer,
   instructionTarget,
+  OLDER_PROPOSAL,
   type HandedChoice,
 } from "@/lib/poradcaHandoff";
 import {
@@ -29,12 +35,11 @@ import {
   CHOICE_HREF,
   formatCost,
   formatDuration,
-  isLongAnswerChoice,
-  longAnswer,
   stepLabel,
 } from "@/lib/poradcaAnswer";
 import { ChoiceSummary } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
+import { formatDateTime } from "@/utils/format";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaChoice, PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
@@ -46,9 +51,17 @@ interface Props {
   projectVersions?: readonly PoradcaVersionInfo[];
   /** DEV-343 — who answers: the project's Poradca, or the Projektant of an idea in Nápady. */
   agentName?: "Poradca" | "Projektant";
+  /** DEV-432 — the newest proposal of the conversation: only its buttons put it into Riadiace centrum. */
+  latest?: boolean;
 }
 
-export default function PoradcaAnswer({ message, scopeVersion, projectVersions = [], agentName = "Poradca" }: Props) {
+export default function PoradcaAnswer({
+  message,
+  scopeVersion,
+  projectVersions = [],
+  agentName = "Poradca",
+  latest = true,
+}: Props) {
   const navigate = useNavigate();
   const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const pinnedVersionId = useActiveContextStore((s) => s.selectedVersion?.versionId ?? null);
@@ -74,8 +87,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
   const inFlight = useRef(false);
   const agentTickets = message.agent_tickets ?? [];
   const steps = message.steps ?? [];
-  // DEV-83: the choices the answer marks, checked by the server against the card they name.
-  const choices = message.choices ?? [];
+  // DEV-83: the choices the answer marks, checked by the server against the card they name — read in handOffOffer.
   const running = message.status === "running";
 
   async function stop() {
@@ -93,18 +105,20 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
   // inserts nothing either, not even a long answer or a choice it would read from the text itself.
   const notInSlovak = message.not_in_slovak ?? null;
   // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
-  const instruction = held || notInSlovak ? null : (message.instruction ?? longAnswer(message.content ?? ""));
   // DEV-401: a short answer for the agent's question (one the server recognised) goes the instruction's way — one button
   // „Vložiť do Riadiaceho centra“, always below the answer (Director 16.11.2026: the small „Vložiť do odpovede“ in the
-  // first sentence was not found).
-  // The choices drawn at the end — a long answer is already the quoted block above, not a choice to pick.
-  const summary = choices.filter((c) => c.card || !isLongAnswerChoice(message.content ?? "", c.label));
-  const answerChoice = held || notInSlovak ? undefined : summary.find((c) => !c.card && c.status === "answer");
+  // first sentence was not found). What the answer offers is read in one place (DEV-432, ``handOffOffer``).
+  const offer = handOffOffer(message);
+  const { instruction, summary } = offer;
+  const answerChoice = offer.answer;
   const insertText = instruction ?? answerChoice?.label ?? null;
+  // DEV-432 — an older proposal puts nothing into Riadiace centrum; its buttons are grey with the reason.
+  const handOffRefused = latest ? instructionBlocked : OLDER_PROPOSAL;
 
   function insert() {
+    if (!latest) return;
     // DEV-333 — the green choice of a card goes with the instruction, and the card has it picked.
-    if (instruction) handOff(instruction, greenCardChoice(choices));
+    if (instruction) handOff(instruction, offer.card);
     else if (answerChoice) handOff(answerChoice.label);
   }
 
@@ -113,15 +127,26 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
   const pickable = !running && !held && !notInSlovak && !insertText;
 
   function pick(choice: PoradcaChoice) {
-    if (!target || typeof choice.card !== "number") return;
+    if (!latest || !target || typeof choice.card !== "number") return;
     try {
       handOffChoice(target.id, { card: choice.card, label: choice.label });
     } catch (e: unknown) {
       setError({ message: e instanceof Error ? e.message : "Odovzdanie voľby zlyhalo" });
       return;
     }
+    handedOff();
     setSelectedVersion({ versionId: target.id, versionNumber: target.version_number });
     navigate("/riadiace-centrum");
+  }
+
+  // DEV-431 — the cockpit keeps at the answer that it was put into Riadiace centrum; the screen says so when it comes
+  // back. The hand-off itself already happened, so a failed record does not stop the way to Riadiace centrum.
+  function handedOff() {
+    try {
+      void markHandedOffApi(message.id).catch(() => undefined);
+    } catch {
+      /* the record is a courtesy — the answer is already in Riadiace centrum */
+    }
   }
 
   // DEV-135: the instruction and the recommended answer to the agent's question go the same way — into the box of
@@ -134,6 +159,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
       setError({ message: e instanceof Error ? e.message : "Vloženie zlyhalo" });
       return;
     }
+    handedOff();
     setSelectedVersion({ versionId: target.id, versionNumber: target.version_number });
     navigate("/riadiace-centrum");
   }
@@ -237,7 +263,7 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
         <ChoiceSummary
           choices={summary}
           onPick={pickable ? pick : undefined}
-          pickRefused={pickable ? instructionBlocked : null}
+          pickRefused={pickable ? handOffRefused : null}
         />
       )}
       {!running && hasActions && (
@@ -262,9 +288,9 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
             <button
               type="button"
               onClick={insert}
-              disabled={!!instructionBlocked}
+              disabled={!!handOffRefused}
               title={
-                instructionBlocked ??
+                handOffRefused ??
                 `Vloží ${instruction ? "pokyn" : "odpoveď"} do poľa Riadiaceho centra verzie ${target?.version_number} — ` +
                   "odošleš ho sám."
               }
@@ -334,6 +360,12 @@ export default function PoradcaAnswer({ message, scopeVersion, projectVersions =
           }}
           onClose={() => setTicketOpen(false)}
         />
+      )}
+      {/* DEV-431 — the answer was put into Riadiace centrum: said at the answer, also after a reload. */}
+      {!running && message.handed_off_at && (
+        <p role="status" className="mt-1 text-[11px] text-[var(--color-state-success-fg)]">
+          Vložené do Riadiaceho centra {formatDateTime(message.handed_off_at)}
+        </p>
       )}
       {instructionBlocked && (insertText || agentTickets.length > 0) && !running && (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{instructionBlocked}</p>

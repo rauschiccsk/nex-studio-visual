@@ -1532,6 +1532,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/messages/{message_id}/handed-off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Handed Off
+         * @description DEV-431 — the answer was put into Riadiace centrum now: the screen says so at the answer, also after a reload and
+         *     on another computer. Only an answer of Poradca (or the Projektant) is put there.
+         */
+        post: operations["mark_handed_off_api_v1_poradca_messages__message_id__handed_off_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/plane-ticket": {
         parameters: {
             query?: never;
@@ -7002,6 +7023,17 @@ export interface components {
             /** Version Number */
             version_number?: string | null;
         };
+        /**
+         * PoradcaHandedOff
+         * @description DEV-431 — when the answer was put into Riadiace centrum.
+         */
+        PoradcaHandedOff: {
+            /**
+             * Handed Off At
+             * Format: date-time
+             */
+            handed_off_at: string;
+        };
         /** PoradcaMessageRead */
         PoradcaMessageRead: {
             /** Agent Tickets */
@@ -7034,6 +7066,8 @@ export interface components {
             error?: string | null;
             /** Finished At */
             finished_at?: string | null;
+            /** Handed Off At */
+            handed_off_at?: string | null;
             /**
              * Held For Answer
              * @default false
@@ -12067,6 +12101,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaBacklogSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_handed_off_api_v1_poradca_messages__message_id__handed_off_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaHandedOff"];
                 };
             };
             /** @description Validation Error */

@@ -87,6 +87,11 @@ export function stopPoradcaApi(messageId: string): Promise<{ stopping: boolean }
 }
 
 /** DEV-29: the request in Poradca's answer goes to the project's Zásobník — no version comes of it. */
+/** DEV-431 — the answer was put into Riadiace centrum now: the cockpit keeps the time at the answer. */
+export function markHandedOffApi(messageId: string): Promise<{ handed_off_at: string }> {
+  return api.post<{ handed_off_at: string }>(`/poradca/messages/${messageId}/handed-off`);
+}
+
 export function saveRequestToBacklogApi(messageId: string): Promise<PoradcaBacklogSaved> {
   return api.post<PoradcaBacklogSaved>(`/poradca/messages/${messageId}/backlog`);
 }

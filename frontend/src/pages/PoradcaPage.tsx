@@ -41,6 +41,7 @@ import { versionOptionLabel } from "@/lib/poradcaAnswer";
 import { REVIEW_PARAM, reviewQuestion, takeReview } from "@/lib/poradcaReview";
 import { toUpload } from "@/lib/poradcaAttachments";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
+import { latestProposalId } from "@/lib/poradcaHandoff";
 
 const WHOLE_PROJECT = "";
 
@@ -121,6 +122,8 @@ export default function PoradcaPage() {
 
   // When the answer finishes, the list refreshes its "running" flag and the order.
   const running = !!detail?.messages?.some((m) => m.status === "running");
+  // DEV-432 — only the newest proposal of the conversation puts something into Riadiace centrum.
+  const latestProposal = latestProposalId(detail?.messages ?? []);
   // DEV-25: what grows while Poradca writes — a new message, a new step of the last one, its answer (the text
   // arrives with the status change, not piece by piece).
   const lastMessage = detail?.messages?.[detail.messages.length - 1];
@@ -461,7 +464,13 @@ export default function PoradcaPage() {
                 )}
               </div>
             ) : (
-              <PoradcaAnswer key={m.id} message={m} scopeVersion={scopeVersion} projectVersions={context?.versions ?? []} />
+              <PoradcaAnswer
+                key={m.id}
+                message={m}
+                scopeVersion={scopeVersion}
+                projectVersions={context?.versions ?? []}
+                latest={m.id === latestProposal}
+              />
             ),
           )}
         </div>

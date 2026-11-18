@@ -110,6 +110,8 @@ class PoradcaMessageRead(BaseModel):
     finished_at: Optional[datetime] = None
     #: The answer carries an instruction for the agent of a running build (``<pokyn-pre-agenta>`` block) — to insert.
     instruction: Optional[str] = None
+    #: DEV-431 — when the answer was last put into Riadiace centrum; ``None`` — never.
+    handed_off_at: Optional[datetime] = None
     #: Odpoveď nesie požiadavku do Zásobníka (blok ``<poziadavka-do-zasobnika>``, staršie odpovede
     #: ``<poziadavka-na-novu-verziu>``) — DEV-29.
     backlog_request: Optional[str] = None
@@ -139,6 +141,12 @@ class PoradcaAgentTicketsAttached(BaseModel):
     attached: list[str]
     #: The lines the screen puts into the answer for the agent — where each ticket's file lies.
     answer_text: str
+
+
+class PoradcaHandedOff(BaseModel):
+    """DEV-431 — when the answer was put into Riadiace centrum."""
+
+    handed_off_at: datetime
 
 
 class PoradcaBacklogSaved(BaseModel):

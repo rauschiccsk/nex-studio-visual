@@ -15,7 +15,8 @@
 
 import type { InputOwner } from "@/components/controlCenter/blockRecovery";
 import { draftKey } from "@/hooks/useDraft";
-import type { PoradcaVersionInfo } from "@/types/poradca";
+import { isLongAnswerChoice, longAnswer } from "@/lib/poradcaAnswer";
+import type { PoradcaChoice, PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
 
 export type HandoffSurface = InputOwner;
 
@@ -177,3 +178,49 @@ export function forgetPoradcaOrigin(
     /* nothing to do */
   }
 }
+
+/** What an answer offers to put into Riadiace centrum — the one place the answer's buttons and the page's „latest
+ * proposal“ (DEV-432) read it from. Nothing while it runs, while it waits for the person's answer (DEV-264) or when what
+ * it would pass on is not Slovak (DEV-356). */
+export interface HandOffOffer {
+  /** The instruction for the agent — or a long answer marked as a choice (DEV-224). */
+  instruction: string | null;
+  /** A short answer for the agent's question the server recognised (DEV-401). */
+  answer: PoradcaChoice | undefined;
+  /** The green choice of a card (DEV-333, DEV-427). */
+  card: HandedChoice | null;
+  /** The choices drawn at the end — a long answer is already the quoted block above, not a choice to pick. */
+  summary: PoradcaChoice[];
+}
+
+export function handOffOffer(message: PoradcaMessage): HandOffOffer {
+  const choices = message.choices ?? [];
+  const summary = choices.filter((c) => c.card || !isLongAnswerChoice(message.content ?? "", c.label));
+  const closed = message.status === "running" || !!message.held_for_answer || !!message.not_in_slovak;
+  if (closed) return { instruction: null, answer: undefined, card: null, summary };
+  return {
+    instruction: message.instruction ?? longAnswer(message.content ?? ""),
+    answer: summary.find((c) => !c.card && c.status === "answer"),
+    card: greenCardChoice(choices),
+    summary,
+  };
+}
+
+/** DEV-432 — the answer puts something into Riadiace centrum. */
+export function offersHandOff(message: PoradcaMessage): boolean {
+  const offer = handOffOffer(message);
+  return !!(offer.instruction || offer.answer || offer.card);
+}
+
+/** DEV-432 — the newest answer of the conversation that offers something to put into Riadiace centrum: only its
+ * buttons are live, an older proposal could put a stale instruction into the build. */
+export function latestProposalId(messages: readonly PoradcaMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]!;
+    if (m.author === "poradca" && offersHandOff(m)) return m.id;
+  }
+  return null;
+}
+
+/** DEV-432 — why an older proposal's buttons are grey. */
+export const OLDER_PROPOSAL = "Starší návrh — do Riadiaceho centra sa vkladá len posledný návrh Poradcu.";

@@ -43,6 +43,7 @@ import { humanizeApiError, type HumanError } from "@/services/apiError";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import type { Idea, PoradcaStatus } from "@/types/poradca";
 import { formatDate } from "@/utils/format";
+import { latestProposalId } from "@/lib/poradcaHandoff";
 
 const NEW_IDEA_DRAFT = "nove";
 /** DEV-408 — the answer Projektant's questions are put for (templates/poradca-ideas-charter.md §3). */
@@ -149,6 +150,8 @@ export default function IdeasPage() {
     conversationId,
   );
   const running = !!detail?.messages?.some((m) => m.status === "running");
+  // DEV-432 — only the newest proposal of the idea's conversation puts something into Riadiace centrum.
+  const latestProposal = latestProposalId(detail?.messages ?? []);
   const notReady =
     status && !status.ready ? (status.problems ?? []).join("; ") : null;
   const concluded = current?.state === "founded" || current?.state === "added";
@@ -415,6 +418,7 @@ export default function IdeasPage() {
                   scopeVersion={null}
                   projectVersions={[]}
                   agentName="Projektant"
+                  latest={m.id === latestProposal}
                 />
                 {current && !concluded && latestBrief?.id === m.id && (
                   <IdeaOutcomeActions

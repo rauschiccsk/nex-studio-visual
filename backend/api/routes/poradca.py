@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
@@ -57,6 +58,7 @@ from backend.schemas.poradca import (
     PoradcaConversationCreate,
     PoradcaConversationDetail,
     PoradcaConversationRead,
+    PoradcaHandedOff,
     PoradcaMessageRead,
     PoradcaProjectContext,
     PoradcaRename,
@@ -184,6 +186,7 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         ticket_proposal=_ticket_proposal(msg.content) if offers else None,
         plane_identifier=msg.plane_identifier,
         plane_url=msg.plane_url,
+        handed_off_at=msg.handed_off_at,
         agent_tickets=handoff.agent_tickets(msg.content) if offers else [],
         held_for_answer=held,
         not_in_slovak=block_language.refusal(foreign) if foreign else None,
@@ -665,6 +668,20 @@ def save_request_to_backlog(
         project_slug=result.project_slug,
         created=result.created,
     )
+
+
+@router.post("/messages/{message_id}/handed-off", response_model=PoradcaHandedOff)
+def mark_handed_off(
+    message_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> PoradcaHandedOff:
+    """DEV-431 — the answer was put into Riadiace centrum now: the screen says so at the answer, also after a reload and
+    on another computer. Only an answer of Poradca (or the Projektant) is put there."""
+    msg = _answer_for(db, current_user, message_id)
+    if msg.author != AUTHOR_PORADCA:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Vložiť sa dá len odpoveď Poradcu.")
+    msg.handed_off_at = datetime.now(timezone.utc)
+    db.commit()
+    return PoradcaHandedOff(handed_off_at=msg.handed_off_at)
 
 
 def _answer_for(db: Session, user: User, message_id: uuid.UUID) -> PoradcaMessage:
