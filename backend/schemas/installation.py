@@ -31,6 +31,10 @@ class InstallationEnvironment(BaseModel):
     opens: Literal["link", "uat_launch", "manager"] = "link"
     #: For ``manager``: the PROD address of the customer's NEX Manager; ``None`` when the cockpit deployed none.
     manager_url: Optional[str] = None
+    #: DEV-404 — the machine it was deployed to (its label); ``None``: the deploy recorded none (before 18.11.2026).
+    machine: Optional[str] = None
+    #: The customer's machine of today when the installation was deployed elsewhere — nothing is deployed there.
+    planned_machine: Optional[str] = None
 
 
 class InstallationApp(BaseModel):

@@ -193,6 +193,17 @@ function EnvironmentCell({ app, environment, asked }: { app: InstallationApp; en
       {installation.last_attempt_failed && (
         <span className="text-xs text-[var(--color-status-warning)]">posledný pokus o nasadenie zlyhal</span>
       )}
+      {/* DEV-404: where it was deployed, not the customer's setting of today (a UAT runs on the cockpit's machine). */}
+      {environment === "prod" && (
+        <span className="text-xs text-[var(--color-text-muted)]">
+          {installation.machine ? `na stroji ${installation.machine}` : "stroj nezaznamenaný"}
+        </span>
+      )}
+      {environment === "prod" && installation.planned_machine && (
+        <span className="text-xs text-[var(--color-status-warning)]">
+          zákazník má byť na stroji {installation.planned_machine} — tam nenasadené
+        </span>
+      )}
     </div>
   );
 }

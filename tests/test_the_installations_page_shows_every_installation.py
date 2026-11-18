@@ -154,6 +154,8 @@ def asked(monkeypatch):
 
     monkeypatch.setattr(I.httpx, "get", get)
     monkeypatch.setattr(I, "_cache", {})
+    # DEV-404: whether the installation is on its machine is asked only when it does not answer — here it is there.
+    monkeypatch.setattr(I, "_present", lambda customer, project, environment, machine: True)
     return calls, answers
 
 

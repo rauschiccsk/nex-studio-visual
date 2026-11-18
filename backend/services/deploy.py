@@ -1638,6 +1638,7 @@ async def _deploy_from(
         status=DEPLOY_STATUS_OK if ok else (DEPLOY_STATUS_UNVERIFIED if started else DEPLOY_STATUS_FAILED),
         actor_id=actor_id,
         detail=detail,
+        machine=deploy_host or "",  # DEV-404 — where it went; a UAT always runs on this machine
     )
     db.add(event)
     db.flush()
@@ -1731,6 +1732,15 @@ def _url_for_instance_slug(instance_slug: str, *, private: bool = False) -> str:
     never drift (§3.4/§3.5).
     """
     return f"https://uat-{instance_slug}.{uat_provisioner.domain_suffix(private)}"
+
+
+def instance_url_on(customer: Customer, environment: str, project: Project, machine: Optional[str]) -> str:
+    """DEV-404 — the address of the installation on the machine it was deployed to (``machine`` as a deploy records it:
+    ``""`` this machine); ``None`` — not recorded — gives the address on the customer's machine of today."""
+    if environment != "prod" or machine is None:
+        return _instance_url(customer, environment, project)
+    base, app = _customer_dir_slug(customer), uat_provisioner.derive_uat_slug(project.slug)
+    return _prod_url(base, app, private=bool(project.private_network), prod_host=machine or None)
 
 
 def _instance_url(customer: Customer, environment: str, project: Project) -> str:

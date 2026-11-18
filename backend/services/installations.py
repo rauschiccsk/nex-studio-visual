@@ -38,9 +38,19 @@ from sqlalchemy.orm import Session
 from backend.config.settings import settings
 from backend.core import authz
 from backend.db.models.customers import Customer
+from backend.db.models.deploy import DeployEvent
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
-from backend.services import claude_agent, deploy, launch_pairing, orchestrator, project_surfaces, uat_provisioner
+from backend.services import (
+    claude_agent,
+    deploy,
+    launch_pairing,
+    orchestrator,
+    prod_machines,
+    project_surfaces,
+    remote_instance,
+    uat_provisioner,
+)
 
 ENVIRONMENTS = ("uat", "prod")
 HEALTH_PATH = "/api/v1/health"
@@ -97,6 +107,15 @@ def _opening(customer: Customer, project: Project, environment: str, managers: d
     return {"opens": MANAGER, "manager_url": managers.get(deploy._customer_dir_slug(customer))}
 
 
+def deployed_machine(environment: str, last: Optional[DeployEvent]) -> Optional[str]:
+    """DEV-404 — the machine the installation was deployed to, as its last good deploy recorded it (``""`` this
+    machine); ``None`` when that deploy recorded none (before 18.11.2026). A UAT runs on this machine whatever was
+    recorded."""
+    if environment == "uat":
+        return ""
+    return getattr(last, "machine", None)
+
+
 def _environment(
     db: Session, customer: Customer, project: Project, environment: str, managers: dict[str, str]
 ) -> Optional[dict]:
@@ -104,8 +123,18 @@ def _environment(
     if not version:
         return None
     last = deploy.last_successful_deploy(db, customer.id, environment)
-    url = deploy._instance_url(customer, environment, project)
+    machine = deployed_machine(environment, last)
+    url = deploy.instance_url_on(customer, environment, project, machine)
+    planned = customer.prod_host or ""
     return {
+        # DEV-404: where it was deployed — not the customer's setting of today; ``None``: not recorded.
+        "machine": prod_machines.label(machine or None) if machine is not None else None,
+        # The customer's machine of today when the installation is elsewhere — nothing of it is deployed there.
+        "planned_machine": (
+            prod_machines.label(planned or None)
+            if environment == "prod" and machine is not None and machine != planned
+            else None
+        ),
         **_opening(customer, project, environment, managers),
         "version": version,
         "deployed_at": last.created_at if last is not None else None,
@@ -182,7 +211,7 @@ def _ask(url: str) -> Status:
     return Status(DOWN, None, "inštalácia nebeží")
 
 
-async def _ask_inside(customer: Customer, project: Project, environment: str) -> Status:
+async def _ask_inside(customer: Customer, project: Project, environment: str, machine: str) -> Status:
     """A private installation, asked inside its backend's container on the machine it runs on: does the backend answer
     on its own health path (the deploy's rule for where that is) with 200."""
     compose = orchestrator._uat_compose_path(
@@ -200,7 +229,7 @@ async def _ask_inside(customer: Customer, project: Project, environment: str) ->
         return Status(DOWN, None, "inštalácia nemá backend")
     port = uat_provisioner.detect_internal_port(services[backend], 8000)
     path = uat_provisioner.resolve_be_health_path(services[backend], claude_agent.PROJECTS_ROOT / project.slug)
-    deploy_host = (customer.prod_host or None) if environment == "prod" else None
+    deploy_host = (machine or None) if environment == "prod" else None  # DEV-404: the machine it was deployed to
     command = ["docker", "compose", "-f", str(compose), "exec", "-T", backend, "python", "-c"]
     rc, out = await orchestrator._compose_smoke_step(
         [*command, _INSIDE_PROBE.format(port=port, path=path)],
@@ -215,6 +244,28 @@ async def _ask_inside(customer: Customer, project: Project, environment: str) ->
     return Status(DOWN, None, "zvnútra inštalácie neodpovedá")
 
 
+#: DEV-404 — what the page says of an installation its machine does not have (set aside or removed outside the cockpit).
+NOT_THERE = "inštalácia na stroji {machine} nie je — odložená alebo zrušená mimo kokpitu"
+
+
+def _present(customer: Customer, project: Project, environment: str, machine: str) -> Optional[bool]:
+    """DEV-404 — whether the installation is on ``machine`` (its compose in its folder there); ``None`` when the machine
+    could not be asked. Blocking — call it off the event loop."""
+    compose = orchestrator._uat_compose_path(
+        deploy._instance_slug(customer, environment),
+        environment=environment,
+        customer_slug=deploy._customer_dir_slug(customer),
+        full_project_slug=project.slug,
+    )
+    host = (machine or None) if environment == "prod" else None
+    if host is None:
+        return compose.is_file()
+    text, error = remote_instance.read_text(compose.parent, compose.name, deploy_host=host)
+    if error:
+        return None
+    return text is not None
+
+
 async def status(db: Session, user: User, customer_id: UUID, environment: str) -> Status:
     """Whether the ``environment`` installation of the customer row lives — the address is worked out here, never taken
     from the caller; the answer is shared for ``installation_status_cache_seconds``."""
@@ -227,13 +278,18 @@ async def status(db: Session, user: User, customer_id: UUID, environment: str) -
     authz.authorize_project(user, project)
     if not deploy.current_version(db, customer.id, environment):
         raise LookupError("Táto inštalácia ešte nie je nasadená.")
-    url = deploy._instance_url(customer, environment, project)
+    # DEV-404: asked where it was deployed; a deploy that recorded no machine is looked for on the customer's machine.
+    machine = deployed_machine(environment, deploy.last_successful_deploy(db, customer.id, environment))
+    where = machine if machine is not None else (customer.prod_host or "")
+    url = deploy.instance_url_on(customer, environment, project, machine)
     now = time.monotonic()
     cached = _cache.get(url)
     if cached is not None and now - cached[0] < settings.installation_status_cache_seconds:
         return cached[1]
     answer = await asyncio.to_thread(_ask, url)
     if project.private_network and answer.detail == GATE_REFUSED:
-        answer = await _ask_inside(customer, project, environment)
+        answer = await _ask_inside(customer, project, environment, where)
+    if answer.state != UP and await asyncio.to_thread(_present, customer, project, environment, where) is False:
+        answer = Status(DOWN, None, NOT_THERE.format(machine=prod_machines.label(where or None)))
     _cache[url] = (now, answer)
     return answer

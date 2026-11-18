@@ -119,6 +119,9 @@ class DeployEvent(Base, UUIDMixin, TimestampMixin):
     # said every warning twice, the first copy behind an English „warnings:“). Non-secret, like ``detail``. Events
     # recorded before this column carry ``[]`` and their warnings in ``detail`` (:func:`deploy.deploy_report`).
     warnings = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    # DEV-404: the machine a deploy went to — ``""`` this machine, otherwise the machine's value (``mager``). ``NULL``
+    # for an acceptance and for every deploy recorded before the column: not recorded, never guessed back.
+    machine = Column(String(64), nullable=True)
 
     __table_args__ = (
         CheckConstraint(_ck_in("environment", ENVIRONMENT_VALUES), name="ck_deploy_events_environment"),

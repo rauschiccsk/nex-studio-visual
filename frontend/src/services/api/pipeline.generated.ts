@@ -6139,6 +6139,8 @@ export interface components {
              * @default []
              */
             links: components["schemas"]["InstallationLink"][];
+            /** Machine */
+            machine?: string | null;
             /** Manager Url */
             manager_url?: string | null;
             /**
@@ -6147,6 +6149,8 @@ export interface components {
              * @enum {string}
              */
             opens: "link" | "uat_launch" | "manager";
+            /** Planned Machine */
+            planned_machine?: string | null;
             /** Url */
             url: string;
             /** Version */
