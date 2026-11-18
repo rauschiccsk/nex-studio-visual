@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-#: Boot timeout shape: ``app did not boot / not responding within 900s: <probe error>`` (``_run_app_starts_smoke``).
+#: Boot timeout shape: ``app did not boot / not responding within 120s: <probe error>`` (``_run_app_starts_smoke``).
 _BOOT_TIMEOUT_RE = re.compile(r"within\s+(\d+)\s*s", re.IGNORECASE)
 
 #: Prefix of a launch-check failure caused by a service that is down — exited non-zero, never settled, or restarted by

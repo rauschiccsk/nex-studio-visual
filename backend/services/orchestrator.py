@@ -6814,13 +6814,10 @@ UAT_ROOT: Path = Path("/opt/uat")
 # PROD instances live under the per-customer control-plane root: a PROD deploy redeploys the compose
 # at ``/opt/customers/<customer-slug>/<full-project-slug>/`` (mirrors uat_provisioner.PROD_ROOT, §2).
 PROD_ROOT: Path = Path("/opt/customers")
-UAT_DEPLOY_TIMEOUT = 900
-# ICCINT-151 — nasadenie na CUDZÍ stroj trvá dlhšie a legitímne: zdrojový kód sa tam musí preniesť a
-# obraz sa stavia na hardvéri zákazníka. Zmerané 25.09.2026 — NEX Manager sa do 900 s zmestil, NEX
-# Inbox nie; kokpit stavbu vzdal a na MAGERi zostal predpis ukazujúci na verziu, ktorá nevznikla.
-# ⚠️ Toto nie je znižovanie latky: práca je naozaj väčšia, nie pomalšia. Aby dlhé čakanie nebolo
-# slepé, patrí k tomu viditeľný priebeh (ICCINT-153) — bez neho človek nerozozná prácu od zamrznutia.
-REMOTE_DEPLOY_TIMEOUT = 2700
+# DEV-425 — how long a deploy may build and start the app is one limit for every machine
+# (``settings.deploy_build_timeout_seconds``). ICCINT-151 gave another machine a longer one first (NEX Inbox did not
+# fit 900 s on MAGER, 25.09.2026); a big image built on ANDROS is the same larger work. The waiting is not blind: the
+# deploy shows its step (ICCINT-153).
 # Post-``up`` DB migration (v4.0.21): one ``alembic upgrade head`` in the backend container for
 # an alembic app that ships no migrate service. The retry absorbs the brief window where the
 # just-recreated backend container is not yet execable; a real migration error fails fast.
@@ -7332,7 +7329,7 @@ async def _run_uat_deploy(
     env = _docker_env_for_target(
         project_env({"APP_VERSION": build_ver, "VITE_APP_VERSION": build_ver, **provenance}), deploy_host
     )
-    limit = REMOTE_DEPLOY_TIMEOUT if (deploy_host or "").strip() else UAT_DEPLOY_TIMEOUT
+    limit = settings.deploy_build_timeout_seconds
     deadline = asyncio.get_running_loop().time() + limit
     base = ["docker", "compose", "-f", str(compose)]
     # DEV-68 — the images are built FIRST, while the running version keeps serving; only then are its containers
@@ -8512,7 +8509,8 @@ async def settle_ci_waits(db: Session, *, on_message: Optional[MessageCallback] 
 # Verifikácia verdict beside the runtime floor. Dead code that describes a capability is worse than none.
 
 
-ACCEPTANCE_SMOKE_TIMEOUT = 900  # matches UAT_DEPLOY_TIMEOUT — covers ``up --build`` + the acceptance suite.
+# DEV-425: ``up --build`` of the whole stack in Verifikácia takes the deploy's limit
+# (``settings.deploy_build_timeout_seconds``) — it builds the same images.
 # gate-g-hardening GAP 1 (A1): bounds the host-run ``release_smoke_test.sh`` against the already-booted
 # isolated stack — a SEPARATE budget from the build/boot above (the script's own assertions, no rebuild).
 RELEASE_ACCEPTANCE_TIMEOUT = 900
@@ -9332,7 +9330,7 @@ async def _boot_smoke_stack(project_slug: str, compose: Path, roles: dict[str, O
         # cleared first — the states this check judges are this run's only.
         await _compose_smoke_step(base + _SMOKE_DOWN, 120, env=compose_env)
         stack.up_rc, stack.up_detail = await _compose_smoke_step(
-            base + ["up", "-d", "--build", "--wait"], ACCEPTANCE_SMOKE_TIMEOUT, env=compose_env
+            base + ["up", "-d", "--build", "--wait"], settings.deploy_build_timeout_seconds, env=compose_env
         )
         yield stack
     finally:

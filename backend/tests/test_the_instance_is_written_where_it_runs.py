@@ -594,15 +594,6 @@ def test_a_failed_restore_is_said_out_loud(monkeypatch) -> None:
     assert "NEPODARILO" in detail and "cieľ neodpovedá" in detail
 
 
-def test_the_timeout_is_longer_when_the_build_runs_on_another_machine() -> None:
-    """Prenos zdrojového kódu a stavba na hardvéri zákazníka trvajú dlhšie — a legitímne."""
-    from backend.services import orchestrator as O
-
-    assert O.REMOTE_DEPLOY_TIMEOUT > O.UAT_DEPLOY_TIMEOUT
-    zdroj = __import__("inspect").getsource(O._run_uat_deploy)
-    assert "REMOTE_DEPLOY_TIMEOUT if" in zdroj, "dlhší limit sa pri cudzom stroji nepoužije"
-
-
 def test_provisioning_remembers_what_it_overwrote_on_the_target(tmp_path, monkeypatch) -> None:
     """⚠️ Túto stráž si vypýtala mutácia, ktorá prešla nezachytená (25.09.2026): stráže skúšali len
     toho, kto predpis vracia, nie toho, kto si pôvodný stav zapamätá. Bez zapamätania niet čo vrátiť

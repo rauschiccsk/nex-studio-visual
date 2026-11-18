@@ -168,6 +168,14 @@ class Settings(BaseSettings):
     # and ICCINT-154 / DEV-166 — deploy_build_cache_max_gb below.)
     deploy_build_space_factor: float = 2.5
     deploy_disk_reserve_gb: int = 10
+    # DEV-425: how long building and starting an app may take — a deploy on any machine, and in Verifikácia the start
+    # of the whole stack and the deploy rehearsal. A backstop against a build or an app that hangs, not a measure of
+    # work: 15 minutes came on 16.06.2026 over builds of 1–2 minutes (CR-NS-098) and Verifikácia copied it; another
+    # machine got 45 minutes on 25.09.2026 when NEX Inbox did not fit (ICCINT-151). Orthodox Hermenia's backend image
+    # of 6–8 GB with its model would not fit 15 minutes on ANDROS's line at its first build (DEV-424). A long build
+    # takes nothing down: the running version keeps serving while the new image is built (DEV-68). Director
+    # 18.11.2026: „Súhlasím“.
+    deploy_build_timeout_seconds: int = 2700
     uat_traefik_port: int = 80
     # DEV-210: how long the measured history of builds behind the forecast of an agent's work is held — the task plan
     # asks for it at every new message of a build, and the history moves only when a build does.

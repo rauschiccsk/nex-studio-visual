@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 import yaml
 
+from backend.config.settings import settings
 from backend.core.agent_env import project_env
 from backend.services import build_provenance, env_contract, verified_build
 from backend.services import uat_provisioner as P
@@ -302,7 +303,7 @@ async def _run_one(target: Rendered, name: str, project_path: Path, version: str
     ]  # fmt: skip
     try:
         rc, out = await O._compose_smoke_step(
-            [*base, "up", "-d", "--build", "--wait"], O.ACCEPTANCE_SMOKE_TIMEOUT, env=env
+            [*base, "up", "-d", "--build", "--wait"], settings.deploy_build_timeout_seconds, env=env
         )
         if rc != 0:
             why = f"inštalácia sa nepostavila alebo nespustila:\n{_tail(out)}"
