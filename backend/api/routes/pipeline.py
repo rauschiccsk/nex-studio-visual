@@ -352,6 +352,10 @@ def _board(db: Session, version_id: uuid.UUID, limit: int = _DEFAULT_RECENT) -> 
         or (state.status == "awaiting_manazer" and state.resume_after_framework_fix)
     ):
         available_actions = sorted(orchestrator.determine_available_actions(state))
+    # DEV-411 — released from a cockpit bug in a fix after Verifikácia: the check may run again without a fix, beside
+    # „Pokračovať“, which goes on with the fix. The cause decides which, and Dedo's reason for the release says it.
+    if state is not None and orchestrator.released_in_verifikacia_fix_loop(db, version_id, state):
+        available_actions = sorted({*available_actions, "overit_bez_opravy"})
     # ICCINT-24: the open proposal from our technical team, read from the DB rather than left for the FE to
     # find in the ``recent_messages`` tail — a busy build would push it out of that tail and the cockpit
     # would stop offering a proposal that still exists. One indexed query; ``None`` in the ordinary case.

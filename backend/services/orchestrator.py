@@ -13063,6 +13063,14 @@ async def _settle_verifikacia_verdict(
                             "oprava a Auditor ju znova overí.",
                             recommended=not rerun,
                         ),
+                        # DEV-411 — the cause may have been outside the app and be gone (a cockpit bug Dedo fixed):
+                        # the check again, no fix, no round spent (DEV-231 offered it beside the card, not on it).
+                        ConsultOption(
+                            id="overit_bez_opravy",
+                            label="Znova over bez opravy",
+                            detail="Keď bola príčina mimo aplikácie a je odstránená (napríklad chyba kokpitu, ktorú "
+                            "Dedo opravil), overenie sa zopakuje nad aktuálnym stavom — bez opravy a bez kola.",
+                        ),
                         ConsultOption(
                             id="hold",
                             label="Zatiaľ podržať (rozhodnem neskôr)",
@@ -14164,6 +14172,18 @@ def _fix_plain_description(scope: str) -> str:
         if line and not line.startswith("`") and len(line) > 12:
             return f"Verifikácia našla chybu: {line[:180]}"
     return "Verifikácia našla blokujúcu chybu — Staviteľ ju opravuje a Auditor to potom znova preverí."
+
+
+def released_in_verifikacia_fix_loop(db: Session, version_id: uuid.UUID, state: PipelineState) -> bool:
+    """DEV-411 — Dedo released the build from a cockpit bug that stopped a fix after Verifikácia. The cause may have
+    been the cockpit alone (16.11.2026 NEX Inbox 1.10.4: the deploy rehearsal's bug, nothing in the app to fix), so
+    besides „Pokračovať“ — the fix goes on — the check can run again without a fix."""
+    return (
+        state.current_stage == "programovanie"
+        and state.status == "awaiting_manazer"
+        and bool(state.resume_after_framework_fix)
+        and _latest_verifikacia_fix_scope(db, version_id) is not None
+    )
 
 
 def _latest_verifikacia_fix_scope(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -16302,6 +16322,14 @@ async def _run_build_round(
                     prior_failures.append(f"systémová chyba ({result.envelope_loss_kind}): {result.reason}")
                 else:
                     prior_failures.append(f"neplatný status blok: {result.reason}")
+            elif result.kind == "framework_issue":
+                # DEV-411 — the Staviteľ says the task needs a change to the cockpit, not to the app: the build stops
+                # for Dedo here as in every other turn. 16.11.2026 NEX Inbox 1.10.4: five fix tasks after Verifikácia
+                # reported the cockpit's bug; this loop took each for a finished task, refused it for having no
+                # commit and ran the next round — nothing reached Dedo for ~1.5 h.
+                return await _settle_framework_issue(
+                    db, state, result, stage=state.current_stage, on_message=on_message
+                )
             elif result.kind in ("question", "blocked"):
                 # DEV-7: a question about a database change the agent already wrote into the version's schema
                 # document is Ri's approval to give — a card, not a free-text answer.
@@ -17325,7 +17353,8 @@ async def apply_action(
             and state.status == "blocked"
             and state.block_reason in VERIF_STALL_BLOCK_REASONS
         )
-        if not (_fix_loop or _verif_stall or verifikacia_round_cap_reached(state)):
+        _released = released_in_verifikacia_fix_loop(db, version_id, state)  # DEV-411
+        if not (_fix_loop or _verif_stall or _released or verifikacia_round_cap_reached(state)):
             raise OrchestratorError(
                 "Znova spustiť overenie je platné len v opravnej slučke po Verifikácii, "
                 "alebo keď zlyhal samotný overovací beh vo Verifikácii."
@@ -17551,6 +17580,15 @@ async def apply_action(
                 return state
             if ans.get("option_id") == "rerun_ci" and not ans.get("free_text") and not ans.get("note"):
                 return await _rerun_project_ci(db, state)  # DEV-234
+            if ans.get("option_id") == "overit_bez_opravy" and not ans.get("free_text") and not ans.get("note"):
+                # DEV-411 — the check again over HEAD, no fix and no round (DEV-231), as the action does.
+                state.current_stage = "verifikacia"
+                state.is_regate = True
+                state.block_reason = None
+                state.dispatch_baseline_sha = None
+                db.flush()
+                _begin_dispatch(db, state)
+                return state
             brief = (
                 ans.get("free_text") or ans.get("note") or ans.get("label") or "Oprav blokujúce zlyhanie z Verifikácie."
             ).strip()
