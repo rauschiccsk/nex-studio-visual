@@ -32,6 +32,7 @@ If the container cannot start, the question fails with a reason — **never** fa
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -53,6 +54,11 @@ _LABEL = "poradca sandbox"
 
 #: Poradca's built-in tools — read only. Anything else makes restricted mode unavailable for it.
 BUILTIN_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob")
+#: DEV-430 — the Projektant of Nápady looks for what a solution needs on the internet: searching and reading a page.
+#: Only a new idea gets them (no project, no secrets in its empty folder); restricted mode keeps WebFetch only when
+#: ``--tools`` names it (CLI 2.1.325 --help), and the fenced network lets the container out to the internet, never to
+#: the host.
+WEB_TOOLS: tuple[str, ...] = ("WebSearch", "WebFetch")
 #: MCP server name; tools are called in Claude Code as ``mcp__poradca__<tool>``.
 MCP_SERVER_NAME = "poradca"
 
@@ -353,6 +359,8 @@ class ClaudeCall:
     effort: Optional[str]
     #: DEV-52 — rozhovor má priložené snímky: ich priečinok sa pripojí a obmedzený režim ho smie čítať.
     attachments: bool = False
+    #: DEV-430 — searching and reading the internet (:data:`WEB_TOOLS`); :func:`run_argv` sets it for a new idea only.
+    web: bool = False
 
 
 def claude_argv(call: ClaudeCall) -> list[str]:
@@ -373,12 +381,12 @@ def claude_argv(call: ClaudeCall) -> list[str]:
         "--verbose",
         "--restricted",
         "--tools",
-        ",".join(BUILTIN_TOOLS),
+        ",".join(BUILTIN_TOOLS + (WEB_TOOLS if call.web else ())),
         "--strict-mcp-config",
         "--mcp-config",
         json.dumps(mcp),
         "--allowedTools",
-        f"mcp__{MCP_SERVER_NAME}",
+        ",".join((f"mcp__{MCP_SERVER_NAME}", *(WEB_TOOLS if call.web else ()))),
         # ``--add-dir`` berie viac priečinkov — za ním preto vždy nasleduje ďalší prepínač, nikdy text otázky.
         *(["--add-dir", CONTAINER_ATTACHMENTS_DIR] if call.attachments else []),
         "--permission-mode",
@@ -495,5 +503,8 @@ def run_argv(
     ]
     for name in _PASSTHROUGH_ENV:
         argv += ["-e", name]
+    # DEV-430 — the internet only for a new idea's Projektant, whatever the caller asked: a project's Poradca reads the
+    # project, whose secrets are overlaid but whose content is the customer's.
+    call = dataclasses.replace(call, web=idea_id is not None)
     argv += ["-w", container_dir, "--entrypoint", "claude", build_sandbox.sandbox_image(), *claude_argv(call)]
     return argv
