@@ -997,7 +997,16 @@ def with_public_ingress(
     )
     connector = public_ingress.connector(str(backend["container_name"]).removesuffix("-backend") + "-ingress")
     if backend.get("networks"):
-        connector["networks"] = backend["networks"]  # where the backend is, so its name answers
+        # Where the backend is, so its name answers — but DEV-426: not the machine's shared networks (declared external,
+        # Traefik's): compose names the service „public-ingress“ in every network it joins, and a second installation
+        # with an entry would make two of them there (the hlásič on MAGER raises an alarm, Máger Dedo 18.11.2026).
+        declared = installation.get("networks") or {}
+        own = [
+            name
+            for name in _networks_as_list(backend["networks"])
+            if not (isinstance(declared.get(name), dict) and declared[name].get("external"))
+        ]
+        connector["networks"] = own or backend["networks"]
     services[public_ingress.SERVICE] = connector
     return {**installation, "services": services}, {key: entry.url, public_ingress.TUNNEL_TOKEN_ENV: entry.token}, []
 

@@ -204,6 +204,41 @@ def test_a_new_installation_runs_the_tunnel_beside_the_app_and_knows_its_address
     assert rules["config"]["ingress"][0]["service"] == "http://uat-icc-helpdesk-backend:8000"
 
 
+def test_the_connector_stays_out_of_the_machines_shared_network(tmp_path, monkeypatch, cloudflare) -> None:
+    """DEV-426 — compose names a service by its name in every network it joins: in the machine's shared Traefik network
+    the second installation with an entry would make two „public-ingress“ there, and the hlásič on MAGER would raise an
+    alarm (Máger Dedo, 18.11.2026). The connector joins the installation's own network, where the backend answers."""
+    _project(tmp_path, monkeypatch)
+
+    result = _deploy(tmp_path)
+
+    compose = yaml.safe_load(result.compose_path.read_text(encoding="utf-8"))
+    services = compose["services"]
+    backend = next(svc for svc in services.values() if str(svc.get("container_name", "")).endswith("-backend"))
+    connector = services[public_ingress.SERVICE]
+    joined = set(P._networks_as_list(connector.get("networks")))
+    assert P.PROXY_NETWORK in P._networks_as_list(backend.get("networks")), "the backend is in the shared network"
+    assert P.PROXY_NETWORK not in joined
+    assert joined and joined <= set(P._networks_as_list(backend.get("networks"))), "where the backend answers"
+    assert not any(
+        (compose.get("networks") or {}).get(n, {}) and compose["networks"][n].get("external") for n in joined
+    )
+
+
+def test_a_backend_only_in_the_shared_network_is_still_reached(cloudflare) -> None:
+    """An installation whose backend has no network of its own: the connector goes where the backend is."""
+    installation = {
+        "services": {"backend": {"container_name": "uat-icc-helpdesk-backend", "networks": ["nex-proxy-net"]}},
+        "networks": {"nex-proxy-net": {"external": True}},
+    }
+
+    out, _settings, _said = P.with_public_ingress(
+        installation, env_contract.parse(EXAMPLE), environment="uat", customer_slug="icc", app="helpdesk"
+    )
+
+    assert out["services"][public_ingress.SERVICE]["networks"] == ["nex-proxy-net"]
+
+
 def test_a_redeploy_writes_the_entry_into_an_installation_that_had_none(tmp_path, monkeypatch, cloudflare) -> None:
     """The entry's settings are the cockpit's, written on every deploy — an installation made before the key was
     entered gets them on its next deploy."""
