@@ -1640,6 +1640,53 @@ def fill_empty_database_connection(
     ]
 
 
+#: DEV-407 — the passwords a service may log in to the installation's database with; ``.env`` always has the first.
+DB_PASSWORD_KEYS = ("POSTGRES_PASSWORD", "DB_PASSWORD")
+
+
+def database_connection_from_env(compose: dict[str, Any], env_text: str) -> list[str]:
+    """DEV-407 — in a new installation every service connects to the database with the installation's settings.
+
+    16.11.2026 the deploy rehearsal of NEX Inbox 1.10.4 made a new installation from the compose of 1.10.3: the
+    database service got the installation's password (``${POSTGRES_PASSWORD}``), but ``migrate`` kept the password the
+    project wrote into its compose (``DB_PASSWORD: dev_password_change_me``) and could not log in. The installation's
+    ``.env`` already holds every connection setting aligned with its database (:func:`_rewrite_db_connection_var`);
+    a setting another service states as a plain value is pointed at it (``${KEY}``) when ``.env`` has it — a password
+    the ``.env`` does not name at the installation's password. The database service keeps its own (it creates the
+    database), and what already reads a variable stays. Returns the services changed."""
+    env = _parse_env_text(env_text)
+    services = compose.get("services") or {}
+    database = identify_service_roles(services).get("db")
+
+    def tied(key: str, value: Any) -> Any:
+        if not (key in DB_CONNECTION_VARS or key.lower().endswith(DB_URL_SUFFIX)):
+            return value
+        if value is None or "$" in str(value):
+            return value
+        if env.get(key):
+            return f"${{{key}}}"
+        return f"${{{DB_PASSWORD_KEYS[0]}}}" if key in DB_PASSWORD_KEYS else value
+
+    changed: list[str] = []
+    for name, svc in services.items():
+        if name == database or not isinstance(svc, dict):
+            continue
+        environment = svc.get("environment")
+        if isinstance(environment, dict):
+            new: Any = {key: tied(str(key), value) for key, value in environment.items()}
+        elif isinstance(environment, list):
+            new = []
+            for item in environment:
+                key, sep, value = str(item).partition("=")
+                new.append(f"{key}={tied(key, value)}" if sep else item)
+        else:
+            continue
+        if new != environment:
+            svc["environment"] = new
+            changed.append(str(name))
+    return changed
+
+
 def validate_rendered_database_address(env_content: str, services: dict[str, Any]) -> list[str]:
     """DEV-235 — ``DATABASE_URL`` rendered EMPTY while a service reads it from ``.env``: the failure, in the Manažér's
     language, or ``[]``.
@@ -4596,6 +4643,8 @@ def provision_uat(
         warnings.extend(ingress_said)
         if ingress_values:
             env_content = _env_text_with(env_content, ingress_values)
+        # DEV-407 — every service of a new installation logs in to its database with the installation's settings.
+        database_connection_from_env(compose, env_content)
         compose_text = render_uat_compose(builds_from(compose, project_path, project_dir), routing)
         instalacia = compose
 
