@@ -138,6 +138,7 @@ def render_targets(
             app=app,
             full_project_slug=project_slug,
             customer_values=customer_values,
+            public_ingress=False,  # DEV-429 — a rehearsal never makes a tunnel nor joins a customer's
         )
 
     fresh = provision(work / "nova", REHEARSAL_CUSTOMER)

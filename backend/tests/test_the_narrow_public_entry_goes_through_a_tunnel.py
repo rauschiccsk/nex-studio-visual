@@ -239,6 +239,32 @@ def test_a_backend_only_in_the_shared_network_is_still_reached(cloudflare) -> No
     assert out["services"][public_ingress.SERVICE]["networks"] == ["nex-proxy-net"]
 
 
+def test_the_deploy_rehearsal_makes_no_tunnel_and_runs_no_connector(tmp_path, monkeypatch, cloudflare) -> None:
+    """DEV-429 — the rehearsal of Verifikácia writes the installation with the deploy's own code, but a tunnel it made
+    would stay in Cloudflare and its connector would join a customer's real tunnel and take part of its real calls. With
+    the tunnels' key set, it calls Cloudflare not once and runs no connector — not even the one an existing customer's
+    compose brings; the entry's address is a placeholder."""
+    from backend.services import deploy_rehearsal
+
+    _project(tmp_path, monkeypatch)
+    first = _deploy(tmp_path)  # a customer's UAT — with its connector — the rehearsal also deploys into
+    assert public_ingress.SERVICE in yaml.safe_load(first.compose_path.read_text(encoding="utf-8"))["services"]
+    cloudflare.calls.clear()
+
+    rendered = deploy_rehearsal.render_targets(
+        "nex-helpdesk", "0.1.0", projects_root=tmp_path / "projects", uat_root=tmp_path / "uat", work=tmp_path / "work"
+    )
+
+    assert cloudflare.calls == [], "the rehearsal asked Cloudflare"
+    assert [t.label for t in rendered][0] == deploy_rehearsal.NEW_INSTALLATION and len(rendered) == 2
+    for target in rendered:
+        services = yaml.safe_load(target.compose.read_text(encoding="utf-8"))["services"]
+        assert public_ingress.SERVICE not in services, f"a connector in the rehearsal of {target.label}"
+        assert not P._parse_env_file(target.env).get(public_ingress.TUNNEL_TOKEN_ENV)
+    new = P._parse_env_file(rendered[0].env)
+    assert new["PUBLIC_INGRESS_URL"] == "https://uat-skuska-nasadenia-helpdesk-ingress.icc.sk"
+
+
 def test_a_redeploy_writes_the_entry_into_an_installation_that_had_none(tmp_path, monkeypatch, cloudflare) -> None:
     """The entry's settings are the cockpit's, written on every deploy — an installation made before the key was
     entered gets them on its next deploy."""

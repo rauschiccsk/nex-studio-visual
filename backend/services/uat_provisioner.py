@@ -971,16 +971,26 @@ def with_public_ingress(
     environment: str,
     customer_slug: Optional[str],
     app: Optional[str],
+    set_up: bool = True,
 ) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     """DEV-409: an installation whose app declares the narrow public entry (``@public-ingress``) — with its tunnel
     set up in Cloudflare, the connector beside the app, and the settings for its ``.env`` (the entry's address, the
-    tunnel's run key). ``(installation, settings, warnings)``; unchanged when the app declares none."""
+    tunnel's run key). ``(installation, settings, warnings)``; unchanged when the app declares none.
+
+    DEV-429 — ``set_up=False`` (the deploy rehearsal of Verifikácia): nothing in Cloudflare is made or changed and no
+    connector runs — a rehearsal's connector would join the customer's real tunnel and take part of its real calls. The
+    entry's address is the name it would have, as a placeholder; a connector the installation's own compose brings (an
+    existing customer's) is left out too — without its run key it would only restart and fail the launch check."""
     from backend.services import public_ingress  # it imports installation_names, which imports this module's peers
 
     declared = contract.public_ingress
     if not declared or not customer_slug or not app:
         return installation, {}, []
     key, prefix = next(iter(declared.items()))
+    if not set_up:
+        services = {k: v for k, v in (installation.get("services") or {}).items() if k != public_ingress.SERVICE}
+        placeholder = {key: f"https://{public_ingress.host(environment, customer_slug, app)}"}
+        return {**installation, "services": services}, placeholder, []
     backend_url = _backend_internal_url(yaml.safe_dump(installation))
     if not backend_url:
         return installation, {}, [public_ingress.NOT_SET_UP.format(why="inštalácia nemá backend s menom kontajnera")]
@@ -4071,6 +4081,7 @@ def provision_uat(
     customer_name: Optional[str] = None,
     installation_language: Optional[str] = None,
     source_path: Optional[Path] = None,
+    public_ingress: bool = True,
 ) -> ProvisionResult:
     """Render an instance's ``{docker-compose.yml,.env}`` + create dirs for ``project_slug``.
 
@@ -4587,7 +4598,7 @@ def provision_uat(
         )
         # DEV-409 — the narrow public entry the app declares: its tunnel, its connector, its settings.
         povysene, ingress_values, ingress_said = with_public_ingress(
-            povysene, contract, environment=environment, customer_slug=customer_slug, app=app
+            povysene, contract, environment=environment, customer_slug=customer_slug, app=app, set_up=public_ingress
         )
         warnings.extend(ingress_said)
         compose_text = render_uat_compose(builds_from(povysene, project_path, project_dir), routing)
@@ -4647,7 +4658,7 @@ def provision_uat(
             language=installation_language,
         )
         compose, ingress_values, ingress_said = with_public_ingress(
-            compose, contract, environment=environment, customer_slug=customer_slug, app=app
+            compose, contract, environment=environment, customer_slug=customer_slug, app=app, set_up=public_ingress
         )
         warnings.extend(ingress_said)
         if ingress_values:
