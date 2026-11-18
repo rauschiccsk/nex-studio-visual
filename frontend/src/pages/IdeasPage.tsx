@@ -45,6 +45,8 @@ import type { Idea, PoradcaStatus } from "@/types/poradca";
 import { formatDate } from "@/utils/format";
 
 const NEW_IDEA_DRAFT = "nove";
+/** DEV-408 — the answer Projektant's questions are put for (templates/poradca-ideas-charter.md §3). */
+const AGREE = "Súhlasím";
 
 /** DEV-331 — an idea that ended in a project leaves only the list; its talk stays with the project (Director 09.11.2026). */
 function ideaRemoval(idea: Idea): Removal | undefined {
@@ -447,6 +449,8 @@ export default function IdeasPage() {
           limits={status}
           incoming={ideaId ? null : incoming}
           placeholder={ideaId ? "Odpovedz Projektantovi…" : "Opíš svoj nápad…"}
+          // DEV-408: Projektant asks so that „Súhlasím“ is a full answer — one click, once he has said something.
+          quickReply={ideaId && lastMessage?.author === "poradca" ? AGREE : undefined}
           onAsk={async (question, files) => {
             thread.follow();
             const uploads = await Promise.all(files.map(toUpload));

@@ -11,7 +11,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { FileText, Loader2, Paperclip, Send, X } from "lucide-react";
+import { Check, FileText, Loader2, Paperclip, Send, X } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -47,6 +47,7 @@ export default function PoradcaComposer({
   limits,
   incoming,
   placeholder = DEFAULT_PLACEHOLDER,
+  quickReply,
 }: {
   /** Where the half-written question lives — one per conversation, one for the new conversation (DEV-24). */
   draftKey: string | null;
@@ -58,6 +59,8 @@ export default function PoradcaComposer({
   incoming: IncomingQuestion | null;
   /** DEV-318 — what the empty box says; Nápady asks for the idea, not a question about a project. */
   placeholder?: string;
+  /** DEV-408 — an answer sent with one click as the person's own message (Nápady: „Súhlasím“); the box stays. */
+  quickReply?: string;
 }) {
   const { text, setText, clear, restored } = useDraft(key);
   const [sending, setSending] = useState(false);
@@ -128,6 +131,20 @@ export default function PoradcaComposer({
     } catch (e: unknown) {
       if (!own) setText(appendInstruction(text, question));
       setError(humanizeApiError(e, "Otázku sa nepodarilo poslať"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // DEV-408: the one-click answer is the person's own message; what he was writing stays in the box, also when it fails.
+  async function reply(answer: string) {
+    if (locked) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onAsk(answer, []);
+    } catch (e: unknown) {
+      setError(humanizeApiError(e, "Odpoveď sa nepodarilo poslať"));
     } finally {
       setSending(false);
     }
@@ -273,6 +290,17 @@ export default function PoradcaComposer({
           }
           className="min-h-[2.5rem] min-w-0 flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
+        {quickReply && (
+          <button
+            type="button"
+            onClick={() => void reply(quickReply)}
+            disabled={locked}
+            title={disabledReason ?? `Odošle odpoveď „${quickReply}“ — rozpísaný text v poli ostane`}
+            className="flex h-10 items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Check className="h-4 w-4" aria-hidden /> {quickReply}
+          </button>
+        )}
         <button
           type="submit"
           disabled={locked || !text.trim()}
