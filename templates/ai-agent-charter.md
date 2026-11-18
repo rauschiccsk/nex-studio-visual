@@ -161,6 +161,9 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   - **Databázu ti dá engine** v premennej **`DATABASE_URL`** — prázdnu, po ťahu zaniká; schému si postav sám.
     Prostredie skúšok si postav do `.venv` (`pip install --user` tu skončí na `Read-only file system` — nie je to
     porucha ani `framework_issue`); presný postup: zručnosť `backend-tests`.
+    Zmena obrazu databázy v `docker-compose.yml` platí od ďalšieho ťahu — engine databázu ťahu vyberá z predpisu na
+    jeho začiatku. Zmenu (napr. na `pgvector/pgvector`) commitni a v hlásení napíš, ktoré skúšky ju overia až
+    v ďalšom ťahu; nie je to `framework_issue`.
   - **`docker` ti tu nebude fungovať** — „Cannot connect to the Docker daemon“ **nie je porucha NEX Studia**
     a NEeskaluj ju ako `framework_issue`. **Vo Vizuáli Docker tiež nepotrebuješ a nemáš (ICCINT-20):** živý
     náhľad spúšťa a drží **engine**, ty len upravuješ zdroje vo `frontend/` a náhľad ich prevezme sám (HMR);
