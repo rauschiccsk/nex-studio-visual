@@ -17793,3 +17793,105 @@ async def apply_action(
         state.next_action = PAUSED_BY_MANAZER_NEXT_ACTION
     db.flush()
     return state
+
+
+# --- The CI runners' own Docker stays bounded (DEV-435) -------------------------------------------------------------
+#
+# 19.11.2026 the root disk of ANDROS crossed 85 % (733 GB used): 29 CI runners held 268 GB of build cache and 132 GB of
+# images in their own Docker. The runners' hook (templates/ci-runner/cleanup.sh, ICCINT-261) empties containers,
+# volumes, networks and dangling images at every job but keeps tagged images and the build cache on purpose — the next
+# build reuses them — so both grew with every run without a bound. Director: „Súhlasím“.
+#
+# Once a day (settings.ci_runner_cache_retention_interval_seconds) the cockpit prunes, in the own Docker of every runner
+# that runs no job, the build cache and the images unused for longer than settings.ci_runner_cache_keep_hours; what is
+# recent stays, so CI stays fast. Here, with the deploy's cleanup, because one module throws images and build cache
+# away (DEV-305). From outside, not in cleanup.sh: a changed hook reaches a runner only when it is renewed, one project
+# at a time. The server's own build cache is not touched — ANDROS keeps it for the builds and tests (DEV-166, DEV-305).
+#
+# Never a working runner: one whose worker process runs (a job), whose Docker has a container, or whose state cannot be
+# read is left alone and named in the result — a prune never races a build.
+
+CI_RUNNER_DOCKER_PREFIX = "nex-ci-docker-"
+CI_RUNNER_PREFIX = "nex-ci-runner-"
+#: A rootless runner Docker listens on the socket of its user, a privileged one on the default socket.
+CI_RUNNER_OWN_SOCKET = (
+    "if [ -S /run/user/1000/docker.sock ]; then export DOCKER_HOST=unix:///run/user/1000/docker.sock; fi; "
+)
+#: How long one Docker command of the pass may take — a prune of tens of gigabytes takes a few minutes.
+CI_RUNNER_COMMAND_TIMEOUT = 900
+
+CI_RUNNER_RUNNING_JOB = "beží úloha CI"
+CI_RUNNER_HAS_CONTAINERS = "v jeho Dockeri bežia kontajnery"
+CI_RUNNER_UNKNOWN = "stav sa nedá zistiť"
+
+
+@dataclass
+class CiRunnerPrune:
+    """What one pass did: the runner Dockers pruned, left alone (with why) and failed."""
+
+    pruned: list[str] = field(default_factory=list)
+    skipped: dict[str, str] = field(default_factory=dict)
+    failed: dict[str, str] = field(default_factory=dict)
+
+
+def _ci_runner_docker(cmd: list[str]) -> subprocess.CompletedProcess:
+    """The one place the pass runs Docker — the suite replaces it. The command carries no environment of the cockpit's
+    (DEV-227): ``docker`` needs only PATH and HOME to reach the server's daemon."""
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "DOCKER_HOST") if k in os.environ}
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=CI_RUNNER_COMMAND_TIMEOUT, check=False, env=env)
+
+
+def _in_ci_runner_docker(name: str, script: str) -> subprocess.CompletedProcess:
+    return _ci_runner_docker(["docker", "exec", name, "sh", "-c", CI_RUNNER_OWN_SOCKET + script])
+
+
+def ci_runner_dockers() -> list[str]:
+    """The running CI runner Dockers on this server, by name."""
+    listed = _ci_runner_docker(["docker", "ps", "--format", "{{.Names}}"])
+    if listed.returncode != 0:
+        raise RuntimeError(f"docker ps failed: {listed.stderr.strip()[-300:]}")
+    return sorted(n for n in listed.stdout.split() if n.startswith(CI_RUNNER_DOCKER_PREFIX))
+
+
+def ci_runner_busy(name: str) -> Optional[str]:
+    """Why the runner Docker ``name`` must be left alone now — or ``None`` when it is idle."""
+    runner = CI_RUNNER_PREFIX + name.removeprefix(CI_RUNNER_DOCKER_PREFIX)
+    worker = _ci_runner_docker(["docker", "exec", runner, "pgrep", "-f", "Runner.Worker"])
+    if worker.returncode == 0:
+        return CI_RUNNER_RUNNING_JOB
+    if worker.returncode != 1:
+        return CI_RUNNER_UNKNOWN
+    containers = _in_ci_runner_docker(name, "docker ps -q")
+    if containers.returncode != 0:
+        return CI_RUNNER_UNKNOWN
+    return CI_RUNNER_HAS_CONTAINERS if containers.stdout.strip() else None
+
+
+def prune_ci_runner_caches() -> CiRunnerPrune:
+    """One pass over every runner Docker on this server. Blocking — call it off the event loop."""
+    result = CiRunnerPrune()
+    keep = settings.ci_runner_cache_keep_hours
+    for name in ci_runner_dockers():
+        try:
+            reason = ci_runner_busy(name)
+            if reason:
+                result.skipped[name] = reason
+                continue
+            done = _in_ci_runner_docker(
+                name,
+                f"docker builder prune -af --filter until={keep}h && docker image prune -af --filter until={keep}h",
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            result.failed[name] = str(exc)[-300:]
+            continue
+        if done.returncode != 0:
+            result.failed[name] = done.stderr.strip()[-300:]
+            continue
+        result.pruned.append(name)
+    logger.info(
+        "CI runner cache retention: pruned %d runner Docker(s), left alone %s, failed %s",
+        len(result.pruned),
+        result.skipped,
+        result.failed,
+    )
+    return result

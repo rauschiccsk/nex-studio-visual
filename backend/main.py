@@ -179,19 +179,17 @@ async def _orchestrator_session_retention_loop() -> None:
             logger.exception("orchestrator session retention loop iteration failed")
 
 
-async def _docker_cache_retention_loop() -> None:
-    """Background task: daily, prune the CI runners' own Docker and the server's build cache of what went unused for
-    long (DEV-435) — the disk of ANDROS crossed 85 % with 400 GB of caches nobody pruned."""
-    from backend.services import docker_cache_retention
-
+async def _ci_runner_cache_retention_loop() -> None:
+    """Background task: daily, prune the CI runners' own Docker of the build cache and images unused for long (DEV-435)
+    — the disk of ANDROS crossed 85 % with 400 GB the runners kept and nobody pruned."""
     while True:
         try:
-            await asyncio.sleep(settings.docker_cache_retention_interval_seconds)
-            await asyncio.to_thread(docker_cache_retention.run_pass)
+            await asyncio.sleep(settings.ci_runner_cache_retention_interval_seconds)
+            await asyncio.to_thread(orchestrator_service.prune_ci_runner_caches)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("docker cache retention loop iteration failed")
+            logger.exception("CI runner cache retention loop iteration failed")
 
 
 async def _ci_watch_loop() -> None:
@@ -386,9 +384,9 @@ async def lifespan(app: FastAPI):
     kb_publish_task: Optional[asyncio.Task] = None
     if settings.kb_publish_enabled:
         kb_publish_task = asyncio.create_task(kb_publish_loop(), name="kb-publish")
-    docker_cache_task: Optional[asyncio.Task] = None
-    if settings.docker_cache_retention_enabled:
-        docker_cache_task = asyncio.create_task(_docker_cache_retention_loop(), name="docker-cache-retention")
+    ci_runner_cache_task: Optional[asyncio.Task] = None
+    if settings.ci_runner_cache_retention_enabled:
+        ci_runner_cache_task = asyncio.create_task(_ci_runner_cache_retention_loop(), name="ci-runner-cache-retention")
     kb_index_task: Optional[asyncio.Task] = None
     if settings.kb_index_sync_enabled:
         kb_index_task = asyncio.create_task(
@@ -410,8 +408,8 @@ async def lifespan(app: FastAPI):
             kb_publish_task.cancel()
         if build_reminder_task is not None:
             build_reminder_task.cancel()
-        if docker_cache_task is not None:
-            docker_cache_task.cancel()
+        if ci_runner_cache_task is not None:
+            ci_runner_cache_task.cancel()
         for t in (
             idle_task,
             retention_task,
@@ -420,7 +418,7 @@ async def lifespan(app: FastAPI):
             ci_watch_task,
             kb_publish_task,
             build_reminder_task,
-            docker_cache_task,
+            ci_runner_cache_task,
         ):
             if t is None:
                 continue

@@ -22,7 +22,7 @@ from backend.services.knowledge_base_writer import KnowledgeBaseWriter
 settings.ci_watch_enabled = False
 settings.kb_publish_enabled = False
 settings.build_reminders_enabled = False
-settings.docker_cache_retention_enabled = False
+settings.ci_runner_cache_retention_enabled = False
 
 
 @pytest.fixture(autouse=True)

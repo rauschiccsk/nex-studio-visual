@@ -1,9 +1,9 @@
-"""DEV-435 — the CI runners' own Docker and the server's build cache stay bounded.
+"""DEV-435 — the CI runners' own Docker stays bounded; the server's own build cache is left alone.
 
 19.11.2026 the root disk of ANDROS crossed 85 %: 29 CI runners held 268 GB of build cache and 132 GB of images in their
-own Docker, the server 137 GB of build cache — the runners' hook keeps tagged images and the build cache and nothing
-pruned the server's. The cockpit now prunes both once a day, only what has gone unused for long, and never a runner
-that is running a job. Director: „Súhlasím“.
+own Docker — the runners' hook keeps tagged images and the build cache. The cockpit now prunes them once a day, only
+what has gone unused for long, and never a runner that is running a job. The server's own build cache stays: ANDROS
+keeps it for the builds and the tests (DEV-166, DEV-305). Director: „Súhlasím“.
 
 Docker itself is never called here: the one function that runs it is replaced by a fake that answers like Docker.
 """
@@ -15,7 +15,7 @@ import subprocess
 import pytest
 
 from backend.config.settings import settings
-from backend.services import docker_cache_retention as retention
+from backend.services import orchestrator
 
 
 class FakeDocker:
@@ -25,7 +25,7 @@ class FakeDocker:
         self.runners = runners
         self.calls: list[list[str]] = []
 
-    def __call__(self, cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess:
         self.calls.append(cmd)
         ok = subprocess.CompletedProcess(cmd, 0, "", "")
         if cmd[:2] == ["docker", "ps"]:
@@ -47,15 +47,12 @@ class FakeDocker:
             c[-1] for c in self.calls if c[:3] == ["docker", "exec", f"nex-ci-docker-{suffix}"] and "prune" in c[-1]
         ]
 
-    def host_prunes(self) -> list[list[str]]:
-        return [c for c in self.calls if c[:3] == ["docker", "builder", "prune"]]
-
 
 @pytest.fixture
 def docker(monkeypatch):
     def install(runners: dict[str, dict]) -> FakeDocker:
         fake = FakeDocker(runners)
-        monkeypatch.setattr(retention, "_run", fake)
+        monkeypatch.setattr(orchestrator, "_ci_runner_docker", fake)
         return fake
 
     return install
@@ -64,11 +61,11 @@ def docker(monkeypatch):
 def test_an_idle_runner_loses_only_what_went_unused_for_long(docker):
     fake = docker({"nex-inbox": {}})
 
-    result = retention.run_pass()
+    result = orchestrator.prune_ci_runner_caches()
 
     keep = settings.ci_runner_cache_keep_hours
     assert fake.prunes_in("nex-inbox") == [
-        f"{retention.OWN_SOCKET}docker builder prune -af --filter until={keep}h"
+        f"{orchestrator.CI_RUNNER_OWN_SOCKET}docker builder prune -af --filter until={keep}h"
         f" && docker image prune -af --filter until={keep}h"
     ]
     assert result.pruned == ["nex-ci-docker-nex-inbox"]
@@ -77,16 +74,16 @@ def test_an_idle_runner_loses_only_what_went_unused_for_long(docker):
 @pytest.mark.parametrize(
     ("runner", "reason"),
     [
-        ({"worker_rc": 0}, retention.RUNNING_JOB),
-        ({"worker_rc": 125}, retention.UNKNOWN),
-        ({"containers": "abc123\n"}, retention.HAS_CONTAINERS),
-        ({"ps_rc": 1}, retention.UNKNOWN),
+        ({"worker_rc": 0}, orchestrator.CI_RUNNER_RUNNING_JOB),
+        ({"worker_rc": 125}, orchestrator.CI_RUNNER_UNKNOWN),
+        ({"containers": "abc123\n"}, orchestrator.CI_RUNNER_HAS_CONTAINERS),
+        ({"ps_rc": 1}, orchestrator.CI_RUNNER_UNKNOWN),
     ],
 )
 def test_a_runner_that_may_be_working_is_left_alone(docker, runner, reason):
     fake = docker({"nex-knowledge": runner, "nex-manager": {}})
 
-    result = retention.run_pass()
+    result = orchestrator.prune_ci_runner_caches()
 
     assert fake.prunes_in("nex-knowledge") == []
     assert result.skipped == {"nex-ci-docker-nex-knowledge": reason}
@@ -96,7 +93,7 @@ def test_a_runner_that_may_be_working_is_left_alone(docker, runner, reason):
 def test_one_runner_failing_does_not_stop_the_others(docker):
     fake = docker({"nex-archive": {"prune_rc": 1}, "orthodox-typikon": {}})
 
-    result = retention.run_pass()
+    result = orchestrator.prune_ci_runner_caches()
 
     assert list(result.failed) == ["nex-ci-docker-nex-archive"]
     assert fake.prunes_in("orthodox-typikon")
@@ -106,26 +103,29 @@ def test_one_runner_failing_does_not_stop_the_others(docker):
 def test_only_runner_dockers_are_pruned_inside(docker):
     fake = docker({"dedo": {}})
 
-    retention.run_pass()
+    orchestrator.prune_ci_runner_caches()
 
     pruned_in = {c[2] for c in fake.calls if c[:2] == ["docker", "exec"] and "prune" in c[-1]}
     assert pruned_in == {"nex-ci-docker-dedo"}
 
 
-def test_the_server_keeps_its_recent_build_cache(docker):
-    fake = docker({})
+def test_the_servers_own_build_cache_is_left_alone(docker):
+    """DEV-166, DEV-305: ANDROS keeps its build cache for the builds and the tests — the pass reaches only runners."""
+    fake = docker({"nex-inbox": {}})
 
-    retention.run_pass()
+    orchestrator.prune_ci_runner_caches()
 
-    assert fake.host_prunes() == [
-        ["docker", "builder", "prune", "-af", "--filter", f"until={settings.host_build_cache_keep_hours}h"]
-    ]
+    assert [c for c in fake.calls if c[:2] != ["docker", "exec"] and "prune" in c] == []
+    assert {c[2] for c in fake.calls if c[:2] == ["docker", "exec"]} <= {
+        "nex-ci-docker-nex-inbox",
+        "nex-ci-runner-nex-inbox",
+    }
 
 
 def test_the_limits_are_settings_with_the_agreed_values():
-    assert (settings.ci_runner_cache_keep_hours, settings.host_build_cache_keep_hours) == (72, 168)
-    assert settings.docker_cache_retention_interval_seconds == 24 * 3600
+    assert settings.ci_runner_cache_keep_hours == 72
+    assert settings.ci_runner_cache_retention_interval_seconds == 24 * 3600
 
 
 def test_the_daily_pass_never_runs_in_the_test_suite():
-    assert settings.docker_cache_retention_enabled is False
+    assert settings.ci_runner_cache_retention_enabled is False

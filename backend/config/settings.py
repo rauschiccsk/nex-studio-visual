@@ -120,12 +120,12 @@ class Settings(BaseSettings):
     ci_watch_interval_seconds: int = 60
     ci_watch_enabled: bool = True
     ci_watch_retry_hours: int = 6
-    # DEV-435: the CI runners' own Docker and the server's build cache stay bounded — once a day the cockpit prunes what
-    # went unused for longer than these (recent cache stays, CI stays fast); off in tests (the app's real life cycle).
-    docker_cache_retention_enabled: bool = True
-    docker_cache_retention_interval_seconds: int = 24 * 3600
+    # DEV-435: the CI runners' own Docker stays bounded — once a day the cockpit prunes what went unused for longer than
+    # this (recent cache stays, CI stays fast); off in tests (the app's real life cycle). The server's own build cache
+    # is not touched (DEV-166, DEV-305).
+    ci_runner_cache_retention_enabled: bool = True
+    ci_runner_cache_retention_interval_seconds: int = 24 * 3600
     ci_runner_cache_keep_hours: int = 72
-    host_build_cache_keep_hours: int = 168
     # DEV-201: how long a version passed by the Auditor waits for the CI of its last commit before the wait is given up
     # (said out loud). Measured 23.10.2026: NEX Inbox's CI took up to 100 minutes, its jobs waiting for the only runner.
     ci_pending_cap_hours: int = 6
