@@ -4,7 +4,7 @@ from backend.db.models.agent_terminal import AgentTerminalSession
 from backend.db.models.backlog import BacklogItem
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.credentials import Credential
-from backend.db.models.customers import Customer
+from backend.db.models.customers import Customer, CustomerSecretReveal
 from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.delivered_authorship import DeliveredAuthorship
 from backend.db.models.delivery_statement import DeliveryStatement
@@ -39,6 +39,7 @@ __all__ = [
     "TimestampMixin",
     "Credential",
     "Customer",
+    "CustomerSecretReveal",
     "DeployEvent",
     "DeployRefusal",
     "DedoProjectProposal",

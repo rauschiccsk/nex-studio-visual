@@ -572,6 +572,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customers/{customer_id}/secrets/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reveal Customer Secret
+         * @description DEV-437 — one stored secret of the customer, for the eye on the customer card. Only the Administrator (the
+         *     ``admin`` account): the Director, 19.11.2026, „toto bude mať len Administrátor“. Every showing is recorded; the
+         *     create, update and list answers still never carry a secret.
+         */
+        get: operations["reveal_customer_secret_api_v1_customers__customer_id__secrets__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customers/{customer_id}/uat-checks": {
         parameters: {
             query?: never;
@@ -4891,6 +4913,16 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * CustomerSecretRead
+         * @description DEV-437 — one stored customer secret, shown to the Administrator on demand.
+         */
+        CustomerSecretRead: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
         };
         /**
          * CustomerSettingRead
@@ -10411,6 +10443,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_DeployProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reveal_customer_secret_api_v1_customers__customer_id__secrets__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                customer_id: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerSecretRead"];
                 };
             };
             /** @description Validation Error */

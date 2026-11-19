@@ -30,8 +30,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core.errors import ConflictError, NotFoundError
-from backend.db.models.customers import Customer
+from backend.db.models.customers import Customer, CustomerSecretReveal
 from backend.db.models.deploy import DeployEvent
+from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.schemas.credentials import CredentialCreate
 from backend.schemas.customer import CustomerCreate, CustomerUpdate
@@ -106,6 +107,24 @@ def read_secret_settings(db: Session, customer: Customer) -> dict[str, str]:
     except (ValueError, OSError):
         return {}
     return {str(k): str(v) for k, v in data.items() if v} if isinstance(data, dict) else {}
+
+
+def reveal_secret(db: Session, customer: Customer, key: str, user: User) -> str:
+    """DEV-437 — one stored secret of the customer, for the Administrator's eye on the customer card: a setting the app
+    marks ``@customer-secret``, or the initial admin password (``ADMIN_INITIAL_PASSWORD``). The showing is recorded —
+    who, which, when — never the value. The caller checks it is the Administrator.
+
+    Raises:
+        NotFoundError: the customer has no such stored secret.
+    """
+    if key == env_contract.LEGACY_ADMIN_PASSWORD:
+        value = credentials_service.read_content(db, customer.credential_id).content if customer.credential_id else None
+    else:
+        value = read_secret_settings(db, customer).get(key)
+    if not value:
+        raise NotFoundError(f"Zákazník nemá uložené tajomstvo {key}.")
+    db.add(CustomerSecretReveal(customer_id=customer.id, key=key, user_id=user.id))
+    return value
 
 
 def secret_setting_keys(db: Session, customer: Customer) -> list[str]:

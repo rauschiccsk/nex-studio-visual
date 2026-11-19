@@ -17,6 +17,9 @@ import { ApiError } from "@/services/api";
 import type { CustomerRead, CustomerSettingsContract } from "@/types/customer";
 import { ADMIN_PASSWORD_LABEL } from "@/types/customer";
 
+
+/** What a stored secret reads as (SecretInput) — the same asterisks for every secret. */
+const STORED_MASK = "••••••••••";
 const { listCustomersMock, createCustomerMock, updateCustomerMock, contractMock } = vi.hoisted(() => ({
   listCustomersMock: vi.fn(),
   createCustomerMock: vi.fn(),
@@ -105,7 +108,8 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     render(<CustomersPage />);
     fireEvent.click(await screen.findByTitle("Upraviť zákazníka"));
 
-    const password = (await screen.findByPlaceholderText("uložené — prázdne = bez zmeny")) as HTMLInputElement;
+    // DEV-437: a stored secret reads as asterisks (STORED_MASK), still write-only for anyone but the Administrator.
+    const password = (await screen.findByPlaceholderText(STORED_MASK)) as HTMLInputElement;
     expect(password.type).toBe("password");
     fireEvent.change(screen.getByDisplayValue("spravca@icc.sk"), { target: { value: "admin@icc.sk" } });
     fireEvent.click(screen.getByRole("button", { name: /Uložiť/ }));
@@ -155,7 +159,7 @@ describe("CustomersPage — the app's own settings (DEV-72)", () => {
     expect(
       screen.getByText(
         "Heslo, s ktorým aplikácia pri inštalácii založí účet admin, keď správcu ešte nemá; správca si ho pri prvom " +
-          "prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne a späť sa už nezobrazí.",
+          "prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne; zobraziť ho môže len Administrátor.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Nastavenia aplikácie pre tohto zákazníka")).not.toBeInTheDocument();

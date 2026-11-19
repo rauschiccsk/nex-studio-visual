@@ -36,3 +36,9 @@ export function updateCustomer(customerId: string, data: CustomerUpdate): Promis
 export function deleteCustomer(customerId: string): Promise<void> {
   return api.delete(`/customers/${customerId}`);
 }
+
+/** DEV-437 — one stored secret of the customer, for the eye on the customer card. The Administrator only; the cockpit
+ * records who saw which secret and when. */
+export function revealCustomerSecret(customerId: string, key: string): Promise<{ key: string; value: string }> {
+  return api.get<{ key: string; value: string }>(`/customers/${customerId}/secrets/${encodeURIComponent(key)}`);
+}

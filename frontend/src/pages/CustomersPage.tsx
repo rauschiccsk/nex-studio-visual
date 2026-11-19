@@ -9,12 +9,16 @@ import {
   deleteCustomer,
   getCustomerSettingsContract,
   listProdMachines,
+  revealCustomerSecret,
 } from "@/services/api/customers";
 import { ApiError } from "@/services/api";
 import { humanizeApiError } from "@/services/apiError";
 import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import CustomerSettingsFields from "@/components/customers/CustomerSettingsFields";
+import SecretInput from "@/components/customers/SecretInput";
+import { isAdminAccount } from "@/services/permissions";
+import { useAuthStore } from "@/store/authStore";
 import { customerSettings, missingRequired } from "@/lib/customerSettings";
 import type { CustomerRead, CustomerSettingsContract, ProdMachine } from "@/types/customer";
 import { ADMIN_PASSWORD_LABEL } from "@/types/customer";
@@ -56,13 +60,14 @@ function isInstanceLabelInvalid(value: string): boolean {
  * therefore enforces the very pattern the deploy path enforces, so a space / dot / underscore is caught
  * while typing instead of days later as a failed deploy.
  *
- * Secret handling (CLAUDE.md §4/§5, OQ-5): the form has a write-only "secret"
- * field whose value is sent to the backend credentials store and NEVER read
- * back. The list shows only a "secret recorded" badge derived from
- * `has_secret`; the secret value never re-enters the browser.
+ * Secret handling (CLAUDE.md §4/§5, OQ-5): a secret typed here goes to the backend credentials store; no answer of
+ * the create, update or list routes ever carries it back. The list shows only a "secret recorded" badge derived from
+ * `has_secret`. DEV-437: a stored secret reads as asterisks and only the Administrator (the `admin` account) may show
+ * it with the eye — one secret, on that click, recorded by the cockpit (the Director, 19.11.2026).
  */
 export default function CustomersPage() {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const slug = selectedProject?.slug;
 
@@ -152,6 +157,11 @@ export default function CustomersPage() {
   // it would be stored and never used, so it is not offered. Not loaded yet → offered, as before DEV-72; failed to
   // load → not offered: the form says it does not know what the app asks (DEV-164).
   const offersLegacySecret = contractError === null && (contract === null || contract.legacy_admin);
+  // DEV-437: the eye on a stored secret — the Administrator only, and only for a customer that already exists.
+  const reveal =
+    isAdminAccount(user) && editingCustomerId
+      ? (key: string) => revealCustomerSecret(editingCustomerId, key).then((r) => r.value)
+      : undefined;
   const appLanguages = contract?.languages ?? [];
 
   function resetForm() {
@@ -434,22 +444,19 @@ export default function CustomersPage() {
             {offersLegacySecret && (
               <label className="block text-xs">
                 <span className="text-[var(--color-text-secondary)]">{ADMIN_PASSWORD_LABEL}</span>
-                <input
-                  spellCheck={false}
-                  type="password"
+                <SecretInput
+                  key={editingCustomerId ?? "new"}
                   value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  autoComplete="new-password"
-                  placeholder={
-                    editingCustomerId
-                      ? "ponechaj prázdne = bez zmeny; vyplň = zmeň heslo"
-                      : "uloží sa bezpečne; späť sa už nezobrazí"
-                  }
+                  onChange={setSecret}
+                  stored={!!items.find((c) => c.id === editingCustomerId)?.has_secret}
+                  newPlaceholder="uloží sa bezpečne"
+                  reveal={reveal ? () => reveal("ADMIN_INITIAL_PASSWORD") : undefined}
+                  label={ADMIN_PASSWORD_LABEL}
                   className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
                 />
                 <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
                   Heslo, s ktorým aplikácia pri inštalácii založí účet admin, keď správcu ešte nemá; správca si ho pri
-                  prvom prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne a späť sa už nezobrazí.
+                  prvom prihlásení zmení. Platí len pre tento projekt. Uloží sa bezpečne; zobraziť ho môže len Administrátor.
                 </span>
               </label>
             )}
@@ -462,6 +469,8 @@ export default function CustomersPage() {
             </p>
           )}
           <CustomerSettingsFields
+            key={editingCustomerId ?? "new"}
+            onReveal={reveal}
             contract={contract}
             values={settingValues}
             onValue={(key, value) => setSettingValues((v) => ({ ...v, [key]: value }))}

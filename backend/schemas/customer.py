@@ -243,6 +243,13 @@ class CustomerRead(BaseModel):
     updated_at: datetime
 
 
+class CustomerSecretRead(BaseModel):
+    """DEV-437 — one stored customer secret, shown to the Administrator on demand."""
+
+    key: str
+    value: str
+
+
 class CustomerSettingRead(BaseModel):
     """One setting an app marks in its ``.env.example`` (DEV-72)."""
 

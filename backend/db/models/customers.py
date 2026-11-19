@@ -92,3 +92,18 @@ class Customer(Base, UUIDMixin, TimestampMixin):
         # project-scoped).
         UniqueConstraint("project_id", "slug", name="uq_customers_project_slug"),
     )
+
+
+class CustomerSecretReveal(Base, UUIDMixin, TimestampMixin):
+    """DEV-437 — who saw which stored secret of which customer, and when. Never the value.
+
+    The Administrator may show a stored customer secret on the customer card (the Director, 19.11.2026: „toto bude mať
+    len Administrátor“); every showing leaves a row here.
+    """
+
+    __tablename__ = "customer_secret_reveals"
+
+    customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The variable shown — a setting the app marks ``@customer-secret``, or ``ADMIN_INITIAL_PASSWORD``.
+    key = Column(String(128), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

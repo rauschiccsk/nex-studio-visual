@@ -18,9 +18,10 @@ project-scoped FE pages can address customers by the pinned project's slug.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core import authz
@@ -33,6 +34,7 @@ from backend.schemas.customer import (
     CustomerCreate,
     CustomerLanguageOption,
     CustomerRead,
+    CustomerSecretRead,
     CustomerSettingRead,
     CustomerSettingsContractRead,
     CustomerUpdate,
@@ -40,6 +42,8 @@ from backend.schemas.customer import (
 )
 from backend.services import app_languages, prod_machines
 from backend.services import customer as customer_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Customers"])
 
@@ -151,6 +155,31 @@ def create_customer(
 # ---------------------------------------------------------------------------
 # Customer-scoped endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/customers/{customer_id}/secrets/{key}", response_model=CustomerSecretRead)
+def reveal_customer_secret(
+    customer_id: UUID,
+    key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CustomerSecretRead:
+    """DEV-437 — one stored secret of the customer, for the eye on the customer card. Only the Administrator (the
+    ``admin`` account): the Director, 19.11.2026, „toto bude mať len Administrátor“. Every showing is recorded; the
+    create, update and list answers still never carry a secret."""
+    customer = authz.assert_customer_access(db, current_user, customer_id)
+    if not authz.is_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Uložené tajomstvo zobrazí len Administrátor."
+        )
+    try:
+        value = customer_service.reveal_secret(db, customer, key, current_user)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise http_error(exc) from exc
+    logger.info("customer secret shown: customer=%s key=%s user=%s", customer.id, key, current_user.username)
+    return CustomerSecretRead(key=key, value=value)
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerRead)

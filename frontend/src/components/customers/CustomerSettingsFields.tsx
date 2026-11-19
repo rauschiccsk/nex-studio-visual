@@ -2,11 +2,12 @@
  * DEV-72 — the settings the app asks of each customer, in the customer form.
  *
  * The app marks them in its `.env.example` (`@customer`, `@customer-secret`, `required`, `@public-url`); the cockpit
- * reads that and shows one field per setting with the app's own words. A secret is write-only: the stored value is
- * never shown, only that one is stored — an empty field keeps it. The public address is filled in by the cockpit at
- * deploy, so it is named, not asked for.
+ * reads that and shows one field per setting with the app's own words. A stored secret reads as asterisks; only the
+ * Administrator may show it with the eye (DEV-437) — an empty field keeps it. The public address is filled in by the
+ * cockpit at deploy, so it is named, not asked for.
  */
 
+import SecretInput from "@/components/customers/SecretInput";
 import { customerSettings } from "@/lib/customerSettings";
 import type { CustomerSettingsContract } from "@/types/customer";
 
@@ -21,9 +22,19 @@ interface Props {
   onSecret: (key: string, value: string) => void;
   /** Secrets that already have a stored value (editing an existing customer). */
   storedSecrets: string[];
+  /** DEV-437 — for the Administrator only: fetches a stored secret for the eye. */
+  onReveal?: (key: string) => Promise<string>;
 }
 
-export default function CustomerSettingsFields({ contract, values, onValue, secrets, onSecret, storedSecrets }: Props) {
+export default function CustomerSettingsFields({
+  contract,
+  values,
+  onValue,
+  secrets,
+  onSecret,
+  storedSecrets,
+  onReveal,
+}: Props) {
   const fields = customerSettings(contract);
   // DEV-164: a Web project's administration has an address of its own — the cockpit fills it in like the web's.
   const publicUrl = (contract?.settings ?? []).filter((s) => s.kind === "public_url" || s.kind === "public_url_admin");
@@ -57,21 +68,26 @@ export default function CustomerSettingsFields({ contract, values, onValue, secr
                   </span>
                 )}
               </span>
-              <input
-                spellCheck={false}
-                type={secret ? "password" : "text"}
-                autoComplete={secret ? "new-password" : "off"}
-                value={secret ? (secrets[s.key] ?? "") : (values[s.key] ?? "")}
-                onChange={(e) => (secret ? onSecret(s.key, e.target.value) : onValue(s.key, e.target.value))}
-                placeholder={
-                  secret
-                    ? stored
-                      ? "uložené — prázdne = bez zmeny"
-                      : "uloží sa bezpečne; späť sa už nezobrazí"
-                    : undefined
-                }
-                className={INPUT}
-              />
+              {secret ? (
+                <SecretInput
+                  value={secrets[s.key] ?? ""}
+                  onChange={(value) => onSecret(s.key, value)}
+                  stored={stored}
+                  newPlaceholder="uloží sa bezpečne"
+                  reveal={onReveal ? () => onReveal(s.key) : undefined}
+                  label={s.label}
+                  className={INPUT}
+                />
+              ) : (
+                <input
+                  spellCheck={false}
+                  type="text"
+                  autoComplete="off"
+                  value={values[s.key] ?? ""}
+                  onChange={(e) => onValue(s.key, e.target.value)}
+                  className={INPUT}
+                />
+              )}
               <span className="mt-1 block font-mono text-[10px] text-[var(--color-text-muted)]">{s.key}</span>
             </label>
           );
