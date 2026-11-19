@@ -1531,6 +1531,14 @@ def generate_uat_env(
                 key_str, source, user=db_user, db_name=db_name, password=shared_db_password, db_host=db_host
             )
             continue
+        if key_str == ADMIN_LOGIN_ENV_KEY and admin_password:
+            # The manager's initial admin login — the customer secret they KNOW (not a random synthetic they could never
+            # discover). Wins over the synthetic path and preserved_secrets, so a redeploy re-aligns it. Never logged
+            # (§4). DEV-436: before the ``${…}`` branch below — the NSV standard template forwards it from ``.env``
+            # (``ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}``) and that branch gave it a random value nobody
+            # knew; Orthodox Hermenia's UAT, 19.11.2026. The same order once emptied ``DATABASE_URL`` (DEV-235).
+            rendered[key_str] = admin_password
+            continue
         if _is_var_expansion(value):
             # v4.0.18: honour a ``${VAR:-default}`` default on a NON-secret var — it IS the app's intended value
             # (e.g. GENESIS_SOURCE:-mock / SHOPIFY_SOURCE:-fake). Blindly writing the placeholder crashed apps
@@ -1557,11 +1565,6 @@ def generate_uat_env(
                 rendered[key_str] = _own_value(key_str, default) or default
             else:
                 rendered[key_str] = USER_SECRET_PLACEHOLDER
-        elif key_str == ADMIN_LOGIN_ENV_KEY and admin_password:
-            # The manager's initial admin login — set it to the customer secret they KNOW (not a random
-            # synthetic they could never discover). Wins over both the synthetic path and preserved_secrets so a
-            # redeploy re-aligns it. Never logged (§4).
-            rendered[key_str] = admin_password
         elif key_str.lower().endswith(SECRET_SUFFIXES):
             kept = preserved_secrets.get(key_str)
             rendered[key_str] = kept or synthetic_secret(key_str)
