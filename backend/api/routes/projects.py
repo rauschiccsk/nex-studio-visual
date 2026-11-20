@@ -27,7 +27,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -73,12 +73,15 @@ from backend.schemas.project import (
     ProjectType,
     ProjectUpdate,
     TemplateOption,
+    UpgradeBrief,
 )
 from backend.schemas.version import VersionCreate
 from backend.services import action_labels as action_labels_service
 from backend.services import app_kit as app_kit_service
 from backend.services import (
     app_languages,
+    delivery_statement,
+    library_upgrades,
     orchestrator,
     pipeline_runner,
     project_adoption,
@@ -866,6 +869,28 @@ def _refuse_while_an_agent_works(db: Session, project: Project) -> None:
                 "pod rukami)."
             ),
         )
+
+
+@router.get("/{project_id}/upgrade-brief", response_model=UpgradeBrief)
+def get_upgrade_brief(
+    project_id: UUID,
+    version_number: str = Query(..., min_length=1, max_length=32),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UpgradeBrief:
+    """DEV-440: the Zadanie of a new version ``version_number`` that only carries the libraries the Manažér upgraded
+    since the previous finished version — the cockpit writes it from their change notes, the Manažér approves it."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise http_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    if not project.source_path:
+        return UpgradeBrief()
+    coming = Version(id=uuid4(), project_id=project.id, version_number=version_number.strip())
+    steps = delivery_statement.base_plan(db, coming)
+    found = library_upgrades.upgrades(Path(project.source_path), steps)
+    return UpgradeBrief(text=library_upgrades.founding_brief(found))
 
 
 @router.post("/{project_id}/app-kit-upgrade", response_model=AppKitUpgradeResult)

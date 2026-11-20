@@ -5,6 +5,7 @@ import {
   getGitStatusApi,
   commitGitApi,
   discardGitApi,
+  getUpgradeBriefApi,
   type GitStatus,
 } from "@/services/api/projects";
 import LibraryUpgradeOffers from "@/components/controlCenter/LibraryUpgradeOffers";
@@ -100,6 +101,11 @@ export default function NewVersionPage() {
   // #3 / DEV-253: the opt-in upgrades of nex-shared and nex-app-kit live in LibraryUpgradeOffers (DEV-379 — the same
   // offer where a version is founded from the technical team's brief); a conversion onto a template re-reads them.
   const [upgradesKey, setUpgradesKey] = useState(0);
+  // DEV-440: the Zadanie the cockpit wrote from the libraries upgraded since the previous version — the Manažér only
+  // approves it. Kept to know whether the box still holds it (refreshed after another upgrade) or the person's text.
+  const [writtenBrief, setWrittenBrief] = useState<string | null>(null);
+  // Moves after every upgrade attempt — the brief is asked again then.
+  const [upgradedKey, setUpgradedKey] = useState(0);
   // DEV-254: what the conversion onto the template did, said once it is done.
   const [converted, setConverted] = useState<string | null>(null);
 
@@ -219,6 +225,31 @@ export default function NewVersionPage() {
       return null;
     }
   }
+
+  // DEV-440 — Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte nemusel niečo
+  // dopisovať do zadania, veď úloha je jasná“. After an upgrade (the tree is re-read) the cockpit asks what rose since
+  // the previous finished version and writes the Zadanie from the change notes — only into an empty box, or over its
+  // own earlier text; what the person wrote is never replaced.
+  // The box and the cockpit's last text, read by the asking below without asking again at every keystroke.
+  const boxRef = useRef({ zadanie, writtenBrief });
+  boxRef.current = { zadanie, writtenBrief };
+  const projectId = project?.id ?? null;
+  useEffect(() => {
+    if (!projectId || savedVersion || !versionNumber.trim()) return;
+    const holdsTheirs = () => boxRef.current.zadanie.trim() !== "" && boxRef.current.zadanie !== boxRef.current.writtenBrief;
+    if (holdsTheirs()) return;
+    let cancelled = false;
+    getUpgradeBriefApi(projectId, versionNumber.trim())
+      .then(({ text }) => {
+        if (cancelled || !text || holdsTheirs()) return;
+        setZadanie(text);
+        setWrittenBrief(text);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, versionNumber, upgradedKey, upgradesKey, savedVersion]);
 
   // "Uložiť ich" — commit all pending changes (preserves work), then re-check the tree.
   async function handleCommitTree() {
@@ -471,7 +502,10 @@ export default function NewVersionPage() {
               clean={!isDirty}
               hidden={!!savedVersion}
               reloadKey={upgradesKey}
-              afterwards={refreshGitStatus}
+              afterwards={async () => {
+                await refreshGitStatus();
+                setUpgradedKey((k) => k + 1);
+              }}
             />
           )}
           <form onSubmit={handleSaveZadanie} noValidate className="space-y-5">
@@ -569,6 +603,11 @@ export default function NewVersionPage() {
               />
               {errors.zadanie ? (
                 <p className="mt-1 text-xs text-[var(--color-status-error)]">{errors.zadanie}</p>
+              ) : writtenBrief !== null && zadanie === writtenBrief ? (
+                <p className="text-[11px] text-[var(--color-text-secondary)] mt-1.5">
+                  Zadanie zostavil kokpit z povýšenia knižníc a ich zápisov zmien — verzia prináša len povýšenie. Stačí
+                  ho uložiť; doplniť ho môžeš, nemusíš.
+                </p>
               ) : (
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
                   Nepovinné. Ak Zadanie vyplníš, uloží sa ako vstup pre Prípravu; ak ho necháš prázdne,

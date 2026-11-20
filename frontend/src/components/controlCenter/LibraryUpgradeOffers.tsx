@@ -45,7 +45,14 @@ export default function LibraryUpgradeOffers({ projectId, hasTemplate, clean, hi
   const kit = useLibraryUpgrade<AppKitStatus>(
     "šablóny aplikácie",
     (target) => upgradeAppKitApi(projectId, target),
-    afterwards,
+    async () => {
+      await afterwards();
+      // DEV-440: the template's upgrade moves nex-shared with it (the scaffold's pins) — its offer is read again, so
+      // it does not offer what the project already has (20.11.2026 Orthodox Hermenia: gone only after a hard reload).
+      await getNexsharedStatusApi(projectId)
+        .then((st) => nex.setStatus(st))
+        .catch(() => {});
+    },
   );
   // React keeps a state setter the same for the component's life — the load below may depend on it.
   const { setStatus: setNexStatus } = nex;

@@ -58,12 +58,21 @@ function plainChoice(text: string): string {
   return text.split(/\s+/).filter(Boolean).join(" ");
 }
 
+/** DEV-442 — the mark with which Poradca says its answer asks the person's consent (charter §5); the cockpit then offers
+ *  „Súhlasím“ under it and never shows the mark itself. */
+const CONSENT_RE = /<suhlas\s*\/>/g;
+
+/** DEV-442 — whether the answer asks the person's consent: Poradca marks it, the cockpit does not guess from the text. */
+export function asksConsent(content: string | null | undefined): boolean {
+  return !!content && new RegExp(CONSENT_RE.source).test(content);
+}
+
 /**
  * Answer text to display: blocks with tags turn into a quote with a heading. Without that the Markdown renderer
  * (it does not let HTML through) would discard them with the content and a person would not see what a button inserts.
  */
 export function answerForDisplay(content: string): string {
-  let out = content;
+  let out = content.replace(CONSENT_RE, "");
   for (const { tag, heading } of BLOCKS) {
     const re = new RegExp(`<${tag}(?:\\s[^>]*)?>\\s*([\\s\\S]*?)\\s*</${tag}>`, "g");
     out = out.replace(re, (_m, body: string) => {

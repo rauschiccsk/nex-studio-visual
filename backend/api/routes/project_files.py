@@ -60,6 +60,10 @@ def _history(db: Session, version_id: uuid.UUID) -> dict[str, tuple[str, datetim
         path = str(entry.get("path") or "")
         if entry.get("action") == "uploaded":
             seen[path] = (str(entry.get("by") or ""), created_at)
+        elif entry.get("action") == "deleted" and path.endswith("/"):
+            # DEV-443 — a whole folder went: none of its files is anyone's upload any more.
+            for gone in [p for p in seen if p.startswith(path)]:
+                seen.pop(gone)
         elif entry.get("action") == "deleted":
             seen.pop(path, None)
     return seen
@@ -154,6 +158,28 @@ async def upload_private_file(
     listing = _listing(db, version_id, files)
     mine = next(f for f in listing["files"] if f.path == stored.path)
     return {**listing, "file": mine, "answer_line": project_files.answer_line(stored)}
+
+
+@router.delete("/{version_id}/files/folder", response_model=PrivateFilesRead)
+async def delete_private_folder(
+    version_id: uuid.UUID,
+    path: str = Query(..., min_length=1, max_length=512),
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """DEV-443 — remove a folder of ``private/`` with everything in it (the agent's working copy); record who did it."""
+    authz.assert_version_access(db, current_user, version_id)
+    root = _project_root(db, version_id)
+    held: list[project_files.PrivateFile] = await _offload(project_files.delete_folder, root, path)
+    folder = path.rstrip("/")
+    await record_private_file(
+        db,
+        version_id,
+        f"{current_user.username} zmazal priečinok {folder}/ z priečinka projektu (počet súborov: {len(held)}).",
+        {"action": "deleted", "path": f"{folder}/", "files": len(held), "by": current_user.username},
+    )
+    files = await _offload(project_files.list_files, root)
+    return _listing(db, version_id, files)
 
 
 @router.delete("/{version_id}/files", response_model=PrivateFilesRead)

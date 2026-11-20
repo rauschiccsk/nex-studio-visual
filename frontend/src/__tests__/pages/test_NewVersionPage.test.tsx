@@ -38,6 +38,7 @@ const {
   peekZadanieOnDiskMock,
   postPipelineActionApiMock,
   getNextVersionNumberApiMock,
+  getUpgradeBriefApiMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   listProjectsApiMock: vi.fn(),
@@ -57,6 +58,7 @@ const {
   peekZadanieOnDiskMock: vi.fn(),
   postPipelineActionApiMock: vi.fn(),
   getNextVersionNumberApiMock: vi.fn(),
+  getUpgradeBriefApiMock: vi.fn(),
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -75,6 +77,7 @@ vi.mock("@/services/api/projects", () => ({
   getGitStatusApi: getGitStatusApiMock,
   commitGitApi: commitGitApiMock,
   discardGitApi: discardGitApiMock,
+  getUpgradeBriefApi: getUpgradeBriefApiMock,
 }));
 vi.mock("@/services/api/versions", () => ({
   listVersions: listVersionsMock,
@@ -166,6 +169,8 @@ beforeEach(() => {
   peekZadanieOnDiskMock.mockResolvedValue({ content: "", relative_path: "" });
   // DEV-149: the number comes from the cockpit — for an empty project that is 0.1.0.
   getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.1.0" });
+  // DEV-440: no upgrade since the previous version unless a test brings one — the box stays empty.
+  getUpgradeBriefApiMock.mockResolvedValue({ text: null });
 });
 
 async function renderPage() {
@@ -767,5 +772,83 @@ describe("NewVersionPage — the engine refuses founding over unsaved work (DEV-
     expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /uložiť zadanie/i })).toBeDisabled();
     expect(writeZadanieMock).not.toHaveBeenCalled();
+  });
+});
+
+
+// DEV-440 — Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte nemusel niečo
+// dopisovať do zadania, veď úloha je jasná“. The cockpit writes the Zadanie from the upgraded libraries' change notes.
+describe("NewVersionPage — a version that only upgrades gets its Zadanie written (DEV-440)", () => {
+  const WRITTEN = "# Povýšenie knižníc rámu aplikácie\n\nVerzia prináša len povýšenie, ktoré Manažér prijal pri jej zakladaní.";
+  const onTemplate = { ...project, template: "nsv-standard" };
+  const behindKit: AppKitStatus = {
+    current: "0.16.4",
+    latest: "0.17.0",
+    behind: 1,
+    up_to_date: false,
+    changelog: [{ version: "0.17.0", body: "Oko pri hesle." }],
+    parts: [{ name: "frontend", label: "Rám (frontend)", current: "0.16.4" }],
+    languages_known: [],
+    languages_from: {},
+  };
+
+  beforeEach(() => {
+    listProjectsApiMock.mockResolvedValue({ items: [onTemplate], total: 1, skip: 0, limit: 100 });
+    getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.2.0" });
+  });
+
+  it("after the upgrade the box holds the cockpit's Zadanie, said as such", async () => {
+    getAppKitStatusApiMock.mockResolvedValue(behindKit);
+    upgradeAppKitApiMock.mockResolvedValue({ upgraded: true, target_version: "0.17.0", committed: true });
+    getUpgradeBriefApiMock.mockResolvedValueOnce({ text: null }).mockResolvedValue({ text: WRITTEN });
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: /povýšiť na v0\.17\.0/i }));
+
+    await waitFor(() => expect(document.querySelector("textarea")).toHaveValue(WRITTEN));
+    expect(getUpgradeBriefApiMock).toHaveBeenLastCalledWith("p1", "0.2.0");
+    expect(screen.getByText(/Zadanie zostavil kokpit z povýšenia knižníc/)).toBeInTheDocument();
+  });
+
+  it("what the Manažér wrote is never replaced by the cockpit's text", async () => {
+    getAppKitStatusApiMock.mockResolvedValue(behindKit);
+    upgradeAppKitApiMock.mockResolvedValue({ upgraded: true, target_version: "0.17.0", committed: true });
+    getUpgradeBriefApiMock.mockResolvedValueOnce({ text: null }).mockResolvedValue({ text: WRITTEN });
+
+    await renderPage();
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    await waitFor(() => expect(getUpgradeBriefApiMock).toHaveBeenCalled());
+    fireEvent.change(textarea, { target: { value: "Moje vlastné zadanie." } });
+    await userEvent.click(await screen.findByRole("button", { name: /povýšiť na v0\.17\.0/i }));
+
+    await waitFor(() => expect(getGitStatusApiMock).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+    expect(textarea).toHaveValue("Moje vlastné zadanie.");
+    expect(screen.queryByText(/Zadanie zostavil kokpit/)).toBeNull();
+  });
+
+  it("without an upgrade the box stays empty, as before", async () => {
+    getAppKitStatusApiMock.mockResolvedValue({ ...behindKit, current: "0.17.0", behind: 0, up_to_date: true, changelog: [] });
+
+    await renderPage();
+
+    await waitFor(() => expect(getUpgradeBriefApiMock).toHaveBeenCalledWith("p1", "0.2.0"));
+    expect(document.querySelector("textarea")).toHaveValue("");
+    expect(screen.queryByText(/Zadanie zostavil kokpit/)).toBeNull();
+  });
+
+  it("after the template's upgrade the nex-shared offer is read again — it does not offer what came with it", async () => {
+    getAppKitStatusApiMock.mockResolvedValue(behindKit);
+    getNexsharedStatusApiMock
+      .mockResolvedValueOnce(behindNexshared)
+      .mockResolvedValue({ ...behindNexshared, current: "0.19.0", behind: 0, up_to_date: true, changelog: [] });
+    upgradeAppKitApiMock.mockResolvedValue({ upgraded: true, target_version: "0.17.0", committed: true });
+
+    await renderPage();
+    expect(await screen.findByRole("button", { name: /povýšiť na v0\.19\.0/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /povýšiť na v0\.17\.0/i }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /povýšiť na v0\.19\.0/i })).toBeNull());
+    expect(upgradeNexsharedApiMock).not.toHaveBeenCalled();
   });
 });

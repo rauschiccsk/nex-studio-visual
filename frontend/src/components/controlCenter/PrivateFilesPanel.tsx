@@ -5,19 +5,36 @@
 // The list is the folder as it is (also what the agent put there itself); who attached a file comes from the
 // build history. It reloads whenever the board gains an attach/delete record, so another tab's upload shows too.
 // Shown only while the folder holds something — the attach button lives in the boxes the Manažér writes in.
+//
+// DEV-441 — the rows sit as close as the text allows and the heading folds the list away; it takes room from the
+// conversation („aby bolo možné aj schovať tento zoznam“). The choice is kept in the browser.
+// DEV-443 — what the agent put into a folder is one line per folder, opened on request and deleted at once
+// (20.11.2026 its unpacked copy of nex-app-kit made 190 of 196 lines).
 
 import { useEffect, useState } from "react";
-import { FolderLock, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderLock, Trash2 } from "lucide-react";
 
 import type { PipelineBoard } from "@/services/api/pipeline";
-import { deletePrivateFileApi, listPrivateFilesApi, type PrivateFile } from "@/services/api/projectFiles";
+import {
+  deletePrivateFileApi,
+  deletePrivateFolderApi,
+  listPrivateFilesApi,
+  type PrivateFile,
+  type PrivateFiles,
+} from "@/services/api/projectFiles";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import {
+  CONFIRM_DELETE_FOLDER_LABEL,
   CONFIRM_DELETE_LABEL,
   DELETE_LABEL,
+  FILES_FOLDED_KEY,
   FILES_HINT,
   FILES_TITLE,
+  HIDE_FILES_LABEL,
+  SHOW_FILES_LABEL,
+  folderLabel,
+  groupPrivateFiles,
   privateFileEvents,
   uploadedLabel,
 } from "./privateFiles";
@@ -27,11 +44,33 @@ interface Props {
   versionId: string;
 }
 
+const DELETE_BUTTON =
+  "flex shrink-0 items-center gap-1 rounded px-1.5 text-[11px] leading-4 font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50";
+
+function readFolded(): boolean {
+  try {
+    return window.localStorage.getItem(FILES_FOLDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function keepFolded(folded: boolean): void {
+  try {
+    if (folded) window.localStorage.setItem(FILES_FOLDED_KEY, "1");
+    else window.localStorage.removeItem(FILES_FOLDED_KEY);
+  } catch {
+    /* a browser without storage folds for this screen only */
+  }
+}
+
 export default function PrivateFilesPanel({ board, versionId }: Props) {
   const [files, setFiles] = useState<PrivateFile[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
+  const [folded, setFolded] = useState(readFolded);
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const events = privateFileEvents(board);
 
   useEffect(() => {
@@ -48,49 +87,125 @@ export default function PrivateFilesPanel({ board, versionId }: Props) {
     };
   }, [versionId, events]);
 
-  async function remove(path: string) {
+  async function remove(call: () => Promise<PrivateFiles>, failed: string) {
     setError(null);
     setBusy(true);
     try {
-      setFiles((await deletePrivateFileApi(versionId, path)).files);
+      setFiles((await call()).files);
       setConfirming(null);
     } catch (err: unknown) {
-      setError(humanizeApiError(err, "Súbor sa nepodarilo zmazať"));
+      setError(humanizeApiError(err, failed));
     } finally {
       setBusy(false);
     }
   }
 
+  function toggleFolded() {
+    setFolded((was) => {
+      keepFolded(!was);
+      return !was;
+    });
+  }
+
+  function toggleOpened(path: string) {
+    setOpened((was) => {
+      const next = new Set(was);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
   if (files.length === 0 && !error) return null;
 
+  const fileLine = (f: PrivateFile, indent = false) => (
+    <li key={f.path} className={`flex items-center gap-2 text-xs leading-4 ${indent ? "pl-5" : ""}`}>
+      <span className="min-w-0 flex-1 truncate font-mono text-[var(--color-text-primary)]">{f.path}</span>
+      <span className="shrink-0 text-[var(--color-text-muted)]">
+        {f.size_label} · {uploadedLabel(f.uploaded_by, f.uploaded_at)}
+      </span>
+      {!indent && (
+        <button
+          type="button"
+          onClick={() =>
+            confirming === f.path
+              ? remove(() => deletePrivateFileApi(versionId, f.path), "Súbor sa nepodarilo zmazať")
+              : setConfirming(f.path)
+          }
+          disabled={busy}
+          className={DELETE_BUTTON}
+        >
+          <Trash2 className="h-3 w-3" aria-hidden="true" />
+          {confirming === f.path ? CONFIRM_DELETE_LABEL : DELETE_LABEL}
+        </button>
+      )}
+    </li>
+  );
+
   return (
-    <div className="flex flex-col gap-1.5 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-2">
-      <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text-secondary)]">
+    <div className="flex flex-col gap-1 border-t border-[var(--color-border-default)] bg-[var(--color-surface)] px-4 py-1.5">
+      <button
+        type="button"
+        onClick={toggleFolded}
+        aria-expanded={!folded}
+        title={folded ? SHOW_FILES_LABEL : HIDE_FILES_LABEL}
+        className="flex items-center gap-2 self-start text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+      >
+        {folded ? (
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        )}
         <FolderLock className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
         <span>
           {FILES_TITLE} ({files.length})
         </span>
-      </div>
-      <p className="text-[11px] text-[var(--color-text-muted)]">{FILES_HINT}</p>
-      <ul className="flex flex-col gap-1">
-        {files.map((f) => (
-          <li key={f.path} className="flex items-center gap-2 text-xs">
-            <span className="min-w-0 flex-1 truncate font-mono text-[var(--color-text-primary)]">{f.path}</span>
-            <span className="shrink-0 text-[var(--color-text-muted)]">
-              {f.size_label} · {uploadedLabel(f.uploaded_by, f.uploaded_at)}
-            </span>
-            <button
-              type="button"
-              onClick={() => (confirming === f.path ? remove(f.path) : setConfirming(f.path))}
-              disabled={busy}
-              className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-            >
-              <Trash2 className="h-3 w-3" aria-hidden="true" />
-              {confirming === f.path ? CONFIRM_DELETE_LABEL : DELETE_LABEL}
-            </button>
-          </li>
-        ))}
-      </ul>
+      </button>
+      {!folded && (
+        <>
+          <p className="text-[11px] leading-4 text-[var(--color-text-muted)]">{FILES_HINT}</p>
+          <ul className="flex flex-col">
+            {groupPrivateFiles(files).map((row) =>
+              row.kind === "file" ? (
+                fileLine(row.file)
+              ) : (
+                <li key={row.path} className="flex flex-col">
+                  <div className="flex items-center gap-2 text-xs leading-4">
+                    <button
+                      type="button"
+                      onClick={() => toggleOpened(row.path)}
+                      aria-expanded={opened.has(row.path)}
+                      className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                    >
+                      {opened.has(row.path) ? (
+                        <ChevronDown className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="truncate font-mono text-[var(--color-text-primary)]">{row.path}</span>
+                    </button>
+                    <span className="shrink-0 text-[var(--color-text-muted)]">{folderLabel(row)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        confirming === row.path
+                          ? remove(() => deletePrivateFolderApi(versionId, row.path), "Priečinok sa nepodarilo zmazať")
+                          : setConfirming(row.path)
+                      }
+                      disabled={busy}
+                      className={DELETE_BUTTON}
+                    >
+                      <Trash2 className="h-3 w-3" aria-hidden="true" />
+                      {confirming === row.path ? CONFIRM_DELETE_FOLDER_LABEL : DELETE_LABEL}
+                    </button>
+                  </div>
+                  {opened.has(row.path) && <ul className="flex flex-col">{row.files.map((f) => fileLine(f, true))}</ul>}
+                </li>
+              ),
+            )}
+          </ul>
+        </>
+      )}
       <ErrorNote error={error} />
     </div>
   );

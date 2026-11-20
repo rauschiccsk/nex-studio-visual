@@ -19,3 +19,8 @@ export function uploadPrivateFileApi(versionId: string, file: File): Promise<Pri
 export function deletePrivateFileApi(versionId: string, path: string): Promise<PrivateFiles> {
   return api.delete<PrivateFiles>(`/pipeline/${versionId}/files?path=${encodeURIComponent(path)}`);
 }
+
+/** DEV-443 — a folder of `private/` with everything in it (the agent's working copy). */
+export function deletePrivateFolderApi(versionId: string, path: string): Promise<PrivateFiles> {
+  return api.delete<PrivateFiles>(`/pipeline/${versionId}/files/folder?path=${encodeURIComponent(path)}`);
+}

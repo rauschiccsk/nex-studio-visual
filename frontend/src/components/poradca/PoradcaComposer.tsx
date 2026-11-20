@@ -40,6 +40,9 @@ export interface IncomingQuestion {
 
 const DEFAULT_PLACEHOLDER = "Opýtaj sa Poradcu…";
 
+/** DEV-408 / DEV-442 — the one-click answer to a question asked for consent (Nápady, Poradca). */
+export const AGREE = "Súhlasím";
+
 export default function PoradcaComposer({
   draftKey: key,
   onAsk,

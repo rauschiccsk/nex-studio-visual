@@ -1225,6 +1225,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/files/folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Private Folder
+         * @description DEV-443 — remove a folder of ``private/`` with everything in it (the agent's working copy); record who did it.
+         */
+        delete: operations["delete_private_folder_api_v1_pipeline__version_id__files_folder_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/relay": {
         parameters: {
             query?: never;
@@ -2304,6 +2324,27 @@ export interface paths {
          *     * **404** — projekt alebo cieľový používateľ neexistuje.
          */
         post: operations["reassign_project_api_v1_projects__project_id__reassign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/upgrade-brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Upgrade Brief
+         * @description DEV-440: the Zadanie of a new version ``version_number`` that only carries the libraries the Manažér upgraded
+         *     since the previous finished version — the cockpit writes it from their change notes, the Manažér approves it.
+         */
+        get: operations["get_upgrade_brief_api_v1_projects__project_id__upgrade_brief_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8595,6 +8636,15 @@ export interface components {
             tenant: string;
         };
         /**
+         * UpgradeBrief
+         * @description DEV-440: the Zadanie the cockpit writes for a version that only upgrades the frame's libraries; ``None``
+         *     without an upgrade since the previous finished version.
+         */
+        UpgradeBrief: {
+            /** Text */
+            text?: string | null;
+        };
+        /**
          * UsageTotalsRead
          * @description Summed token usage + active-compute time for a scope (phase / version / project).
          */
@@ -11579,6 +11629,39 @@ export interface operations {
             };
         };
     };
+    delete_private_folder_api_v1_pipeline__version_id__files_folder_delete: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateFilesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_relay_api_v1_pipeline__version_id__relay_post: {
         parameters: {
             query?: never;
@@ -13299,6 +13382,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_HandoverResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_upgrade_brief_api_v1_projects__project_id__upgrade_brief_get: {
+        parameters: {
+            query: {
+                version_number: string;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradeBrief"];
                 };
             };
             /** @description Validation Error */

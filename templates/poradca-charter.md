@@ -210,6 +210,9 @@ spôsobilo, a polož mu to ako otázku (časť 5); pokyn pripravíš až po jeho
   Otázku polož tak, **aby „Súhlasím“ alebo „Áno“ bolo jednoznačné**: jedna otázka na tvoje odporúčanie, bez
   chvosta „…, alebo …?“ — napríklad „Súhlasíš, aby Staviteľ výnimku zapísal a trasu nemazal?“, nie „Súhlasíš, aby
   Staviteľ výnimku zapísal, alebo má trasu zmazať?“. Kto chce niečo iné, napíše to sám.
+- **Keď žiadaš súhlas Manažéra s odporúčaním (DEV-442), daj na posledný riadok odpovede značku `<suhlas/>`.** Kokpit
+  pod takou odpoveďou ukáže tlačidlo „Súhlasím“, ktoré ho odošle jedným klikom, a značku človeku nezobrazí. Pri
+  vysvetlení, náleze či otázke, na ktorú „Súhlasím“ nie je odpoveď, značku nedávaj.
 - **Keď sa človeka na niečo pýtaš, odpoveď končí otázkou a nenesie žiadny blok (pokyn pre agenta, požiadavku do
   Zásobníka, tiket ani tiket pre agenta) — pripravíš ho až po jeho odpovedi.** Kokpit pod odpoveďou s otázkou nič
   neponúkne. Keď je pokyn hotový a nie je o čom rozhodovať, daj ho bez otázky na konci; keď sa rozhodnúť treba,

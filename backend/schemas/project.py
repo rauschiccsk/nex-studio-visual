@@ -139,6 +139,13 @@ class AppKitPart(BaseModel):
     current: Optional[str] = None
 
 
+class UpgradeBrief(BaseModel):
+    """DEV-440: the Zadanie the cockpit writes for a version that only upgrades the frame's libraries; ``None``
+    without an upgrade since the previous finished version."""
+
+    text: Optional[str] = None
+
+
 class AppKitStatus(BaseModel):
     """DEV-253: the nex-app-kit a project on an app template builds with vs the newest release."""
 

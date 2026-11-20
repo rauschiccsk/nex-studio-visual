@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import unicodedata
 import uuid
@@ -233,6 +234,21 @@ def delete(project_root: Path, rel: str) -> PrivateFile:
     described = _describe(root, target)
     target.unlink()
     return described
+
+
+def delete_folder(project_root: Path, rel: str) -> list[PrivateFile]:
+    """DEV-443 — remove a folder inside ``private/`` with all it holds (the agent's working copy of a library, its
+    helper scripts) and return the files it held. ``private/`` itself, a link or anything outside is refused, not
+    touched; links inside are removed as links, never followed."""
+    root = Path(project_root)
+    base = _private_dir(root)
+    target = root / rel
+    inside = os.path.normpath(target).startswith(os.path.normpath(base) + os.sep)
+    if not inside or target.is_symlink() or not target.is_dir():
+        raise PrivateFileRefused(f"Priečinok {rel} v {PRIVATE_DIR}/ nie je — nie je čo zmazať.")
+    held = [f for f in list_files(root) if f.path.startswith(target.relative_to(root).as_posix() + "/")]
+    shutil.rmtree(target)
+    return held
 
 
 def answer_line(f: PrivateFile, label: str = "Priložený súbor") -> str:

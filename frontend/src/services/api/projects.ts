@@ -374,3 +374,9 @@ export function rejectProjectDedoProposalApi(projectId: string, proposalId: stri
     proposal_id: proposalId,
   });
 }
+
+/** DEV-440: the Zadanie the cockpit writes for a new version that only carries the libraries upgraded since the
+ *  previous finished version — `text` is null without an upgrade. */
+export function getUpgradeBriefApi(projectId: string, versionNumber: string): Promise<{ text?: string | null }> {
+  return api.get(`/projects/${projectId}/upgrade-brief?version_number=${encodeURIComponent(versionNumber)}`);
+}

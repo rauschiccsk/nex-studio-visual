@@ -15,9 +15,7 @@ import ErrorNote from "@/components/common/ErrorNote";
 import IdeaOutcomeActions from "@/components/poradca/IdeaOutcomeActions";
 import IdeaProjectTicket from "@/components/poradca/IdeaProjectTicket";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
-import PoradcaComposer, {
-  type IncomingQuestion,
-} from "@/components/poradca/PoradcaComposer";
+import PoradcaComposer, { AGREE, type IncomingQuestion } from "@/components/poradca/PoradcaComposer";
 import PoradcaConversationItem, {
   type Removal,
 } from "@/components/poradca/PoradcaConversationItem";
@@ -46,8 +44,6 @@ import { formatDate } from "@/utils/format";
 import { latestProposalId } from "@/lib/poradcaHandoff";
 
 const NEW_IDEA_DRAFT = "nove";
-/** DEV-408 — the answer Projektant's questions are put for (templates/poradca-ideas-charter.md §3). */
-const AGREE = "Súhlasím";
 
 /** DEV-331 — an idea that ended in a project leaves only the list; its talk stays with the project (Director 09.11.2026). */
 function ideaRemoval(idea: Idea): Removal | undefined {

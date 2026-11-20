@@ -1181,6 +1181,8 @@ export function registerFixtures(): void {
       ],
     },
   );
+  // DEV-440: the Zadanie the cockpit writes for a version that only upgrades — none here, the box is measured empty.
+  answer("get", "/api/v1/projects/{project_id}/upgrade-brief", { text: null });
   // DEV-156: the panel „Nepoužívaný kód z minulých verzií“ — one thing the earlier versions left behind.
   answer("get", "/api/v1/projects/{slug}/dead-code", {
     findings: [

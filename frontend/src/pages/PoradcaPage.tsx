@@ -16,7 +16,7 @@ import { MessageSquarePlus } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import PoradcaAnswer from "@/components/poradca/PoradcaAnswer";
-import PoradcaComposer, { type IncomingQuestion } from "@/components/poradca/PoradcaComposer";
+import PoradcaComposer, { AGREE, type IncomingQuestion } from "@/components/poradca/PoradcaComposer";
 import PoradcaConversationItem from "@/components/poradca/PoradcaConversationItem";
 import QuestionAttachments from "@/components/poradca/QuestionAttachments";
 import { draftKey } from "@/hooks/useDraft";
@@ -37,7 +37,7 @@ import {
 } from "@/services/api/poradca";
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { versionOptionLabel } from "@/lib/poradcaAnswer";
+import { asksConsent, versionOptionLabel } from "@/lib/poradcaAnswer";
 import { REVIEW_PARAM, reviewQuestion, takeReview } from "@/lib/poradcaReview";
 import { toUpload } from "@/lib/poradcaAttachments";
 import type { PoradcaConversation, PoradcaProjectContext, PoradcaStatus } from "@/types/poradca";
@@ -486,6 +486,10 @@ export default function PoradcaPage() {
           }
           limits={status}
           incoming={incoming}
+          // DEV-442: „Súhlasím“ in one click — only under Poradca's last answer that asks the person's consent.
+          quickReply={
+            !running && lastMessage?.author === "poradca" && asksConsent(lastMessage.content) ? AGREE : undefined
+          }
           onAsk={async (question, files) => {
             thread.follow(); // his own question: show what comes back, wherever he had scrolled to
             const uploads = await Promise.all(files.map(toUpload));

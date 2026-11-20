@@ -121,3 +121,23 @@ def brief_block(found: list[Upgrade]) -> str:
 
 def brief_for(repo: Path, steps: list[delivery_statement.BaseStep]) -> str:
     return brief_block(upgrades(repo, steps))
+
+
+def founding_brief(found: list[Upgrade]) -> Optional[str]:
+    """DEV-440 — the Zadanie of a version that only upgrades the frame's libraries, written by the cockpit so the
+    Manažér only approves it. Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte
+    nemusel niečo dopisovať do zadania, veď úloha je jasná“. ``None`` without an upgrade."""
+    if not found:
+        return None
+    moved = "\n".join(f"- {u.label}: z v{u.old} na v{u.new}" for u in found)
+    notes = "\n\n".join(_changes(u) for u in found)
+    return (
+        "# Povýšenie knižníc rámu aplikácie\n\n"
+        f"Verzia prináša len povýšenie, ktoré Manažér prijal pri jej zakladaní:\n{moved}\n\n"
+        "Žiadna iná zmena aplikácie do tejto verzie nepatrí.\n\n"
+        f"## Čo povýšenie prináša (zápisy zmien knižníc)\n\n{notes}\n\n"
+        "## Hotové, keď\n\n"
+        "- Aplikácia sa postaví a prejde všetkými kontrolami s novými verziami knižníc.\n"
+        "- Zmeny zo zápisov vyššie, ktoré sa aplikácie týkajú, platia v UAT; vlastné skúšky aplikácie ostanú zelené.\n"
+        "- Ak povýšenie niečo v aplikácii rozbije, oprava patrí do tejto verzie a poznámky k vydaniu ju opíšu.\n"
+    )
