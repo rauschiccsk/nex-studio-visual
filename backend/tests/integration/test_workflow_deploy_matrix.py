@@ -266,8 +266,8 @@ class TestDeployMatrixRead:
         assert prod.json()["ok"] is False
 
         row = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()["rows"][0]
-        # UAT succeeded → shows the version, no failure flag.
-        assert row["uat_version"] == "0.1.0"
+        # UAT succeeded → shows the version, no failure flag. DEV-449: the acceptance graduated it to 1.0.0.
+        assert row["uat_version"] == "1.0.0"
         assert row["uat_last_attempt_failed"] is False
         # PROD never succeeded AND the newest attempt failed → honest failure flag, not a silent empty cell.
         assert row["prod_version"] is None
@@ -324,7 +324,8 @@ class TestProdAcceptanceGate:
 
         # 4) Now the matrix shows it accepted → FE enables PROD Nasadiť.
         matrix2 = client.get(f"/api/v1/projects/{project.slug}/deploy-matrix").json()
-        assert "0.1.0" in matrix2["rows"][0]["accepted_versions"]
+        # DEV-449: the acceptance that opens the first PROD graduates the version to 1.0.0.
+        assert "1.0.0" in matrix2["rows"][0]["accepted_versions"]
 
         # 5) PROD deploy now SUCCEEDS (gate satisfied) — and graduates to v1.0.0 (§3.6).
         prod = client.post(
@@ -375,7 +376,9 @@ class TestProdAcceptanceGate:
         assert accept.status_code == 200, accept.text
         event = accept.json()
         assert event["event_type"] == "accept"
-        assert event["version_number"] == "0.1.0"  # which version
+        # DEV-449: which version — graduated to 1.0.0 by the acceptance that opens the first PROD, still found as 0.1.0.
+        assert event["version_number"] == "1.0.0"
+        assert deploy_service._resolve_version(db_session, project.id, "0.1.0").version_number == "1.0.0"
         assert event["customer_id"] == str(customer.id)  # which customer
         assert event["actor_id"] == str(user.id)  # WHO accepted
         assert event["created_at"] is not None  # WHEN
@@ -454,12 +457,13 @@ class TestProdAcceptanceGate:
 
 
 class TestGraduationGatedOnDeploySuccess:
-    def test_failed_first_prod_deploy_does_not_graduate(self, client, db_session, prod_failing_deploy_runner):
-        """⚠ A FAILED first-PROD deploy leaves the version un-graduated + resolvable for a retry (§3.6).
-
-        The promote-in-place graduation is gated on ``first_prod and ok`` — a runner returning ``ok=False``
-        records a ``failed`` event, drops the bump signal, and leaves the built version under its ORIGINAL
-        number/status with NO v1.0.0 shell, so the Manažér can simply re-deploy it.
+    def test_a_failed_first_prod_deploy_keeps_the_graduation_and_can_be_retried(
+        self, client, db_session, prod_failing_deploy_runner
+    ):
+        """⚠ DEV-449: the graduation to 1.0.0 happens at the acceptance, before PROD is built — a FAILED first-PROD
+        deploy records a ``failed`` event and drops the bump signal, keeps the graduated version (one row, no v1.0.0
+        shell) and finds it under the old and the new number, so the Manažér simply re-deploys it. Until DEV-449 the
+        graduation followed a successful deploy and its unchecked commit turned main red (Orthodox Hermenia 20.11.2026).
         """
         user = _current_user(db_session)
         project = _seed_project(db_session, creator=user)
@@ -488,16 +492,16 @@ class TestGraduationGatedOnDeploySuccess:
         assert result["bumped_to"] is None  # a failed deploy drops the bump signal
         assert result["url"] is None
 
-        # No graduation: the built version stays under v0.1.0 with its seed status, and NO v1.0.0 row was created.
+        # DEV-449: the graduation happened at the acceptance, before PROD was built; a failed deploy keeps it — one row,
+        # no v1.0.0 shell beside it, and a retry finds it under either number.
         db_session.expire_all()
         rows = db_session.execute(select(Version).where(Version.project_id == project.id)).scalars().all()
         assert len(rows) == 1, "a failed deploy must not create a v1.0.0 shell"
         stayed = rows[0]
         assert stayed.id == version_id
-        assert stayed.version_number == "0.1.0"  # NOT graduated
-        assert stayed.status == "planned"  # seed default, untouched — a failed deploy never marks released
-        # Still resolvable under its original number for a retry (the deploy is repeatable).
+        assert (stayed.version_number, stayed.graduated_from, stayed.status) == ("1.0.0", "0.1.0", "released")
         assert deploy_service._resolve_version(db_session, project.id, "0.1.0").id == version_id
+        assert deploy_service._resolve_version(db_session, project.id, "1.0.0").id == version_id
         # The failure is in the audit log as a 'failed' prod deploy event.
         prod_events = db_session.execute(
             select(DeployEvent.status).where(

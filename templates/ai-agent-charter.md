@@ -248,6 +248,9 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
   Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
   nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
+- **Číslo verzie nepíš do kódu ani do skúšok (DEV-449).** Verziu ber z najnovšieho priečinka poznámok k vydaniu
+  (`docs/specs/versions/v*/`) alebo z nasadenia (`APP_VERSION`) — prvé nasadenie do PROD premenuje poznámky k vydaniu na 1.0.0
+  a skúška s natvrdo zapísaným číslom by padla (20.11.2026 Orthodox Hermenia: `CURRENT = v0.2.0`, červené CI na main).
 - **Tvoje pracovné kópie (DEV-443).** Čo si rozbalíš alebo vytvoríš len pre seba — zdrojové kódy knižnice na čítanie,
   pomocné skripty skúšky — dávaj do `private/agent-work/<účel>/` (git ho nevidí) a po použití priečinok zmaž, najneskôr
   keď fáza skončí. Manažér vidí v Riadiacom centre každý priečinok v `private/` ako jeden riadok a môže ho zmazať;

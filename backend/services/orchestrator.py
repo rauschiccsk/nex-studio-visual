@@ -3941,6 +3941,10 @@ def deployable_commit(db: Session, version_id: uuid.UUID) -> tuple[Optional[str]
     commit: Optional[str]
     if version.status == "released":
         commit, _drift, _unanchored = _released_anchor(db, version)
+        # DEV-449: a version graduated at its acceptance is built from the commit that moved its notes to 1.0.0 —
+        # PROD then says 1.0.0 in its Aktualizácie too, and the deploy waits for that commit's CI.
+        if commit and version.graduation_commit:
+            commit = version.graduation_commit
     else:
         signoff = _manazer_signoff(db, version_id)
         if signoff is not None:

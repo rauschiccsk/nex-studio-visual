@@ -72,6 +72,8 @@ def test_the_acceptance_counts_the_checks_of_every_version_the_guide_asked_to_tr
     assert accepted.json()["detail"] == (
         "UAT akceptované — PROD otvorené. Otestované 1 z 4. "
         f"Neotestované: 0.2.0: {ISDOC}; 0.3.0: Rýchlejšie hľadanie. Nefunguje: 0.3.0: Export do CSV."
+        # DEV-449: the acceptance that opens the first PROD renames the version to 1.0.0 and says so.
+        " Verzia sa pre prvé PROD premenovala na v1.0.0 — PROD sa nasadí, keď kontroly (CI) tohto premenovania prejdú."
     )
 
 

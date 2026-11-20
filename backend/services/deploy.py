@@ -218,8 +218,21 @@ def _resolve_version(db: Session, project_id: UUID, version_number: str) -> Vers
         select(Version).where(Version.project_id == project_id, Version.version_number == version_number)
     ).scalar_one_or_none()
     if version is None:
+        # DEV-449: a version graduated to 1.0.0 at its acceptance is still found under the number the screen showed.
+        version = db.execute(
+            select(Version).where(Version.project_id == project_id, Version.graduated_from == version_number)
+        ).scalar_one_or_none()
+    if version is None:
         raise NotFoundError(f"Verzia {version_number!r} v tomto projekte neexistuje.")
     return version
+
+
+def _current_number(db: Session, project_id: UUID, version_number: str) -> str:
+    """DEV-449: the number a version carries now — its graduated one when ``version_number`` is what it was before."""
+    graduated = db.execute(
+        select(Version.version_number).where(Version.project_id == project_id, Version.graduated_from == version_number)
+    ).scalar_one_or_none()
+    return graduated or version_number
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +247,9 @@ def is_accepted(db: Session, customer_id: UUID, version_number: str) -> bool:
     a customer/version ONLY once the Manažér has accepted that customer's UAT of
     that version.
     """
+    customer = db.get(Customer, customer_id)
+    if customer is not None:
+        version_number = _current_number(db, customer.project_id, version_number)  # DEV-449
     stmt = select(DeployEvent.id).where(
         DeployEvent.customer_id == customer_id,
         DeployEvent.version_number == version_number,
@@ -1199,7 +1215,7 @@ def accept(
             that version exists yet (router → 404 / 409).
     """
     customer = _get_customer(db, customer_id)
-    _resolve_version(db, customer.project_id, version_number)
+    version = _resolve_version(db, customer.project_id, version_number)
 
     uat_version = current_version(db, customer_id, "uat")
     has_uat_deploy = db.execute(
@@ -1230,7 +1246,46 @@ def accept(
     )
     db.add(event)
     db.flush()
+    # DEV-449: the acceptance that opens the project's first PROD graduates the version to 1.0.0 now — its commit
+    # is published and checked before the PROD deploy builds it (the deploy waits for the CI of what it builds).
+    graduated, warning = _graduate_at_acceptance(db, customer.project_id, version)
+    if graduated:
+        event.detail = f"{event.detail} {GRADUATED_AT_ACCEPTANCE.format(version=graduated)}"
+    if warning:
+        event.warnings = [warning]
+    db.flush()
     return event
+
+
+#: DEV-449: what the acceptance record adds when it graduated the version.
+GRADUATED_AT_ACCEPTANCE = (
+    "Verzia sa pre prvé PROD premenovala na v{version} — PROD sa nasadí, keď kontroly (CI) tohto premenovania prejdú."
+)
+
+
+def _graduate_at_acceptance(db: Session, project_id: UUID, version: Version) -> tuple[Optional[str], Optional[str]]:
+    """DEV-449 — graduate the version the Manažér accepted for the project's FIRST PROD, before that PROD is built.
+
+    20.11.2026 Orthodox Hermenia: the graduation used to run after the successful first PROD deploy — PROD had been
+    built from the commit before it (it reported 1.0.0, its Aktualizácie said v0.2.0) and the graduation commit went
+    to main unchecked; the app's own test named v0.2.0 and main turned red (the third time, after DEV-307 and DEV-418).
+    Now the acceptance renames the version and moves its notes (:func:`_graduate_version_in_place`) and publishes the
+    commit; the PROD deploy builds HEAD and waits for its CI like for any code it builds, so a red graduation stops
+    PROD instead of following it. Returns ``(graduated number or None, warning or None)``: nothing for a project that
+    already had PROD, a version already released, or one not below 1.0.0 (the deploy marks it released as before)."""
+    from backend.services import claude_agent
+
+    project = db.get(Project, project_id)
+    if (
+        project is None
+        or version.status == "released"
+        or not _is_pre_release(version.version_number)
+        or project_had_prod_deploy(db, project_id)
+    ):
+        return None, None
+    proj_root = claude_agent.PROJECTS_ROOT / project.slug
+    _graduate_version_in_place(db, version, FIRST_PROD_VERSION, proj_root)
+    return version.version_number, _publish_graduation(proj_root, version.version_number)
 
 
 # ---------------------------------------------------------------------------
@@ -1950,6 +2005,7 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
                 f"Verziu nemožno povýšiť na {target!r}: toto číslo už v projekte nesie iná verzia "
                 "(uq_versions_project_id_version_number) — prvé povýšenie na PROD sa s ňou nesmie zraziť."
             )
+        version.graduated_from = old_number  # DEV-449: still found under the number the Manažér saw
         version.version_number = target
     version.status = "released"
     version.release_date = date.today()
@@ -1967,5 +2023,13 @@ def _graduate_version_in_place(db: Session, version: Version, target: str, proj_
     db.flush()
     # §4: keep the served note dir in sync with the renamed version (no-op when the number is unchanged).
     if old_number != target:
+        from backend.services.orchestrator import _repo_head
+
+        before = _repo_head(proj_root)
         _move_release_note_dir(proj_root, old_number, target, version.release_date)
+        after = _repo_head(proj_root)
+        # DEV-449: the commit with the moved notes is what the first PROD builds — not the one before it.
+        if after and after != before:
+            version.graduation_commit = after
+            db.flush()
     return version

@@ -39,6 +39,11 @@ class Version(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
     version_number = Column(String(50), nullable=False)
+    #: DEV-449: the number the version carried before its first-PROD graduation to 1.0.0 (the Manažér's screens may
+    #: still name it); empty for a version never renamed.
+    graduated_from = Column(String(50), nullable=True)
+    #: DEV-449: the commit that moved the version's release notes to 1.0.0 — what its first PROD builds.
+    graduation_commit = Column(String(40), nullable=True)
     name = Column(String(255), nullable=True)
     status = Column(String(20), nullable=False, server_default="planned")
     description = Column(Text, nullable=True)

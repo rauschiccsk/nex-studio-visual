@@ -8,6 +8,7 @@ reached GitHub only because a later, unrelated commit was pushed on top of it.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import threading
 from pathlib import Path
@@ -56,7 +57,8 @@ async def _first_prod_deploy(db_session, monkeypatch, tmp_path, *, push_to: Path
     await _deploy(db_session, customer, version_number="0.1.0", environment="uat", actor=user, runner=runner)
     from backend.services import deploy as deploy_service
 
-    deploy_service.accept(db_session, customer.id, "0.1.0", user.id)
+    # DEV-449: the acceptance graduates and pushes — the route is a plain ``def`` FastAPI runs on a worker thread.
+    await asyncio.to_thread(deploy_service.accept, db_session, customer.id, "0.1.0", user.id)
     event, _url, bumped = await _deploy(
         db_session, customer, version_number="0.1.0", environment="prod", actor=user, runner=runner
     )

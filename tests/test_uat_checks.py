@@ -103,6 +103,8 @@ def test_the_acceptance_records_what_was_tested(client, project):  # noqa: F811
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["detail"] == (
         f"UAT akceptované — PROD otvorené. Otestované 0 z 2. Neotestované: {DETAIL}. Nefunguje: {ISDOC}."
+        # DEV-449: the acceptance that opens the first PROD renames the version to 1.0.0 and says so.
+        " Verzia sa pre prvé PROD premenovala na v1.0.0 — PROD sa nasadí, keď kontroly (CI) tohto premenovania prejdú."
     )
 
 
