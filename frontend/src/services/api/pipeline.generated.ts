@@ -9231,7 +9231,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "running" | "stopped" | "missing";
+            state: "running" | "starting" | "stopped" | "missing";
             /** Url */
             url?: string | null;
         };
@@ -9256,7 +9256,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "running" | "stopped" | "missing" | "not_needed";
+            state: "running" | "starting" | "stopped" | "missing" | "not_needed";
             /** Url */
             url?: string | null;
         };

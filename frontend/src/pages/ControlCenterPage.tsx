@@ -281,6 +281,7 @@ export default function ControlCenterPage() {
           restarting={vizualPreview.restarting}
           error={vizualPreview.error}
           onRestart={vizualPreview.restart}
+          startingTooLong={vizualPreview.startingTooLong}
         />
       </div>
 
@@ -369,6 +370,7 @@ export default function ControlCenterPage() {
             !!vizualPreview.preview?.needed &&
             (vizualPreview.preview.state === "stopped" || vizualPreview.preview.state === "missing")
           }
+          previewStarting={!!vizualPreview.preview?.needed && vizualPreview.preview.state === "starting"}
         />
         {/* DEV-367: the whole Návrh / Vizuál is wrong — the version goes back to Príprava, after a second question. */}
         <ReturnToPripravaBar board={board} versionId={versionId} onBoard={setBoard} />

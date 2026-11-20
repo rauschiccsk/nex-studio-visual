@@ -130,9 +130,11 @@ describe("PrivateFilesPanel", () => {
     });
     render(<PrivateFilesPanel board={boardWith(1)} versionId="v1" />);
 
-    expect(await screen.findByText("Súbory pre Staviteľa (2)")).toBeInTheDocument();
+    // DEV-446: the heading counts the attachments; the agent's own file waits under „Pracovné súbory Staviteľa“.
+    expect(await screen.findByText("Prílohy (1)")).toBeInTheDocument();
     expect(screen.getByText("private/profesia.eml")).toBeInTheDocument();
     expect(screen.getByText(/12 kB · nahral alex/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Pracovné súbory Staviteľa · počet súborov: 1/ }));
     expect(screen.getByText("1 kB · vytvoril Staviteľ")).toBeInTheDocument();
   });
 

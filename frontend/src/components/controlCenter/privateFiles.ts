@@ -7,14 +7,17 @@ export const ATTACH_LABEL = "Priložiť súbor";
 export const ATTACHING_LABEL = "Nahrávam…";
 export const ATTACH_HINT =
   "Súbor sa uloží do projektu, do priečinka private/ — git ho nevidí. Do správy sa doplní, kde ho Staviteľ nájde.";
-export const FILES_TITLE = "Súbory pre Staviteľa";
+/** DEV-446 — what the Manažér attached; Director 20.11.2026: „tam majú byť prílohy, ktoré som zadal ja“. */
+export const ATTACHMENTS_TITLE = "Prílohy";
+/** DEV-446 — what the Staviteľ put into private/ itself, apart from the attachments and folded by default. */
+export const AGENT_FILES_TITLE = "Pracovné súbory Staviteľa";
 export const FILES_HINT = "Ležia v projekte v priečinku private/, mimo gitu. Agent ich nájde podľa cesty v správe.";
 export const DELETE_LABEL = "Zmazať";
 export const CONFIRM_DELETE_LABEL = "Naozaj zmazať";
 const BY_AGENT_LABEL = "vytvoril Staviteľ";
 export const CONFIRM_DELETE_FOLDER_LABEL = "Naozaj zmazať priečinok";
-export const SHOW_FILES_LABEL = "Rozbaliť zoznam súborov pre Staviteľa";
-export const HIDE_FILES_LABEL = "Zbaliť zoznam súborov pre Staviteľa";
+export const SHOW_FILES_LABEL = "Rozbaliť prílohy";
+export const HIDE_FILES_LABEL = "Zbaliť prílohy";
 /** DEV-441 — whether the list is folded, kept in the browser across screens and versions. */
 export const FILES_FOLDED_KEY = "nsv.private-files.folded";
 
@@ -45,6 +48,22 @@ export function groupPrivateFiles(files: PrivateFile[]): PrivateFilesRow[] {
     folder.files.push(file);
   }
   return rows;
+}
+
+/** DEV-446 — the attachments (a person's files) apart from the Staviteľ's own lines (its folders and loose files). */
+export function splitAttachments(rows: PrivateFilesRow[]): { attached: PrivateFile[]; agent: PrivateFilesRow[] } {
+  const attached: PrivateFile[] = [];
+  const agent: PrivateFilesRow[] = [];
+  for (const row of rows) {
+    if (row.kind === "file" && row.file.uploaded_by) attached.push(row.file);
+    else agent.push(row);
+  }
+  return { attached, agent };
+}
+
+/** How many files the Staviteľ's lines hold. */
+export function agentFileCount(rows: PrivateFilesRow[]): number {
+  return rows.reduce((n, row) => n + (row.kind === "file" ? 1 : row.files.length), 0);
 }
 
 /** „počet súborov: 190 · vytvoril Staviteľ“ — without a plural rule. */

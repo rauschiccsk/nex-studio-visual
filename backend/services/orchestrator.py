@@ -1370,6 +1370,41 @@ def _resolve_orch_session(db: Session, project_slug: str, role: str) -> tuple[uu
     return new_uuid, True
 
 
+#: DEV-448 — the words before the current Pravidlá agenta handed to a session that started with an older text.
+CHARTER_CHANGED_HEADING = (
+    "PRAVIDLÁ AGENTA SA ZMENILI od začiatku tejto relácie. Nižšie je ich aktuálne znenie — platí namiesto toho, s "
+    "ktorým si reláciu začal; riaď sa ním od tohto ťahu."
+)
+
+
+def _charter_for_turn(db: Session, slug: str, role: str, is_first: bool) -> str:
+    """DEV-448 — what a turn adds before its prompt so the session works by the current Pravidlá agenta.
+
+    A charter reaches the agent only when its session starts (``--append-system-prompt``); a session serves the
+    (project, role) across versions, so a cockpit release that changed the charter reached a running project only
+    with a new session (20.11.2026 Orthodox Hermenia 0.2.0: the rule on working copies in ``private/`` never arrived).
+    The session keeps the fingerprint of the charter it last received. A session that starts now receives the charter
+    as ever (nothing is added); a resumed one whose charter changed since — or one from before the fingerprint — gets
+    the current text once. A charter that cannot be read adds nothing (the turn's own path reports a missing one)."""
+    if not is_first:
+        claude_agent._refresh_rules(slug)  # the same refresh a starting session gets — the current templates
+    try:
+        text = _agent_charter_path(slug, role).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    fingerprint = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    row = db.execute(
+        select(OrchestratorSession).where(OrchestratorSession.project_slug == slug, OrchestratorSession.role == role)
+    ).scalar_one_or_none()
+    if row is None:
+        return ""
+    known = row.charter_sha256
+    row.charter_sha256 = fingerprint
+    if is_first or known == fingerprint:
+        return ""
+    return f"{CHARTER_CHANGED_HEADING}\n\n{text.strip()}\n\n---\n\n"
+
+
 def _get_state(db: Session, version_id: uuid.UUID) -> Optional[PipelineState]:
     return db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
 
@@ -5268,6 +5303,8 @@ async def invoke_agent(
     # invoke_agent — applies the owner's config; unset → no flags (today's behavior).
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, role)
     charter_path = _agent_charter_path(slug, role)
+    # DEV-448: a session that started with an older charter is given the current one before this turn's prompt.
+    prompt = _charter_for_turn(db, slug, role, is_first) + prompt
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
@@ -5698,6 +5735,8 @@ async def _plan_pass_once(
     model_override, effort_override = _resolve_dispatch_overrides(db, version_id, AI_AGENT_ROLE)
     # task_plan normally runs after the design phase (session exists → resume); a first call is defensive.
     charter_path = _agent_charter_path(slug, AI_AGENT_ROLE)
+    # DEV-448: the warm session gets the current Pravidlá agenta once if they changed since it last received them.
+    prompt = _charter_for_turn(db, slug, AI_AGENT_ROLE, is_first) + prompt
 
     tagged_on_event: Optional[claude_agent.EventCallback] = None
     if on_event is not None:
@@ -15301,12 +15340,15 @@ VIZUAL_PREVIEW_REBUILD_FAILED = (
 VIZUAL_PREVIEW_DOWN = (
     f"Živý náhľad nebeží — spusti ho tlačidlom {_press('restart_preview')}, pozri si ho a potom vizuál schváľ."
 )
+#: DEV-447: why it is refused while the preview still prepares its libraries — nothing to start, only to wait.
+VIZUAL_PREVIEW_STARTING = "Živý náhľad sa ešte pripravuje — počkaj, kým sa otvorí, pozri si ho a potom vizuál schváľ."
 
 
 async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     """DEV-127: the live preview a Manažér walks in the Vizuál step, as it really is.
 
-    ``{"needed": bool, "state": "running" | "stopped" | "missing" | "not_needed", "url", "reason", "frontends"}``.
+    ``{"needed": bool, "state": "running" | "starting" | "stopped" | "missing" | "not_needed", "url", "reason",
+    "frontends"}`` — ``starting`` (DEV-447): it runs, but does not answer yet.
     Not needed outside the Vizuál step and when the AI's self-contained mockup is the preview (served by the cockpit
     itself). Docker is asked off the event loop (ICCINT-74).
 
@@ -15336,7 +15378,16 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
             found = await _rebuild_preview_on_current_libraries(slug, private, surface)
         frontends.append({"name": surface.name, "label": surface.label, "directory": surface.directory, **found})
     down = [f for f in frontends if f["state"] != "running"]
-    overall = "running" if not down else ("stopped" if any(f["state"] == "stopped" for f in down) else "missing")
+    # DEV-447: one that still prepares its libraries is „starting“ — unless another is down for good.
+    overall = (
+        "running"
+        if not down
+        else "stopped"
+        if any(f["state"] == "stopped" for f in down)
+        else "starting"
+        if any(f["state"] == "starting" for f in down)
+        else "missing"
+    )
     reason = next((f["reason"] for f in down if f["reason"]), None)
     if reason and len(frontends) > 1:
         reason = f"{next(f['label'] for f in down if f['reason'])}: {reason}"
@@ -17061,6 +17112,8 @@ async def apply_action(
         # days at a preview that had died seven minutes after „Vizuál je pripravený" (28.09.2026).
         if state.current_stage == "vizual":
             preview = await vizual_preview(db, state.version_id)
+            if preview["needed"] and preview["state"] == "starting":
+                raise OrchestratorError(VIZUAL_PREVIEW_STARTING)
             if preview["needed"] and preview["state"] != "running":
                 raise OrchestratorError(VIZUAL_PREVIEW_DOWN)
         # NOTE (nex-studio-visual, Director 2026-07-13): the old "never advance out of Návrh with an EMPTY plan"

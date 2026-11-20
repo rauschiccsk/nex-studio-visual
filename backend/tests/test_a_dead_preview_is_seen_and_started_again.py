@@ -24,10 +24,13 @@ STACK = (
 )
 
 
-def _docker(monkeypatch, *, running: str | None, logs: str = ""):
-    """``docker inspect`` answers ``running`` ("true"/"false"; None = no such container); ``docker logs`` → ``logs``."""
+def _docker(monkeypatch, *, running: str | None, logs: str = "", answers: bool = True):
+    """``docker inspect`` answers ``running`` ("true"/"false"; None = no such container); ``docker logs`` → ``logs``;
+    ``docker exec`` (DEV-447: the readiness probe) succeeds when the preview ``answers``."""
 
     def _run(argv, **_):
+        if argv[1] == "exec":
+            return subprocess.CompletedProcess(argv, 0 if answers else 1, "", "")
         if argv[1] == "inspect":
             if running is None:
                 return subprocess.CompletedProcess(argv, 1, "", "Error: No such object")
@@ -49,6 +52,13 @@ def test_a_running_preview_gives_its_address(monkeypatch) -> None:
         "url": "https://vizual-nex-manager.isnex.eu",
         "reason": None,
     }
+
+
+def test_a_running_preview_that_does_not_answer_yet_is_starting_without_its_address(monkeypatch) -> None:
+    # DEV-447 — 20.11.2026 Orthodox Hermenia: the strip offered the link at once; the opened preview said it was
+    # still being prepared (Vite was bundling its libraries).
+    _docker(monkeypatch, running="true", answers=False)
+    assert vizual_sandbox.preview_state("nex-manager") == {"state": "starting", "url": None, "reason": None}
 
 
 def test_a_stopped_preview_says_the_last_error_it_left_without_colours_or_stack(monkeypatch) -> None:
@@ -133,6 +143,20 @@ async def test_in_the_vizual_step_a_dead_preview_is_seen_with_its_reason(db_sess
 
 
 @pytest.mark.asyncio
+async def test_in_the_vizual_step_a_preview_still_preparing_is_starting_without_a_link(db_session, monkeypatch) -> None:
+    # DEV-447: the strip says „Náhľad sa pripravuje…“ and offers the link only once the preview answers.
+    version, project = _make_version(db_session)
+    _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _preview(monkeypatch, ["starting"])
+    assert await orchestrator.vizual_preview(db_session, version.id) == {
+        "needed": True,
+        "state": "starting",
+        "url": None,
+        "reason": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_start_again_brings_a_dead_preview_back(db_session, monkeypatch) -> None:
     version, project = _make_version(db_session)
     _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
@@ -188,4 +212,18 @@ async def test_the_vizual_is_not_approved_while_its_preview_is_dead(db_session, 
     with pytest.raises(OrchestratorError) as caught:
         await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
     assert str(caught.value) == VIZUAL_PREVIEW_DOWN
+    assert state.current_stage == "vizual" and state.pending_vizual_signoff is not True
+
+
+@pytest.mark.asyncio
+async def test_the_vizual_waits_while_its_preview_is_still_preparing(db_session, monkeypatch) -> None:
+    # DEV-447: not „nebeží — spusti ho“ — there is nothing to start, only to wait.
+    version, _ = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    state.status = "awaiting_manazer"
+    db_session.flush()
+    _preview(monkeypatch, ["starting"])
+    with pytest.raises(OrchestratorError) as caught:
+        await orchestrator.apply_action(db_session, version_id=version.id, action="schvalit")
+    assert str(caught.value) == orchestrator.VIZUAL_PREVIEW_STARTING
     assert state.current_stage == "vizual" and state.pending_vizual_signoff is not True

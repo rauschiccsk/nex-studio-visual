@@ -235,7 +235,7 @@ class VizualFrontendPreviewRead(BaseModel):
     name: str
     label: str
     directory: str
-    state: Literal["running", "stopped", "missing"]
+    state: Literal["running", "starting", "stopped", "missing"]
     url: Optional[str] = None
     reason: Optional[str] = None
 
@@ -244,7 +244,7 @@ class VizualPreviewRead(BaseModel):
     """DEV-127: the live preview of the Vizuál step as it really is — running, stopped (and why), or not needed."""
 
     needed: bool = Field(description="False outside the Vizuál step and when the AI's mockup is the preview.")
-    state: Literal["running", "stopped", "missing", "not_needed"]
+    state: Literal["running", "starting", "stopped", "missing", "not_needed"]
     url: Optional[str] = None
     reason: Optional[str] = Field(default=None, description="The last error line a stopped preview left.")
     #: DEV-162: each frontend's preview when the project has more than one (a Web project); empty otherwise.

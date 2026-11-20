@@ -34,6 +34,8 @@ interface Props {
   onBoard: (board: PipelineBoard) => void;
   /** DEV-127: the live preview of the Vizuál step is not running — a vizuál is approved by looking at it. */
   previewDown?: boolean;
+  /** DEV-447: the preview runs but still prepares its libraries — the vizuál waits until it opens. */
+  previewStarting?: boolean;
 }
 
 /** DEV-127: the same words the backend refuses „Schváliť vizuál“ with while the preview does not run — the preview's
@@ -41,7 +43,10 @@ interface Props {
 const vizualPreviewDown = (board: Props["board"]) =>
   `Živý náhľad nebeží — spusti ho tlačidlom „${actionLabel(board, "restart_preview")}“, pozri si ho a potom vizuál schváľ.`;
 
-export default function ApproveBar({ board, versionId, onBoard, previewDown = false }: Props) {
+/** DEV-447: the same words the backend refuses „Schváliť vizuál“ with while the preview still prepares. */
+const VIZUAL_PREVIEW_STARTING = "Živý náhľad sa ešte pripravuje — počkaj, kým sa otvorí, pozri si ho a potom vizuál schváľ.";
+
+export default function ApproveBar({ board, versionId, onBoard, previewDown = false, previewStarting = false }: Props) {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -130,6 +135,9 @@ export default function ApproveBar({ board, versionId, onBoard, previewDown = fa
       )}
       {!mayApprove && <p className="text-xs text-[var(--color-text-muted)]">{SCHEMA_APPROVER_ONLY}</p>}
       {isVizual && previewDown && <p className="text-xs text-[var(--color-text-muted)]">{vizualPreviewDown(board)}</p>}
+      {isVizual && previewStarting && (
+        <p className="text-xs text-[var(--color-text-muted)]">{VIZUAL_PREVIEW_STARTING}</p>
+      )}
 
       <div className="flex items-center gap-2">
         {checkKeys.length > 0 && (
@@ -164,7 +172,7 @@ export default function ApproveBar({ board, versionId, onBoard, previewDown = fa
         <button
           type="button"
           onClick={() => submit("schvalit", "Schválenie zlyhalo")}
-          disabled={submitting || !mayApprove || (isVizual && previewDown)}
+          disabled={submitting || !mayApprove || (isVizual && (previewDown || previewStarting))}
           className={`shrink-0 rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 ${
             isVizual && checkKeys.length === 0 ? "ml-auto" : ""
           }`}

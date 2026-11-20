@@ -28,6 +28,8 @@ interface Props {
   restarting?: boolean;
   error?: string;
   onRestart?: () => void;
+  /** DEV-447: the preview has been preparing for longer than usual. */
+  startingTooLong?: boolean;
 }
 
 const STRIP =
@@ -36,7 +38,14 @@ const LINK =
   "inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1 font-medium transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50 pointer-coarse:min-h-11";
 const BUTTON = `ml-auto ${LINK}`;
 
-export default function LivePreviewBar({ board, preview = null, restarting = false, error = "", onRestart }: Props) {
+export default function LivePreviewBar({
+  board,
+  preview = null,
+  restarting = false,
+  error = "",
+  onRestart,
+  startingTooLong = false,
+}: Props) {
   if (board?.state?.current_stage !== "vizual") return null;
   const restart = onRestart ? (
     <button type="button" onClick={onRestart} disabled={restarting} className={LINK}>
@@ -45,6 +54,23 @@ export default function LivePreviewBar({ board, preview = null, restarting = fal
     </button>
   ) : null;
   const failure = error ? <span className="w-full text-[var(--color-status-error)]">{error}</span> : null;
+  // DEV-447 — 20.11.2026 Orthodox Hermenia: after „Spustiť náhľad znova“ the strip showed nothing at work and offered
+  // the link at once, while the opened preview said it was still being prepared. Until the preview answers, the strip
+  // says so and offers no link; one that takes unusually long is said too, with the button to start it again.
+  if (preview?.needed && preview.state === "starting") {
+    return (
+      <div role="status" aria-label="Živý náhľad" className={STRIP}>
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        <span>
+          {startingTooLong
+            ? "Náhľad sa pripravuje dlhšie než zvyčajne — ak sa neotvorí, spusti ho znova."
+            : "Náhľad sa pripravuje… — odkaz sa ukáže, keď bude pripravený."}
+        </span>
+        {startingTooLong && restart && <span className="ml-auto">{restart}</span>}
+        {failure}
+      </div>
+    );
+  }
   const down = preview?.needed && (preview.state === "stopped" || preview.state === "missing");
   if (down) {
     return (

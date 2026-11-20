@@ -36,6 +36,7 @@ upgrade for the matched router by default, so no extra label is required.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -351,15 +352,55 @@ def _release_notes_mount(frontend_host_path: Path) -> list[str]:
     return ["--mount", f"type=bind,source={resolved},target={RELEASE_NOTES_IN_SANDBOX},readonly"]
 
 
+#: DEV-445: what npm records as INSTALLED in ``node_modules`` — the libraries Vite really bundles.
+INSTALLED_LOCK = "node_modules/.package-lock.json"
+
+
 def dependencies_fingerprint(frontend_host_path: Path) -> str:
-    """DEV-241: the libraries a preview of ``frontend_host_path`` bundles — 16 hex of the SHA-256 of its
-    ``package-lock.json`` (``package.json`` without one); ``""`` when the frontend has neither."""
-    for name in _DEPENDENCY_FILES:
+    """DEV-241: the libraries a preview of ``frontend_host_path`` bundles — 16 hex of the SHA-256 of what is installed
+    (``node_modules/.package-lock.json``; DEV-445), else of its ``package-lock.json`` (``package.json`` without one);
+    ``""`` when the frontend has none of them.
+
+    DEV-445 — 20.11.2026 Orthodox Hermenia 0.2.0: the preview started at 16:12 on the old libraries (the upgrade had
+    rewritten the lock file, not ``node_modules``); the agent installed them at 16:13, the lock file did not move, and
+    a fingerprint of the lock file kept the stale preview „current“. The installed record moves with every install."""
+    for name in (INSTALLED_LOCK, *_DEPENDENCY_FILES):
         try:
             return hashlib.sha256((frontend_host_path / name).read_bytes()).hexdigest()[:16]
         except OSError:
             continue
     return ""
+
+
+def _read_lock(path: Path) -> Optional[dict]:
+    """The ``packages`` of an npm lock file, without the project itself and its links; ``None`` when unreadable."""
+    try:
+        packages = (json.loads(path.read_text(encoding="utf-8")) or {}).get("packages") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    return {
+        name: entry for name, entry in packages.items() if name and isinstance(entry, dict) and not entry.get("link")
+    }
+
+
+def _pinned(entry: dict) -> tuple[Optional[str], Optional[str]]:
+    """What pins a package in a lock file: its version and where it was taken from."""
+    return entry.get("version"), entry.get("resolved")
+
+
+def installed_matches_lock(frontend_host_path: Path) -> bool:
+    """DEV-445: does ``node_modules`` hold what ``package-lock.json`` prescribes? Every installed package is the
+    locked one, and every locked package that is not optional is installed. ``True`` when it cannot be told (no lock
+    file) — an install is never run on a guess; ``False`` when ``node_modules`` carries no record of what it holds."""
+    wanted = _read_lock(frontend_host_path / "package-lock.json")
+    if wanted is None:
+        return True
+    have = _read_lock(frontend_host_path / INSTALLED_LOCK)
+    if have is None:
+        return False
+    if any(name in wanted and _pinned(wanted[name]) != _pinned(entry) for name, entry in have.items()):
+        return False
+    return all(name in have or entry.get("optional") or entry.get("peer") for name, entry in wanted.items())
 
 
 def build_run_argv(
@@ -531,14 +572,23 @@ def _force_remove(name: str) -> None:
 
 
 def _ensure_node_modules(frontend_host_path: Path, *, slug: str) -> None:
-    """Ensure ``frontend/node_modules`` exists (scaffold normally installs it); one-shot ``npm install``.
+    """Ensure ``frontend/node_modules`` holds what the lock file prescribes before Vite bundles it; one-shot install.
 
-    Runs in the SAME isolated posture as the dev-server (only the frontend bind, only nex-proxy-net) so
-    the install can never touch anything but the project.
+    Missing (scaffold normally installs it) or — DEV-445 — not what ``package-lock.json`` prescribes (an upgrade of
+    the template rewrote the lock file, not ``node_modules``): installed in the SAME isolated posture as the dev-server
+    (only the frontend bind, only nex-proxy-net), so the install can never touch anything but the project. With a lock
+    file it is ``npm ci`` — exactly the locked libraries.
     """
-    if (frontend_host_path / "node_modules").is_dir():
+    present = (frontend_host_path / "node_modules").is_dir()
+    if present and installed_matches_lock(frontend_host_path):
         return
-    logger.info("vizual sandbox: node_modules missing for %s — running one-shot npm install", slug)
+    command = ["npm", "ci"] if (frontend_host_path / "package-lock.json").is_file() else ["npm", "install"]
+    logger.info(
+        "vizual sandbox: node_modules %s for %s — running one-shot %s",
+        "not what the lock file prescribes" if present else "missing",
+        slug,
+        " ".join(command),
+    )
     proc = subprocess.run(
         [
             "docker",
@@ -555,8 +605,7 @@ def _ensure_node_modules(frontend_host_path: Path, *, slug: str) -> None:
             "-w",
             "/app",
             NODE_IMAGE,
-            "npm",
-            "install",
+            *command,
         ],
         capture_output=True,
         text=True,
@@ -683,8 +732,40 @@ def _stopped_reason(name: str) -> Optional[str]:
     return errors[-1][:_REASON_MAX] if errors else None
 
 
+#: DEV-447 — how long the readiness probe may wait for the preview's own page and its app entry, in seconds.
+READY_PROBE_SECONDS = 8
+#: DEV-447 — asked INSIDE the preview container (its Node): the page, then the app's entry module the page names last —
+#: Vite answers that only once it has its libraries ready. Exit 0 = the preview answers.
+_READY_PROBE = (
+    "const base='http://127.0.0.1:5173';const s=AbortSignal.timeout(%d);"
+    "fetch(base+'/',{signal:s}).then(r=>r.ok?r.text():Promise.reject()).then(h=>{"
+    'const m=[...h.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map(x=>x[1]);'
+    "return m.length?fetch(base+m[m.length-1],{signal:s}):{ok:true}})"
+    ".then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+) % (READY_PROBE_SECONDS * 1000)
+
+
+def preview_answers(name: str) -> bool:
+    """DEV-447: does the running preview ``name`` answer — its page and the app's entry module? ``False`` while Vite
+    still prepares its libraries after a start (20.11.2026 Orthodox Hermenia: the strip offered the link at once and
+    the opened preview said it was still being prepared). Never raises; a probe that cannot run is ``False``."""
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", name, "node", "-e", _READY_PROBE],
+            capture_output=True,
+            text=True,
+            timeout=READY_PROBE_SECONDS + 5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def preview_state(slug: str, *, private: bool = False, directory: str = MAIN_FRONTEND) -> dict:
-    """DEV-127: ``{"state": "running" | "stopped" | "missing", "url": str | None, "reason": str | None}``.
+    """DEV-127: ``{"state": "running" | "starting" | "stopped" | "missing", "url": str | None, "reason": str | None}``.
+
+    DEV-447: ``starting`` — the container runs, the preview does not answer yet (Vite prepares its libraries); its
+    address is given only once it answers.
 
     ``stopped`` carries the last error line the preview left, so the cockpit can say WHY it is not running —
     on 28.09.2026 the preview of NEX Manager 1.3.0 died seven minutes after „Vizuál je pripravený" and the
@@ -694,6 +775,8 @@ def preview_state(slug: str, *, private: bool = False, directory: str = MAIN_FRO
     name = container_name(slug, directory)
     seen = _inspect_state(name)
     if seen["running"]:
+        if not preview_answers(name):
+            return {"state": "starting", "url": None, "reason": None}
         return {"state": "running", "url": public_url(slug, private=private, directory=directory), "reason": None}
     if seen["exists"]:
         return {"state": "stopped", "url": None, "reason": _stopped_reason(name)}

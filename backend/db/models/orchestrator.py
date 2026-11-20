@@ -37,6 +37,9 @@ class OrchestratorSession(Base, UUIDMixin, TimestampMixin):
     #: unbounded row growth without expiring an actively-used thread. Defaults to ``now()`` (≈ ``created_at``
     #: at insert; the migration backfills existing rows to ``created_at``).
     last_input_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    #: DEV-448: the fingerprint (SHA-256) of the Pravidlá agenta this session last received — at its start or as the
+    #: current text given to a resumed turn after the charter changed. Empty for a session from before.
+    charter_sha256 = Column(String(64), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("project_slug", "role", name="uq_orchestrator_session_project_role"),
