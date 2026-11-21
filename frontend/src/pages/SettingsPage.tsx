@@ -45,6 +45,7 @@ import { useAuthStore } from "@/store/authStore";
 import AccountColorPicker from "@/components/settings/AccountColorPicker";
 import BatchReviewPanel from "@/components/settings/BatchReviewPanel";
 import PlaneResponsiblePanel from "@/components/settings/PlaneResponsiblePanel";
+import SettingsExtraSections from "@/components/settings/SettingsExtraSections";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
 import { modelOptionLabel } from "@/utils/modelLabel";
@@ -696,7 +697,9 @@ export default function SettingsPage() {
               onTestTelegram={telegramTestApi}
               passwordMinLength={5}
             />
-            <AccountColorPicker />
+            <SettingsExtraSections>
+              <AccountColorPicker />
+            </SettingsExtraSections>
           </>
         ) : null,
         users: (
@@ -715,14 +718,18 @@ export default function SettingsPage() {
               onChangePassword={handleChangePassword}
               onToggleActive={handleToggleActive}
             />
-            {/* DEV-360: who answers for each account's tickets in Plane — read again when the accounts change. */}
-            <PlaneResponsiblePanel
-              key={users
-                .map((u) => `${u.id}:${u.is_active}:${u.first_name}:${u.last_name}`)
-                .join("|")}
-            />
-            {/* DEV-483: which accounts decide the Staviteľ's questions with Poradca at once (the learners do not). */}
-            <BatchReviewPanel key={users.map((u) => `${u.id}:${u.is_active}`).join("|")} />
+            <SettingsExtraSections>
+              {/* DEV-360: who answers for each account's tickets in Plane — read again when the accounts change. Each
+                  panel's key names the panel (DEV-485): with no accounts yet both keys were empty, and React kept an
+                  orphan copy of the first panel on the page. */}
+              <PlaneResponsiblePanel
+                key={`plane-responsible:${users
+                  .map((u) => `${u.id}:${u.is_active}:${u.first_name}:${u.last_name}`)
+                  .join("|")}`}
+              />
+              {/* DEV-483: which accounts decide the Staviteľ's questions with Poradca at once (the learners do not). */}
+              <BatchReviewPanel key={`batch-review:${users.map((u) => `${u.id}:${u.is_active}`).join("|")}`} />
+            </SettingsExtraSections>
           </>
         ),
         sessions: (

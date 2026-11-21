@@ -219,6 +219,11 @@ interface Props {
   onBoard: (board: PipelineBoard) => void;
   /** DEV-483 — Poradca's word on each card from the summary of the fast path, by the card's key. */
   proposals?: Record<string, BatchReviewRow>;
+  /** DEV-486 — the cards it may show, by key: in the summary of the fast path, the one card under its row. */
+  only?: string[];
+  /** DEV-486 — the card alone, inside the summary: no banner, round lines or trail of what is decided — the summary
+   *  shows those itself. */
+  embedded?: boolean;
 }
 
 /** One look for every choice on the card — the agent's options and the Manažér's own decision (DEV-220). */
@@ -230,7 +235,7 @@ function choiceClass(selected: boolean): string {
   }`;
 }
 
-export default function DecisionCardsBar({ board, versionId, onBoard, proposals }: Props) {
+export default function DecisionCardsBar({ board, versionId, onBoard, proposals, only, embedded }: Props) {
   const messages = useMemo(() => board?.recent_messages ?? [], [board?.recent_messages]);
   const latest = useMemo(() => latestConsultation(messages), [messages]);
   const answered = useMemo(() => (latest ? answeredLabels(messages, latest.seq) : {}), [messages, latest]);
@@ -257,10 +262,14 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals 
   // DEV-26: the card's instruction for the AI partner is a writing surface like any other — it takes
   // Poradca's instruction during a consultation, keeps its lines, and survives a trip to another screen.
   // One draft per card, so an instruction written for one decision never rides along with the next one.
+  const open = useCallback(
+    (d: { key: string }) => !(d.key in answered) && (!only || only.includes(d.key)),
+    [answered, only],
+  );
   const currentKey = useMemo(() => {
     const decisions = latest?.consultation.decisions ?? [];
-    return decisions.find((d) => !(d.key in answered))?.key ?? null;
-  }, [latest, answered]);
+    return decisions.find(open)?.key ?? null;
+  }, [latest, open]);
   const noteDraft = useDraft(currentKey ? draftKey(`karta.${currentKey}`, versionId) : null);
   const note = noteDraft.text;
   const noteRef = useAutoGrowTextarea(note);
@@ -287,7 +296,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals 
   const consultation = latest?.consultation ?? null;
   if (!consultation) return null; // decide offered but the block message isn't in the recent tail — nothing to render
   const total = consultation.decisions.length;
-  const idx = consultation.decisions.findIndex((d) => !(d.key in answered));
+  const idx = consultation.decisions.findIndex(open);
   // ICCINT-124 — smer sa počíta zo záznamu, nie z počítadla: uzavreté rozhodnutia a to, ako v
   // jednotlivých kolách klesali (alebo stúpali) blokujúce nálezy. DEV-5: z celého záznamu verzie (backend),
   // nie z chvosta posledných správ, a k tomu veta o tom, čo posledné kolo získalo.
@@ -327,6 +336,175 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals 
       setSubmitting(false);
     }
   }
+
+  // The current decision card — alone inside the summary of the fast path (DEV-486), or under the banner.
+  const card = (
+    <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-4">
+      <div className="mb-1 text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        Rozhodnutie {idx + 1} z {total}
+      </div>
+      <div className="text-sm font-medium text-[var(--color-text-primary)]">{current.question}</div>
+      {held && (
+        <p role="status" className="mt-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
+          Podržané — karta počká na tvoje rozhodnutie.
+        </p>
+      )}
+      {/* ICCINT-123: jedna veta o pôvode. Nemení to POČET otázok — mení to, čo si o tom počte
+          Manažér myslí. Pri NEX Inbox v1.5.0 vyzeralo štvrté kolo najhoršie a bol to čistý objav:
+          nevyvolalo ho žiadne jeho rozhodnutie, a z karty to nijako nevyplývalo. */}
+      {origin && <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{origin}</p>}
+      {suvisiaceVety(consultation.decisions, current).map((veta) => (
+        <p key={veta} className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
+          {veta}
+        </p>
+      ))}
+      {current.explanation && (
+        <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
+          {current.explanation}
+        </p>
+      )}
+      {/* DEV-483: the card left from the summary carries both proposals — the Staviteľ's is the recommended
+          option below, Poradca's is said here with its reason. */}
+      {proposals?.[current.key]?.poradca_label && (
+        <p className="mt-1 text-xs text-[var(--color-text-secondary)]" data-testid="poradca-proposal">
+          <span className="font-medium">Poradca navrhuje:</span> {proposals[current.key]?.poradca_label}
+          {proposals[current.key]?.poradca_why ? ` — ${proposals[current.key]?.poradca_why}` : ""}
+        </p>
+      )}
+      {/* v4.0.11: the jargon (paths / codes / repro) is tucked behind a disclosure so the explanation
+          above stays plain for a non-expert — nothing lost, one click away. */}
+      {current.technical_detail && (
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
+            Technický detail
+          </summary>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-[var(--color-canvas)] p-2 text-[11px] text-[var(--color-text-muted)]">
+            {current.technical_detail}
+          </pre>
+        </details>
+      )}
+
+      {/* DEV-103/DEV-106: every card goes to Poradca as it stands — nothing to copy, nothing to type. */}
+      <ReviewWithPoradcaButton
+        versionId={versionId}
+        card={{
+          position: idx + 1,
+          total,
+          round: typeof consultation.round === "number" ? consultation.round : null,
+          roundMax: typeof consultation.round_max === "number" ? consultation.round_max : null,
+          request: reviewRequestFor(consultation.source),
+          question: current.question,
+          origin: origin ?? undefined,
+          explanation: current.explanation,
+          technicalDetail: current.technical_detail,
+          options: current.options.map((o) => ({ label: o.label, recommended: o.recommended })),
+          rationale: current.rationale,
+        }}
+      />
+
+      {/* Options as clickable buttons; the recommended one is badged. DEV-220: under them, always, his own. */}
+      <div className="mt-3 space-y-2">
+        {current.options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={!own && picked === o.id}
+            onClick={() => {
+              setPicked(o.id);
+              setOwn(false);
+            }}
+            className={choiceClass(!own && picked === o.id)}
+          >
+            <span className="font-medium text-[var(--color-text-primary)]">{o.label}</span>
+            {o.recommended && (
+              <span className="ml-2 rounded bg-[var(--color-status-success)] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
+                Odporúčané
+              </span>
+            )}
+            {o.detail && <span className="mt-0.5 block text-[var(--color-text-muted)]">{o.detail}</span>}
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-pressed={own}
+          onClick={() => {
+            setPicked(null);
+            setOwn(true);
+            noteRef.current?.focus();
+          }}
+          className={choiceClass(own)}
+        >
+          <span className="font-medium text-[var(--color-text-primary)]">{OWN_DECISION_LABEL}</span>
+          <span className="mt-0.5 block text-[var(--color-text-muted)]">
+            Žiadna možnosť ti nevyhovuje — do poľa nižšie napíš, ako to má byť. AI partner to zapracuje namiesto
+            ponúknutých možností.
+          </span>
+        </button>
+      </div>
+
+      {/* ICCINT-123: cena voľby PRI voľbe, nie po nej. Údaj, nie odporúčanie — poradím ani
+          značkou „odporúčané“ nehýbe. */}
+      {reopens > 0 && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+          {`Zmena tejto voľby znovu otvára ${reopens} ${uzavreteRozhodnutia(reopens)}.`}
+        </p>
+      )}
+
+      {current.rationale && (
+        <p className="mt-2 flex items-start gap-1 text-[11px] text-[var(--color-text-muted)]">
+          <Lightbulb className="mt-0.5 h-3 w-3 flex-shrink-0" />
+          {current.rationale}
+        </p>
+      )}
+
+      {fromPoradca && (
+        <p className="mt-2 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
+      )}
+      {held && note.trim() && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">Text v poli sa neposlal — ostáva tu na neskôr.</p>
+      )}
+      {noteDraft.restored && !fromPoradca && !held && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
+      )}
+      <textarea
+        data-draft="karta"
+        lang="sk"
+        spellCheck={true}
+        ref={noteRef}
+        value={note}
+        onChange={(e) => {
+          noteDraft.setText(e.target.value);
+          if (fromPoradca) dismissPoradca(); // he edited it — the text is his now
+        }}
+        rows={own ? 3 : 1}
+        placeholder={
+          own
+            ? "Tvoje rozhodnutie — napíš, ako to má byť"
+            : "Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
+        }
+        className="mt-2 w-full resize-none rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
+      />
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        {/* (3) Explicit "what happens" — the Manažér knows what the click does. */}
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          Vyber možnosť alebo napíš vlastné rozhodnutie a potvrď. Keď rozhodneš všetky body, AI partner sám
+          zapracuje zmeny a pokračuje.
+        </span>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="shrink-0 rounded bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {submitting ? "Posielam…" : embedded ? "Rozhodnúť" : idx + 1 < total ? "Rozhodnúť → ďalšie" : "Rozhodnúť → dokončiť"}
+        </button>
+      </div>
+
+      <ErrorNote error={error} className="mt-2" />
+    </div>
+  );
+  if (embedded) return <div className="mt-2">{card}</div>;
 
   return (
     <div className="border-t border-[var(--color-border-default)] bg-[var(--color-surface)]">
@@ -388,171 +566,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals 
           </ul>
         )}
 
-        {/* The current decision card. */}
-        <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-4">
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            Rozhodnutie {idx + 1} z {total}
-          </div>
-          <div className="text-sm font-medium text-[var(--color-text-primary)]">{current.question}</div>
-          {held && (
-            <p role="status" className="mt-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
-              Podržané — karta počká na tvoje rozhodnutie.
-            </p>
-          )}
-          {/* ICCINT-123: jedna veta o pôvode. Nemení to POČET otázok — mení to, čo si o tom počte
-              Manažér myslí. Pri NEX Inbox v1.5.0 vyzeralo štvrté kolo najhoršie a bol to čistý objav:
-              nevyvolalo ho žiadne jeho rozhodnutie, a z karty to nijako nevyplývalo. */}
-          {origin && <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">{origin}</p>}
-          {suvisiaceVety(consultation.decisions, current).map((veta) => (
-            <p key={veta} className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
-              {veta}
-            </p>
-          ))}
-          {current.explanation && (
-            <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
-              {current.explanation}
-            </p>
-          )}
-          {/* DEV-483: the card left from the summary carries both proposals — the Staviteľ's is the recommended
-              option below, Poradca's is said here with its reason. */}
-          {proposals?.[current.key]?.poradca_label && (
-            <p className="mt-1 text-xs text-[var(--color-text-secondary)]" data-testid="poradca-proposal">
-              <span className="font-medium">Poradca navrhuje:</span> {proposals[current.key]?.poradca_label}
-              {proposals[current.key]?.poradca_why ? ` — ${proposals[current.key]?.poradca_why}` : ""}
-            </p>
-          )}
-          {/* v4.0.11: the jargon (paths / codes / repro) is tucked behind a disclosure so the explanation
-              above stays plain for a non-expert — nothing lost, one click away. */}
-          {current.technical_detail && (
-            <details className="mt-1.5">
-              <summary className="cursor-pointer text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
-                Technický detail
-              </summary>
-              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-[var(--color-canvas)] p-2 text-[11px] text-[var(--color-text-muted)]">
-                {current.technical_detail}
-              </pre>
-            </details>
-          )}
-
-          {/* DEV-103/DEV-106: every card goes to Poradca as it stands — nothing to copy, nothing to type. */}
-          <ReviewWithPoradcaButton
-            versionId={versionId}
-            card={{
-              position: idx + 1,
-              total,
-              round: typeof consultation.round === "number" ? consultation.round : null,
-              roundMax: typeof consultation.round_max === "number" ? consultation.round_max : null,
-              request: reviewRequestFor(consultation.source),
-              question: current.question,
-              origin: origin ?? undefined,
-              explanation: current.explanation,
-              technicalDetail: current.technical_detail,
-              options: current.options.map((o) => ({ label: o.label, recommended: o.recommended })),
-              rationale: current.rationale,
-            }}
-          />
-
-          {/* Options as clickable buttons; the recommended one is badged. DEV-220: under them, always, his own. */}
-          <div className="mt-3 space-y-2">
-            {current.options.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                aria-pressed={!own && picked === o.id}
-                onClick={() => {
-                  setPicked(o.id);
-                  setOwn(false);
-                }}
-                className={choiceClass(!own && picked === o.id)}
-              >
-                <span className="font-medium text-[var(--color-text-primary)]">{o.label}</span>
-                {o.recommended && (
-                  <span className="ml-2 rounded bg-[var(--color-status-success)] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
-                    Odporúčané
-                  </span>
-                )}
-                {o.detail && <span className="mt-0.5 block text-[var(--color-text-muted)]">{o.detail}</span>}
-              </button>
-            ))}
-            <button
-              type="button"
-              aria-pressed={own}
-              onClick={() => {
-                setPicked(null);
-                setOwn(true);
-                noteRef.current?.focus();
-              }}
-              className={choiceClass(own)}
-            >
-              <span className="font-medium text-[var(--color-text-primary)]">{OWN_DECISION_LABEL}</span>
-              <span className="mt-0.5 block text-[var(--color-text-muted)]">
-                Žiadna možnosť ti nevyhovuje — do poľa nižšie napíš, ako to má byť. AI partner to zapracuje namiesto
-                ponúknutých možností.
-              </span>
-            </button>
-          </div>
-
-          {/* ICCINT-123: cena voľby PRI voľbe, nie po nej. Údaj, nie odporúčanie — poradím ani
-              značkou „odporúčané“ nehýbe. */}
-          {reopens > 0 && (
-            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-              {`Zmena tejto voľby znovu otvára ${reopens} ${uzavreteRozhodnutia(reopens)}.`}
-            </p>
-          )}
-
-          {current.rationale && (
-            <p className="mt-2 flex items-start gap-1 text-[11px] text-[var(--color-text-muted)]">
-              <Lightbulb className="mt-0.5 h-3 w-3 flex-shrink-0" />
-              {current.rationale}
-            </p>
-          )}
-
-          {fromPoradca && (
-            <p className="mt-2 text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
-          )}
-          {held && note.trim() && (
-            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">Text v poli sa neposlal — ostáva tu na neskôr.</p>
-          )}
-          {noteDraft.restored && !fromPoradca && !held && (
-            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">{RESTORED_DRAFT_LABEL}</p>
-          )}
-          <textarea
-            data-draft="karta"
-            lang="sk"
-            spellCheck={true}
-            ref={noteRef}
-            value={note}
-            onChange={(e) => {
-              noteDraft.setText(e.target.value);
-              if (fromPoradca) dismissPoradca(); // he edited it — the text is his now
-            }}
-            rows={own ? 3 : 1}
-            placeholder={
-              own
-                ? "Tvoje rozhodnutie — napíš, ako to má byť"
-                : "Pokyn pre AI partnera (nepovinné) — napíš, čo má spraviť"
-            }
-            className="mt-2 w-full resize-none rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
-          />
-
-          <div className="mt-3 flex items-center justify-between gap-3">
-            {/* (3) Explicit "what happens" — the Manažér knows what the click does. */}
-            <span className="text-[10px] text-[var(--color-text-muted)]">
-              Vyber možnosť alebo napíš vlastné rozhodnutie a potvrď. Keď rozhodneš všetky body, AI partner sám
-              zapracuje zmeny a pokračuje.
-            </span>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!canSubmit}
-              className="shrink-0 rounded bg-primary-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {submitting ? "Posielam…" : idx + 1 < total ? "Rozhodnúť → ďalšie" : "Rozhodnúť → dokončiť"}
-            </button>
-          </div>
-
-          <ErrorNote error={error} className="mt-2" />
-        </div>
+        {card}
       </div>
     </div>
   );

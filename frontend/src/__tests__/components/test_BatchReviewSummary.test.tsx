@@ -5,6 +5,11 @@
  * Director 21.11.2026: „Následne mi kompaktne a prehľadne ukazál by otázku a návrh staviteľa a taktiež návrh Poradcu.
  * … mne by dali len súhrn na schválenie. Ak niečim nebudem súhlasiť potom to budem riešiť Staviteľom a Poradcom
  * osobitne.“
+ *
+ * DEV-486 — while the fast path is on, the summary is the only place to decide. Director 21.11.2026 on NEX Inbox
+ * 1.11.0: „1. Ak je zapnutá rýchla cesta, potom nechcem mať súčasne na obrazovke aj otázky po jednom - je to mätúce.
+ * 2. V paneli "Súhrn s Poradcom" bod 4. má chck box ale nedá sa naň kliknúť. 3 Bod 5. Nemá check box - prečo, ako
+ * budeme riešiť?“
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -47,9 +52,50 @@ function review(rows: BatchReviewRow[], status: "running" | "done" | "failed" = 
 }
 
 function summary(onBoard = vi.fn(), board = BOARD) {
-  render(<BatchReviewSummary board={board} versionId="v1" onBoard={onBoard} />);
+  render(
+    <MemoryRouter>
+      <BatchReviewSummary board={board} versionId="v1" onBoard={onBoard} />
+    </MemoryRouter>,
+  );
   return onBoard;
 }
+
+/** A build standing on the cards of a consultation — the cards one by one would be drawn for it. */
+function consulting(keys: string[]): PipelineBoard {
+  return {
+    available_actions: ["decide"],
+    recent_messages: [
+      {
+        id: "m1",
+        version_id: "v1",
+        stage: "priprava",
+        author: "ai_agent",
+        recipient: "manazer",
+        kind: "consultation",
+        content: "Rozhodnutia.",
+        status: "sent",
+        seq: 10,
+        created_at: "2026-11-21T10:00:00Z",
+        payload: {
+          consultation: {
+            id: "c1",
+            source: "priprava",
+            decisions: keys.map((key, i) => ({
+              key,
+              question: `Otázka ${i + 1}?`,
+              options: [
+                { id: "a", label: `A${i + 1}`, recommended: true },
+                { id: "b", label: `B${i + 1}` },
+              ],
+            })),
+          },
+        },
+      },
+    ],
+  } as unknown as PipelineBoard;
+}
+
+const ONE_BY_ONE = /Treba tvoje rozhodnutie/;
 
 beforeEach(() => {
   api.getBatchReviewApi.mockReset();
@@ -87,39 +133,107 @@ describe("the summary of the fast path (DEV-483)", () => {
     ]);
   });
 
-  it("an agreement he unchecks stays for the card, and so does every card related to it", async () => {
+  it("an agreement he unchecks is his to decide, and every card related to it waits — without a checkbox", async () => {
     api.getBatchReviewApi.mockResolvedValue(review([row(1, "agree"), row(2, "agree", { related: [1] }), row(3, "agree")]));
     summary();
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Schváliť kartu 1" }));
 
-    expect(screen.getByRole("checkbox", { name: "Schváliť kartu 2" })).not.toBeChecked();
-    expect(screen.getByText("Súvisí s kartou 1, ktorú rozhoduješ sám — rozhodni ju na karte.")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Schváliť kartu 2" })).toBeNull();
+    expect(screen.getByText("⏸ čaká na kartu 1")).toBeInTheDocument();
+    expect(screen.getByText("Súvisí s kartou 1 — zaškrtne sa, keď kartu 1 rozhodneš.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Schváliť označené \(1\)/ })).toBeEnabled();
   });
 
-  it("while Poradca answers it says so, and a failure is said instead of a table", async () => {
+  it("while Poradca answers it says so — and no card one by one is on the screen", async () => {
     api.getBatchReviewApi.mockResolvedValue(review([row(1, "waiting"), row(2, "waiting")], "running"));
-    summary();
+    summary(vi.fn(), consulting(["d1", "d2"]));
     expect(await screen.findByText(/Poradca posudzuje naraz všetky karty \(2\)/)).toBeInTheDocument();
+    expect(screen.queryByText(ONE_BY_ONE)).toBeNull();
+    expect(screen.queryByText(/Rozhodnutie 1 z 2/)).toBeNull();
   });
 
-  it("a failure is one sentence; the cards wait one by one", async () => {
+  it("a failure is one sentence, and the cards come back one by one so the build never stands", async () => {
     api.getBatchReviewApi.mockResolvedValue(review([row(1, "missing")], "failed", "Poradca súhrn nedokončil."));
-    summary();
+    summary(vi.fn(), consulting(["d1"]));
     expect(await screen.findByText("Poradca súhrn nedokončil.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Súhrn s Poradcom" })).toBeNull();
+    expect(screen.getByText(ONE_BY_ONE)).toBeInTheDocument();
   });
 
-  it("without cards to decide, or without a review, it shows nothing", async () => {
+  it("without a summary the cards come one by one as before; without cards to decide it asks nothing", async () => {
     api.getBatchReviewApi.mockResolvedValue(null);
-    summary();
-    await waitFor(() => expect(api.getBatchReviewApi).toHaveBeenCalled());
+    summary(vi.fn(), consulting(["d1"]));
+    expect(await screen.findByText(ONE_BY_ONE)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Súhrn s Poradcom" })).toBeNull();
 
     api.getBatchReviewApi.mockClear();
     summary(vi.fn(), { available_actions: [], recent_messages: [] } as unknown as PipelineBoard);
     expect(api.getBatchReviewApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("the summary is the only place to decide (DEV-486)", () => {
+  it("with the summary done, the cards one by one are not on the screen", async () => {
+    api.getBatchReviewApi.mockResolvedValue(review([row(1, "agree"), row(2, "agree")]));
+    summary(vi.fn(), consulting(["d1", "d2"]));
+
+    await screen.findByRole("region", { name: "Súhrn s Poradcom" });
+    expect(screen.queryByText(ONE_BY_ONE)).toBeNull();
+    expect(screen.queryByText(/Rozhodnutie \d z 2/)).toBeNull();
+  });
+
+  it("a card he decides himself opens under its row, and deciding it there sends his decision", async () => {
+    api.getBatchReviewApi.mockResolvedValue(review([row(1, "agree"), row(2, "manager"), row(3, "disagree")]));
+    const next = { available_actions: ["decide"], recent_messages: [] };
+    api.postPipelineActionApi.mockResolvedValue(next);
+    const onBoard = summary(vi.fn(), consulting(["d1", "d2", "d3"]));
+
+    const table = await screen.findByRole("region", { name: "Súhrn s Poradcom" });
+    const second = within(table).getByText("2. Otázka 2?").closest("li") as HTMLElement;
+    expect(within(second).getByText("Rozhodnutie 2 z 3")).toBeInTheDocument();
+    expect(within(second).getByTestId("poradca-proposal")).toHaveTextContent("Poradca navrhuje: B2 — Prečo 2.");
+    const third = within(table).getByText("3. Otázka 3?").closest("li") as HTMLElement;
+    expect(third).toHaveTextContent("Rozhodneš ju tu po karte 2.");
+    expect(within(third).queryByText(/Rozhodnutie 3 z 3/)).toBeNull();
+    expect(screen.queryByText(ONE_BY_ONE)).toBeNull();
+
+    fireEvent.click(within(second).getByRole("button", { name: /^B2/ }));
+    fireEvent.click(within(second).getByRole("button", { name: "Rozhodnúť" }));
+
+    await waitFor(() => expect(onBoard).toHaveBeenCalledWith(next));
+    expect(api.postPipelineActionApi.mock.calls).toEqual([
+      ["v1", { action: "decide", payload: { decision_key: "d2", option_id: "b", note: undefined } }],
+    ]);
+  });
+
+  it("a card waiting for another has no checkbox, says which card, and is checked once that card is decided", async () => {
+    api.getBatchReviewApi.mockResolvedValueOnce(review([row(1, "manager"), row(2, "agree", { related: [1] })]));
+    const board = consulting(["d1", "d2"]);
+    const { rerender } = render(
+      <MemoryRouter>
+        <BatchReviewSummary board={board} versionId="v1" onBoard={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const table = await screen.findByRole("region", { name: "Súhrn s Poradcom" });
+    expect(within(table).queryByRole("checkbox", { name: "Schváliť kartu 2" })).toBeNull();
+    expect(within(table).getByText("⏸ čaká na kartu 1")).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: /Schváliť označené \(0\)/ })).toBeDisabled();
+
+    api.getBatchReviewApi.mockResolvedValueOnce(
+      review([row(1, "decided", { decided_label: "B1" }), row(2, "agree", { related: [1] })]),
+    );
+    const decided = { ...board, recent_messages: [...board.recent_messages, { id: "m2", seq: 11 }] } as unknown as PipelineBoard;
+    rerender(
+      <MemoryRouter>
+        <BatchReviewSummary board={decided} versionId="v1" onBoard={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("checkbox", { name: "Schváliť kartu 2" })).toBeChecked();
+    expect(screen.queryByText("⏸ čaká na kartu 1")).toBeNull();
+    expect(screen.getByRole("button", { name: /Schváliť označené \(1\)/ })).toBeEnabled();
   });
 });
 

@@ -27,3 +27,10 @@ export function approvable(rows: BatchReviewRow[], unchecked: Set<string>): { ke
   return { keys, heldBy };
 }
 
+
+/** DEV-486 — a card the Manažér decides on its card inside the summary: his alone, a disagreement, one Poradca left
+ * out, or an agreement he unchecked. A decided card is never one of them. */
+export function decidesHimself(row: BatchReviewRow, unchecked: Set<string>): boolean {
+  if (row.state === "manager" || row.state === "disagree" || row.state === "missing") return true;
+  return row.state === "agree" && unchecked.has(row.key);
+}

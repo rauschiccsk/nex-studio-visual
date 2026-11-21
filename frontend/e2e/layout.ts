@@ -16,6 +16,9 @@
  *    the controls inside it.
  * 5. A figure with its unit („280,6 kT“, „561,20 €“, „100 %“) is never split over two lines. DEV-265: a statement line
  *    naming 31 tasks squeezed the number columns of Fakturácia until every amount broke after its digits.
+ * 6. Text and form fields keep the page's margin: no line of text and no field in `main` comes closer than a few pixels
+ *    to its left or right edge. DEV-485: three panels of Nastavenia stood flush against the sidebar, their selects
+ *    reaching the right edge — everything fitted and nothing was squeezed, so no rule above saw it.
  */
 
 /** What opens something more on a page: a dialog, or content folded away. Each is opened and measured too. */
@@ -27,7 +30,14 @@ import type { Page } from "@playwright/test";
 export const TOUCH_PX = 44;
 
 export interface Problem {
-  rule: "page-scrolls-sideways" | "sticks-out" | "squeezed" | "covered" | "too-small-to-touch" | "number-split";
+  rule:
+    | "page-scrolls-sideways"
+    | "sticks-out"
+    | "squeezed"
+    | "covered"
+    | "too-small-to-touch"
+    | "number-split"
+    | "touches-edge";
   what: string;
   detail: string;
 }
@@ -174,6 +184,61 @@ function measure(touchPx: number): Problem[] {
         what: `text „${(node.textContent ?? "").trim().slice(0, 40)}“ in ${describe(parent)}`,
         detail: `${words} words on ${lines} lines, ${Math.round(parent.getBoundingClientRect().width)} px wide`,
       });
+    }
+  }
+
+  // Rule 6 — the page's margin, measured line by line against `main`. What a frame really scrolled sideways, a widget
+  // of its own (the terminal) and a fixed box (a dialog, the drawer) lay out their inside themselves. Only a frame that
+  // does scroll: a page's own content box scrolls up and down and a panel's table inside it does not make it a frame.
+  const MARGIN = 8;
+  const content = document.querySelector("main");
+  if (content && shown(content)) {
+    const edges = content.getBoundingClientRect();
+    const laysOutItself = (el: Element): boolean => {
+      for (let a: Element | null = el; a && a !== content; a = a.parentElement) {
+        if (scrolls(a) && a.scrollWidth > a.clientWidth + 1) return true;
+        if (a.classList.contains("xterm") || getComputedStyle(a).position === "fixed") return true;
+      }
+      return false;
+    };
+    // What of a line can be seen: a box that cuts its text off (an ellipsis, a pane) shows only its own part.
+    const seen = (el: Element, left: number, right: number): [number, number] => {
+      for (let a: Element | null = el; a && a !== content; a = a.parentElement) {
+        if (!clips(a)) continue;
+        const box = a.getBoundingClientRect();
+        left = Math.max(left, box.left);
+        right = Math.min(right, box.right);
+      }
+      return [left, right];
+    };
+    const touches = (left: number, right: number): boolean => left - edges.left < MARGIN || edges.right - right < MARGIN;
+    const where = (left: number, right: number): string =>
+      `${Math.round(left - edges.left)} px from the left and ${Math.round(edges.right - right)} px from the right edge of the page`;
+    const marked = new Set<Element>();
+    const marginTexts = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    for (let node = marginTexts.nextNode(); node; node = marginTexts.nextNode()) {
+      const parent = node.parentElement;
+      const text = (node.textContent ?? "").trim();
+      if (!parent || !text || marked.has(parent) || !shown(parent) || insideOwnWidget(node) || laysOutItself(parent)) continue;
+      if (parent.closest("select")) continue; // an option's text lies inside its field, measured below
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const line of Array.from(range.getClientRects())) {
+        const [left, right] = seen(parent, line.left, line.right);
+        if (right - left <= 0 || !touches(left, right)) continue;
+        marked.add(parent);
+        problems.push({ rule: "touches-edge", what: `text „${text.slice(0, 40)}“ in ${describe(parent)}`, detail: where(left, right) });
+        break;
+      }
+    }
+    const fields = content.querySelectorAll('select, textarea, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])');
+    for (const field of Array.from(fields)) {
+      if (!shown(field) || insideOwnWidget(field) || laysOutItself(field)) continue;
+      const box = field.getBoundingClientRect();
+      const [left, right] = seen(field.parentElement ?? field, box.left, box.right);
+      if (right - left > 0 && touches(left, right)) {
+        problems.push({ rule: "touches-edge", what: describe(field), detail: where(left, right) });
+      }
     }
   }
 

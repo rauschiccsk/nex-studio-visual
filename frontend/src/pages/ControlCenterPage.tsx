@@ -36,8 +36,6 @@ import ConversationComposer from "@/components/controlCenter/ConversationCompose
 import SpecApprovalBar from "@/components/controlCenter/SpecApprovalBar";
 import ApproveBar from "@/components/controlCenter/ApproveBar";
 import BatchReviewSummary from "@/components/controlCenter/BatchReviewSummary";
-import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
-import type { BatchReviewRow } from "@/services/api/batchReview";
 import BlockRecoveryBar from "@/components/controlCenter/BlockRecoveryBar";
 import SchemaApprovalBar from "@/components/controlCenter/SchemaApprovalBar";
 import PrivateFilesPanel from "@/components/controlCenter/PrivateFilesPanel";
@@ -90,7 +88,6 @@ export default function ControlCenterPage() {
   // From the tablet up both stand side by side and the tabs are not there.
   const [pane, setPane] = useState<"rozhovor" | "plan">("rozhovor");
   // DEV-483: Poradca's word per card from the summary of the fast path — shown on the cards left to decide.
-  const [proposals, setProposals] = useState<Record<string, BatchReviewRow>>({});
   const conversationOnPhone = pane === "rozhovor" ? "" : "max-md:hidden";
   const planOnPhone = pane === "plan" ? "" : "max-md:hidden";
   // DEV-84 — a link to one task (`?uloha=20.1.1` from the repository tab) shows the plan, also on a phone.
@@ -312,18 +309,13 @@ export default function ControlCenterPage() {
       {/* Approval / change-request moment — sits between the thread and the relay send box. All bars are
           honest-by-construction (render null unless applicable) and mutually exclusive in practice:
           SpecApprovalBar on a settled Príprava (approve_spec, STEP 2); ApproveBar on a Návrh gate awaiting
-          the Manažér (schvalit — advances to Programovanie); DecisionCardsBar on a consultation blocker
-          (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled version whose verified
-          green drifted past HEAD (overit_znovu — CR-V2-057). */}
+          the Manažér (schvalit — advances to Programovanie); BatchReviewSummary, and through it DecisionCardsBar,
+          on a consultation blocker (decide — one Decision Card at a time, CR-V2-041); ReverifyBar on a settled
+          version whose verified green drifted past HEAD (overit_znovu — CR-V2-057). */}
       <div className={`col-start-1 row-start-4 min-w-0 md:row-start-3 ${conversationOnPhone}`}>
-        {/* DEV-483: the fast path — the cards Poradca assessed at once, agreements approved in one go. */}
-        <BatchReviewSummary board={board} versionId={versionId} onBoard={setBoard} onProposals={setProposals} />
-        <DecisionCardsBar
-          board={board}
-          versionId={versionId}
-          onBoard={setBoard}
-          proposals={proposals}
-        />
+        {/* DEV-483/DEV-486: the decision cards — with the fast path the summary of Poradca's assessment is the only
+            place to decide (each card the Manažér decides himself opens in it); without it, the cards one by one. */}
+        <BatchReviewSummary board={board} versionId={versionId} onBoard={setBoard} />
         {/* ICCINT-25: right under the cards, because it is the same surface failing — when the cards could
             not be built, this is how you ask for them again instead of being left with the raw findings. */}
         <RepeatConsultationBar
