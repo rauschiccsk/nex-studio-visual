@@ -44,7 +44,7 @@ from backend.schemas.user import (
     UserRole,
     UserUpdate,
 )
-from backend.services import backlog_tickets, plane_tickets
+from backend.services import plane_responsible, plane_tickets
 from backend.services import user as user_service
 from backend.services.plane_gateway import PlaneError, name_key
 
@@ -93,7 +93,7 @@ def list_users(
 
 def _plane_people() -> list[str]:
     try:
-        return backlog_tickets.responsible_people(plane_tickets.gateway())
+        return plane_responsible.responsible_people(plane_tickets.gateway())
     except PlaneError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -105,7 +105,7 @@ def _plane_account(user: User, people: list[str]) -> PlaneResponsibleAccount:
         username=user.username,
         name=" ".join(part for part in (user.first_name, user.last_name) if part) or None,
         chosen=user.plane_responsible,
-        by_name=backlog_tickets.responsible_by_name(user, by_key),
+        by_name=plane_responsible.responsible_by_name(user, by_key),
     )
 
 
@@ -140,7 +140,7 @@ def set_plane_responsible(
         if chosen is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"„{name}“ v skupine „{backlog_tickets.RESPONSIBLE_GROUP}“ evidencie DEV nie je.",
+                detail=f"„{name}“ v skupine „{plane_responsible.RESPONSIBLE_GROUP}“ evidencie DEV nie je.",
             )
         user.plane_responsible = chosen
     else:

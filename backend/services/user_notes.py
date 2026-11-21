@@ -9,22 +9,26 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.db.models.backlog import BacklogItem
+from backend.db.models.foundation import User
+from backend.db.models.projects import Project
 from backend.db.models.user_note import UserNote
-from backend.schemas.backlog import BacklogItemCreate
-from backend.services import backlog as backlog_service
+from backend.services import plane_responsible, plane_tickets
+from backend.services.plane_gateway import PlaneError, PlaneGateway
 
 NOT_FOUND = "Poznámka sa nenašla."
-EMPTY = "Poznámka je prázdna — nie je z čoho založiť požiadavku."
-ALREADY_IN_BACKLOG = "Z tejto poznámky už vznikla požiadavka REQ-{number}."
+EMPTY = "Poznámka je prázdna — nie je z čoho založiť tiket."
+ALREADY_A_TICKET = "Z tejto poznámky už vznikol tiket {identifier}."
+NO_RESPONSIBLE = (
+    "Konto {username} nemá zodpovedného v Plane. Manažér ho nastaví v Nastaveniach, karta Používatelia, časť "
+    "„Zodpovedný v Plane“."
+)
 DELETE_OPEN = "Natrvalo sa maže len vyriešená poznámka — najprv ju označ ako vyriešenú."
 
-#: The backlog's own bound on a request's title.
+#: A ticket's title bound in Plane.
 TITLE_MAX = 500
 
 
@@ -91,27 +95,39 @@ def delete(db: Session, user_id: uuid.UUID, note_id: uuid.UUID) -> None:
     db.flush()
 
 
-def backlog_item(db: Session, note: UserNote) -> Optional[BacklogItem]:
-    return db.get(BacklogItem, note.backlog_item_id) if note.backlog_item_id else None
-
-
-def to_backlog(db: Session, user_id: uuid.UUID, note_id: uuid.UUID, project_id: uuid.UUID) -> UserNote:
-    """Turn the note into exactly one request in the project's backlog — the first line its title, the rest its
-    description — and resolve the note, pointing to the request. A second time is refused (``ValueError``)."""
-    note = _own(db, user_id, note_id, lock=True)
-    existing = backlog_item(db, note)
-    if existing is not None:
-        raise ValueError(ALREADY_IN_BACKLOG.format(number=existing.number))
+def to_ticket(
+    db: Session, plane: PlaneGateway, user: User, note_id: uuid.UUID, project: Project, work_kind: str
+) -> UserNote:
+    """DEV-455 — turn the note into exactly one ticket of the project in Plane (the Zásobník is gone): the first line
+    its title, the rest its text; the note is resolved and points to the ticket. A second time is refused
+    (``ValueError``); when Plane refuses, nothing changes (``PlaneError``)."""
+    note = _own(db, user.id, note_id, lock=True)
+    if note.plane_identifier:
+        raise ValueError(ALREADY_A_TICKET.format(identifier=note.plane_identifier))
     name = title(note.body)
     if not name:
         raise ValueError(EMPTY)
-    lines = note.body.strip().splitlines()
-    rest = "\n".join(lines[1:]).strip()
-    item = backlog_service.create(
+    responsible = plane_responsible.responsible_of(user, plane_responsible.responsible_people(plane))
+    if responsible is None:
+        raise PlaneError(NO_RESPONSIBLE.format(username=user.username))
+    rest = "\n".join(note.body.strip().splitlines()[1:]).strip()
+    ref = plane_tickets.file_ticket(
         db,
-        BacklogItemCreate(project_id=project_id, title=name[:TITLE_MAX], description=rest or None),
+        plane,
+        project=project,
+        user=user,
+        source="kokpit",
+        title=name[:TITLE_MAX],
+        description=rest or name,
+        labels=(
+            f"{plane_responsible.TICKET_TYPE_GROUP}: Task",
+            f"{plane_responsible.RESPONSIBLE_GROUP}: {responsible}",
+        ),
+        doer=responsible,
+        work_kind=work_kind,
     )
-    note.backlog_item_id = item.id
+    note.ticket_project_id = project.id
+    note.plane_identifier, note.plane_url = ref.identifier, ref.url
     note.resolved_at = datetime.now(timezone.utc)
     db.flush()
     return note

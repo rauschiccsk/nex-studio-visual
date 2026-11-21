@@ -28,11 +28,13 @@ from backend.db.models.user_note import UserNote
 from backend.db.models.version_discount_change import VersionDiscountChange
 from backend.db.models.version_note import VersionNote
 from backend.db.models.version_rate_change import VersionRateChange
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
 
 __all__ = [
     "AgentTerminalSession",
     "BacklogItem",
+    "VersionTicket",
     "Idea",
     "Base",
     "UUIDMixin",

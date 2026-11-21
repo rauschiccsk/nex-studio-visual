@@ -41,8 +41,6 @@ function answer(content: string, choices: PoradcaChoice[]) {
     steps: [],
     status: "done",
     instruction: null,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices,
   };
   return render(

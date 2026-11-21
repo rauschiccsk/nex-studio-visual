@@ -1,6 +1,6 @@
 /**
  * DEV-89 — quick notes: saved by themselves while typing; a change made on another device is never overwritten
- * without a word; „Vyriešené“ moves a note aside, deleted for good only on purpose; „Do Zásobníka“ needs a project.
+ * without a word; „Vyriešené“ moves a note aside, deleted for good only on purpose; „Založiť tiket“ needs a project and a work kind (DEV-455).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,7 +22,7 @@ vi.mock("@/services/api/notes", async (importOriginal) => {
     saveNote: vi.fn(),
     resolveNote: vi.fn(),
     deleteNote: vi.fn(),
-    noteToBacklog: vi.fn(),
+    noteToTicket: vi.fn(),
   };
 });
 
@@ -32,7 +32,7 @@ import {
   deleteNote,
   listNotes,
   NoteConflict,
-  noteToBacklog,
+  noteToTicket,
   resolveNote,
   saveNote,
   type Note,
@@ -46,7 +46,7 @@ const note = (over: Partial<Note>): Note => ({
   created_at: "2026-10-12T08:00:00Z",
   updated_at: "2026-10-12T08:00:00Z",
   resolved_at: null,
-  backlog: null,
+  ticket: null,
   ...over,
 });
 const OPEN = note({});
@@ -171,29 +171,32 @@ describe("quick notes (DEV-89)", () => {
     confirm.mockRestore();
   });
 
-  it("„Do Zásobníka“ says a project must be chosen first", async () => {
+  it("„Založiť tiket“ says a project must be chosen first", async () => {
     renderPage();
     await screen.findByDisplayValue(/Zavolať Tiborovi/);
 
-    expect(screen.getByRole("button", { name: /Do Zásobníka/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Založiť tiket/ })).toBeDisabled();
     expect(screen.getByText(/najprv si v Projektoch vyber projekt/)).toBeInTheDocument();
   });
 
-  it("„Do Zásobníka“ makes the note a request of the selected project and links to it", async () => {
+  it("„Založiť tiket“ waits for the work kind, then makes the note a ticket of the project and links to it", async () => {
     context.selectedProject = { slug: "nex-inbox", name: "NEX Inbox" };
-    vi.mocked(noteToBacklog).mockResolvedValue({
+    vi.mocked(noteToTicket).mockResolvedValue({
       ...OPEN,
       resolved_at: "2026-10-12T10:30:00Z",
-      backlog: { id: "b1", project_id: "p1", project_slug: "nex-inbox", project_name: "NEX Inbox", number: 12 },
+      ticket: { project_slug: "nex-inbox", project_name: "NEX Inbox", identifier: "DEV-512", url: "http://plane/512" },
     });
     renderPage();
     await screen.findByDisplayValue(/Zavolať Tiborovi/);
+    const found = screen.getByRole("button", { name: "Založiť tiket — NEX Inbox" });
+    expect(found).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Do Zásobníka — NEX Inbox" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Oprava/ }));
+    fireEvent.click(found);
 
-    await waitFor(() => expect(noteToBacklog).toHaveBeenCalledWith("n1", "nex-inbox"));
-    expect(await screen.findByRole("link", { name: "REQ-12" })).toHaveAttribute("href", "/projects/nex-inbox/backlog");
-    expect(screen.queryByRole("button", { name: /Do Zásobníka/ })).toBeNull();
+    await waitFor(() => expect(noteToTicket).toHaveBeenCalledWith("n1", "nex-inbox", "fix"));
+    expect(await screen.findByRole("link", { name: "DEV-512" })).toHaveAttribute("href", "/projects/nex-inbox/plane-tikety");
+    expect(screen.queryByRole("button", { name: /Založiť tiket/ })).toBeNull();
   });
 
   it("what was typed is saved before another note opens", async () => {

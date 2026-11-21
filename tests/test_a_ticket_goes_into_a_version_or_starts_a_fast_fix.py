@@ -1,10 +1,12 @@
-"""DEV-122 — from a ticket of the „Plane tikety" tab straight to the Zásobník or to a fast fix; the ticket follows.
+"""DEV-122, DEV-455 — from a ticket of the „Plane tikety" tab into a version or to a fast fix; the ticket follows.
 
-Director 14.10.2026 approved: at an open ticket „Do Zásobníka" (a linked requirement) and „Spustiť rýchlu opravu"
+Director 14.10.2026 approved: at an open ticket „Spustiť rýchlu opravu"
 (the ticket's text is the directive, its work kind preselected, the version is created by the Manažér's click as
 today). The fast fix and its ticket stay linked: started → In Progress, deployed to UAT → a comment, deployed to PROD
 → Done with a comment (version, date, customer). Nothing starts without the Manažér's click (DEV-29).
-One ticket goes one way — the Zásobník or a fast fix, never both (Director 15.10.2026: „Súhlasím“ to „Súhlasíš
+DEV-455 (Director 21.11.2026: „Zásobník by sme mali teraz už úplne zrušiť a ponechať len jediný zdroj - PLANE tikety“):
+the ticket goes straight into a version — In Progress with a comment; the version's PROD deploy closes it, once.
+One ticket goes one way — a version or a fast fix, never both (Director 15.10.2026: „Súhlasím“ to „Súhlasíš
 s pravidlom ‚jeden tiket ide jednou cestou‘?“): otherwise the requirement and the fix would both move the ticket.
 """
 
@@ -17,9 +19,9 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from backend.db.models.backlog import BacklogItem
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
-from backend.services import backlog_tickets, deploy, pipeline_runner, plane_tickets
+from backend.services import deploy, pipeline_runner, plane_tickets
 from backend.tests.fake_plane import FakePlane, gateway_for
 from tests.test_dedo_proposal_before_the_work_starts import _bearer, _make_project, _make_user
 
@@ -34,7 +36,6 @@ TICKET_HTML = (
 def plane(monkeypatch):
     fake = FakePlane()
     monkeypatch.setattr(plane_tickets, "gateway", lambda: gateway_for(fake))
-    monkeypatch.setattr(backlog_tickets, "gateway", lambda: gateway_for(fake))
     return fake
 
 
@@ -99,74 +100,90 @@ def test_the_tab_gives_the_tickets_text_without_who_works_on_it(client, setup):
     assert ticket["fix_version"] is None
 
 
-# ── „Do Zásobníka" ──────────────────────────────────────────────────────────────────────────────────────────────
+# ── „Zaradiť do verzie" ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _to_backlog(client, user, project, issue_id="x11"):
-    return client.post(f"/api/v1/projects/{project.slug}/plane-tickets/{issue_id}/backlog", headers=_bearer(user))
+def _new_version(db_session, project, number="2.0.0") -> Version:
+    version = Version(project_id=project.id, version_number=number)
+    db_session.add(version)
+    db_session.commit()
+    return version
 
 
-def test_a_ticket_becomes_one_linked_requirement_and_says_so_once(client, setup, plane, db_session):
-    user, project = setup
-    first = _to_backlog(client, user, project)
-    second = _to_backlog(client, user, project)
-    assert first.status_code == second.status_code == 200, first.text
-    assert first.json()["id"] == second.json()["id"]
-    item = db_session.get(BacklogItem, uuid.UUID(first.json()["id"]))
-    assert (item.title, item.plane_issue_id, item.plane_identifier, item.status) == (
-        "Tiket x11",
-        "x11",
-        "DEV-11",
-        "open",
-    )
-    assert item.description == _tickets(client, user, project)["DEV-11"]["text"]
-    assert _comments(plane, "x11") == [
-        f"<p>Tiket je zaradený do Zásobníka projektu {project.name} ako REQ-{item.number}. Zaradil: Zoltán Rausch.</p>"
-    ]
-    assert first.json()["plane_warning"] is None
-    assert _tickets(client, user, project)["DEV-11"]["requirement"] == f"REQ-{item.number}"
-
-
-def test_the_requirement_from_a_ticket_moves_it_like_one_founded_from_the_zasobnik(client, setup, plane, db_session):
-    user, project = setup
-    item_id = _to_backlog(client, user, project).json()["id"]
-    r = client.patch(
-        f"/api/v1/backlog/{item_id}",
+def _into(client, user, project, version, issue_id="x11"):
+    return client.post(
+        f"/api/v1/projects/{project.slug}/plane-tickets/{issue_id}/version",
         headers=_bearer(user),
-        json={"status": "rejected", "rejection_reason": "Duplicita"},
+        json={"version_id": str(version.id)},
     )
-    assert r.status_code == 200, r.text
-    assert plane.issues["x11"]["state"] == "s-cancelled"
 
 
-def test_a_ticket_of_another_projects_module_founds_no_requirement(client, setup, plane, db_session):
+def test_a_ticket_goes_into_a_version_once_moves_to_in_progress_and_says_so(client, setup, plane, db_session):
     user, project = setup
-    r = _to_backlog(client, user, project, "x21")
+    version = _new_version(db_session, project)
+    first = _into(client, user, project, version)
+    second = _into(client, user, project, version)
+    assert first.status_code == second.status_code == 200, first.text
+    assert first.json() == {
+        "issue_id": "x11",
+        "identifier": "DEV-11",
+        "version_number": "2.0.0",
+        "plane_warning": None,
+    }
+    link = db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).scalar_one()
+    assert (link.version_id, link.title, link.plane_identifier) == (version.id, "Tiket x11", "DEV-11")
+    assert link.text == _tickets(client, user, project)["DEV-11"]["text"]
+    assert plane.issues["x11"]["state"] == "s-ip"
+    assert _comments(plane, "x11") == [
+        f"<p>Tiket je zaradený do verzie v2.0.0 projektu {project.name}. Zaradil: Zoltán Rausch.</p>"
+    ]
+    assert _tickets(client, user, project)["DEV-11"]["in_version"] == "v2.0.0"
+
+
+def test_a_ticket_taken_out_goes_back_to_todo(client, setup, plane, db_session):
+    user, project = setup
+    version = _new_version(db_session, project)
+    _into(client, user, project, version)
+    r = client.delete(f"/api/v1/projects/{project.slug}/plane-tickets/x11/version/{version.id}", headers=_bearer(user))
+    assert r.status_code == 200, r.text
+    assert db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).first() is None
+    assert plane.issues["x11"]["state"] == "s-todo"
+    assert _tickets(client, user, project)["DEV-11"]["in_version"] is None
+
+
+def test_a_ticket_one_version_solves_goes_into_no_other(client, setup, plane, db_session):
+    user, project = setup
+    _into(client, user, project, _new_version(db_session, project, "2.0.0"))
+    r = _into(client, user, project, _new_version(db_session, project, "2.1.0"))
+    assert (r.status_code, r.json()["detail"]) == (409, "Tiket DEV-11 už rieši verzia v2.0.0.")
+
+
+def test_a_ticket_of_another_projects_module_goes_into_no_version(client, setup, plane, db_session):
+    user, project = setup
+    r = _into(client, user, project, _new_version(db_session, project), "x21")
     assert r.status_code == 400
     assert "nie je" in r.json()["detail"]
-    assert db_session.execute(select(BacklogItem).where(BacklogItem.plane_issue_id == "x21")).first() is None
+    assert db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x21")).first() is None
     assert _comments(plane, "x21") == []
 
 
-def test_a_ticket_with_a_fast_fix_does_not_go_to_the_zasobnik(client, setup, plane, db_session, dispatched):
-    """One ticket goes one way — otherwise the requirement and the fix would both move it."""
+def test_a_ticket_with_a_fast_fix_goes_into_no_version(client, setup, plane, db_session, dispatched):
+    """One ticket goes one way — otherwise the version and the fix would both move it."""
     user, project = setup
     started = _fast_fix(client, user, project)
     assert started.status_code == 201, started.text
     number = db_session.get(Version, uuid.UUID(started.json()["version_id"])).version_number
-    r = _to_backlog(client, user, project)
-    assert r.status_code == 409
-    assert r.json()["detail"] == f"Z tohto tiketu už je spustená rýchla oprava v{number} — do Zásobníka nepatrí."
-    assert db_session.execute(select(BacklogItem).where(BacklogItem.plane_issue_id == "x11")).first() is None
+    r = _into(client, user, project, _new_version(db_session, project, "3.0.0"))
+    assert (r.status_code, r.json()["detail"]) == (409, f"Z tohto tiketu už je spustená rýchla oprava v{number}.")
 
 
-def test_when_the_ticket_does_not_take_the_comment_the_requirement_stays(client, setup, plane, db_session):
+def test_when_the_ticket_does_not_take_the_comment_the_link_stays(client, setup, plane, db_session):
     user, project = setup
     plane.drop_comments = True
-    r = _to_backlog(client, user, project)
+    r = _into(client, user, project, _new_version(db_session, project))
     assert r.status_code == 200, r.text
-    assert r.json()["plane_warning"].startswith(f"Požiadavka REQ-{r.json()['number']} je v Zásobníku, ale tiket DEV-11")
-    assert db_session.get(BacklogItem, uuid.UUID(r.json()["id"])) is not None
+    assert r.json()["plane_warning"].startswith("Zmena je uložená, ale tiket DEV-11 v Plane sa neposunul")
+    assert db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).scalar_one()
 
 
 # ── „Spustiť rýchlu opravu" ─────────────────────────────────────────────────────────────────────────────────────
@@ -220,13 +237,13 @@ def test_one_ticket_starts_one_fast_fix(client, setup, plane, db_session, dispat
     assert _versions(db_session, project) == before and len(dispatched) == 1
 
 
-def test_a_ticket_in_the_zasobnik_starts_no_fast_fix(client, setup, plane, db_session, dispatched):
+def test_a_ticket_in_a_version_starts_no_fast_fix(client, setup, plane, db_session, dispatched):
     user, project = setup
-    number = _to_backlog(client, user, project).json()["number"]
+    _into(client, user, project, _new_version(db_session, project))
     before = _versions(db_session, project)
     r = _fast_fix(client, user, project)
     assert r.status_code == 409
-    assert r.json()["detail"] == f"Tiket je už v Zásobníku ako REQ-{number} — pôjde s verziou, do ktorej ho zaradíš."
+    assert r.json()["detail"] == "Tiket už rieši verzia v2.0.0 — pôjde s ňou."
     assert _versions(db_session, project) == before and dispatched == []
 
 
@@ -344,3 +361,38 @@ async def test_only_a_successful_deploy_of_a_fix_from_a_ticket_tells_the_ticket(
     deploy.accept(db_session, customer.id, "0.1.1", user.id)
     await _deploy(db_session, customer, version_number="0.1.1", environment="prod", actor=user, runner=_FakeRunner())
     assert calls[-1][1:] == ("ANDROS", "prod")
+
+
+def test_the_versions_prod_deploy_closes_its_tickets_once(client, setup, plane, db_session):
+    """DEV-455 — the version solves the ticket: its PROD deploy moves it to Done with a comment; a second PROD deploy
+    (another customer) closes nothing again; a ticket Plane did not take stays open for the next deploy."""
+    user, project = setup
+    version = _new_version(db_session, project)
+    _into(client, user, project, version)
+    customer = type("C", (), {"name": "FLORASERVIS"})()
+
+    assert asyncio.run(deploy._close_version_tickets(db_session, version, "2.0.0", customer)) == []
+    assert plane.issues["x11"]["state"] == "s-done"
+    assert _comments(plane, "x11")[-1] == (
+        "<p>Verzia v2.0.0, ktorá tiket rieši, je nasadená na PROD u zákazníka FLORASERVIS.</p>"
+    )
+    link = db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).scalar_one()
+    assert link.closed_at is not None
+    comments = len(_comments(plane, "x11"))
+
+    assert asyncio.run(deploy._close_version_tickets(db_session, version, "2.0.0", customer)) == []
+    assert len(_comments(plane, "x11")) == comments, "closed once"
+
+
+def test_a_ticket_plane_did_not_close_stays_open_for_the_next_deploy(client, setup, plane, db_session):
+    user, project = setup
+    version = _new_version(db_session, project)
+    _into(client, user, project, version)
+    customer = type("C", (), {"name": "FLORASERVIS"})()
+    plane.status = 503
+
+    warnings = asyncio.run(deploy._close_version_tickets(db_session, version, "2.0.0", customer))
+
+    assert warnings and warnings[0].startswith("Tiket DEV-11 sa po nasadení na PROD neuzavrel")
+    link = db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).scalar_one()
+    assert link.closed_at is None

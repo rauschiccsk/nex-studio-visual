@@ -55,7 +55,7 @@ function ideaRemoval(idea: Idea): Removal | undefined {
     question: `Odstrániť „${idea.title}“ zo zoznamu Nápadov?`,
     note: idea.talk_in_project
       ? `Rozhovor ostane v Poradcovi ${where}.`
-      : `Požiadavka ostane v Zásobníku ${where}.`,
+      : `Tiket ostane v evidencii ${where} v Plane.`,
     action: "Odstrániť",
   };
 }
@@ -309,7 +309,9 @@ export default function IdeasPage() {
             <span>
               {current.state === "founded"
                 ? `Z nápadu vznikol projekt ${current.outcome_project_name}; zadanie je vo verzii 0.1.0.`
-                : `Zadanie je v Zásobníku projektu ${current.outcome_project_name} ako REQ-${current.outcome_backlog_number}.`}
+                : current.outcome_backlog_number
+                  ? `Zadanie je v projekte ${current.outcome_project_name} ako požiadavka REQ-${current.outcome_backlog_number}.`
+                  : `Zadanie je tiketom projektu ${current.outcome_project_name}; verziu mu určí Manažér v Plane tiketoch.`}
               {current.plane_identifier
                 ? ` Tiket v DEV: ${current.plane_identifier}.`
                 : ""}{" "}
@@ -439,7 +441,7 @@ export default function IdeasPage() {
             concluded
               ? current?.talk_in_project
                 ? "Nápad skončil v projekte — rozhovor pokračuje v Poradcovi projektu."
-                : "Nápad skončil — požiadavka je v Zásobníku projektu, ktorý vedie iný manažér."
+                : "Nápad skončil — zadanie je tiketom projektu, ktorý vedie iný manažér."
               : notReady
                 ? `Projektant teraz nevie bežať: ${notReady}`
                 : running

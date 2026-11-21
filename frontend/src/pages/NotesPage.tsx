@@ -4,21 +4,23 @@
 // Private: only the author reads them (kept on the server, so the same on every computer and on the phone). Several
 // notes, named by their first line; saved by itself while typing, saying when. A note changed meanwhile on another
 // device is never overwritten without a word: the screen says so and the person chooses which text stays. „Vyriešené“
-// moves a note aside (it is deleted for good only on purpose); „Do Zásobníka“ makes it a request REQ-N of the selected
-// project, once.
+// moves a note aside (it is deleted for good only on purpose); „Založiť tiket“ makes it a ticket of the selected
+// project in Plane, once, with the work kind the person picks (DEV-455 — the Zásobník is gone).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Archive, Check, ChevronDown, ChevronRight, Inbox, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Check, ChevronDown, ChevronRight, Loader2, Plus, RotateCcw, Ticket, Trash2 } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
+import WorkKindChoice from "@/components/common/WorkKindChoice";
+import type { WorkKind } from "@/lib/workKind";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import {
   createNote,
   deleteNote,
   listNotes,
   NoteConflict,
-  noteToBacklog,
+  noteToTicket,
   resolveNote,
   saveNote,
   type Note,
@@ -56,6 +58,8 @@ export default function NotesPage() {
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [showResolved, setShowResolved] = useState(false);
   const [busy, setBusy] = useState(false);
+  // DEV-455: who pays the work the note becomes — a project ticket carries it (DEV-118).
+  const [workKind, setWorkKind] = useState<WorkKind | null>(null);
 
   // The revision each note's text on this screen was written over, and the one save waiting to go — a save runs
   // after the previous one has finished, so every change goes over the revision the server just answered with.
@@ -191,7 +195,7 @@ export default function NotesPage() {
         >
           <span className="block truncate text-sm">{nameOf(note)}</span>
           <span className="block text-[10px] text-[var(--color-text-muted)]">
-            {note.backlog ? `REQ-${note.backlog.number} · ` : ""}
+            {note.ticket ? `${note.ticket.identifier} · ` : ""}
             {formatDateTime(note.updated_at)}
           </span>
         </button>
@@ -283,17 +287,17 @@ export default function NotesPage() {
                 {selected.resolved_at && (
                   <p className="mb-2 text-xs text-[var(--color-text-muted)]">
                     Vyriešená {formatDateTime(selected.resolved_at)}
-                    {selected.backlog && (
+                    {selected.ticket && (
                       <>
                         {" "}
-                        — požiadavka{" "}
+                        — tiket{" "}
                         <Link
-                          to={`/projects/${selected.backlog.project_slug}/backlog`}
+                          to={`/projects/${selected.ticket.project_slug}/plane-tikety`}
                           className="text-primary-400 underline hover:text-primary-300"
                         >
-                          REQ-{selected.backlog.number}
+                          {selected.ticket.identifier}
                         </Link>{" "}
-                        v Zásobníku projektu {selected.backlog.project_name}
+                        projektu {selected.ticket.project_name}
                       </>
                     )}
                     .
@@ -372,28 +376,35 @@ export default function NotesPage() {
                         </button>
                       </>
                     )}
-                    {!selected.backlog && (
+                    {!selected.ticket && (
                       <button
                         type="button"
-                        disabled={busy || !selectedProject || !selected.title}
+                        disabled={busy || !selectedProject || !selected.title || !workKind}
+                        title={workKind ? undefined : "Najprv vyber druh práce"}
                         onClick={() =>
                           selectedProject &&
+                          workKind &&
                           void act(
-                            async () => remember(await noteToBacklog(selected.id, selectedProject.slug)),
-                            "Požiadavku sa nepodarilo založiť",
+                            async () => remember(await noteToTicket(selected.id, selectedProject.slug, workKind)),
+                            "Tiket sa nepodarilo založiť",
                           )
                         }
                         className="flex items-center gap-1 rounded bg-primary-600 px-2.5 py-1 font-medium text-white hover:bg-primary-500 disabled:opacity-50"
                       >
-                        <Inbox size={13} /> Do Zásobníka{selectedProject ? ` — ${selectedProject.name}` : ""}
+                        <Ticket size={13} /> Založiť tiket{selectedProject ? ` — ${selectedProject.name}` : ""}
                       </button>
                     )}
                   </span>
                 </div>
-                {!selected.backlog && !selectedProject && (
+                {!selected.ticket && selectedProject && !selected.resolved_at && (
+                  <div className="mt-2 flex justify-end">
+                    <WorkKindChoice name="poznamka-druh" value={workKind} onChange={setWorkKind} disabled={busy} />
+                  </div>
+                )}
+                {!selected.ticket && !selectedProject && (
                   <p className="mt-1 text-right text-[11px] text-[var(--color-text-muted)]">
                     <Archive size={11} className="mr-1 inline" />
-                    Do Zásobníka: najprv si v Projektoch vyber projekt — požiadavka patrí do jeho Zásobníka.
+                    Založiť tiket: najprv si v Projektoch vyber projekt — tiket patrí do jeho evidencie v Plane.
                   </p>
                 )}
                 <ErrorNote error={actionError} className="mt-2" />

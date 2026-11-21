@@ -123,10 +123,17 @@ describe("the ticket of a founded project (DEV-360)", () => {
     expect(screen.queryByRole("button", { name: "Založiť tiket projektu v DEV" })).toBeNull();
   });
 
-  it("an idea added to a Zásobník offers no button — its requirement has a ticket of its own", async () => {
+  it("an idea added to a project says its ticket and offers no button (DEV-455)", async () => {
+    renderIdea(founded({ state: "added", outcome_backlog_number: null, plane_identifier: "DEV-610" }));
+
+    expect(await screen.findByText(/Zadanie je tiketom projektu .*; verziu mu určí Manažér v Plane tiketoch\./)).toBeInTheDocument();
+    expect(screen.getByText(/Tiket v DEV: DEV-610\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Založiť tiket projektu v DEV" })).toBeNull();
+  });
+
+  it("an idea added before the change still names its requirement", async () => {
     renderIdea(founded({ state: "added", outcome_backlog_number: 7 }));
 
-    expect(await screen.findByText(/ako REQ-7\./)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Založiť tiket projektu v DEV" })).toBeNull();
+    expect(await screen.findByText(/ako požiadavka REQ-7\./)).toBeInTheDocument();
   });
 });

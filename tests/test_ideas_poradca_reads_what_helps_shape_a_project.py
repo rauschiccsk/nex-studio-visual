@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.services.poradca import idea_tools, runner, tools
@@ -129,7 +128,6 @@ def test_another_persons_project_is_read_too(world):
     assert _call(world["me"], "dokumentacia_projektu", projekt=world["theirs"].slug, cesta="docs/riesenie.md") == (
         "# Riešenie"
     )
-    assert "Zásobník projektu" in _call(world["me"], "zasobnik_projektu", projekt=world["theirs"].slug)
 
 
 def test_a_project_that_is_not_in_the_cockpit_is_said(world):
@@ -153,10 +151,20 @@ def test_the_founding_options_say_when_web_is_not_available(world, db_session, m
     assert f"dostupný: nie — {project_surfaces.WEB_NOT_YET}" in _call(world["me"], "moznosti_zalozenia")
 
 
-def test_the_zasobnik_of_a_project(world, db_session):
-    db_session.add(BacklogItem(project_id=world["mine"].id, number=1, title="Skupiny podľa farností", description="d"))
-    db_session.flush()
-    assert "REQ-1" in _call(world["me"], "zasobnik_projektu", projekt=world["mine"].slug)
+def test_the_tickets_of_a_project_are_read_by_the_tool_poradca_has_inside_the_project(world, monkeypatch):
+    """DEV-455 — the Zásobník is gone; an idea checks the project's open tickets instead."""
+    from backend.services.poradca import tools
+
+    asked: list = []
+
+    async def plane_tikety(self, args):
+        asked.append(self.project_id)
+        return "Tikety modulu P (otvorené), najnovšia zmena prvá:\nDEV-12 [Todo] Skupiny podľa farností"
+
+    monkeypatch.setattr(tools.PoradcaTools, "plane_tikety", plane_tikety)
+
+    assert "DEV-12" in _call(world["me"], "tikety_projektu", projekt=world["theirs"].slug)
+    assert asked == [world["theirs"].id]
 
 
 def test_the_rules_of_navrhy_name_every_tool_of_an_idea():
@@ -169,7 +177,7 @@ def test_the_rules_of_navrhy_name_every_tool_of_an_idea():
             "projekty",
             "dokumentacia_projektu",
             "moznosti_zalozenia",
-            "zasobnik_projektu",
+            "tikety_projektu",
         ]
     )
     assert [n for n in names if f"`{n}`" not in charter] == []

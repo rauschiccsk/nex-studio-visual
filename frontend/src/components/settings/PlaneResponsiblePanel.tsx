@@ -62,8 +62,8 @@ export default function PlaneResponsiblePanel() {
         Zodpovedný v Plane
       </h3>
       <p className="text-xs text-[var(--color-text-muted)]">
-        Kto za tikety konta zodpovedá v evidencii DEV — pri tikete projektu založeného z nápadu a pri tikete zo
-        Zásobníka. Konto bez nastavenia kokpit páruje podľa jeho mena.
+        Kto za tikety konta zodpovedá v evidencii DEV — pri tikete z nápadu, z Poradcu a z poznámky. Konto bez
+        nastavenia kokpit páruje podľa jeho mena.
       </p>
       {error && (
         <p role="alert" className="text-xs text-[var(--color-state-error-fg)]">

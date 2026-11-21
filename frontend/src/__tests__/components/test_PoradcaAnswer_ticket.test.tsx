@@ -64,8 +64,6 @@ function answer(id: string, over: Record<string, unknown> = {}) {
     steps: [],
     status: "done",
     instruction: null,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices: [],
     ticket_proposal: { kind: "nsv", title: "Tlačidlo Nasadiť pri UAT nič nerobí" },
     plane_identifier: null,
@@ -89,9 +87,9 @@ async function openPanel(): Promise<ReturnType<typeof within>> {
 }
 
 describe("A ticket from Poradca's answer (DEV-119)", () => {
-  it("offers „Založiť tiket“ only under an answer that proposes one", () => {
-    answer("m0", { ticket_proposal: null, backlog_request: "Pridať export faktúr do CSV." });
-    expect(screen.getByRole("button", { name: /Uložiť do Zásobníka/ })).toBeInTheDocument();
+  it("offers „Založiť tiket“ only under an answer that proposes one — and nothing for the Zásobník (DEV-455)", () => {
+    answer("m0", { ticket_proposal: null, content: "<poziadavka-do-zasobnika>Export CSV.</poziadavka-do-zasobnika>" });
+    expect(screen.queryByRole("button", { name: /Zásobník/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Založiť tiket/ })).toBeNull();
   });
 

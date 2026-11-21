@@ -101,8 +101,6 @@ const ANSWER_WITH_INSTRUCTION = {
   created_at: "2026-10-05T10:00:01Z",
   finished_at: "2026-10-05T10:01:21Z",
   instruction: "Oprav test_login.",
-  backlog_request: null,
-  captured_backlog_number: null,
 };
 
 function renderPage(url = "/poradca?c=c1") {

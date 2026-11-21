@@ -947,7 +947,7 @@ export function registerFixtures(): void {
       created_at: T1,
       updated_at: T2,
       resolved_at: null,
-      backlog: null,
+      ticket: null,
     },
     {
       id: "aaaaaaaa-0000-4000-8000-000000000090",
@@ -957,12 +957,11 @@ export function registerFixtures(): void {
       created_at: T1,
       updated_at: T1,
       resolved_at: T2,
-      backlog: {
-        id: "aaaaaaaa-0000-4000-8000-000000000091",
-        project_id: PROJECT.id,
+      ticket: {
         project_slug: PROJECT.slug,
         project_name: PROJECT.name,
-        number: 12,
+        identifier: "DEV-512",
+        url: "http://plane.test/icc/projects/p1/issues/i512",
       },
     },
   ]);
@@ -1284,81 +1283,13 @@ export function registerFixtures(): void {
       },
     ],
   });
-  // DEV-361: which versions take a requirement — one past Príprava says why it is not offered.
-  answer("get", "/api/v1/backlog/versions", [
-    { id: VERSION.id, version_number: VERSION.version_number, status: "active", refusal: null },
-    {
-      id: "22222222-2222-4222-8222-222222222229",
-      version_number: "1.8.5",
-      status: "active",
-      refusal:
-        "Verzia 1.8.5 má schválenú Špecifikáciu — požiadavka by sa do nej už nedostala. Zaraď ju do ďalšej verzie.",
-    },
-    {
-      id: RELEASED.id,
-      version_number: RELEASED.version_number,
-      status: "released",
-      refusal: `Verzia ${RELEASED.version_number} je hotová — požiadavka by sa do nej už nedostala.`,
-    },
-  ]);
-  answer("get", "/api/v1/backlog", {
-    items: [
-      {
-        id: "66666666-6666-4666-8666-666666666661",
-        number: 7,
-        project_id: PROJECT.id,
-        version_id: null,
-        title:
-          "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
-        description: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
-        priority: "medium",
-        status: "open",
-        realized_at: null,
-        rejection_reason: null,
-        plane_identifier: null,
-        plane_url: null,
-        created_at: T0,
-        updated_at: T1,
-      },
-      {
-        // DEV-121: a requirement with its ticket — the link to Plane must be touchable on a phone.
-        id: "66666666-6666-4666-8666-666666666662",
-        number: 8,
-        project_id: PROJECT.id,
-        version_id: VERSION.id,
-        title: "Import faktúr z ISDOC",
-        description: null,
-        priority: "high",
-        status: "included",
-        realized_at: null,
-        rejection_reason: null,
-        plane_identifier: "DEV-130",
-        plane_url: "http://plane.test/icc/projects/p1/issues/i130",
-        created_at: T0,
-        updated_at: T1,
-      },
-    ],
-    total: 2,
-    skip: 0,
-    limit: 50,
-  });
-  // DEV-121: the draft „Založiť tiket" opens with — the layout check opens the panel too.
-  answer("get", "/api/v1/backlog/{item_id}/plane-ticket", {
-    title:
-      "Čítať čiarový kód EAN z obrázka faktúry, keď ho dodávateľ nemá v texte PDF",
-    description: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
-    ticket_type: "Task",
-    responsible_options: ["Andros Dedo", "Zoltán"],
-    responsible: "Zoltán",
-    plane_identifier: null,
-    plane_url: null,
-  });
-  // DEV-120: the „Plane tikety" tab — one ticket the Zásobník founded, one from a Dedo.
-  // DEV-122: an open ticket goes to the Zásobník or starts a fast fix — the layout check opens the fast fix panel.
+  // DEV-120: the „Plane tikety" tab — one ticket a version solves, one free.
+  // DEV-122, DEV-455: an open ticket goes into a version or starts a fast fix — the layout check opens the fast fix.
   answer("get", "/api/v1/projects/{slug}/plane-tickets", {
     project_id: PROJECT.id,
     project_name: PROJECT.name,
     module: PROJECT.name,
+    open_versions: [{ id: VERSION.id, version_number: VERSION.version_number }],
     tickets: [
       {
         issue_id: "i130",
@@ -1374,10 +1305,9 @@ export function registerFixtures(): void {
         doer: "Zoltán",
         updated_at: T1,
         url: "http://plane.test/icc/projects/p1/issues/i130",
-        requirement: "REQ-7",
-        requirement_version: "v1.9.0",
         text: "REBIOP má skutočný GTIN len v čiarach čiarového kódu.",
         fix_version: null,
+        in_version: `v${VERSION.version_number}`,
       },
       {
         issue_id: "i114",
@@ -1393,10 +1323,9 @@ export function registerFixtures(): void {
         doer: "Zoltán Rausch",
         updated_at: T0,
         url: "http://plane.test/icc/projects/p1/issues/i114",
-        requirement: null,
-        requirement_version: null,
         text: "Číslo faktúry je v ISDOC len vo variabilnom symbole.\n\nOver aj dobropis.",
         fix_version: null,
+        in_version: null,
       },
     ],
   });

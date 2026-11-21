@@ -5,7 +5,6 @@ import type {
   PoradcaAgentTicketsAttached,
   PoradcaConversation,
   PoradcaConversationDetail,
-  PoradcaBacklogSaved,
   PoradcaProjectContext,
   PoradcaReviewConversation,
   PoradcaStatus,
@@ -86,14 +85,9 @@ export function stopPoradcaApi(messageId: string): Promise<{ stopping: boolean }
   return api.post<{ stopping: boolean }>(`/poradca/messages/${messageId}/stop`);
 }
 
-/** DEV-29: the request in Poradca's answer goes to the project's Zásobník — no version comes of it. */
 /** DEV-431 — the answer was put into Riadiace centrum now: the cockpit keeps the time at the answer. */
 export function markHandedOffApi(messageId: string): Promise<{ handed_off_at: string }> {
   return api.post<{ handed_off_at: string }>(`/poradca/messages/${messageId}/handed-off`);
-}
-
-export function saveRequestToBacklogApi(messageId: string): Promise<PoradcaBacklogSaved> {
-  return api.post<PoradcaBacklogSaved>(`/poradca/messages/${messageId}/backlog`);
 }
 
 /** DEV-119 — the preview of the ticket Poradca proposes: what the cockpit adds and similar open tickets. */

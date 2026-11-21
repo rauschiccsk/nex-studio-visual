@@ -248,6 +248,10 @@ Tri úrovne, každá s vlastnou disciplínou zápisu (`design.md` §5.2; mechani
   centre. Kokpit ho uloží do `private/` v koreni projektu — git ho nevidí — a do odpovede doplní presnú cestu.
   Nežiadaj `scp`, terminál ani ukladanie na server a nepýtaj obsah súboru do textu správy. Originál do gitu
   nedávaj; čo má ísť do repozitára, ulož ako anonymizovanú kópiu mimo `private/`.
+- **Claude len cez predplatné (DEV-459).** Aplikácia volá Clauda výhradne cez predplatné Claude — Claude Code s ročným
+  kódom `CLAUDE_CODE_OAUTH_TOKEN`; na šablóne nex-app-kit cez `nex_app_kit.claude` (od v0.18.0), vlastný prístup
+  nepíš. Knižnicu `anthropic` s kľúčom API ani `ANTHROPIC_API_KEY` nenavrhuj (štandard ICC D-001) — kokpit takú
+  Špecifikáciu neschváli a takú aplikáciu nenasadí (21.11.2026 Orthodox Hermenia: kľúč API, v PROD nefungovalo nič s AI).
 - **Číslo verzie nepíš do kódu ani do skúšok (DEV-449).** Verziu ber z najnovšieho priečinka poznámok k vydaniu
   (`docs/specs/versions/v*/`) alebo z nasadenia (`APP_VERSION`) — prvé nasadenie do PROD premenuje poznámky k vydaniu na 1.0.0
   a skúška s natvrdo zapísaným číslom by padla (20.11.2026 Orthodox Hermenia: `CURRENT = v0.2.0`, červené CI na main).

@@ -13,12 +13,11 @@ from fastapi.testclient import TestClient
 
 from backend.api.routes.plane_tickets import router as plane_tickets_router
 from backend.core.security import get_current_user
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.session import get_db
-from backend.schemas.backlog import BacklogItemCreate
-from backend.services import backlog as backlog_service
-from backend.services import backlog_tickets, plane_tickets
+from backend.services import plane_tickets
 from backend.tests.fake_plane import FakePlane, gateway_for
-from tests.test_backlog import _make_project, _make_user, _make_version
+from tests.project_factories import _make_project, _make_user, _make_version
 
 
 @pytest.fixture
@@ -98,30 +97,20 @@ def test_the_finished_tickets_are_the_done_and_the_cancelled_ones(setup):
     ]
 
 
-def test_a_ticket_of_the_zasobnik_names_its_requirement_and_version(setup, plane, db_session, monkeypatch):
-    owner, project, client = setup
-    monkeypatch.setattr(backlog_tickets, "gateway", lambda: gateway_for(plane))
-    item = backlog_service.create(db_session, BacklogItemCreate(project_id=project.id, title="Import ISDOC"))
+def test_a_ticket_put_into_a_version_names_it_and_the_tab_offers_the_open_versions(setup, plane, db_session):
+    """DEV-455 — the version the Manažér put the ticket into; and the versions a ticket may still go into."""
+    _owner, project, client = setup
     version = _make_version(db_session, project)
-    backlog_service.assign_to_version(db_session, item.id, version.id)
-    backlog_tickets.found(
-        db_session,
-        gateway_for(plane),
-        item.id,
-        owner,
-        title="Import ISDOC",
-        description="",
-        work_kind="change",
-        ticket_type="Task",
-        responsible="Zoltán",
-    )
-    plane.issues[item.plane_issue_id]["state"] = "s-ip"
-    tickets = client.get(f"/api/v1/projects/{project.slug}/plane-tickets").json()["tickets"]
-    linked = [t for t in tickets if t["identifier"] == item.plane_identifier]
-    assert [(t["requirement"], t["requirement_version"]) for t in linked] == [
-        (f"REQ-{item.number}", f"v{version.version_number}")
-    ]
-    assert all(t["requirement"] is None for t in tickets if t["identifier"] != item.plane_identifier)
+    db_session.add(VersionTicket(version_id=version.id, plane_issue_id="x12", plane_identifier="DEV-12", title="t"))
+    db_session.flush()
+
+    body = client.get(f"/api/v1/projects/{project.slug}/plane-tickets").json()
+
+    assert {t["identifier"]: t["in_version"] for t in body["tickets"]} == {
+        "DEV-12": f"v{version.version_number}",
+        "DEV-11": None,
+    }
+    assert body["open_versions"] == [{"id": str(version.id), "version_number": version.version_number}]
 
 
 def test_a_ticket_with_two_work_kinds_says_so_instead_of_guessing(setup, plane):
@@ -145,6 +134,7 @@ def test_a_project_without_a_module_has_no_tickets_and_reading_founds_none(db_se
         "project_name": project.name,
         "module": None,
         "tickets": [],
+        "open_versions": [],  # DEV-455: no version yet to put a ticket into
     }
     assert {req.method for req in plane.requests} == {"GET"}  # only read — no module founded
     assert project.plane_module_id is None

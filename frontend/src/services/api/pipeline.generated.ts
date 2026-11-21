@@ -236,106 +236,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/backlog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Backlog
-         * @description Paginated backlog list (ordered ``number ASC`` = ``REQ-1, REQ-2, …``).
-         *
-         *     v4.0.43: a Junior (``shu``) MUST scope to a project they OWN (``project_id`` required + owner-checked);
-         *     ri/ha may list across all projects.
-         */
-        get: operations["list_backlog_api_v1_backlog_get"];
-        put?: never;
-        /**
-         * Create Backlog Item
-         * @description Create a backlog item (``REQ-N`` auto-assigned; status ``open``). v4.0.43: owner-or-admin/ha.
-         */
-        post: operations["create_backlog_item_api_v1_backlog_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backlog/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Versions For Assignment
-         * @description DEV-361 — each version of the project with why a requirement can no longer be included in it.
-         */
-        get: operations["versions_for_assignment_api_v1_backlog_versions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backlog/{item_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Backlog Item
-         * @description Delete a backlog item — when ``open`` or ``rejected`` (never realized/included History, DEV-98). v4.0.43:
-         *     owner-or-admin/ha of the item's project.
-         */
-        delete: operations["delete_backlog_item_api_v1_backlog__item_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Backlog Item
-         * @description Edit, reject, or assign-to-version.
-         *
-         *     A payload that sets ``version_id`` is an **assign** (→ ``status=included``); otherwise it edits
-         *     ``title`` / ``description`` / ``priority`` / ``status`` (reject = ``status='rejected'``). v4.0.43:
-         *     owner-or-admin/ha of the item's project.
-         */
-        patch: operations["update_backlog_item_api_v1_backlog__item_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/backlog/{item_id}/plane-ticket": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Plane Ticket Draft
-         * @description What „Založiť tiket" offers to edit — or the requirement's ticket, when it exists (DEV-121).
-         */
-        get: operations["plane_ticket_draft_api_v1_backlog__item_id__plane_ticket_get"];
-        put?: never;
-        /**
-         * Found Plane Ticket
-         * @description Found the requirement's ticket in its project's module of the DEV register — once (DEV-121).
-         */
-        post: operations["found_plane_ticket_api_v1_backlog__item_id__plane_ticket_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/client-errors": {
         parameters: {
             query?: never;
@@ -1005,7 +905,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/notes/{note_id}/to-backlog": {
+    "/api/v1/notes/{note_id}/to-ticket": {
         parameters: {
             query?: never;
             header?: never;
@@ -1015,10 +915,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Note To Backlog
-         * @description A request in the project's backlog, exactly once; the caller must be allowed into the project's backlog.
+         * Note To Ticket
+         * @description DEV-455 — a ticket of the project in Plane, exactly once; the caller must be allowed into the project.
          */
-        post: operations["note_to_backlog_api_v1_notes__note_id__to_backlog_post"];
+        post: operations["note_to_ticket_api_v1_notes__note_id__to_ticket_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1481,8 +1381,9 @@ export interface paths {
         put?: never;
         /**
          * Idea Added
-         * @description The idea's brief goes to the Zásobník of the existing project it names — any project of the cockpit (DEV-350);
-         *     the talk moves to that project when its author may open it, otherwise it stays with him in Nápady.
+         * @description The idea's brief becomes a ticket of the existing project it names in Plane — any project of the cockpit
+         *     (DEV-350, DEV-455); the talk moves to that project when its author may open it, otherwise it stays with him in
+         *     Nápady.
          */
         post: operations["idea_added_api_v1_poradca_ideas__idea_id__added_post"];
         delete?: never;
@@ -1548,26 +1449,6 @@ export interface paths {
          *     ``private/`` of the build's project; the lines for the answer say where. Nothing is sent to the agent.
          */
         post: operations["attach_agent_tickets_api_v1_poradca_messages__message_id__agent_tickets_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/poradca/messages/{message_id}/backlog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Request To Backlog
-         * @description „Uložiť do Zásobníka" — požiadavka z odpovede Poradcu do Zásobníka projektu; verzia nevzniká (DEV-29).
-         */
-        post: operations["save_request_to_backlog_api_v1_poradca_messages__message_id__backlog_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2833,7 +2714,7 @@ export interface paths {
         };
         /**
          * List Project Plane Tickets
-         * @description The tickets of the project's module, newest change first; a ticket of the Zásobník names its REQ-N.
+         * @description The tickets of the project's module, newest change first; a ticket in a version names it (DEV-455).
          */
         get: operations["list_project_plane_tickets_api_v1_projects__slug__plane_tickets_get"];
         put?: never;
@@ -2844,7 +2725,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{slug}/plane-tickets/{issue_id}/backlog": {
+    "/api/v1/projects/{slug}/plane-tickets/{issue_id}/version": {
         parameters: {
             query?: never;
             header?: never;
@@ -2854,14 +2735,33 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Plane Ticket To Backlog
-         * @description „Do Zásobníka" — the requirement linked to the ticket; a second click returns the same one.
+         * Put Plane Ticket Into Version
+         * @description „Zaradiť do verzie" — the version solves the ticket; a second click returns the same link (DEV-455).
          *
-         *     The requirement is saved first; the ticket's comment comes after and, when Plane does not take it, the sentence
-         *     says so (``plane_warning``) instead of undoing the requirement.
+         *     The link is saved first; when Plane does not move the ticket, the sentence says so (``plane_warning``).
          */
-        post: operations["plane_ticket_to_backlog_api_v1_projects__slug__plane_tickets__issue_id__backlog_post"];
+        post: operations["put_plane_ticket_into_version_api_v1_projects__slug__plane_tickets__issue_id__version_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{slug}/plane-tickets/{issue_id}/version/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take Plane Ticket Out Of Version
+         * @description „Vyradiť z verzie" — while the version has not carried the ticket to the Staviteľ yet (DEV-455).
+         */
+        delete: operations["take_plane_ticket_out_of_version_api_v1_projects__slug__plane_tickets__issue_id__version__version_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3899,196 +3799,6 @@ export interface components {
             updated_at: string;
             /** Username */
             username: string;
-        };
-        /**
-         * BacklogItemCreate
-         * @description Payload for creating a backlog item. ``number`` (→ ``REQ-N``) is server-assigned; ``status``
-         *     is always ``open`` at creation (the lifecycle is driven by assign/realize/reject afterwards).
-         */
-        BacklogItemCreate: {
-            /**
-             * Description
-             * @description Optional longer description.
-             */
-            description?: string | null;
-            /**
-             * Priority
-             * @description low | medium | high | critical.
-             * @default medium
-             * @enum {string}
-             */
-            priority: "low" | "medium" | "high" | "critical";
-            /**
-             * Project Id
-             * Format: uuid
-             * @description Project the requirement belongs to.
-             */
-            project_id: string;
-            /**
-             * Title
-             * @description Short requirement title.
-             */
-            title: string;
-        };
-        /**
-         * BacklogItemRead
-         * @description Serialised backlog row. ``from_attributes`` enables ``model_validate(orm_obj)``.
-         */
-        BacklogItemRead: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Description */
-            description?: string | null;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Number */
-            number: number;
-            /** Plane Identifier */
-            plane_identifier?: string | null;
-            /** Plane Url */
-            plane_url?: string | null;
-            /**
-             * Plane Warning
-             * @description DEV-121: the change is saved, but its ticket in Plane did not follow — said to the person.
-             */
-            plane_warning?: string | null;
-            /**
-             * Priority
-             * @enum {string}
-             */
-            priority: "low" | "medium" | "high" | "critical";
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /** Realized At */
-            realized_at?: string | null;
-            /** Rejection Reason */
-            rejection_reason?: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "open" | "included" | "realized" | "rejected";
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version Id */
-            version_id?: string | null;
-        };
-        /**
-         * BacklogItemUpdate
-         * @description Partial update. Edit (title/description/priority), reject (``status='rejected'``), or assign to a
-         *     version (``version_id`` → the service sets ``status='included'``). ``project_id``/``number`` are
-         *     immutable; ``realized_at`` is server-managed (set on release).
-         */
-        BacklogItemUpdate: {
-            /** Description */
-            description?: string | null;
-            /** Priority */
-            priority?: ("low" | "medium" | "high" | "critical") | null;
-            /**
-             * Rejection Reason
-             * @description Why the requirement is rejected — required with status='rejected' (DEV-121).
-             */
-            rejection_reason?: string | null;
-            /** Status */
-            status?: ("open" | "included" | "realized" | "rejected") | null;
-            /** Title */
-            title?: string | null;
-            /**
-             * Version Id
-             * @description Assign the requirement to this version (the service sets status=included).
-             */
-            version_id?: string | null;
-        };
-        /**
-         * BacklogTicketCreate
-         * @description The edited draft — founds the requirement's ticket in its project's module of the DEV register.
-         */
-        BacklogTicketCreate: {
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /** Responsible */
-            responsible: string;
-            /**
-             * Ticket Type
-             * @enum {string}
-             */
-            ticket_type: "Bug" | "Task";
-            /** Title */
-            title: string;
-            /**
-             * Work Kind
-             * @enum {string}
-             */
-            work_kind: "fix" | "change" | "gift";
-        };
-        /**
-         * BacklogTicketDraft
-         * @description What „Založiť tiket" offers to edit before anything is written to Plane (DEV-121).
-         */
-        BacklogTicketDraft: {
-            /** Description */
-            description: string;
-            /**
-             * Plane Identifier
-             * @description The ticket, when it already exists.
-             */
-            plane_identifier?: string | null;
-            /** Plane Url */
-            plane_url?: string | null;
-            /**
-             * Responsible
-             * @description The person who clicked, when Plane knows them.
-             */
-            responsible?: string | null;
-            /**
-             * Responsible Options
-             * @description People of the „Zodpovedný“ group in the DEV register.
-             */
-            responsible_options: string[];
-            /**
-             * Ticket Type
-             * @enum {string}
-             */
-            ticket_type: "Bug" | "Task";
-            /** Title */
-            title: string;
-        };
-        /**
-         * BacklogVersionRead
-         * @description DEV-361 — a version of the project and why a requirement can no longer be included in it.
-         */
-        BacklogVersionRead: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Refusal */
-            refusal?: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "planned" | "active" | "done" | "released";
-            /** Version Number */
-            version_number: string;
         };
         /**
          * BillingOverviewRead
@@ -6471,29 +6181,34 @@ export interface components {
             wait_seconds: number;
         };
         /**
-         * NoteBacklogRead
-         * @description The request a note became.
+         * NoteTicketRead
+         * @description The project ticket a note became (DEV-455).
          */
-        NoteBacklogRead: {
+        NoteTicketRead: {
+            /**
+             * Identifier
+             * @description DEV-n
+             */
+            identifier: string;
+            /** Project Name */
+            project_name: string;
+            /** Project Slug */
+            project_slug: string;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * OpenVersionRead
+         * @description A version a ticket may still go into — in Príprava or not started (DEV-455).
+         */
+        OpenVersionRead: {
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /**
-             * Number
-             * @description REQ-{number}
-             */
-            number: number;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
-            /** Project Name */
-            project_name: string;
-            /** Project Slug */
-            project_slug: string;
+            /** Version Number */
+            version_number: string;
         };
         /**
          * OpenVersionStanding
@@ -6531,17 +6246,6 @@ export interface components {
             version_number: string;
             /** Waiting Since */
             waiting_since?: string | null;
-        };
-        /** PaginatedResponse[BacklogItemRead] */
-        PaginatedResponse_BacklogItemRead_: {
-            /** Items */
-            items: components["schemas"]["BacklogItemRead"][];
-            /** Limit */
-            limit: number;
-            /** Skip */
-            skip: number;
-            /** Total */
-            total: number;
         };
         /** PaginatedResponse[ProjectRead] */
         PaginatedResponse_ProjectRead_: {
@@ -6867,25 +6571,15 @@ export interface components {
              */
             identifier: string;
             /**
+             * In Version
+             * @description The version the Manažér put the ticket into — it solves the ticket (DEV-455).
+             */
+            in_version?: string | null;
+            /**
              * Issue Id
              * @description The ticket's id in Plane — what „Do Zásobníka“ and a fast fix name it by.
              */
             issue_id: string;
-            /**
-             * Named In Version
-             * @description The version whose Zadanie names the ticket — its work is there (DEV-453).
-             */
-            named_in_version?: string | null;
-            /**
-             * Requirement
-             * @description REQ-N of the Zásobník that founded the ticket.
-             */
-            requirement?: string | null;
-            /**
-             * Requirement Version
-             * @description The version that requirement is in.
-             */
-            requirement_version?: string | null;
             /**
              * State
              * @description The ticket's column in Plane.
@@ -6970,23 +6664,6 @@ export interface components {
              * @default
              */
             name: string;
-        };
-        /**
-         * PoradcaBacklogSaved
-         * @description DEV-29: požiadavka z odpovede Poradcu uložená do Zásobníka (verzia z nej nevzniká).
-         */
-        PoradcaBacklogSaved: {
-            /**
-             * Backlog Item Id
-             * Format: uuid
-             */
-            backlog_item_id: string;
-            /** Created */
-            created: boolean;
-            /** Number */
-            number: number;
-            /** Project Slug */
-            project_slug: string;
         };
         /**
          * PoradcaChoiceRead
@@ -7123,10 +6800,6 @@ export interface components {
              * @enum {string}
              */
             author: "human" | "poradca";
-            /** Backlog Request */
-            backlog_request?: string | null;
-            /** Captured Backlog Number */
-            captured_backlog_number?: number | null;
             /** Choices */
             choices?: components["schemas"]["PoradcaChoiceRead"][];
             /** Content */
@@ -7805,6 +7478,11 @@ export interface components {
              * @description The project's module in DEV; none until its first ticket.
              */
             module: string | null;
+            /**
+             * Open Versions
+             * @description The versions a ticket may still go into (DEV-455).
+             */
+            open_versions: components["schemas"]["OpenVersionRead"][];
             /**
              * Project Id
              * Format: uuid
@@ -8802,7 +8480,6 @@ export interface components {
         };
         /** UserNoteRead */
         UserNoteRead: {
-            backlog?: components["schemas"]["NoteBacklogRead"] | null;
             /** Body */
             body: string;
             /**
@@ -8819,6 +8496,7 @@ export interface components {
             resolved_at?: string | null;
             /** Revision */
             revision: number;
+            ticket?: components["schemas"]["NoteTicketRead"] | null;
             /** Title */
             title: string;
             /**
@@ -8839,10 +8517,15 @@ export interface components {
             /** Revision */
             revision: number;
         };
-        /** UserNoteToBacklog */
-        UserNoteToBacklog: {
+        /** UserNoteToTicket */
+        UserNoteToTicket: {
             /** Project Slug */
             project_slug: string;
+            /**
+             * Work Kind
+             * @enum {string}
+             */
+            work_kind: "fix" | "change" | "gift";
         };
         /**
          * UserRead
@@ -9138,6 +8821,20 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
+         * VersionTicketRead
+         * @description The ticket put into a version, and the sentence when Plane did not follow (DEV-455).
+         */
+        VersionTicketRead: {
+            /** Identifier */
+            identifier: string;
+            /** Issue Id */
+            issue_id: string;
+            /** Plane Warning */
+            plane_warning?: string | null;
             /** Version Number */
             version_number: string;
         };
@@ -9526,6 +9223,14 @@ export interface components {
             /** Launch Url */
             launch_url: string;
         };
+        /** _VersionChoice */
+        _VersionChoice: {
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /**
          * _VersionSettingsResponse
          * @description Odpoveď na ``GET /versions/{version_id}/nastavenia`` (ICCINT-100).
@@ -9853,237 +9558,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionHoldRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_backlog_api_v1_backlog_get: {
-        parameters: {
-            query?: {
-                /** @description Filter by project. */
-                project_id?: string | null;
-                /** @description Filter by lifecycle status. */
-                status?: ("open" | "included" | "realized" | "rejected") | null;
-                skip?: number;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedResponse_BacklogItemRead_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_backlog_item_api_v1_backlog_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BacklogItemCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    versions_for_assignment_api_v1_backlog_versions_get: {
-        parameters: {
-            query: {
-                /** @description The project whose versions a requirement may be included in. */
-                project_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogVersionRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_backlog_item_api_v1_backlog__item_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_backlog_item_api_v1_backlog__item_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BacklogItemUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    plane_ticket_draft_api_v1_backlog__item_id__plane_ticket_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogTicketDraft"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    found_plane_ticket_api_v1_backlog__item_id__plane_ticket_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BacklogTicketCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklogItemRead"];
                 };
             };
             /** @description Validation Error */
@@ -11298,7 +10772,7 @@ export interface operations {
             };
         };
     };
-    note_to_backlog_api_v1_notes__note_id__to_backlog_post: {
+    note_to_ticket_api_v1_notes__note_id__to_ticket_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -11309,7 +10783,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UserNoteToBacklog"];
+                "application/json": components["schemas"]["UserNoteToTicket"];
             };
         };
         responses: {
@@ -12222,37 +11696,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaAgentTicketsAttached"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_request_to_backlog_api_v1_poradca_messages__message_id__backlog_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                message_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PoradcaBacklogSaved"];
                 };
             };
             /** @description Validation Error */
@@ -14268,13 +13711,50 @@ export interface operations {
             };
         };
     };
-    plane_ticket_to_backlog_api_v1_projects__slug__plane_tickets__issue_id__backlog_post: {
+    put_plane_ticket_into_version_api_v1_projects__slug__plane_tickets__issue_id__version_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 slug: string;
                 issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_VersionChoice"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    take_plane_ticket_out_of_version_api_v1_projects__slug__plane_tickets__issue_id__version__version_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                issue_id: string;
+                version_id: string;
             };
             cookie?: never;
         };
@@ -14286,7 +13766,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BacklogItemRead"];
+                    "application/json": components["schemas"]["VersionTicketRead"];
                 };
             };
             /** @description Validation Error */

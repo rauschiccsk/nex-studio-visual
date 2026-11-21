@@ -18,7 +18,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent, DeployRefusal
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -51,7 +50,7 @@ def _tool_names() -> set[str]:
 def test_every_screen_of_a_project_has_its_poradca_tools():
     screens = _project_screens()
 
-    assert {"Zákazníci", "UAT", "PROD", "Zásobník"} <= screens, (
+    assert {"Zákazníci", "UAT", "PROD", "Plane tikety"} <= screens, (
         "the menu was read wrong — the guard would guard nothing"
     )
     assert screens == set(tools.SCREENS) | set(tools.NOT_READ)
@@ -110,20 +109,6 @@ async def test_stavba_names_every_note_of_the_auditors_verdict(world):  # noqa: 
 
     assert "  poznámka Audítora (neblokuje, skúšky ju nechytia): Poistku proti registráciám sa dá obísť." in out
     assert "  poznámka Audítora (neblokuje): Spojenie so zbernou schránkou neoveruje server." in out
-
-
-async def test_poziadavka_gives_the_whole_requirement(world):  # noqa: F811
-    db, project = world["db"], world["project"]
-    long_text = "Pred verejným spustením treba limit podľa skutočnej IP. " * 20
-    db.add(BacklogItem(project_id=project.id, number=2, title="Limit registrácií", description=long_text))
-    db.flush()
-
-    out = await world["tools"].poziadavka({"cislo": 2})
-
-    assert out.splitlines()[0] == "REQ-2 [Otvorené, priorita stredná] Limit registrácií"
-    assert long_text.strip() in out
-    with pytest.raises(ToolError, match="REQ-9"):
-        await world["tools"].poziadavka({"cislo": 9})
 
 
 async def test_verzie_lists_the_versions_with_their_builds(world):  # noqa: F811
@@ -240,7 +225,7 @@ async def test_naklady_fakturacia_and_plane_tikety_read_the_screens_services(wor
     )
     monkeypatch.setattr(delivery_statement, "billing_rows", lambda db, project, root: [row])
     ticket = SimpleNamespace(
-        identifier="DEV-9", state="Todo", title="Limit podľa IP", requirement="REQ-2", warning=None
+        identifier="DEV-9", state="Todo", title="Limit podľa IP", in_version="v1.3.0", warning=None
     )
     monkeypatch.setattr(plane_tickets, "gateway", lambda: None)
     monkeypatch.setattr(
@@ -251,4 +236,4 @@ async def test_naklady_fakturacia_and_plane_tikety_read_the_screens_services(wor
 
     assert "1.2.0 (active): 42 €" in await world["tools"].naklady({})
     assert "1.2.0: dá sa vystaviť, na vystavenie 1250.00 €" in await world["tools"].fakturacia({})
-    assert "DEV-9 [Todo] Limit podľa IP — REQ-2" in await world["tools"].plane_tikety({})
+    assert "DEV-9 [Todo] Limit podľa IP — vo verzii v1.3.0" in await world["tools"].plane_tikety({})

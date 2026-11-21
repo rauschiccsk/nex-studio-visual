@@ -125,12 +125,13 @@ class IdeaTools:
             ]
         )
 
-    async def zasobnik_projektu(self, args: dict) -> str:
-        """A project's Zásobník — read by the same tool Poradca has inside the project."""
+    async def tikety_projektu(self, args: dict) -> str:
+        """A project's open Plane tickets (DEV-455: the Zásobník is gone, the tickets are the one list of work) —
+        read by the same tool Poradca has inside the project."""
         with SessionLocal() as db:
             project = self._project(db, args.get("projekt"))
             project_id = project.id
-        return await PoradcaTools(project_id=project_id, version_id=None, user_id=self.user_id).zasobnik({})
+        return await PoradcaTools(project_id=project_id, version_id=None, user_id=self.user_id).plane_tikety({})
 
 
 def _person(user: Optional[User]) -> str:
@@ -203,11 +204,11 @@ def build_idea_tools(*, user_id: UUID) -> list[Tool]:
             lambda a: "formulár Nový projekt",
         ),
         Tool(
-            "zasobnik_projektu",
-            "Zásobník projektu: požiadavky REQ-číslo so stavom, prioritou, názvom a začiatkom popisu — pred "
-            "doplnením projektu over, či tam podobná požiadavka už nie je.",
+            "tikety_projektu",
+            "Otvorené tikety projektu v Plane: číslo, stav, názov a verzia, ktorá ich rieši — pred doplnením "
+            "projektu over, či tam podobný tiket už nie je.",
             _schema(projekt, ["projekt"]),
-            t.zasobnik_projektu,
+            t.tikety_projektu,
             lambda a: str(a.get("projekt", "")),
         ),
     ]

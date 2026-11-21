@@ -52,12 +52,12 @@ from backend.core.agent_env import project_env
 from backend.core.errors import ConflictError, NotFoundError
 from backend.core.local_time import local_time
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User, UserAgentSettings
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
 from backend.schemas import version as version_schemas
 from backend.schemas.epic import EpicCreate
@@ -104,6 +104,7 @@ from backend.services import (
     uat_guide,
     uat_provisioner,
     verified_build,
+    version_tickets,
 )
 from backend.services import epic as epic_service
 from backend.services import feat as feat_service
@@ -1856,7 +1857,7 @@ def _priprava_directive(
     version_id: uuid.UUID,
     *,
     flow_type: str = "new_version",
-    requirements: Optional[list[BacklogItem]] = None,
+    requirements: Optional[list[VersionTicket]] = None,
     upgrades: str = "",
 ) -> str:
     """The Príprava phase brief (CR-V2-010; PREP-1..PREP-4, RULES-3 read-first/ask-until-understood).
@@ -3505,39 +3506,34 @@ def _review_notes_gap(skeleton: TaskPlanSkeleton, note_count: int) -> Optional[s
 # required — the v1 helper is gone, but its job is not.)
 
 
-#: DEV-134 — the heading under which the version's assigned Zásobník requirements enter the agent's brief.
-BACKLOG_HEADING = "POŽIADAVKY ZO ZÁSOBNÍKA"
+#: DEV-134, DEV-455 — the heading under which the tickets the version solves enter the agent's brief.
+BACKLOG_HEADING = "TIKETY, KTORÉ VERZIA RIEŠI"
 
 
-def _included_requirements(db: Session, version_id: uuid.UUID, *, not_yet_delivered: bool = False) -> list[BacklogItem]:
-    """The requirements the Manažér assigned to this version from the Zásobník — with ``not_yet_delivered`` only those
-    no round of Príprava has carried to the Staviteľ yet (DEV-361)."""
-    query = select(BacklogItem).where(BacklogItem.version_id == version_id, BacklogItem.status == "included")
-    if not_yet_delivered:
-        query = query.where(BacklogItem.delivered_at.is_(None))
-    return list(db.execute(query.order_by(BacklogItem.number.asc())).scalars().all())
+def _included_requirements(
+    db: Session, version_id: uuid.UUID, *, not_yet_delivered: bool = False
+) -> list[VersionTicket]:
+    """The Plane tickets the Manažér put into this version (DEV-455) — with ``not_yet_delivered`` only those no round
+    of Príprava has carried to the Staviteľ yet (DEV-361)."""
+    return version_tickets.for_version(db, version_id, not_yet_delivered=not_yet_delivered)
 
 
-def _requirement_lines(items: list[BacklogItem]) -> list[str]:
+def _requirement_lines(items: list[VersionTicket]) -> list[str]:
     lines = []
     for it in items:
-        line = f"- REQ-{it.number}: {it.title}"
-        if it.description:
-            line += f" — {it.description}"
-        if it.plane_identifier:
-            line += f" (tiket {it.plane_identifier})"
+        line = f"- {it.plane_identifier}: {it.title}"
+        if it.text:
+            line += f" — {it.text}"
         lines.append(line)
     return lines
 
 
-def _backlog_scope_block(db: Session, version_id: uuid.UUID, items: Optional[list[BacklogItem]] = None) -> str:
-    """The requirements the Manažér assigned to this version from the Zásobník, for the Príprava brief (DEV-134).
+def _backlog_scope_block(db: Session, version_id: uuid.UUID, items: Optional[list[VersionTicket]] = None) -> str:
+    """The tickets the Manažér put into this version, for the Príprava brief (DEV-134, DEV-455).
 
-    They were put in front of the agent only at the stage „gate_a“ of the retired v1 pipeline; today's Príprava never
-    read them, so a requirement assigned to a version was never built (16.10.2026, NEX Inbox 1.9.0). Empty when the
-    version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be assigned to it
-    before its Príprava — the block belongs to a new version only. ``items`` — the ones the caller hands over and
-    then marks delivered; ``None`` reads them here.
+    Empty when the version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be
+    put into it before its Príprava — the block belongs to a new version only. ``items`` — the ones the caller hands
+    over and then marks delivered; ``None`` reads them here.
     """
     items = _included_requirements(db, version_id) if items is None else items
     if not items:
@@ -3545,23 +3541,22 @@ def _backlog_scope_block(db: Session, version_id: uuid.UUID, items: Optional[lis
     lines = [
         "",
         "",
-        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii; sú súčasťou zadania, "
-        "zapracuj ich rovnako ako Zadanie:",
+        f"{BACKLOG_HEADING} — Manažér ich zaradil do tejto verzie; sú súčasťou zadania, zapracuj ich rovnako ako "
+        "Zadanie. Po nasadení verzie do PROD ich kokpit uzavrie:",
         *_requirement_lines(items),
     ]
     return "\n".join(lines) + "\n"
 
 
-def _new_requirements_block(items: list[BacklogItem]) -> str:
-    """DEV-361 — the requirements included while Príprava already runs, for its next round (answer, question,
-    return, decision). Before, only the opening brief carried the Zásobník: 11.11.2026 a requirement included in
-    orthodox-register 0.1.0 during Príprava would never have reached the Staviteľ. Empty when there is none."""
+def _new_requirements_block(items: list[VersionTicket]) -> str:
+    """DEV-361 — the tickets put into the version while Príprava already runs, for its next round (answer, question,
+    return, decision). Empty when there is none."""
     if not items:
         return ""
     lines = [
         "",
         "",
-        f"{BACKLOG_HEADING} — Manažér ich priradil k tejto verzii počas Prípravy; sú súčasťou zadania, zapracuj ich "
+        f"{BACKLOG_HEADING} — Manažér ich zaradil do tejto verzie počas Prípravy; sú súčasťou zadania, zapracuj ich "
         "do Špecifikácie rovnako ako Zadanie. Keď menia bod, ktorý ste už dohodli, povedz to Manažérovi:",
         *_requirement_lines(items),
     ]
@@ -3594,14 +3589,9 @@ def _back_to_priprava_notice(db: Session, version_id: uuid.UUID) -> Optional[str
     return BACK_TO_PRIPRAVA_NOTICE.format(phase=BACK_TO_PRIPRAVA_FROM.get(from_stage, BACK_TO_PRIPRAVA_FROM["navrh"]))
 
 
-def _mark_delivered(db: Session, items: list[BacklogItem]) -> None:
-    """The requirements the round carried reached the Staviteľ — the next round does not carry them again."""
-    now = datetime.now(timezone.utc)
-    for it in items:
-        if it.delivered_at is None:
-            it.delivered_at = now
-    if items:
-        db.flush()
+def _mark_delivered(db: Session, items: list[VersionTicket]) -> None:
+    """The tickets the round carried reached the Staviteľ — the next round does not carry them again."""
+    version_tickets.mark_delivered(db, items)
 
 
 def _latest_schema_approval(db: Session, version_id: uuid.UUID) -> Optional[str]:
@@ -4166,6 +4156,33 @@ def _write_task_plan_doc(db: Session, version: Version, stage: str = "navrh") ->
     except OSError as exc:
         return f"task-plan doc write failed: {exc}"
     return None
+
+
+#: DEV-459: the sentence a Špecifikácia that asks for an Anthropic API key is refused with.
+SPEC_ASKS_API_KEY = (
+    "Špecifikácia žiada kľúč API Anthropic ({keys}) ako povinný údaj zákazníka. ICC volá Clauda len cez predplatné "
+    "Claude — Claude Code s ročným kódom CLAUDE_CODE_OAUTH_TOKEN (šablóna nex-app-kit, nex_app_kit.claude). Požiadaj "
+    "Staviteľa o úpravu Špecifikácie tlačidlom {button} a potom ju schváľ."
+)
+
+
+def _refuse_a_spec_asking_for_an_api_key(db: Session, state: PipelineState, spec_rel: Optional[str]) -> None:
+    """DEV-459 — a Špecifikácia (or its design document) that asks the customer for an Anthropic API key is not
+    approved: the ``.env.example`` lines it quotes are read with the same contract the deploy reads. 21.11.2026
+    Orthodox Hermenia's §17.3 did exactly that and was approved; in PROD nothing with AI worked."""
+    version = db.get(Version, state.version_id)
+    project = db.get(Project, version.project_id) if version else None
+    if not spec_rel or project is None or not project.source_path:
+        return
+    folder = (Path(project.source_path) / spec_rel).parent
+    text = "\n\n".join(
+        (folder / name).read_text(encoding="utf-8", errors="replace")
+        for name in ("specification.md", "design.md")
+        if (folder / name).is_file()
+    )
+    demanded = env_contract.api_key_demanded(env_contract.parse(text))
+    if demanded:
+        raise OrchestratorError(SPEC_ASKS_API_KEY.format(keys=", ".join(demanded), button=_press("uprav")))
 
 
 def _priprava_spec_disk_status(db: Session, state: PipelineState) -> tuple[Optional[str], str]:
@@ -10959,7 +10976,7 @@ async def run_dispatch(
     # The v1 ``_run_gate_e_round`` per-question machinery is REMOVED wholesale (CR-V2-013) — there is no Gate-E
     # routing anywhere in this 4-phase dispatch.
     # DEV-361: the Zásobník's requirements this round carries to the Staviteľ — marked delivered once it ran.
-    handed: list[BacklogItem] = []
+    handed: list[VersionTicket] = []
     takes_requirements = stage == "priprava" and state.flow_type != "fast_fix"
     if directive is not None:
         prompt = directive  # the Manažér's framed uprav/ask/answer message IS the prompt (direct comms)
@@ -16850,6 +16867,7 @@ async def apply_action(
             # the spec is captured (on disk when a checkout exists, in the append-only log otherwise).
             if disk_status == "missing":
                 raise OrchestratorError("Špecifikácia ešte nie je napísaná — nedá sa schváliť")
+            _refuse_a_spec_asking_for_an_api_key(db, state, rel)
             _record_message(
                 db,
                 version_id=version_id,
@@ -16871,6 +16889,7 @@ async def apply_action(
             state.next_action = "Špecifikácia schválená a zmrazená — pokračujeme v rozhovore."
             db.flush()
             return state
+        _refuse_a_spec_asking_for_an_api_key(db, state, _priprava_spec_disk_status(db, state)[0])  # DEV-459
         _record_message(
             db,
             version_id=version_id,

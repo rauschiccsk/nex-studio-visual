@@ -313,4 +313,4 @@ def test_the_charter_asks_for_the_blocks_the_cockpit_reads_and_says_when_which()
     assert "„Založiť tiket“" in charter
     for word in (*handoff.TICKET_WORK_KINDS, *handoff.TICKET_WAYS):
         assert f"`{word}`" in charter, f"the charter does not tell Poradca the word {word}"
-    assert "Problém s kokpitom" in charter and "Práca na projekte" in charter and "Len do Zásobníka" in charter
+    assert "Problém s kokpitom" in charter and "Práca na projekte" in charter and "Práca na budúcu verziu" in charter

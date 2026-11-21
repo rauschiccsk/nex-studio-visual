@@ -1,8 +1,9 @@
 /**
- * DEV-122 — from an open ticket of the „Plane tikety" tab straight to the Zásobník or to a fast fix.
+ * DEV-122, DEV-455 — from an open ticket of the „Plane tikety" tab straight into a version or to a fast fix.
  *
- * Director 14.10.2026 approved: at an open ticket „Do Zásobníka" (a linked requirement) and „Spustiť rýchlu opravu"
- * (the ticket's text is the directive, its work kind preselected, the version is created by the Manažér's click).
+ * Director 14.10.2026 approved „Spustiť rýchlu opravu" (the ticket's text is the directive, its work kind preselected,
+ * the version is created by the Manažér's click); 21.11.2026: „Zásobník by sme mali teraz už úplne zrušiť a ponechať
+ * len jediný zdroj - PLANE tikety“ — the ticket goes straight into a version, which solves it and closes it after PROD.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -11,15 +12,17 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { ApiError } from "@/services/api";
 import type { PlaneTicket } from "@/services/api/planeTickets";
 
-const { list, toBacklog, startFix, openCockpit } = vi.hoisted(() => ({
+const { list, putInto, takeOut, startFix, openCockpit } = vi.hoisted(() => ({
   list: vi.fn(),
-  toBacklog: vi.fn(),
+  putInto: vi.fn(),
+  takeOut: vi.fn(),
   startFix: vi.fn(),
   openCockpit: vi.fn(),
 }));
 vi.mock("@/services/api/planeTickets", () => ({
   listProjectPlaneTicketsApi: list,
-  planeTicketToBacklogApi: toBacklog,
+  putTicketIntoVersionApi: putInto,
+  takeTicketOutOfVersionApi: takeOut,
 }));
 vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: startFix }));
 vi.mock("@/hooks/useOpenVersionCockpit", () => ({ useOpenVersionCockpit: () => openCockpit }));
@@ -44,17 +47,20 @@ function ticket(over: Partial<PlaneTicket> = {}): PlaneTicket {
     doer: "Andros Dedo",
     updated_at: "2026-10-15T09:20:00Z",
     url: "http://plane.test/i/114",
-    requirement: null,
-    requirement_version: null,
     text: "Číslo faktúry je v ISDOC len vo variabilnom symbole.\n\nOver aj dobropis.",
     fix_version: null,
-    named_in_version: null,
+    in_version: null,
     ...over,
   };
 }
 
+const OPEN_VERSIONS = [
+  { id: "v-190", version_number: "1.9.0" },
+  { id: "v-200", version_number: "2.0.0" },
+];
+
 function answer(...tickets: PlaneTicket[]) {
-  return { project_id: "p-uuid", project_name: "NEX Inbox", module: "NEX Inbox", tickets };
+  return { project_id: "p-uuid", project_name: "NEX Inbox", module: "NEX Inbox", tickets, open_versions: OPEN_VERSIONS };
 }
 
 async function row(identifier: string): Promise<HTMLElement> {
@@ -67,32 +73,23 @@ describe("PlaneTicketsPage — from a ticket (DEV-122)", () => {
     list.mockResolvedValue(
       answer(
         ticket(),
-        ticket({ issue_id: "i130", identifier: "DEV-130", requirement: "REQ-7" }),
+        ticket({ issue_id: "i130", identifier: "DEV-130", in_version: "v1.0.0" }),
         ticket({ issue_id: "i131", identifier: "DEV-131", fix_version: "v1.9.1" }),
       ),
     );
     render(<PlaneTicketsPage />);
     const free = within(await row("DEV-114"));
     expect(free.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual([
-      "Do Zásobníka",
+      "Zaradiť do verzie",
       "Spustiť rýchlu opravu",
     ]);
-    expect(within(await row("DEV-130")).queryByRole("button")).toBeNull();
+    expect(free.getByRole("combobox", { name: "Verzia pre tiket DEV-114" })).toHaveValue("v-200");
+    const solved = within(await row("DEV-130"));
+    expect(solved.getByText("Vo verzii v1.0.0")).toBeInTheDocument();
+    expect(solved.queryByRole("button")).toBeNull(); // v1.0.0 is no longer open — nothing to take it out of
     const fixed = within(await row("DEV-131"));
     expect(fixed.queryByRole("button")).toBeNull();
     expect(fixed.getByText("Rýchla oprava v1.9.1")).toBeInTheDocument();
-  });
-
-  it("DEV-453: a ticket a version's Zadanie names shows the version and offers no fast fix", async () => {
-    list.mockResolvedValue(
-      answer(ticket(), ticket({ issue_id: "i434", identifier: "DEV-434", named_in_version: "v0.1.1" })),
-    );
-    render(<PlaneTicketsPage />);
-
-    const done = within(await row("DEV-434"));
-    expect(done.getByText("Vo verzii v0.1.1")).toBeInTheDocument();
-    expect(done.queryByRole("button")).toBeNull();
-    expect(within(await row("DEV-114")).getByRole("button", { name: /Spustiť rýchlu opravu/ })).toBeInTheDocument();
   });
 
   it("offers nothing at a finished ticket", async () => {
@@ -101,30 +98,53 @@ describe("PlaneTicketsPage — from a ticket (DEV-122)", () => {
     expect(within(await row("DEV-99")).queryByRole("button")).toBeNull();
   });
 
-  it("puts the ticket into the Zásobník, says its REQ-N and shows the list again", async () => {
+  it("puts the ticket into the chosen version, says what follows and shows the list again", async () => {
     list.mockResolvedValue(answer(ticket({ issue_id: "i201", identifier: "DEV-201" })));
-    toBacklog.mockResolvedValue({ id: "b1", number: 12, plane_warning: null });
+    putInto.mockResolvedValue({ issue_id: "i201", identifier: "DEV-201", version_number: "1.9.0", plane_warning: null });
     render(<PlaneTicketsPage />);
-    const door = within(await row("DEV-201")).getByRole("button", { name: /Do Zásobníka/ });
+    const line = within(await row("DEV-201"));
+    fireEvent.change(line.getByRole("combobox", { name: "Verzia pre tiket DEV-201" }), { target: { value: "v-190" } });
     const asked = list.mock.calls.length;
-    list.mockResolvedValue(answer(ticket({ issue_id: "i201", identifier: "DEV-201", requirement: "REQ-12" })));
-    fireEvent.click(door);
-    expect(await screen.findByText("Tiket je v Zásobníku ako REQ-12.")).toBeInTheDocument();
-    expect(toBacklog).toHaveBeenCalledWith("nex-inbox", "i201");
-    expect(await screen.findByText("REQ-12")).toBeInTheDocument();
+    list.mockResolvedValue(answer(ticket({ issue_id: "i201", identifier: "DEV-201", in_version: "v1.9.0" })));
+    fireEvent.click(line.getByRole("button", { name: /Zaradiť do verzie/ }));
+    expect(
+      await screen.findByText(
+        "Tiket je zaradený do verzie v1.9.0 — Príprava ho dostane a po nasadení do PROD ho kokpit uzavrie.",
+      ),
+    ).toBeInTheDocument();
+    expect(putInto).toHaveBeenCalledWith("nex-inbox", "i201", "v-190");
+    expect(await screen.findByText("Vo verzii v1.9.0")).toBeInTheDocument();
     expect(list.mock.calls.length).toBe(asked + 1);
   });
 
-  it("says when the ticket did not hear about it", async () => {
+  it("says when the ticket did not move in Plane", async () => {
     list.mockResolvedValue(answer(ticket({ issue_id: "i202", identifier: "DEV-202" })));
-    toBacklog.mockResolvedValue({
-      id: "b2",
-      number: 13,
-      plane_warning: "Požiadavka REQ-13 je v Zásobníku, ale tiket DEV-202 sa o tom nedozvedel: 503",
+    putInto.mockResolvedValue({
+      issue_id: "i202",
+      identifier: "DEV-202",
+      version_number: "2.0.0",
+      plane_warning: "Zmena je uložená, ale tiket DEV-202 v Plane sa neposunul: 503",
     });
     render(<PlaneTicketsPage />);
-    fireEvent.click(within(await row("DEV-202")).getByRole("button", { name: /Do Zásobníka/ }));
-    expect(await screen.findByText(/tiket DEV-202 sa o tom nedozvedel/)).toBeInTheDocument();
+    fireEvent.click(within(await row("DEV-202")).getByRole("button", { name: /Zaradiť do verzie/ }));
+    expect(await screen.findByText(/tiket DEV-202 v Plane sa neposunul/)).toBeInTheDocument();
+  });
+
+  it("takes a ticket out of a version that is still open", async () => {
+    list.mockResolvedValue(answer(ticket({ issue_id: "i204", identifier: "DEV-204", in_version: "v2.0.0" })));
+    takeOut.mockResolvedValue({ issue_id: "i204", identifier: "DEV-204", version_number: "2.0.0", plane_warning: null });
+    render(<PlaneTicketsPage />);
+    fireEvent.click(within(await row("DEV-204")).getByRole("button", { name: /Vyradiť z verzie/ }));
+    expect(await screen.findByText("Tiket je vyradený z verzie v2.0.0.")).toBeInTheDocument();
+    expect(takeOut).toHaveBeenCalledWith("nex-inbox", "i204", "v-200");
+  });
+
+  it("without a version to go into, says to found one and still offers the fast fix", async () => {
+    list.mockResolvedValue({ ...answer(ticket({ issue_id: "i205", identifier: "DEV-205" })), open_versions: [] });
+    render(<PlaneTicketsPage />);
+    const line = within(await row("DEV-205"));
+    expect(line.getByText("Verzia, do ktorej by sa tiket dal zaradiť, nie je — založ novú verziu.")).toBeInTheDocument();
+    expect(line.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Spustiť rýchlu opravu"]);
   });
 
   it("opens the fast fix with the ticket's title and text as the directive and its work kind chosen", async () => {

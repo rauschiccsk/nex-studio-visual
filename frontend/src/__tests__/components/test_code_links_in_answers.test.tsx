@@ -43,8 +43,6 @@ describe("files named by Poradca and the agent (DEV-88)", () => {
       steps: [],
       status: "done",
       instruction: null,
-      backlog_request: null,
-      captured_backlog_number: null,
       choices: [],
     });
     render(

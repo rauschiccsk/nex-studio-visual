@@ -49,8 +49,6 @@ function answer(over: Record<string, unknown> = {}, scopeVersion: unknown = VERS
     steps: [],
     status: "done",
     instruction: null,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices: [],
     ticket_proposal: null,
     plane_identifier: null,

@@ -46,7 +46,7 @@ export function ideaTicketApi(id: string): Promise<IdeaOutcome> {
   return api.post<IdeaOutcome>(`/poradca/ideas/${id}/ticket`);
 }
 
-/** The brief of `messageId` goes to the Zásobník of the existing project it names. */
+/** The brief of `messageId` becomes a ticket of the existing project it names in Plane (DEV-455). */
 export function ideaAddedApi(
   id: string,
   messageId: string,

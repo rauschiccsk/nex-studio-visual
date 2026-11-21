@@ -182,6 +182,25 @@ def unknowable_admin_secrets(contract: Contract, template_keys: Sequence[str]) -
     )
 
 
+#: DEV-459: what an app never asks the customer for — ICC calls Claude through the Claude subscription only (Knowledge
+#: Base ``icc/DECISIONS.md`` D-001), never with a paid Anthropic API key.
+SUBSCRIPTION_ONLY = ("ANTHROPIC_API_KEY",)
+API_KEY_REFUSED = (
+    "Aplikácia žiada kľúč API Anthropic ({keys}) ako povinný údaj zákazníka. ICC volá Clauda len cez predplatné "
+    "Claude — Claude Code s ročným kódom CLAUDE_CODE_OAUTH_TOKEN (šablóna nex-app-kit od v0.18.0, nex_app_kit.claude). "
+    "Treba to opraviť v aplikácii."
+)
+
+
+def api_key_demanded(contract: Contract) -> list[str]:
+    """DEV-459 — the Anthropic API keys the app asks the customer for as a required secret.
+
+    21.11.2026 Orthodox Hermenia asked for ``ANTHROPIC_API_KEY`` (Špecifikácia §17.3) and called Claude with the
+    ``anthropic`` library; the yearly subscription code on the card was refused and nothing with AI worked in PROD.
+    Neither the Príprava, the Návrh, its review nor the deploy had a rule to stop it."""
+    return sorted(s.key for s in contract.of_kind(CUSTOMER_SECRET) if s.required and s.key in SUBSCRIPTION_ONLY)
+
+
 def deploy_blockers(contract: Contract, *, template_keys: Sequence[str], values: Mapping[str, str]) -> list[str]:
     """Why a deploy must not start — one sentence each, for the manager; ``[]`` = nothing stops it.
 
@@ -194,6 +213,9 @@ def deploy_blockers(contract: Contract, *, template_keys: Sequence[str], values:
         blockers.append(
             "Zákazníkovi chýbajú povinné nastavenia: " + "; ".join(missing) + ". Doplň ich v sekcii Zákazníci."
         )
+    demanded = api_key_demanded(contract)
+    if demanded:  # DEV-459
+        blockers.append(API_KEY_REFUSED.format(keys=", ".join(demanded)))
     unknowable = unknowable_admin_secrets(contract, template_keys)
     if unknowable:
         blockers.append(

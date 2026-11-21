@@ -4,6 +4,7 @@
  */
 
 import api, { ApiError } from "@/services/api";
+import type { WorkKind } from "@/lib/workKind";
 import type { components } from "@/services/api/pipeline.generated";
 
 export type Note = components["schemas"]["UserNoteRead"];
@@ -42,7 +43,7 @@ export function deleteNote(id: string): Promise<void> {
   return api.delete<void>(`/notes/${id}`);
 }
 
-/** A request REQ-N in the backlog of the project, once; the note comes back resolved and pointing to it. */
-export function noteToBacklog(id: string, projectSlug: string): Promise<Note> {
-  return api.post<Note>(`/notes/${id}/to-backlog`, { project_slug: projectSlug });
+/** DEV-455 — a ticket of the project in Plane, once; the note comes back resolved and pointing to it. */
+export function noteToTicket(id: string, projectSlug: string, workKind: WorkKind): Promise<Note> {
+  return api.post<Note>(`/notes/${id}/to-ticket`, { project_slug: projectSlug, work_kind: workKind });
 }

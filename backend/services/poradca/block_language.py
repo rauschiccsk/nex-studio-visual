@@ -23,8 +23,6 @@ import re
 from dataclasses import dataclass
 
 from backend.services.poradca.handoff import (
-    BLOCK_BACKLOG,
-    BLOCK_BACKLOG_LEGACY,
     BLOCK_IDEA_ADDITION,
     BLOCK_IDEA_PROJECT,
     BLOCK_INSTRUCTION,
@@ -33,12 +31,11 @@ from backend.services.poradca.handoff import (
 #: The marked choice (DEV-83 / DEV-224) — not a ``handoff`` block, but text the person passes on too.
 BLOCK_CHOICE = "volba"
 
-#: The blocks a person passes on as text, with the name the screen and the agent know them by.
+#: The blocks a person passes on as text, with the name the screen and the agent know them by (DEV-455: the
+#: Zásobník's request is gone — nothing is passed on from it any more).
 TEXT_BLOCKS: dict[str, str] = {
     BLOCK_INSTRUCTION: "pokyn pre agenta",
     BLOCK_CHOICE: "odpoveď pre agenta",
-    BLOCK_BACKLOG: "požiadavka do Zásobníka",
-    BLOCK_BACKLOG_LEGACY: "požiadavka do Zásobníka",
     BLOCK_IDEA_PROJECT: "zadanie projektu",
     BLOCK_IDEA_ADDITION: "doplnenie projektu",
 }

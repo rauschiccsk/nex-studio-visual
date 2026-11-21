@@ -78,7 +78,7 @@ def test_the_english_instruction_of_11_11_is_found_and_its_slovak_twin_with_code
 
 def test_every_block_a_person_passes_on_is_read_also_with_its_attributes():
     for answer, block in (
-        (ENGLISH_REQUIREMENT, "poziadavka-do-zasobnika"),
+        (ENGLISH_INSTRUCTION, "pokyn-pre-agenta"),
         (ENGLISH_CHOICE, "volba"),
         (ENGLISH_CHOICE.replace("<volba>", '<volba karta="1">'), "volba"),
         (ENGLISH_BRIEF, "zadanie-projektu"),
@@ -103,9 +103,9 @@ def test_an_answer_with_an_english_block_offers_nothing_and_says_why(setup, db_s
 
     shown = _messages(client, conversation)[-1]
 
-    assert shown["instruction"] is None and shown["backlog_request"] is None
+    assert shown["instruction"] is None
     assert shown["not_in_slovak"] == (
-        "Kokpit neponúka, čo nie je po slovensky: pokyn pre agenta, požiadavka do Zásobníka. "
+        "Kokpit neponúka, čo nie je po slovensky: pokyn pre agenta. "
         "Požiadaj o prepísanie po slovensky — cesty a mená z kódu ostanú, ako sú."
     )
 
@@ -118,16 +118,6 @@ def test_an_answer_in_slovak_offers_its_instruction_and_says_nothing(setup, db_s
 
     assert shown["instruction"].startswith("Dve spresnenia k nálezom Audítora:")
     assert shown["not_in_slovak"] is None
-
-
-def test_the_click_on_an_english_requirement_is_refused_with_the_sentence(setup, db_session):  # noqa: F811
-    _, _, _, conversation, client = setup
-    message = _answer(db_session, conversation, f"Ulož to.\n\n{ENGLISH_REQUIREMENT}")
-
-    resp = client.post(f"/api/v1/poradca/messages/{message.id}/backlog")
-
-    assert resp.status_code == 422
-    assert resp.json()["detail"].startswith("Kokpit neponúka, čo nie je po slovensky: požiadavka do Zásobníka.")
 
 
 def test_an_english_brief_is_no_outcome_of_the_idea():

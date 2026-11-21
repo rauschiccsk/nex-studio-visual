@@ -31,7 +31,7 @@ from backend.db.models.pipeline import PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, DONE, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.services import action_labels, backlog_tickets, plane_tickets
+from backend.services import action_labels, plane_responsible, plane_tickets
 from backend.services.plane_gateway import PlaneGateway
 from backend.services.poradca.handoff import (
     HandoffRefused,
@@ -233,7 +233,7 @@ def draft(db: Session, plane: PlaneGateway, message: PoradcaMessage, user: Optio
             similar=similar_tickets(plane, module, proposal.title),
         )
     module = plane.find_module(project.plane_module_id, project.name)
-    people = backlog_tickets.responsible_people(plane)
+    people = plane_responsible.responsible_people(plane)
     return Draft(
         kind="project",
         title=proposal.title,
@@ -242,7 +242,7 @@ def draft(db: Session, plane: PlaneGateway, message: PoradcaMessage, user: Optio
         work_kind=proposal.work_kind,
         way=proposal.way,
         responsible_options=people,
-        responsible=backlog_tickets.responsible_of(user, people),
+        responsible=plane_responsible.responsible_of(user, people),
         similar=similar_tickets(plane, module, proposal.title),
     )
 
@@ -276,7 +276,7 @@ def found(
         return message, False
     proposal = proposal_of(message)
     conversation, project = _conversation_and_project(db, message, project_needed=proposal.kind != "nsv")
-    labels = (f"{backlog_tickets.TICKET_TYPE_GROUP}: {ticket_type}",)
+    labels = (f"{plane_responsible.TICKET_TYPE_GROUP}: {ticket_type}",)
     if proposal.kind == "nsv":
         context = "\n".join(f"- {line}" for line in context_lines(db, message, conversation, project))
         ref = plane_tickets.file_ticket(
@@ -287,7 +287,7 @@ def found(
             source="poradca",
             title=title,
             description=f"{description.strip()}\n\nKontext z kokpitu:\n{context}",
-            labels=(*labels, f"{backlog_tickets.RESPONSIBLE_GROUP}: {COCKPIT_DOER}"),
+            labels=(*labels, f"{plane_responsible.RESPONSIBLE_GROUP}: {COCKPIT_DOER}"),
             doer=COCKPIT_DOER,
             module_name=COCKPIT_MODULE,
         )
@@ -296,8 +296,8 @@ def found(
             raise ValueError(plane_tickets.WORK_KIND_MISSING)
         if way not in WAY_WORDS:
             raise ValueError(WAY_MISSING)
-        if responsible not in backlog_tickets.responsible_people(plane):
-            raise ValueError(f"„{responsible}“ v skupine „{backlog_tickets.RESPONSIBLE_GROUP}“ evidencie DEV nie je.")
+        if responsible not in plane_responsible.responsible_people(plane):
+            raise ValueError(f"„{responsible}“ v skupine „{plane_responsible.RESPONSIBLE_GROUP}“ evidencie DEV nie je.")
         ref = plane_tickets.file_ticket(
             db,
             plane,
@@ -309,7 +309,7 @@ def found(
                 f"{description.strip()}\n\nNávrh: {WAY_WORDS[way]}. O verzii rozhoduje Manažér — tiket ju nezakladá "
                 "ani nespúšťa."
             ),
-            labels=(*labels, f"{backlog_tickets.RESPONSIBLE_GROUP}: {responsible}"),
+            labels=(*labels, f"{plane_responsible.RESPONSIBLE_GROUP}: {responsible}"),
             doer=responsible,
             work_kind=work_kind,
         )

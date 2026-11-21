@@ -20,7 +20,6 @@ import NewProjectPage from "./pages/NewProjectPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 import NewVersionPage from "./pages/NewVersionPage";
 import VersionDetailPage from "./pages/VersionDetailPage";
-import BacklogPage from "./pages/BacklogPage";
 import PlaneTicketsPage from "./pages/PlaneTicketsPage";
 import MetricsPage from "./pages/MetricsPage";
 import BillingPage from "./pages/BillingPage";
@@ -84,7 +83,6 @@ function App() {
             <Route path="projects/:slug" element={<ProjectDetailPage />} />
             <Route path="projects/:slug/versions/new" element={<NewVersionPage />} />
             <Route path="projects/:slug/versions/:versionId" element={<VersionDetailPage />} />
-            <Route path="projects/:slug/backlog" element={<BacklogPage />} />
             <Route path="projects/:slug/plane-tikety" element={<PlaneTicketsPage />} />
             <Route path="projects/:slug/metrics" element={<MetricsPage />} />
             <Route path="projects/:slug/billing" element={<BillingPage />} />

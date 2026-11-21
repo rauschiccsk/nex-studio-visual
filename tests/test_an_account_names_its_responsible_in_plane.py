@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from backend.api.routes import users as users_routes
 from backend.core.security import get_current_user
 from backend.db.session import get_db
-from backend.services import backlog_tickets, plane_tickets
+from backend.services import plane_responsible, plane_tickets
 from backend.services.poradca import ideas
 from backend.tests.fake_plane import FakePlane, gateway_for
 from tests.test_ideas_end_in_a_project import PAID_BRIEF, _idea_with, _new_project, world  # noqa: F401
@@ -50,26 +50,26 @@ def _labels(plane, issue) -> set[str]:
 
 def test_the_person_set_at_the_account_wins_over_its_names(world):  # noqa: F811
     me = _alex(world)
-    assert backlog_tickets.responsible_of(me, PEOPLE) is None  # the names alone find nobody — the founding of 11.11.
+    assert plane_responsible.responsible_of(me, PEOPLE) is None  # the names alone find nobody — the founding of 11.11.
 
     me.plane_responsible = "Zoltán"
-    assert backlog_tickets.responsible_of(me, PEOPLE) == "Zoltán"
+    assert plane_responsible.responsible_of(me, PEOPLE) == "Zoltán"
 
     me.first_name = "Andros"
     me.last_name = "Dedo"
-    assert backlog_tickets.responsible_of(me, PEOPLE) == "Zoltán"  # a name that matches someone else does not decide
+    assert plane_responsible.responsible_of(me, PEOPLE) == "Zoltán"  # a name that matches someone else does not decide
 
 
 def test_an_account_without_a_person_is_matched_by_its_names_as_before(world):  # noqa: F811
     me = world["me"]  # first name Zoltán
     assert me.plane_responsible is None
-    assert backlog_tickets.responsible_of(me, PEOPLE) == "Zoltán"
+    assert plane_responsible.responsible_of(me, PEOPLE) == "Zoltán"
 
 
 def test_a_person_who_left_the_group_is_nobody_not_a_guess_by_name(world):  # noqa: F811
     me = world["me"]  # first name Zoltán, so the names would find Zoltán
     me.plane_responsible = "Eva"
-    assert backlog_tickets.responsible_of(me, PEOPLE) is None
+    assert plane_responsible.responsible_of(me, PEOPLE) is None
 
 
 # ── the ticket of a founded project ─────────────────────────────────────────────────────────────────────────────────
@@ -135,8 +135,9 @@ def test_the_button_of_an_idea_that_founded_nothing_is_refused(world):  # noqa: 
     assert world["plane"].issues == {}
 
 
-def test_the_button_of_an_idea_added_to_a_zasobnik_is_refused(world):  # noqa: F811
-    """A requirement of the Zásobník gets its own ticket there — the idea's project ticket is only of a new project."""
+def test_the_button_of_an_idea_added_to_a_project_is_refused(world):  # noqa: F811
+    """An addition is filed as the project's ticket at once (DEV-455) — the second-try button is only for a new
+    project."""
     db = world["db"]
     _new_project(db, world["me"], slug="nex-manager")
     idea, (answer,) = _idea_with(world, ADDITION)
@@ -146,7 +147,7 @@ def test_the_button_of_an_idea_added_to_a_zasobnik_is_refused(world):  # noqa: F
     r = c.post(f"/api/v1/poradca/ideas/{idea['id']}/ticket")
 
     assert r.status_code == 409 and r.json()["detail"] == ideas.NOT_FOUNDED
-    assert world["plane"].issues == {}
+    assert len(world["plane"].issues) == 1, "only the addition's own ticket"
 
 
 # ── the Manažér sets it ─────────────────────────────────────────────────────────────────────────────────────────────

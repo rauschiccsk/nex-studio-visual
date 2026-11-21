@@ -29,12 +29,11 @@ import pytest
 from sqlalchemy import select
 
 from backend.api.routes import pipeline as pipeline_routes
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
-from backend.services import action_labels, orchestrator, pipeline_runner, vizual_sandbox
-from backend.services import backlog as backlog_service
+from backend.services import action_labels, orchestrator, pipeline_runner, version_tickets, vizual_sandbox
 from backend.services.pipeline_status import PipelineStatusBlock
 from tests.test_orchestrator_v2_priprava_dial import _make_version, _seed_state
 
@@ -55,7 +54,7 @@ REMOVAL_COMMIT = "docs: Návrh a Vizuál verzie {n} vrátené do Prípravy — o
 COMMENT = "Celý projekt je zlý — prehľad má ukázať pokladňu, banku aj faktúry odberateľov."
 TITLE = "Pokladňa a banka v prehľade"
 DESCRIPTION = "Prehľad ukáže stav pokladne aj bankových účtov."
-LINE = f"REQ-7: {TITLE} — {DESCRIPTION}"
+LINE = f"DEV-707: {TITLE} — {DESCRIPTION}"
 
 
 @pytest.fixture(autouse=True)
@@ -603,11 +602,14 @@ def test_the_auditors_notes_before_the_return_are_not_handed_over(db_session):
 # ── the Staviteľ hears it ───────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _requirement(db, project) -> BacklogItem:
-    item = BacklogItem(project_id=project.id, number=7, title=TITLE, description=DESCRIPTION)
-    db.add(item)
+def _put_in(db, version) -> VersionTicket:
+    """DEV-455: the Manažér puts a ticket into the version on the Plane tikety tab (the Zásobník is gone)."""
+    link = VersionTicket(
+        version_id=version.id, plane_issue_id="issue-707", plane_identifier="DEV-707", title=TITLE, text=DESCRIPTION
+    )
+    db.add(link)
     db.flush()
-    return item
+    return link
 
 
 async def _round(db, version_id, action, payload):
@@ -619,19 +621,16 @@ async def _round(db, version_id, action, payload):
     return directive
 
 
-async def test_after_the_return_the_zasobnik_takes_the_version_and_the_next_round_carries_all_of_it(
-    db_session, prompts
-):
+async def test_after_the_return_the_version_takes_a_ticket_and_the_next_round_carries_all_of_it(db_session, prompts):
     version, project, _ = _settled(db_session, stage="navrh")
     _approve(db_session, version.id)
     _say(db_session, version.id, stage="navrh")  # the Staviteľ's Návrh
-    item = _requirement(db_session, project)
-    with pytest.raises(ValueError):  # past Príprava the Zásobník does not take it (DEV-361)
-        backlog_service.assign_to_version(db_session, item.id, version.id)
+    # past Príprava the version takes no ticket (DEV-361, DEV-455)
+    assert version_tickets.assign_refusal(db_session, version) is not None
 
     await _go_back(db_session, version.id)
-    backlog_service.assign_to_version(db_session, item.id, version.id)
-    db_session.flush()
+    assert version_tickets.assign_refusal(db_session, version) is None
+    item = _put_in(db_session, version)
     directive = await _round(db_session, version.id, "uprav", {"comment": COMMENT})
 
     prompt = prompts[-1]

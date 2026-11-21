@@ -12,9 +12,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
@@ -143,8 +142,9 @@ def test_a_ticket_plane_refuses_leaves_the_project_founded_and_a_second_click_fi
     assert len(plane.issues) == 1
 
 
-def test_the_brief_added_to_an_existing_project_is_a_requirement_of_its_zasobnik(world):
-    db = world["db"]
+def test_the_brief_added_to_an_existing_project_is_a_ticket_of_the_project(world):
+    """DEV-455 — the Zásobník is gone: the addition becomes the project's ticket in Plane, once, with its work kind."""
+    db, plane = world["db"], world["plane"]
     existing = _new_project(db, world["me"], slug="nex-manager")
     idea, (answer,) = _idea_with(world, ADDITION)
     c = _client(db, world["me"])
@@ -154,10 +154,23 @@ def test_the_brief_added_to_an_existing_project_is_a_requirement_of_its_zasobnik
 
     assert first.status_code == 200, first.text
     assert (first.json()["state"], first.json()["outcome_project_slug"]) == ("added", "nex-manager")
-    assert first.json()["outcome_backlog_number"] == second.json()["outcome_backlog_number"] is not None
-    (item,) = db.execute(select(BacklogItem).where(BacklogItem.project_id == existing.id)).scalars()
-    assert item.title == "Skupiny podľa farností" and item.description.startswith("Skupiny podľa farností\nSprávca")
+    assert first.json()["plane_identifier"] == second.json()["plane_identifier"] is not None
+    (issue,) = plane.issues.values()
+    assert issue["name"] == "Skupiny podľa farností"
+    labels = {label["name"] for label in plane.labels if label["id"] in issue["labels"]}
+    assert "Druh práce: Požiadavka (CHR)" in labels and "Typ: Task" in labels
     assert db.get(PoradcaConversation, uuid.UUID(idea["conversation_id"])).project_id == existing.id
+
+
+def test_an_addition_without_its_work_kind_files_no_ticket(world):
+    db, plane = world["db"], world["plane"]
+    _new_project(db, world["me"], slug="nex-manager")
+    idea, (answer,) = _idea_with(world, ADDITION.replace(' druh="poziadavka"', ""))
+
+    r = _client(db, world["me"]).post(f"/api/v1/poradca/ideas/{idea['id']}/added", json={"message_id": answer})
+
+    assert (r.status_code, r.json()["detail"]) == (409, ideas.ADDITION_WITHOUT_KIND)
+    assert plane.issues == {}
 
 
 def test_a_brief_is_added_to_a_project_another_manager_leads_and_the_talk_stays_with_its_author(world, db_session):
@@ -178,8 +191,8 @@ def test_a_brief_is_added_to_a_project_another_manager_leads_and_the_talk_stays_
         "nex-manager",
         False,
     )
-    (item,) = db_session.execute(select(BacklogItem).where(BacklogItem.project_id == theirs.id)).scalars()
-    assert item.title == "Skupiny podľa farností"
+    (issue,) = world["plane"].issues.values()
+    assert issue["name"] == "Skupiny podľa farností" and theirs.plane_module_id is not None
     assert db_session.get(PoradcaConversation, uuid.UUID(idea["conversation_id"])).project_id is None
     assert c.get(f"/api/v1/poradca/conversations/{idea['conversation_id']}").status_code == 200, "his own talk"
 
@@ -198,7 +211,7 @@ def test_a_brief_for_a_project_that_is_not_in_the_cockpit_is_refused(world, db_s
     idea, (answer,) = _idea_with(world, ADDITION)
     r = _client(db_session, world["me"]).post(f"/api/v1/poradca/ideas/{idea['id']}/added", json={"message_id": answer})
     assert r.status_code == 404
-    assert db_session.execute(select(func.count()).select_from(BacklogItem)).scalar_one() == 0
+    assert world["plane"].issues == {}
 
 
 def test_each_brief_offers_only_its_own_outcome(world):
@@ -223,4 +236,6 @@ def test_both_checks_of_an_addition_stand_on_their_own(world):
     with pytest.raises(ideas.OutcomeRefused, match="na nový projekt"):
         ideas.addition_target(db, conversation, uuid.UUID(answer))
     with pytest.raises(ideas.OutcomeRefused, match="na nový projekt"):
-        ideas.add(db, row, conversation, message_id=uuid.UUID(answer), project=existing)
+        ideas.add(
+            db, plane_tickets.gateway(), world["me"], row, conversation, message_id=uuid.UUID(answer), project=existing
+        )

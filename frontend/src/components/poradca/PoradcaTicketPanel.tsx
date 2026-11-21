@@ -11,7 +11,7 @@ import { TICKET_TYPES } from "@/lib/ticketTypes";
 import { foundPoradcaTicketApi, getPoradcaTicketDraftApi } from "@/services/api/poradca";
 import { humanizeApiError } from "@/services/apiError";
 import type { WorkKind } from "@/lib/workKind";
-import type { TicketType } from "@/types/backlog";
+import type { TicketType } from "@/lib/ticketTypes";
 import type { PoradcaTicketDraft } from "@/types/poradca";
 
 type Way = "version" | "fast_fix";

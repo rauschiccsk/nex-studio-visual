@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from backend.schemas.delivery_statement import WorkKind
+
+#: The type of a ticket in the DEV register — the „Typ“ label (MAGER-34).
+TicketType = Literal["Bug", "Task"]
 
 
 class PlaneTicketRead(BaseModel):
@@ -24,13 +27,27 @@ class PlaneTicketRead(BaseModel):
     doer: Optional[str] = Field(default=None, description="Who works on it now — the ticket's „Robí:“ line.")
     updated_at: Optional[datetime] = None
     url: str
-    requirement: Optional[str] = Field(default=None, description="REQ-N of the Zásobník that founded the ticket.")
-    requirement_version: Optional[str] = Field(default=None, description="The version that requirement is in.")
     text: str = Field(default="", description="The ticket's text without its „Robí:“ line — a fast fix's directive.")
     fix_version: Optional[str] = Field(default=None, description="The fast fix started from the ticket (DEV-122).")
-    named_in_version: Optional[str] = Field(
-        default=None, description="The version whose Zadanie names the ticket — its work is there (DEV-453)."
+    in_version: Optional[str] = Field(
+        default=None, description="The version the Manažér put the ticket into — it solves the ticket (DEV-455)."
     )
+
+
+class OpenVersionRead(BaseModel):
+    """A version a ticket may still go into — in Príprava or not started (DEV-455)."""
+
+    id: UUID
+    version_number: str
+
+
+class VersionTicketRead(BaseModel):
+    """The ticket put into a version, and the sentence when Plane did not follow (DEV-455)."""
+
+    issue_id: str
+    identifier: str
+    version_number: str
+    plane_warning: Optional[str] = None
 
 
 class ProjectPlaneTicketsRead(BaseModel):
@@ -38,3 +55,4 @@ class ProjectPlaneTicketsRead(BaseModel):
     project_name: str
     module: Optional[str] = Field(description="The project's module in DEV; none until its first ticket.")
     tickets: list[PlaneTicketRead]
+    open_versions: list[OpenVersionRead] = Field(description="The versions a ticket may still go into (DEV-455).")

@@ -19,7 +19,6 @@ CHARTER = Path(__file__).resolve().parents[1] / "templates" / "poradca-charter.m
 INSTRUCTION = (
     "<pokyn-pre-agenta>\nV backend/app/kit.py nastav on_setting_change podľa §6.4 Špecifikácie.\n</pokyn-pre-agenta>"
 )
-BACKLOG = "<poziadavka-do-zasobnika>\nExport do Excelu\nFaktúry sa dajú stiahnuť do Excelu.\n</poziadavka-do-zasobnika>"
 TICKET = "<tiket-nsv>\nTlačidlo Nasadiť pri UAT nič nerobí\nPo kliknutí sa nič nestane.\n</tiket-nsv>"
 AGENT_TICKETS = "<tiket-pre-agenta>DEV-186</tiket-pre-agenta>"
 ASKS = "Pozrel som Špecifikáciu §6.4 aj kód šablóny.\n\nChceš, aby sa do denníka zapisovala aj zmena modelu?"
@@ -42,24 +41,23 @@ def test_an_answer_ends_with_a_question_to_the_person_whatever_trails_it():
 
 def test_an_answer_that_asks_offers_nothing_under_it_and_says_why(setup, db_session):  # noqa: F811
     _, _, _, conversation, client = setup
-    for block in (INSTRUCTION, BACKLOG, TICKET, AGENT_TICKETS):
+    for block in (INSTRUCTION, TICKET, AGENT_TICKETS):
         _answer(db_session, conversation, f"{ASKS}\n\n{block}")
 
-    for shown in _messages(client, conversation)[-4:]:
+    for shown in _messages(client, conversation)[-3:]:
         assert shown["held_for_answer"] is True
-        assert shown["instruction"] is None and shown["backlog_request"] is None
+        assert shown["instruction"] is None
         assert shown["ticket_proposal"] is None and shown["agent_tickets"] == []
 
 
 def test_an_answer_without_a_question_offers_what_it_prepared(setup, db_session):  # noqa: F811
     _, _, _, conversation, client = setup
-    _answer(db_session, conversation, f"Tu je pokyn.\n\n{INSTRUCTION}\n\n{BACKLOG}\n\n{TICKET}\n\n{AGENT_TICKETS}")
+    _answer(db_session, conversation, f"Tu je pokyn.\n\n{INSTRUCTION}\n\n{TICKET}\n\n{AGENT_TICKETS}")
 
     shown = _messages(client, conversation)[-1]
 
     assert shown["held_for_answer"] is False
     assert shown["instruction"] == "V backend/app/kit.py nastav on_setting_change podľa §6.4 Špecifikácie."
-    assert shown["backlog_request"].startswith("Export do Excelu")
     assert shown["ticket_proposal"] == {"kind": "nsv", "title": "Tlačidlo Nasadiť pri UAT nič nerobí"}
     assert shown["agent_tickets"] == ["DEV-186"]
 
@@ -73,12 +71,10 @@ def test_a_question_without_anything_prepared_holds_nothing(setup, db_session): 
 
 def test_the_clicks_on_an_answer_that_asks_are_refused_with_the_sentence(setup, db_session):  # noqa: F811
     _, _, _, conversation, client = setup
-    backlog = _answer(db_session, conversation, f"{ASKS}\n\n{BACKLOG}")
     ticket = _answer(db_session, conversation, f"{ASKS}\n\n{TICKET}")
     tickets = _answer(db_session, conversation, f"{ASKS}\n\n{AGENT_TICKETS}")
 
     for resp in (
-        client.post(f"/api/v1/poradca/messages/{backlog.id}/backlog"),
         client.get(f"/api/v1/poradca/messages/{ticket.id}/plane-ticket"),
         client.post(f"/api/v1/poradca/messages/{tickets.id}/agent-tickets"),
     ):
@@ -90,6 +86,6 @@ def test_the_charter_tells_poradca_to_wait():
     text = " ".join(CHARTER.read_text(encoding="utf-8").split())
 
     assert (
-        "Keď sa človeka na niečo pýtaš, odpoveď končí otázkou a nenesie žiadny blok (pokyn pre agenta, požiadavku "
-        "do Zásobníka, tiket ani tiket pre agenta) — pripravíš ho až po jeho odpovedi." in text
+        "Keď sa človeka na niečo pýtaš, odpoveď končí otázkou a nenesie žiadny blok (pokyn pre agenta, tiket ani "
+        "tiket pre agenta) — pripravíš ho až po jeho odpovedi." in text
     )

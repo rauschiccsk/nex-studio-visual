@@ -15,10 +15,8 @@ from typing import Any
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.schemas.backlog import BacklogItemCreate, BacklogItemUpdate
 from backend.schemas.user import UserCreate, UserUpdate
 from backend.schemas.version import VersionUpdate
-from backend.services import backlog as backlog_service
 from backend.services import user as user_service
 from backend.services import version as version_service
 
@@ -68,16 +66,6 @@ def test_a_field_that_was_not_sent_stays(db_session) -> None:
     person = _person(db_session)
     user_service.update(db_session, person.id, UserUpdate(first_name="Zoltán"))
     assert (person.first_name, person.last_name, person.telegram_chat_id) == ("Zoltán", "Test", "123456789")
-
-
-def test_a_requests_description_can_be_cleared(db_session) -> None:
-    owner = _person(db_session)
-    project = _project(db_session, owner)
-    item = backlog_service.create(
-        db_session, BacklogItemCreate(project_id=project.id, title="Export do CSV", description="Stĺpce ako v Exceli.")
-    )
-    backlog_service.update(db_session, item.id, BacklogItemUpdate(title=None, description=None))
-    assert (item.title, item.description) == ("Export do CSV", None)
 
 
 def test_a_versions_optional_fields_can_be_cleared(db_session) -> None:

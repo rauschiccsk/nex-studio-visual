@@ -67,8 +67,6 @@ function answer(scopeVersion: unknown, projectVersions: unknown[]) {
     steps: [],
     status: "done",
     instruction: INSTRUCTION,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices: [],
     ticket_proposal: null,
     plane_identifier: null,

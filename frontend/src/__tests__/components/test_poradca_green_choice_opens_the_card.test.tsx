@@ -56,8 +56,6 @@ function answer(choices: unknown[], instruction: string | null = null, version: 
     steps: [],
     status: "done",
     instruction,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices,
     ticket_proposal: null,
     plane_identifier: null,

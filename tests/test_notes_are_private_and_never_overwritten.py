@@ -9,10 +9,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from backend.core.security import get_current_user
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.main import app
@@ -136,57 +135,63 @@ def test_resolved_stays_until_deleted_on_purpose_and_an_open_note_is_never_delet
     assert client.get(URL).json() == []
 
 
-def test_to_backlog_makes_exactly_one_request_and_resolves_the_note(client, people):
+@pytest.fixture
+def plane(monkeypatch):
+    from backend.services import plane_tickets
+    from backend.tests.fake_plane import FakePlane, gateway_for
+
+    fake = FakePlane()
+    monkeypatch.setattr(plane_tickets, "gateway", lambda: gateway_for(fake))
+    return fake
+
+
+def test_to_ticket_makes_exactly_one_ticket_of_the_project_and_resolves_the_note(client, people, plane):
+    """DEV-455 — the Zásobník is gone: a note becomes the project's ticket in Plane, with the work kind chosen."""
     db, maria, _tibor, project = people
+    maria.first_name = "Zoltán"  # the account's names find its responsible person in Plane
     _as(db, maria)
     note = _new(client, "\nExport do CSV\n\nZákazník chce stĺpce ako v Exceli.\nAj s DPH.")
-    before = db.execute(
-        select(func.count()).select_from(BacklogItem).where(BacklogItem.project_id == project.id)
-    ).scalar()
 
-    done = client.post(f"{URL}/{note['id']}/to-backlog", json={"project_slug": project.slug})
+    done = client.post(f"{URL}/{note['id']}/to-ticket", json={"project_slug": project.slug, "work_kind": "change"})
 
     assert done.status_code == 200, done.text
     body = done.json()
-    item = db.get(BacklogItem, uuid.UUID(body["backlog"]["id"]))
-    assert (item.project_id, item.title, item.description, item.status) == (
-        project.id,
-        "Export do CSV",
-        "Zákazník chce stĺpce ako v Exceli.\nAj s DPH.",
-        "open",
-    )
+    (issue,) = plane.issues.values()
+    assert issue["name"] == "Export do CSV"
+    assert "Zákazník chce stĺpce ako v Exceli." in issue["description_html"]
+    labels = {label["name"] for label in plane.labels if label["id"] in issue["labels"]}
+    assert {"Typ: Task", "Zodpovedný: Zoltán", "Druh práce: Požiadavka (CHR)"} <= labels
     assert body["resolved_at"] is not None
-    assert (body["backlog"]["number"], body["backlog"]["project_slug"], body["backlog"]["project_name"]) == (
-        item.number,
+    assert (body["ticket"]["identifier"], body["ticket"]["project_slug"], body["ticket"]["project_name"]) == (
+        f"DEV-{issue['sequence_id']}",
         project.slug,
         "Faktúry",
     )
 
-    again = client.post(f"{URL}/{note['id']}/to-backlog", json={"project_slug": project.slug})
+    again = client.post(f"{URL}/{note['id']}/to-ticket", json={"project_slug": project.slug, "work_kind": "change"})
     assert (again.status_code, again.json()["detail"]) == (
         409,
-        f"Z tejto poznámky už vznikla požiadavka REQ-{item.number}.",
+        f"Z tejto poznámky už vznikol tiket DEV-{issue['sequence_id']}.",
     )
-    after = db.execute(
-        select(func.count()).select_from(BacklogItem).where(BacklogItem.project_id == project.id)
-    ).scalar()
-    assert after == before + 1
+    assert len(plane.issues) == 1
 
 
-def test_to_backlog_refuses_an_empty_note_and_a_project_the_person_may_not_touch(client, people):
+def test_to_ticket_refuses_an_empty_note_and_a_project_the_person_may_not_touch(client, people, plane):
     db, maria, tibor, project = people
     _as(db, maria)
     empty = _new(client, "   \n  ")
-    refused = client.post(f"{URL}/{empty['id']}/to-backlog", json={"project_slug": project.slug})
+    refused = client.post(f"{URL}/{empty['id']}/to-ticket", json={"project_slug": project.slug, "work_kind": "fix"})
     assert (refused.status_code, refused.json()["detail"]) == (
         409,
-        "Poznámka je prázdna — nie je z čoho založiť požiadavku.",
+        "Poznámka je prázdna — nie je z čoho založiť tiket.",
     )
 
     _as(db, tibor)
     own = _new(client, "Tiborova požiadavka")
-    assert client.post(f"{URL}/{own['id']}/to-backlog", json={"project_slug": project.slug}).status_code == 403
-    assert client.get(URL).json()[0]["backlog"] is None
+    r = client.post(f"{URL}/{own['id']}/to-ticket", json={"project_slug": project.slug, "work_kind": "fix"})
+    assert r.status_code == 403
+    assert client.get(URL).json()[0]["ticket"] is None
+    assert plane.issues == {}
 
 
 def test_without_signing_in_there_are_no_notes(client):

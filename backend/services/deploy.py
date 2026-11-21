@@ -1698,11 +1698,10 @@ async def _deploy_from(
     db.add(event)
     db.flush()
 
-    # DEV-121: the tickets of the requirements this version carries are done once it runs on PROD. Plane is asked
-    # off the event loop, after the deploy itself is decided; a ticket that did not follow is a warning, never a
-    # failed deploy.
+    # DEV-121, DEV-455: the tickets this version solves are done once it runs on PROD. Plane is asked off the event
+    # loop, after the deploy itself is decided; a ticket that did not follow is a warning, never a failed deploy.
     if ok and environment == "prod":
-        warnings.extend(await _close_requirement_tickets(db, version, deployed_version, customer))
+        warnings.extend(await _close_version_tickets(db, version, deployed_version, customer))
     # DEV-122: a fast fix started from a ticket tells it where it runs — UAT a comment, PROD Done.
     if ok and version.plane_issue_id:
         warning = await _follow_fix_ticket(version, deployed_version, customer, environment)
@@ -1718,25 +1717,28 @@ async def _deploy_from(
     return DeployOutcome(event, (url if ok else None), bumped_to, warnings)
 
 
-async def _close_requirement_tickets(db: Session, version, deployed_version: str, customer: Customer) -> list[str]:
-    """Done for the tickets of the version's requirements (DEV-121); the sentences of those that did not follow."""
+async def _close_version_tickets(db: Session, version, deployed_version: str, customer: Customer) -> list[str]:
+    """Done for the tickets the version solves (DEV-455) — each once: a second PROD deploy closes nothing again; the
+    sentences of those that did not follow (they stay open and the next PROD deploy tries again)."""
     from backend.core.offload import BlockingWorkTimedOut, run_blocking
-    from backend.services import backlog_tickets
+    from backend.services import plane_tickets, version_tickets
 
-    tickets = backlog_tickets.deployed_tickets(db, version.id)
+    tickets = version_tickets.deployed_tickets(db, version.id)
     if not tickets:
         return []
     try:
-        return await run_blocking(
-            backlog_tickets.close_deployed,
-            backlog_tickets.gateway,
+        closed, warnings = await run_blocking(
+            version_tickets.close_deployed,
+            plane_tickets.gateway,
             tickets,
             version=f"v{deployed_version}",
             customer=customer.name,
             cap=120,
         )
     except BlockingWorkTimedOut:
-        return [f"Tikety požiadaviek verzie v{deployed_version} sa do 2 minút neuzavreli — Plane neodpovedal."]
+        return [f"Tikety verzie v{deployed_version} sa do 2 minút neuzavreli — Plane neodpovedal."]
+    version_tickets.mark_closed(db, closed)
+    return warnings
 
 
 async def _follow_fix_ticket(version, deployed_version: str, customer: Customer, environment: str) -> Optional[str]:

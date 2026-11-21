@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from backend.api.routes import health as _health
 from backend.api.routes.agent_terminal import router as agent_terminal_router
 from backend.api.routes.auth import router as auth_router
-from backend.api.routes.backlog import router as backlog_router
 from backend.api.routes.ci_runner import router as ci_runner_router
 from backend.api.routes.ci_runs import router as ci_runs_router
 from backend.api.routes.client_errors import router as client_errors_router
@@ -455,7 +454,6 @@ app.include_router(knowledge_router, prefix="/api/v1/knowledge")
 app.include_router(project_specs_router, prefix="/api/v1/project-specs")
 app.include_router(rag_router, prefix="/api/v1/rag")
 app.include_router(credentials_router, prefix="/api/v1/credentials")
-app.include_router(backlog_router, prefix="/api/v1/backlog")
 # The versions router intentionally mounts under the bare ``/api/v1`` prefix
 # because it spans two URL families (``/projects/{id}/versions`` and
 # ``/versions/{id}``) — see DESIGN.md §2.6 Version Management.

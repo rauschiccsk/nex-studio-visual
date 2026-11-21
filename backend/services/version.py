@@ -75,7 +75,6 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic
 from backend.db.models.versions import Version
 from backend.schemas.version import VersionCreate, VersionUpdate
-from backend.services import backlog as backlog_service
 from backend.services.patch import apply_changes
 
 #: Filesystem root every project workspace lives under (mirrors
@@ -606,10 +605,6 @@ def mark_done(db: Session, version_id: UUID) -> Version:
     version = get_by_id(db, version_id)
     if version.status in ("planned", "active"):
         version.status = "done"
-    # DEV-185: the version's included requests are realized when its build finishes — the one ending every build
-    # passes. Until 23.10.2026 only ``release`` did it, which only a route nobody called reached, so no request was
-    # ever realized. Idempotent: only ``included`` requests move.
-    backlog_service.realize_for_version(db, version_id)
     db.flush()
     return version
 

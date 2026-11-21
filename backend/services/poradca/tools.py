@@ -51,17 +51,6 @@ _KB_DOC_CHARS = 40_000
 _DB_ROWS = 200
 _DB_TIMEOUT_S = 10
 _CMD_TIMEOUT_S = 30
-#: DEV-33: the Zásobník as the screen names it (BacklogPage) — Poradca speaks to the Manažér in his words.
-_BACKLOG_LIMIT = 200
-_BACKLOG_DESCRIPTION_CHARS = 200
-_BACKLOG_STATUS = {
-    "open": "Otvorené",
-    "included": "Vo verzii",
-    "realized": "Realizované vo verzii",
-    "rejected": "Zamietnuté",
-}
-_BACKLOG_PRIORITY = {"low": "nízka", "medium": "stredná", "high": "vysoká", "critical": "kritická"}
-
 #: DEV-181 — the other screens of a project.
 _REQUIREMENT_CHARS = 20_000
 _VERSIONS_LIMIT = 50
@@ -250,13 +239,6 @@ def _vizual_checklist_lines(checklists: list) -> list[str]:
     return out
 
 
-def _requirements(n: int) -> str:
-    """„1 požiadavka", „3 požiadavky", „5 požiadaviek" — the Slovak plural the screen would say."""
-    if n == 1:
-        return "1 požiadavka"
-    return f"{n} požiadavky" if 2 <= n <= 4 else f"{n} požiadaviek"
-
-
 class PoradcaTools:
     """Tools of one question — bound to the project, the conversation's version and the person asking."""
 
@@ -349,40 +331,6 @@ class PoradcaTools:
                 when = local_time(msg.created_at).strftime("%d.%m. %H:%M") if msg.created_at else ""
                 lines.append(f"— [{when}] {msg.author} → {msg.recipient} ({msg.kind}, fáza {msg.stage}):\n{text}")
                 lines.extend(_finding_lines(msg))
-            return "\n".join(lines)
-
-    # ── zásobník ───────────────────────────────────────────────────────────────
-
-    async def zasobnik(self, args: dict) -> str:
-        """DEV-33: the project's Zásobník, so Poradca names a requirement that is already there (REQ-N) instead of
-        proposing it again — 08.10.2026 it offered the credit-note requirement a second time, and the click
-        „Uložiť do Zásobníka" would have created a duplicate of REQ-1. Read through the backlog service the
-        Zásobník screen uses, never a copy of its query."""
-        from backend.services import backlog as backlog_service
-
-        with SessionLocal() as db:
-            items = backlog_service.list_backlog(db, project_id=self.project_id, limit=_BACKLOG_LIMIT)
-            if not items:
-                return "Zásobník projektu je prázdny."
-            numbers = {
-                v.id: v.version_number
-                for v in db.execute(select(Version).where(Version.project_id == self.project_id)).scalars()
-            }
-            lines = [f"Zásobník projektu — {_requirements(len(items))} (REQ-číslo, stav, názov, popis):"]
-            for item in items:
-                status = _BACKLOG_STATUS.get(item.status, item.status)
-                if item.status in ("included", "realized") and item.version_id in numbers:
-                    status += f" {numbers[item.version_id]}"
-                line = (
-                    f"REQ-{item.number} [{status}, priorita {_BACKLOG_PRIORITY.get(item.priority, item.priority)}] "
-                    f"{item.title}"
-                )
-                description = " ".join((item.description or "").split())
-                if description:
-                    if len(description) > _BACKLOG_DESCRIPTION_CHARS:
-                        description = description[:_BACKLOG_DESCRIPTION_CHARS].rstrip() + " …"
-                    line += f" — {description}"
-                lines.append(line)
             return "\n".join(lines)
 
     async def plan_uloh(self, args: dict) -> str:
@@ -615,32 +563,6 @@ class PoradcaTools:
 
     # ── DEV-181: what the Manažér sees on the project's other screens ─────────
 
-    async def poziadavka(self, args: dict) -> str:
-        """One requirement of the Zásobník whole — ``zasobnik`` lists only the start of each."""
-        from backend.db.models.backlog import BacklogItem
-
-        cislo = _int_arg(args, "cislo", 0, 1_000_000)
-        with SessionLocal() as db:
-            item = db.execute(
-                select(BacklogItem).where(BacklogItem.project_id == self.project_id, BacklogItem.number == cislo)
-            ).scalar_one_or_none()
-            if item is None:
-                raise ToolError(f"Požiadavka REQ-{cislo} v Zásobníku projektu nie je.")
-            status = _BACKLOG_STATUS.get(item.status, item.status)
-            if item.version_id is not None:
-                version = db.get(Version, item.version_id)
-                if version is not None:
-                    status += f" {version.version_number}"
-            priority = _BACKLOG_PRIORITY.get(item.priority, item.priority)
-            lines = [f"REQ-{item.number} [{status}, priorita {priority}] {item.title}"]
-            if item.plane_identifier:
-                lines.append(f"Tiket v Plane: {item.plane_identifier}")
-            if item.rejection_reason:
-                lines.append(f"Dôvod zamietnutia: {item.rejection_reason}")
-            lines.append("")
-            lines.append((item.description or "(bez popisu)")[:_REQUIREMENT_CHARS])
-            return "\n".join(lines)
-
     async def verzie(self, args: dict) -> str:
         """The project's versions as the Verzie screen lists them — the newest first, with where each build stands."""
         from backend.db.models.pipeline import PipelineState
@@ -773,8 +695,8 @@ class PoradcaTools:
             lines = [f"Tikety modulu {found.module} ({'uzavreté' if uzavrete else 'otvorené'}), najnovšia zmena prvá:"]
             for ticket in found.tickets[:_TICKETS_LIMIT]:
                 line = f"{ticket.identifier} [{ticket.state}] {ticket.title}"
-                if ticket.requirement:
-                    line += f" — {ticket.requirement}"
+                if ticket.in_version:  # DEV-455: the version the Manažér put it into
+                    line += f" — vo verzii {ticket.in_version}"
                 if ticket.warning:
                     line += f" (pozor: {ticket.warning})"
                 lines.append(line)
@@ -1040,15 +962,6 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             lambda a: f"verzia {a.get('verzia') or 'rozhovoru'}",
         ),
         Tool(
-            "zasobnik",
-            "Zásobník projektu: požiadavky REQ-číslo so stavom (otvorená, vo verzii, realizovaná, zamietnutá), "
-            "prioritou, názvom a začiatkom popisu. Pred návrhom požiadavky do Zásobníka over, či tam podobná "
-            "už nie je.",
-            _schema(),
-            t.zasobnik,
-            lambda a: "projekt",
-        ),
-        Tool(
             "git_historia",
             "História zmien projektu (git log): číslo commitu, dátum, autor, popis. Voliteľne len pre jednu cestu.",
             _schema(
@@ -1117,14 +1030,6 @@ def build_tools(*, project_id: UUID, version_id: Optional[UUID], user_id: UUID) 
             lambda a: f"UAT {a.get('zakaznik') or ''}".strip(),
         ),
         # DEV-181 — „Poradca v projekte musí vidieť všetko“ (Director 22.10.2026): the project's other screens.
-        Tool(
-            "poziadavka",
-            "Jedna požiadavka Zásobníka celá — REQ-číslo, stav, priorita, celý popis, tiket v Plane, dôvod "
-            "zamietnutia.",
-            _schema({"cislo": {"type": "integer", "description": "Číslo požiadavky, napr. 2 pre REQ-2."}}, ["cislo"]),
-            t.poziadavka,
-            lambda a: f"REQ-{a.get('cislo', '')}",
-        ),
         Tool(
             "verzie",
             "Verzie projektu ako ich ukazuje obrazovka Verzie — číslo, stav a kde stojí stavba každej, najnovšia prvá.",
@@ -1239,7 +1144,6 @@ FILES = "Read/Grep/Glob"
 #: Director 22.10.2026 „Poradca v projekte musí vidieť všetko“.
 SCREENS: dict[str, tuple[str, ...]] = {
     "Verzie": ("verzie", "stavba"),
-    "Zásobník": ("zasobnik", "poziadavka"),
     "Plane tikety": ("plane_tikety", "plane_tiket"),
     "Riadiace centrum": ("stavba", "plan_uloh", "zaznam_agenta"),
     "Dokumenty": ("dokumenty", FILES),

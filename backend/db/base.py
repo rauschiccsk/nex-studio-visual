@@ -22,6 +22,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.system_settings import SystemSetting
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
 
 # The complete list of concrete ORM models covered by the Alembic migration chain.
@@ -50,6 +51,7 @@ ALL_MODELS: tuple[type, ...] = (
 __all__ = [
     "ALL_MODELS",
     "BacklogItem",
+    "VersionTicket",
     "Base",
     "Credential",
     "Customer",

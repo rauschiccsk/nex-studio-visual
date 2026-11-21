@@ -35,7 +35,6 @@ from backend.config.settings import settings
 from backend.core import authz
 from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import get_current_user, require_shu_or_above, verify_ws_token
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.poradca import AUTHOR_PORADCA, RUNNING, PoradcaConversation, PoradcaMessage
@@ -53,7 +52,6 @@ from backend.schemas.poradca import (
     IdeaRead,
     PoradcaAgentTicketsAttached,
     PoradcaAsk,
-    PoradcaBacklogSaved,
     PoradcaChoiceRead,
     PoradcaConversationCreate,
     PoradcaConversationDetail,
@@ -133,13 +131,6 @@ def _conversation_for(
     return conversation, project
 
 
-def _captured_backlog_number(db: Session, msg: PoradcaMessage) -> Optional[int]:
-    if msg.captured_backlog_item_id is None:
-        return None
-    item = db.get(BacklogItem, msg.captured_backlog_item_id)
-    return item.number if item is not None else None
-
-
 def _ticket_proposal(content: str) -> Optional[PoradcaTicketProposalRead]:
     proposal = handoff.ticket_proposal(content)
     return PoradcaTicketProposalRead(kind=proposal.kind, title=proposal.title) if proposal else None
@@ -181,8 +172,6 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         created_at=msg.created_at,
         finished_at=msg.finished_at,
         instruction=handoff.extract_block(msg.content, handoff.BLOCK_INSTRUCTION) if offers else None,
-        backlog_request=handoff.backlog_request(msg.content) if offers else None,
-        captured_backlog_number=_captured_backlog_number(db, msg),
         ticket_proposal=_ticket_proposal(msg.content) if offers else None,
         plane_identifier=msg.plane_identifier,
         plane_url=msg.plane_url,
@@ -404,8 +393,9 @@ def idea_added(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> IdeaOutcome:
-    """The idea's brief goes to the Zásobník of the existing project it names — any project of the cockpit (DEV-350);
-    the talk moves to that project when its author may open it, otherwise it stays with him in Nápady."""
+    """The idea's brief becomes a ticket of the existing project it names in Plane — any project of the cockpit
+    (DEV-350, DEV-455); the talk moves to that project when its author may open it, otherwise it stays with him in
+    Nápady."""
     idea, conversation = _idea_for(db, current_user, idea_id)
     try:
         slug = ideas.addition_target(db, conversation, payload.message_id)
@@ -413,11 +403,23 @@ def idea_added(
         if project is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Projekt sa nenašiel.")
         may_open = authz.is_owner_or_admin(current_user, authz.project_owner_id(project))
-        idea = ideas.add(db, idea, conversation, message_id=payload.message_id, project=project, talk_moves=may_open)
+        idea = ideas.add(
+            db,
+            plane_tickets.gateway(),
+            current_user,
+            idea,
+            conversation,
+            message_id=payload.message_id,
+            project=project,
+            talk_moves=may_open,
+        )
         db.commit()
     except ideas.OutcomeRefused as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PlaneError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     db.refresh(idea)
     return IdeaOutcome(**_idea_read(db, idea, conversation).model_dump())
 
@@ -646,28 +648,6 @@ async def stop_message(
     if msg.status != RUNNING or not await runner.stop(message_id):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Odpoveď už nebeží.")
     return {"stopping": True}
-
-
-@router.post("/messages/{message_id}/backlog", response_model=PoradcaBacklogSaved)
-def save_request_to_backlog(
-    message_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
-) -> PoradcaBacklogSaved:
-    """„Uložiť do Zásobníka" — požiadavka z odpovede Poradcu do Zásobníka projektu; verzia nevzniká (DEV-29)."""
-    msg = db.get(PoradcaMessage, message_id)
-    if msg is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Správa sa nenašla.")
-    _conversation_for(db, current_user, msg.conversation_id)
-    try:
-        result = handoff.backlog_item_from_message(db, msg)
-    except handoff.HandoffRefused as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    db.commit()
-    return PoradcaBacklogSaved(
-        backlog_item_id=result.backlog_item_id,
-        number=result.number,
-        project_slug=result.project_slug,
-        created=result.created,
-    )
 
 
 @router.post("/messages/{message_id}/handed-off", response_model=PoradcaHandedOff)

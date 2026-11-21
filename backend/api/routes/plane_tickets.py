@@ -1,8 +1,9 @@
 """The „Plane tikety" tab — the tickets of a project's module in the DEV register (DEV-120).
 
 * ``GET /projects/{slug}/plane-tickets?closed=false`` → open tickets (``closed=true`` → done and cancelled).
-* ``POST /projects/{slug}/plane-tickets/{issue_id}/backlog`` → the ticket becomes a linked requirement of the
-  Zásobník, once (DEV-122); the ticket says so in a comment. A fast fix from a ticket starts at ``/pipeline/fast-fix``.
+* ``POST /projects/{slug}/plane-tickets/{issue_id}/version`` → the ticket goes into a version that solves it
+  (DEV-455); ``DELETE …/version/{version_id}`` takes it out while the version has not started on it. The ticket
+  moves in Plane with a comment. A fast fix from a ticket starts at ``/pipeline/fast-fix``.
 
 Reading founds nothing in Plane. Access as everywhere in the cockpit: the project's owner and the admin.
 """
@@ -10,17 +11,24 @@ Reading founds nothing in Plane. Access as everywhere in the cockpit: the projec
 from __future__ import annotations
 
 from dataclasses import asdict
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
+from backend.db.models.versions import Version
 from backend.db.session import get_db
-from backend.schemas.backlog import BacklogItemRead
-from backend.schemas.plane_tickets import PlaneTicketRead, ProjectPlaneTicketsRead
-from backend.services import backlog_tickets, plane_tickets
+from backend.schemas.plane_tickets import (
+    OpenVersionRead,
+    PlaneTicketRead,
+    ProjectPlaneTicketsRead,
+    VersionTicketRead,
+)
+from backend.services import plane_tickets, version_tickets
 from backend.services.plane_gateway import PlaneError
 
 router = APIRouter(tags=["Plane tikety"])
@@ -33,7 +41,7 @@ def list_project_plane_tickets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ProjectPlaneTicketsRead:
-    """The tickets of the project's module, newest change first; a ticket of the Zásobník names its REQ-N."""
+    """The tickets of the project's module, newest change first; a ticket in a version names it (DEV-455)."""
     project = authz.assert_project_slug_access(db, current_user, slug)
     try:
         found = plane_tickets.project_tickets(db, plane_tickets.gateway(), project, closed=closed)
@@ -47,26 +55,41 @@ def list_project_plane_tickets(
             PlaneTicketRead(**asdict(t), work_kind_label=plane_tickets.work_kind_words(t.work_kind))
             for t in found.tickets
         ],
+        open_versions=[
+            OpenVersionRead(id=v.id, version_number=v.version_number)
+            for v in version_tickets.open_versions(db, project.id)
+        ],
     )
 
 
-@router.post("/projects/{slug}/plane-tickets/{issue_id}/backlog", response_model=BacklogItemRead)
-def plane_ticket_to_backlog(
+class _VersionChoice(BaseModel):
+    version_id: UUID
+
+
+def _version_of(db: Session, project, version_id: UUID) -> Version:
+    version = db.get(Version, version_id)
+    if version is None or version.project_id != project.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Verzia v tomto projekte nie je.")
+    return version
+
+
+@router.post("/projects/{slug}/plane-tickets/{issue_id}/version", response_model=VersionTicketRead)
+def put_plane_ticket_into_version(
     slug: str,
     issue_id: str,
+    choice: _VersionChoice,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> BacklogItemRead:
-    """„Do Zásobníka" — the requirement linked to the ticket; a second click returns the same one.
+) -> VersionTicketRead:
+    """„Zaradiť do verzie" — the version solves the ticket; a second click returns the same link (DEV-455).
 
-    The requirement is saved first; the ticket's comment comes after and, when Plane does not take it, the sentence
-    says so (``plane_warning``) instead of undoing the requirement.
+    The link is saved first; when Plane does not move the ticket, the sentence says so (``plane_warning``).
     """
     project = authz.assert_project_slug_access(db, current_user, slug)
-    plane = plane_tickets.gateway()
+    version = _version_of(db, project, choice.version_id)
     try:
-        item, created = plane_tickets.ticket_to_backlog(db, plane, project, issue_id)
-    except plane_tickets.TicketTaken as exc:
+        link, warning = version_tickets.assign(db, plane_tickets.gateway(), project, version, issue_id, current_user)
+    except version_tickets.TicketRefused as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
@@ -76,15 +99,33 @@ def plane_ticket_to_backlog(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     db.commit()
-    db.refresh(item)
-    warning = None
-    if created:
-        req = backlog_tickets.req(item)
-        sentence = plane_tickets.BACKLOG_COMMENT.format(
-            project=project.name, req=req, who=plane_tickets.person(current_user)
-        )
-        try:
-            plane.comment(item.plane_issue_id, sentence)
-        except PlaneError as exc:
-            warning = f"Požiadavka {req} je v Zásobníku, ale tiket {item.plane_identifier} sa o tom nedozvedel: {exc}"
-    return BacklogItemRead.model_validate(item).model_copy(update={"plane_warning": warning})
+    return VersionTicketRead(
+        issue_id=link.plane_issue_id,
+        identifier=link.plane_identifier,
+        version_number=version.version_number,
+        plane_warning=warning,
+    )
+
+
+@router.delete("/projects/{slug}/plane-tickets/{issue_id}/version/{version_id}", response_model=VersionTicketRead)
+def take_plane_ticket_out_of_version(
+    slug: str,
+    issue_id: str,
+    version_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VersionTicketRead:
+    """„Vyradiť z verzie" — while the version has not carried the ticket to the Staviteľ yet (DEV-455)."""
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    version = _version_of(db, project, version_id)
+    link = version_tickets.of_issue(db, issue_id)
+    identifier = link.plane_identifier if link else issue_id
+    try:
+        warning = version_tickets.remove(db, plane_tickets.gateway(), project, version, issue_id, current_user)
+    except version_tickets.TicketRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return VersionTicketRead(
+        issue_id=issue_id, identifier=identifier, version_number=version.version_number, plane_warning=warning
+    )

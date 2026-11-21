@@ -39,7 +39,6 @@ const IconNotes = () => <NavIcon glyph="📝" />;
 const IconFolder = () => <NavIcon glyph="📁" />;
 const IconInstallations = () => <NavIcon glyph="🖥️" />;
 const IconVersions = () => <NavIcon glyph="🌿" />;
-const IconBacklog = () => <NavIcon glyph="📋" />;
 const IconPlaneTickets = () => <NavIcon glyph="🎫" />;
 const IconMetrics = () => <NavIcon glyph="📊" />;
 const IconBilling = () => <NavIcon glyph="🧾" />;
@@ -185,7 +184,7 @@ export default function Sidebar() {
 
   return (
     // FINAL v2.0.0 navigation (CR-V2-019, design §4.1). Order top-to-bottom:
-    //   Prehľad · Projekty[📌 pin] · Verzie · Zásobník · AI Agent · Vývoj ·
+    //   Prehľad · Projekty[📌 pin] · Verzie · Plane tikety · AI Agent · Vývoj ·
     //   Zákazníci · UAT · PROD · Metriky · Dokumentácia · Prístupy ·
     //   Aktualizácie · Nastavenia.  Footer: presence 🟢/🌙 + user card.
     //
@@ -281,18 +280,8 @@ export default function Sidebar() {
         disabled={!hasProject}
         disabledTitle="Vyber projekt pre prístup k verziám"
       />
-      {/* E2 (CR-NS-041): per-project Backlog. Project-scoped — disabled (not cross-domain fallback)
-          when no project is selected. */}
-      <NavItem
-        icon={<IconBacklog />}
-        label="Zásobník"
-        active={hasProject ? isActive(`/projects/${selectedProject!.slug}/backlog`) : false}
-        onClick={() => navigate(hasProject ? `/projects/${selectedProject!.slug}/backlog` : projectsFallback)}
-        disabled={!hasProject}
-        disabledTitle="Vyber projekt pre prístup k zásobníku"
-      />
-      {/* DEV-120: the tickets of the pinned project's module in Plane's DEV register — beside the Zásobník, whose
-          requirements found them. Project-scoped like it: disabled with a reason when no project is pinned. */}
+      {/* DEV-120, DEV-455: the tickets of the pinned project's module in Plane's DEV register — the one list of work
+          for a version (the Zásobník is gone). Project-scoped: disabled with a reason when no project is pinned. */}
       <NavItem
         icon={<IconPlaneTickets />}
         label="Plane tikety"

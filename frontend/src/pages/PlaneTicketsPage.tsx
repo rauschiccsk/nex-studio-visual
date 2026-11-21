@@ -1,18 +1,19 @@
 // PlaneTicketsPage — „Plane tikety“ (DEV-120): the tickets of the pinned project's module in the DEV register.
 // Director 14.10.2026: „Chcel by som pridať novú záložku "Plane tikety" tu by som videl tikety pre konkrétny projekt.“
 // Identifier with a link to Plane, title, column, type, work kind, who works on it, last change; open or finished.
-// A ticket the Zásobník founded names its requirement (REQ-N) and the version it is in.
-// DEV-122: an open ticket goes „Do Zásobníka“ (a linked requirement) or starts a fast fix from its text — one way per
-// ticket, which then moves the ticket on its own.
+// DEV-455: an open ticket goes into a version that solves it („Zaradiť do verzie“ — the Príprava gets it, PROD closes
+// it) or starts a fast fix from its text (DEV-122) — one way per ticket, which then moves the ticket on its own.
+// Director 21.11.2026: „Zásobník by sme mali teraz už úplne zrušiť a ponechať len jediný zdroj - PLANE tikety.“
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Inbox, Loader2, Zap } from "lucide-react";
+import { ListPlus, Loader2, Undo2, Zap } from "lucide-react";
 
 import PlaneTicketFastFix from "@/components/planeTickets/PlaneTicketFastFix";
 import {
   listProjectPlaneTicketsApi,
-  planeTicketToBacklogApi,
+  putTicketIntoVersionApi,
+  takeTicketOutOfVersionApi,
   type PlaneTicket,
   type ProjectPlaneTickets,
 } from "@/services/api/planeTickets";
@@ -45,24 +46,43 @@ export default function PlaneTicketsPage() {
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
   const [fixing, setFixing] = useState<string | null>(null);
-  const [toBacklog, setToBacklog] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [notices, setNotices] = useState<Record<string, Notice[]>>({});
+  // The version each ticket's picker shows — the newest open version until the Manažér picks another.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
 
-  async function putToBacklog(t: PlaneTicket) {
-    if (!slug || toBacklog) return;
-    setToBacklog(t.issue_id);
+  async function move(t: PlaneTicket, call: () => Promise<{ plane_warning?: string | null }>, done: string, failed: string) {
+    if (!slug || busy) return;
+    setBusy(t.issue_id);
     try {
-      const item = await planeTicketToBacklogApi(slug, t.issue_id);
-      const said: Notice[] = [{ text: `Tiket je v Zásobníku ako REQ-${item.number}.`, warning: false }];
-      if (item.plane_warning) said.push({ text: item.plane_warning, warning: true });
+      const res = await call();
+      const said: Notice[] = [{ text: done, warning: false }];
+      if (res.plane_warning) said.push({ text: res.plane_warning, warning: true });
       setNotices((n) => ({ ...n, [t.issue_id]: said }));
       setReload((r) => r + 1);
     } catch (e: unknown) {
-      const text = humanizeApiError(e, "Zaradenie do Zásobníka zlyhalo").message;
-      setNotices((n) => ({ ...n, [t.issue_id]: [{ text, warning: true }] }));
+      setNotices((n) => ({ ...n, [t.issue_id]: [{ text: humanizeApiError(e, failed).message, warning: true }] }));
     } finally {
-      setToBacklog(null);
+      setBusy(null);
     }
+  }
+
+  function putIntoVersion(t: PlaneTicket, versionId: string, number: string) {
+    void move(
+      t,
+      () => putTicketIntoVersionApi(slug ?? "", t.issue_id, versionId),
+      `Tiket je zaradený do verzie v${number} — Príprava ho dostane a po nasadení do PROD ho kokpit uzavrie.`,
+      "Zaradenie do verzie zlyhalo",
+    );
+  }
+
+  function takeOut(t: PlaneTicket, versionId: string, number: string) {
+    void move(
+      t,
+      () => takeTicketOutOfVersionApi(slug ?? "", t.issue_id, versionId),
+      `Tiket je vyradený z verzie v${number}.`,
+      "Vyradenie z verzie zlyhalo",
+    );
   }
 
   useEffect(() => {
@@ -96,7 +116,7 @@ export default function PlaneTicketsPage() {
             — modul <span className="text-[var(--color-text-secondary)]">{data.module}</span>
           </>
         ) : null}
-        . Tiket zo Zásobníka ukazuje svoju požiadavku (REQ-N) a verziu.
+        . Tiket zaradený do verzie ukazuje, ktorá verzia ho rieši; po jej nasadení do PROD ho kokpit uzavrie.
       </p>
 
       <div role="tablist" aria-label="Tikety" className="flex items-center border-b border-[var(--color-border-default)] mb-4">
@@ -129,7 +149,7 @@ export default function PlaneTicketsPage() {
       {!loading && !error && data && data.tickets.length === 0 && (
         <div className="rounded-xl border border-dashed border-[var(--color-border-default)] p-10 text-center text-sm text-[var(--color-text-muted)]">
           {data.module === null
-            ? "Projekt ešte nemá modul v evidencii DEV — vznikne s prvým tiketom, napríklad zo Zásobníka."
+            ? "Projekt ešte nemá modul v evidencii DEV — vznikne s prvým tiketom, napríklad z Poradcu."
             : view === "open"
               ? "Žiadne otvorené tikety."
               : "Žiadne uzavreté tikety."}
@@ -161,21 +181,15 @@ export default function PlaneTicketsPage() {
                     {t.work_kind_label}
                   </span>
                 )}
-                {t.requirement && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-accent-primary)]/15 text-[var(--color-accent-primary)]">
-                    {t.requirement}
-                    {t.requirement_version ? ` · ${t.requirement_version}` : ""}
-                  </span>
-                )}
                 {t.fix_version && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-accent-primary)]/15 text-[var(--color-accent-primary)]">
                     Rýchla oprava {t.fix_version}
                   </span>
                 )}
-                {/* DEV-453: a version's Zadanie names the ticket — its work is in that version, no fast fix is offered. */}
-                {!t.fix_version && t.named_in_version && (
+                {/* DEV-455: the version the Manažér put the ticket into — it solves the ticket, no other way is offered. */}
+                {t.in_version && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-accent-primary)]/15 text-[var(--color-accent-primary)]">
-                    Vo verzii {t.named_in_version}
+                    Vo verzii {t.in_version}
                   </span>
                 )}
               </div>
@@ -193,12 +207,41 @@ export default function PlaneTicketsPage() {
                   {n.text}
                 </div>
               ))}
-              {!t.closed && !t.requirement && !t.fix_version && !t.named_in_version && (
+              {!t.closed && !t.fix_version && !t.in_version && (
                 <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <button type="button" onClick={() => putToBacklog(t)} disabled={toBacklog !== null} className={ACTION}>
-                    {toBacklog === t.issue_id ? <Loader2 size={13} className="animate-spin" /> : <Inbox size={13} />}
-                    Do Zásobníka
-                  </button>
+                  {data.open_versions.length > 0 ? (
+                    <>
+                      <select
+                        aria-label={`Verzia pre tiket ${t.identifier}`}
+                        value={chosen[t.issue_id] ?? data.open_versions[data.open_versions.length - 1]?.id ?? ""}
+                        onChange={(e) => setChosen((c) => ({ ...c, [t.issue_id]: e.target.value }))}
+                        className="rounded border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-2 py-1 text-xs text-[var(--color-text-primary)] pointer-coarse:min-h-11"
+                      >
+                        {data.open_versions.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            v{v.version_number}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => {
+                          const id = chosen[t.issue_id] ?? data.open_versions[data.open_versions.length - 1]?.id;
+                          const version = data.open_versions.find((v) => v.id === id);
+                          if (version) putIntoVersion(t, version.id, version.version_number);
+                        }}
+                        className={ACTION}
+                      >
+                        {busy === t.issue_id ? <Loader2 size={13} className="animate-spin" /> : <ListPlus size={13} />}
+                        Zaradiť do verzie
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      Verzia, do ktorej by sa tiket dal zaradiť, nie je — založ novú verziu.
+                    </span>
+                  )}
                   <button
                     type="button"
                     aria-expanded={fixing === t.issue_id}
@@ -209,7 +252,25 @@ export default function PlaneTicketsPage() {
                   </button>
                 </div>
               )}
-              {fixing === t.issue_id && !t.requirement && !t.fix_version && !t.named_in_version && (
+              {!t.closed &&
+                t.in_version &&
+                (() => {
+                  const version = data.open_versions.find((v) => `v${v.version_number}` === t.in_version);
+                  return version ? (
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => takeOut(t, version.id, version.version_number)}
+                        className={ACTION}
+                      >
+                        {busy === t.issue_id ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />}
+                        Vyradiť z verzie
+                      </button>
+                    </div>
+                  ) : null;
+                })()}
+              {fixing === t.issue_id && !t.fix_version && !t.in_version && (
                 <PlaneTicketFastFix
                   ticket={t}
                   project={{ id: data.project_id, slug: slug ?? "", name: data.project_name }}

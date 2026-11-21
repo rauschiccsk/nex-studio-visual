@@ -43,7 +43,7 @@ Farnosť vedie matriku na papieri a chce ju mať v aplikácii.
 
 ADDITION = """Patrí to do NEX Managera.
 
-<doplnenie-projektu projekt="nex-manager">
+<doplnenie-projektu projekt="nex-manager" druh="poziadavka">
 Skupiny podľa farností
 Správca vytvorí skupinu pre každú farnosť a pridelí jej ľudí.
 </doplnenie-projektu>
@@ -205,19 +205,6 @@ def test_the_briefs_are_read_from_the_answer():
         handoff.project_addition("<doplnenie-projektu>\nBez projektu a s dosť dlhým textom\n</doplnenie-projektu>")
         is None
     )
-
-
-def test_what_needs_a_project_says_the_idea_has_none_yet(db_session, answers):
-    me = _user(db_session)
-    answers.append(
-        "Do Zásobníka:\n<poziadavka-do-zasobnika>\nNiečo dlhšie než desať znakov\n</poziadavka-do-zasobnika>"
-    )
-    idea = _client(db_session, me).post("/api/v1/poradca/ideas", json={"question": "Nápad"}).json()
-    answer = idea["conversation"]["messages"][-1]["id"]
-
-    r = _client(db_session, me).post(f"/api/v1/poradca/messages/{answer}/backlog")
-
-    assert r.status_code == 422 and r.json()["detail"] == handoff.IDEA_NOT_A_PROJECT_YET
 
 
 def test_a_cockpit_ticket_can_come_from_an_idea_a_project_ticket_cannot(db_session, answers):

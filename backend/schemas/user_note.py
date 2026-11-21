@@ -8,16 +8,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.schemas.delivery_statement import WorkKind
 
-class NoteBacklogRead(BaseModel):
-    """The request a note became."""
 
-    id: UUID
-    project_id: UUID
-    #: Where the request is — the screen links to the project's backlog.
+class NoteTicketRead(BaseModel):
+    """The project ticket a note became (DEV-455)."""
+
     project_slug: str
     project_name: str
-    number: int = Field(description="REQ-{number}")
+    identifier: str = Field(description="DEV-n")
+    url: Optional[str] = None
 
 
 class UserNoteRead(BaseModel):
@@ -29,7 +29,7 @@ class UserNoteRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     resolved_at: Optional[datetime] = None
-    backlog: Optional[NoteBacklogRead] = None
+    ticket: Optional[NoteTicketRead] = None
 
 
 class UserNoteCreate(BaseModel):
@@ -53,6 +53,8 @@ class UserNoteResolve(BaseModel):
     resolved: bool
 
 
-class UserNoteToBacklog(BaseModel):
+class UserNoteToTicket(BaseModel):
     #: The project the screen has selected, as it knows it.
     project_slug: str
+    #: Who pays the work (DEV-118: fix, gift, change) — a project ticket carries it.
+    work_kind: WorkKind

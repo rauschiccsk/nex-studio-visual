@@ -8,8 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.schemas.backlog import TicketType
 from backend.schemas.delivery_statement import WorkKind
+from backend.schemas.plane_tickets import TicketType
 
 #: Longest question — longer text is more likely a pasted log; Poradca reads that itself with a tool.
 MAX_QUESTION_CHARS = 20_000
@@ -112,11 +112,6 @@ class PoradcaMessageRead(BaseModel):
     instruction: Optional[str] = None
     #: DEV-431 — when the answer was last put into Riadiace centrum; ``None`` — never.
     handed_off_at: Optional[datetime] = None
-    #: Odpoveď nesie požiadavku do Zásobníka (blok ``<poziadavka-do-zasobnika>``, staršie odpovede
-    #: ``<poziadavka-na-novu-verziu>``) — DEV-29.
-    backlog_request: Optional[str] = None
-    #: Číslo požiadavky (REQ-N), ktorú človek z tejto odpovede už uložil do Zásobníka.
-    captured_backlog_number: Optional[int] = None
     #: DEV-83 — the choices the answer marks (``<volba>``), in its order; empty for a question or unfinished answer.
     choices: list[PoradcaChoiceRead] = Field(default_factory=list)
     #: DEV-119 — the ticket the answer proposes (``<tiket-nsv>`` / ``<tiket-projektu>``) and the one founded from it.
@@ -147,15 +142,6 @@ class PoradcaHandedOff(BaseModel):
     """DEV-431 — when the answer was put into Riadiace centrum."""
 
     handed_off_at: datetime
-
-
-class PoradcaBacklogSaved(BaseModel):
-    """DEV-29: požiadavka z odpovede Poradcu uložená do Zásobníka (verzia z nej nevzniká)."""
-
-    backlog_item_id: UUID
-    number: int
-    project_slug: str
-    created: bool
 
 
 class PoradcaConversationRead(BaseModel):

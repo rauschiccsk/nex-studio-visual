@@ -12,26 +12,22 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.local_time import local_time
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
-from backend.schemas.backlog import BacklogItemCreate
-from backend.services import backlog as backlog_service
 from backend.services.people import person_name
 from backend.services.plane_gateway import PlaneError, PlaneGateway, TicketRef, html_to_paragraphs
 
 #: Where a ticket came from — said in its text, so the register shows which door of the cockpit founded it.
 SOURCES = {
     "poradca": "z rozhovoru s Poradcom",
-    "zasobnik": "zo Zásobníka",
+    "zasobnik": "zo Zásobníka",  # before DEV-455 — the tickets founded then still say it
     "plane_tikety": "zo záložky Plane tikety",
     "kokpit": "z kokpitu",
     "ideas": "z Nápadov",  # DEV-318 — the ticket of a project founded from an idea
@@ -150,11 +146,9 @@ class ProjectTicket:
     doer: Optional[str]
     updated_at: Optional[datetime]
     url: str
-    requirement: Optional[str]
-    requirement_version: Optional[str]
     text: str
     fix_version: Optional[str]
-    named_in_version: Optional[str] = None
+    in_version: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -180,28 +174,23 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
     """The tickets of the project's module in the DEV register, open or finished, newest change first.
 
     Reading founds nothing: a project without a module yet has no tickets (the module comes with the first one).
-    A ticket a requirement of the Zásobník founded names it (REQ-N) and the version the requirement is in.
+    A ticket put into a version names it (DEV-455); a fast fix started from it names its version (DEV-122).
     """
     module = gateway.find_module(project.plane_module_id, project.name)
     if module is None:
         return ProjectTickets(None, [])
     states = gateway.state_names()
     labels = {lab["id"]: lab.get("name", "") for lab in gateway.labels()}
-    linked = {
-        item.plane_issue_id: (f"REQ-{item.number}", f"v{version.version_number}" if version else None)
-        for item, version in db.execute(
-            select(BacklogItem, Version)
-            .outerjoin(Version, Version.id == BacklogItem.version_id)
-            .where(BacklogItem.project_id == project.id, BacklogItem.plane_issue_id.is_not(None))
-        ).all()
-    }
     fixes = {
         version.plane_issue_id: f"v{version.version_number}"
         for version in db.execute(
             select(Version).where(Version.project_id == project.id, Version.plane_issue_id.is_not(None))
         ).scalars()
     }
-    named = versions_naming_tickets(db, project)
+    # DEV-455: the version the Manažér put the ticket into — the cockpit's own link, never read from a text.
+    from backend.services import version_tickets
+
+    in_versions = version_tickets.versions_of_project(db, project.id)
     rows: list[ProjectTicket] = []
     for issue in gateway.module_tickets(module["id"]):
         state, group = states.get(issue.get("state"), ("", ""))
@@ -213,7 +202,6 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
             kind, warning = work_kind_of(names), None
         except PlaneError as exc:
             kind, warning = None, str(exc)
-        requirement, version = linked.get(issue["id"], (None, None))
         rows.append(
             ProjectTicket(
                 issue_id=issue["id"],
@@ -227,18 +215,16 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
                 doer=_doer(issue.get("description_html", "")),
                 updated_at=_when(issue.get("updated_at")),
                 url=gateway.ticket_url(issue),
-                requirement=requirement,
-                requirement_version=version,
                 text=ticket_text(issue),
                 fix_version=fixes.get(issue["id"]),
-                named_in_version=named.get(identifier(gateway, issue)),
+                in_version=in_versions.get(issue["id"]),
             )
         )
     rows.sort(key=lambda t: t.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return ProjectTickets(module.get("name"), rows)
 
 
-# --- from a ticket to the Zásobník or to a fast fix (DEV-122) -----------------------------------------------------
+# --- from a ticket to a version or to a fast fix (DEV-122, DEV-455) ---------------------------------------------------
 
 #: How the ticket of a fast fix follows its version: the column (``None`` = only the comment), the comment for people,
 #: and the sentence when Plane did not follow — the fix itself never waits for Plane.
@@ -259,15 +245,7 @@ FIX_MOVES = {
         "Tiket {ticket} rýchlej opravy sa po nasadení na PROD neuzavrel",
     ),
 }
-BACKLOG_COMMENT = "Tiket je zaradený do Zásobníka projektu {project} ako {req}. Zaradil: {who}."
 _DOER_LINE = re.compile(r"^Robí:.*$", re.MULTILINE)
-
-
-class TicketTaken(Exception):
-    """The ticket already went one way — to the Zásobník or to a fast fix; one ticket goes one way.
-
-    Director 15.10.2026: „Súhlasím“ — otherwise the requirement and the fix would both move the ticket.
-    """
 
 
 @dataclass(frozen=True)
@@ -277,42 +255,6 @@ class LinkedTicket:
     issue_id: str
     identifier: str
     url: str
-
-
-#: DEV-453: a ticket's identifier as a Zadanie names it (DEV-434) — whole, not the end of a longer word (the digits
-#: are taken greedily, so DEV-112 is never read as DEV-11).
-_TICKET_ID = re.compile(r"(?<![A-Za-z0-9-])([A-Z][A-Z0-9]*-\d+)")
-#: Where a version's Zadanie lies in the project — the cockpit writes it there when the version is founded.
-CUSTOMER_REQUIREMENTS = "docs/specs/versions/v{number}/customer-requirements.md"
-
-
-def versions_naming_tickets(db: Session, project: Project) -> dict[str, str]:
-    """DEV-453 — ``{ticket identifier: "vX"}`` for every ticket a version's Zadanie of the project names: the fast
-    fix's directive (its kickoff) or the version's ``customer-requirements.md``. The oldest version naming it wins —
-    the one its work went into.
-
-    20.11.2026 NEX HelpDesk: DEV-434 was fixed in 0.1.1, a fast fix started from the project's dialog with the ticket in
-    its directive, and DEV-412 was the Zadanie of the first version; neither had the version's link to the ticket (only
-    a fast fix started at the ticket gets it), so Plane tikety offered „Spustiť rýchlu opravu“ for work already done."""
-    from backend.services import fast_fix
-
-    found: dict[str, str] = {}
-    versions = (
-        db.execute(select(Version).where(Version.project_id == project.id).order_by(Version.created_at)).scalars().all()
-    )
-    for version in versions:
-        texts = [fast_fix.kickoff_directive(db, version.id) or ""]
-        # A version renamed at its first PROD (DEV-449) keeps its Zadanie under the number it was built as.
-        for number in {version.version_number, version.graduated_from} - {None} if project.source_path else ():
-            doc = Path(project.source_path) / CUSTOMER_REQUIREMENTS.format(number=number)
-            try:
-                texts.append(doc.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                pass
-        for text in texts:
-            for ticket in _TICKET_ID.findall(text):
-                found.setdefault(ticket, f"v{version.version_number}")
-    return found
 
 
 def identifier(gateway: PlaneGateway, issue: dict) -> str:
@@ -341,49 +283,17 @@ def linked_ticket(gateway: PlaneGateway, module_id: Optional[str], project_name:
     return LinkedTicket(issue["id"], identifier(gateway, issue), gateway.ticket_url(issue))
 
 
-def ticket_to_backlog(db: Session, gateway: PlaneGateway, project: Project, issue_id: str) -> tuple[BacklogItem, bool]:
-    """The ticket becomes a requirement of the Zásobník, linked to it — once; ``(item, created_now)``.
-
-    The project's row is locked while it is looked up and founded, so a second click returns the same requirement.
-    From then on the requirement moves its ticket like one founded from the Zásobník (DEV-121).
-    """
-    db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
-    existing = requirement_of_ticket(db, project.id, issue_id)
-    if existing is not None:
-        return existing, False
-    fix = fix_of_ticket(db, project.id, issue_id)
-    if fix is not None:
-        raise TicketTaken(f"Z tohto tiketu už je spustená rýchla oprava v{fix.version_number} — do Zásobníka nepatrí.")
-    issue = find_project_ticket(gateway, project.plane_module_id, project.name, issue_id)
-    item = backlog_service.create(
-        db,
-        BacklogItemCreate(
-            project_id=project.id,
-            title=(issue.get("name") or "Tiket z Plane")[:500],
-            description=ticket_text(issue) or None,
-        ),
-    )
-    item.plane_issue_id = issue["id"]
-    item.plane_identifier = identifier(gateway, issue)
-    item.plane_url = gateway.ticket_url(issue)
-    db.flush()
-    return item, True
-
-
-def requirement_of_ticket(db: Session, project_id, issue_id: str) -> Optional[BacklogItem]:
-    return db.execute(
-        select(BacklogItem).where(BacklogItem.project_id == project_id, BacklogItem.plane_issue_id == issue_id)
-    ).scalar_one_or_none()
-
-
 def way_taken(db: Session, project_id, issue_id: str) -> Optional[str]:
     """Where the ticket already went, in words — ``None`` while it may still go either way."""
     fix = fix_of_ticket(db, project_id, issue_id)
     if fix is not None:
         return f"Z tohto tiketu už je spustená rýchla oprava v{fix.version_number}."
-    item = requirement_of_ticket(db, project_id, issue_id)
-    if item is not None:
-        return f"Tiket je už v Zásobníku ako REQ-{item.number} — pôjde s verziou, do ktorej ho zaradíš."
+    from backend.services import version_tickets
+
+    link = version_tickets.of_issue(db, issue_id)
+    if link is not None:
+        version = db.get(Version, link.version_id)
+        return f"Tiket už rieši verzia v{version.version_number if version else '?'} — pôjde s ňou."
     return None
 
 

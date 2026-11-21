@@ -49,7 +49,7 @@ export default function StartBuildBar({ board, versionId, onBoard }: Props) {
       <p className="text-sm font-medium text-[var(--color-text-primary)]">Verzia ešte nebeží.</p>
       <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
         Tvorba špecifikácie začne Prípravou: Staviteľ prečíta Zadanie verzie aj
-        požiadavky, ktoré si k nej priradil zo Zásobníka.
+        tikety, ktoré si do nej zaradil v záložke Plane tikety.
       </p>
       <div className="mt-3 flex justify-end">
         <button

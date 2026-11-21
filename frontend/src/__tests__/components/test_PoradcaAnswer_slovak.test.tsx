@@ -34,8 +34,6 @@ function answer(over: Record<string, unknown>) {
     steps: [],
     status: "done",
     instruction: null,
-    backlog_request: null,
-    captured_backlog_number: null,
     choices: [],
     ticket_proposal: null,
     agent_tickets: [],

@@ -27,22 +27,23 @@ from backend.db.models.projects import Project
 from backend.db.models.user_note import UserNote
 from backend.db.session import get_db
 from backend.schemas.user_note import (
-    NoteBacklogRead,
+    NoteTicketRead,
     UserNoteConflictRead,
     UserNoteCreate,
     UserNoteRead,
     UserNoteResolve,
     UserNoteSave,
-    UserNoteToBacklog,
+    UserNoteToTicket,
 )
+from backend.services import plane_tickets
 from backend.services import user_notes as notes
+from backend.services.plane_gateway import PlaneError
 
 router = APIRouter(tags=["User Notes"])
 
 
 def _read(db: Session, note: UserNote) -> UserNoteRead:
-    item = notes.backlog_item(db, note)
-    project = db.get(Project, item.project_id) if item else None
+    project = db.get(Project, note.ticket_project_id) if note.ticket_project_id else None
     return UserNoteRead(
         id=note.id,
         body=note.body,
@@ -51,14 +52,13 @@ def _read(db: Session, note: UserNote) -> UserNoteRead:
         created_at=note.created_at,
         updated_at=note.updated_at,
         resolved_at=note.resolved_at,
-        backlog=NoteBacklogRead(
-            id=item.id,
-            project_id=item.project_id,
+        ticket=NoteTicketRead(
             project_slug=project.slug,
             project_name=project.name,
-            number=item.number,
+            identifier=note.plane_identifier,
+            url=note.plane_url,
         )
-        if item and project
+        if project is not None and note.plane_identifier
         else None,
     )
 
@@ -136,22 +136,25 @@ def delete_note(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{note_id}/to-backlog", response_model=UserNoteRead)
-def note_to_backlog(
+@router.post("/{note_id}/to-ticket", response_model=UserNoteRead)
+def note_to_ticket(
     note_id: UUID,
-    payload: UserNoteToBacklog,
+    payload: UserNoteToTicket,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserNoteRead:
-    """A request in the project's backlog, exactly once; the caller must be allowed into the project's backlog."""
+    """DEV-455 — a ticket of the project in Plane, exactly once; the caller must be allowed into the project."""
     project = authz.assert_project_slug_access(db, current_user, payload.project_slug)
     try:
-        note = notes.to_backlog(db, current_user.id, note_id, project.id)
+        note = notes.to_ticket(db, plane_tickets.gateway(), current_user, note_id, project, payload.work_kind)
     except LookupError as exc:
         raise _not_found(exc) from exc
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PlaneError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     db.commit()
     db.refresh(note)
     return _read(db, note)

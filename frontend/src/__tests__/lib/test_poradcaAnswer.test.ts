@@ -19,9 +19,9 @@ describe("answerForDisplay", () => {
     expect(out).not.toContain("<pokyn-pre-agenta>");
   });
 
-  it("does the same for a request to the Zásobník and leaves plain text alone", () => {
+  it("shows an older answer's request to the Zásobník as a plain request (DEV-455) and leaves plain text alone", () => {
     expect(answerForDisplay("<poziadavka-do-zasobnika>Export CSV.</poziadavka-do-zasobnika>")).toContain(
-      "**Požiadavka do Zásobníka:**",
+      "**Požiadavka:**",
     );
     expect(answerForDisplay("Len odpoveď.")).toBe("Len odpoveď.");
   });
@@ -33,9 +33,9 @@ describe("answerForDisplay", () => {
     expect(answerForDisplay('<volba karta="1">Voľba [A] a \\ B</volba>')).toBe("[Voľba \\[A\\] a \\\\ B](#volba-1)");
   });
 
-  it("DEV-29: an answer from before the change shows its request as one for the Zásobník, never a new version", () => {
+  it("DEV-29: an answer from before that change shows its request as a plain request, never a new version", () => {
     const out = answerForDisplay("<poziadavka-na-novu-verziu>Dobropisy.</poziadavka-na-novu-verziu>");
-    expect(out).toContain("**Požiadavka do Zásobníka:**");
+    expect(out).toContain("**Požiadavka:**");
     expect(out).not.toContain("novú verziu");
   });
 });

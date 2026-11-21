@@ -2,14 +2,14 @@
 //
 // The buttons appear only when the answer carries the relevant block (Poradca charter, part 4) — and „Vložiť do
 // Riadiaceho centra" is grey with a reason when the build field rejects an instruction. Nothing is sent by itself:
-// pokyn odošle človek v Riadiacom centre; požiadavka ide len do Zásobníka — verzia z nej nevzniká, o verziách
-// rozhoduje Director (DEV-29). DEV-119: a proposed ticket opens a preview; the person founds it in Plane.
+// pokyn odošle človek v Riadiacom centre. DEV-119: a proposed ticket opens a preview; the person founds it in Plane
+// — which version solves it, the Manažér decides on the Plane tikety tab (DEV-455; the Zásobník is gone).
 // DEV-218: the tickets the agent asked for — the cockpit reads them from Plane and attaches them as files; the lines
 // that say where go into the answer for the agent, which the Manažér sends himself.
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, Loader2, Paperclip, Send, Square, Ticket } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Paperclip, Send, Square, Ticket } from "lucide-react";
 
 import { SpecMarkdown } from "@/components/markdown/SpecMarkdown";
 import ErrorNote from "@/components/common/ErrorNote";
@@ -18,7 +18,6 @@ import { useCodePaths } from "@/hooks/useCodePaths";
 import {
   attachAgentTicketsApi,
   markHandedOffApi,
-  saveRequestToBacklogApi,
   stopPoradcaApi,
 } from "@/services/api/poradca";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
@@ -73,18 +72,14 @@ export default function PoradcaAnswer({
   const projectSlug = useActiveContextStore((s) => s.selectedProject?.slug ?? null);
   // DEV-88 — a file of the project the answer names is a link into NS Code, at the line it names.
   const codePaths = useCodePaths(projectSlug);
-  // DEV-29: the REQ-N the request was saved as — from the answer itself, or from the click just now.
-  const [savedNumber, setSavedNumber] = useState<number | null>(message.captured_backlog_number ?? null);
   const [showSteps, setShowSteps] = useState(false);
   // DEV-119: the ticket founded from this answer — from the answer itself, or from the click just now.
   const [ticket, setTicket] = useState<{ identifier: string; url: string } | null>(
     message.plane_identifier ? { identifier: message.plane_identifier, url: message.plane_url ?? "" } : null,
   );
   const [ticketOpen, setTicketOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
-  const inFlight = useRef(false);
   const agentTickets = message.agent_tickets ?? [];
   const steps = message.steps ?? [];
   // DEV-83: the choices the answer marks, checked by the server against the card they name — read in handOffOffer.
@@ -164,22 +159,6 @@ export default function PoradcaAnswer({
     navigate("/riadiace-centrum");
   }
 
-  async function saveToBacklog() {
-    if (inFlight.current) return; // a second click before the re-render must not save it twice
-    inFlight.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await saveRequestToBacklogApi(message.id);
-      setSavedNumber(saved.number);
-    } catch (e: unknown) {
-      setError(humanizeApiError(e, "Uloženie do Zásobníka zlyhalo"));
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  }
-
   // DEV-218 — the cockpit reads the tickets from Plane now and stores them for the agent; the lines go to the answer.
   // The button is grey while it runs, so a second click attaches nothing twice.
   async function attachTickets() {
@@ -195,7 +174,7 @@ export default function PoradcaAnswer({
     }
   }
 
-  const hasActions = !!(insertText || message.backlog_request || message.ticket_proposal || agentTickets.length);
+  const hasActions = !!(insertText || message.ticket_proposal || agentTickets.length);
 
   return (
     <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2">
@@ -298,32 +277,6 @@ export default function PoradcaAnswer({
             >
               <Send className="h-3.5 w-3.5" /> Vložiť do Riadiaceho centra
             </button>
-          )}
-          {message.backlog_request && savedNumber == null && (
-            <button
-              type="button"
-              onClick={() => void saveToBacklog()}
-              disabled={busy}
-              title="Požiadavka sa zapíše do Zásobníka projektu. Do ktorej verzie pôjde, rozhodneš sám."
-              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />} Uložiť do
-              Zásobníka
-            </button>
-          )}
-          {message.backlog_request && savedNumber != null && (
-            <span className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-              {`Uložené v Zásobníku ako REQ-${savedNumber}.`}
-              {projectSlug && (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/projects/${projectSlug}/backlog`)}
-                  className="rounded-lg border border-[var(--color-border-default)] px-2 py-1 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-                >
-                  Otvoriť Zásobník
-                </button>
-              )}
-            </span>
           )}
           {message.ticket_proposal && !ticket && (
             <button

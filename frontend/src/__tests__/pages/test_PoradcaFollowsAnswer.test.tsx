@@ -69,8 +69,6 @@ function answer(status: "running" | "done", content = "") {
     created_at: "2026-10-08T10:00:01Z",
     finished_at: null,
     instruction: null,
-    backlog_request: null,
-    captured_backlog_number: null,
   };
 }
 function conversation(messages: unknown[]) {

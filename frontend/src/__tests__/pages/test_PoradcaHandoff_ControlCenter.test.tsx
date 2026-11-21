@@ -76,8 +76,6 @@ const MESSAGE = {
   steps: [],
   status: "done",
   instruction: INSTRUCTION,
-  backlog_request: null,
-  captured_backlog_number: null,
 };
 const SCOPE = {
   id: VERSION,

@@ -21,9 +21,7 @@ from backend.db.models.foundation import User
 from backend.db.models.idea import OUTCOME_ADDED, OUTCOME_FOUNDED, Idea
 from backend.db.models.poradca import AUTHOR_PORADCA, DONE, PoradcaConversation, PoradcaMessage
 from backend.db.models.projects import Project
-from backend.schemas.backlog import BacklogItemCreate
-from backend.services import backlog as backlog_service
-from backend.services import backlog_tickets, metrics, plane_tickets
+from backend.services import metrics, plane_responsible, plane_tickets
 from backend.services import version as version_service
 from backend.services.plane_gateway import PlaneError, PlaneGateway
 from backend.services.poradca import handoff, runner
@@ -56,6 +54,15 @@ NOT_FOUNDED = "Z nápadu nevznikol projekt — tiket projektu v DEV sa zakladá 
 NO_RESPONSIBLE = (
     "Konto {username} nemá zodpovedného v Plane. Manažér ho nastaví v Nastaveniach, karta Používatelia, časť "
     "„Zodpovedný v Plane“; potom pri nápade stlač „Založiť tiket projektu v DEV“."
+)
+NO_RESPONSIBLE_ADDITION = (
+    "Konto {username} nemá zodpovedného v Plane. Manažér ho nastaví v Nastaveniach, karta Používatelia, časť "
+    "„Zodpovedný v Plane“; potom stlač „Pridať do projektu“ znova."
+)
+#: DEV-455: an addition becomes a ticket, and a ticket about work on a project names who pays it (DEV-118).
+ADDITION_WITHOUT_KIND = (
+    "Zadanie doplnenia nemá druh práce (oprava, dar alebo požiadavka) — požiadaj Poradcu, nech ho doplní, a stlač "
+    "„Pridať do projektu“ znova."
 )
 
 
@@ -242,7 +249,7 @@ def file_project_ticket(
     brief = handoff.project_brief(message.content) if message is not None else None
     if brief is None or brief.work_kind is None:
         raise PlaneError("Zadanie, z ktorého projekt vznikol, sa nenašlo — tiket sa nedá založiť.")
-    responsible = backlog_tickets.responsible_of(user, backlog_tickets.responsible_people(plane))
+    responsible = plane_responsible.responsible_of(user, plane_responsible.responsible_people(plane))
     if responsible is None:
         raise PlaneError(NO_RESPONSIBLE.format(username=user.username))
     ref = plane_tickets.file_ticket(
@@ -256,7 +263,10 @@ def file_project_ticket(
             f"{brief.brief}\n\nZadanie vzniklo v Nápadoch kokpitu („{conversation.title}“) a je zapísané vo verzii "
             f"{FIRST_VERSION} projektu."
         ),
-        labels=(f"{backlog_tickets.TICKET_TYPE_GROUP}: Task", f"{backlog_tickets.RESPONSIBLE_GROUP}: {responsible}"),
+        labels=(
+            f"{plane_responsible.TICKET_TYPE_GROUP}: Task",
+            f"{plane_responsible.RESPONSIBLE_GROUP}: {responsible}",
+        ),
         doer=responsible,
         work_kind=brief.work_kind,
     )
@@ -286,6 +296,8 @@ def addition_target(db: Session, conversation: PoradcaConversation, message_id: 
 
 def add(
     db: Session,
+    plane: PlaneGateway,
+    user: User,
     idea: Idea,
     conversation: PoradcaConversation,
     *,
@@ -293,13 +305,15 @@ def add(
     project: Project,
     talk_moves: bool = True,
 ) -> Idea:
-    """The brief goes to ``project``'s Zásobník as a requirement — which version takes it, its manager decides
-    (DEV-29) — and the talk moves to the project when its author may open it; otherwise it stays with him in Nápady
-    (DEV-350: any project's Zásobník, since the Projektant reads every project). A second click returns what the
-    first one did.
+    """The brief becomes a ticket of ``project`` in Plane — which version solves it, its manager decides on the Plane
+    tikety tab (DEV-455; until then a requirement of the Zásobník) — and the talk moves to the project when its author
+    may open it; otherwise it stays with him in Nápady (DEV-350). A second click returns what the first one did. The
+    ticket is filed first: when Plane refuses, nothing changes and the person tries again.
 
     Raises:
-        OutcomeRefused: no brief, a rewritten one, a new project's brief, or a brief for another project.
+        OutcomeRefused: no brief, a rewritten one, a new project's brief, a brief for another project, or one without
+            its work kind.
+        PlaneError: Plane refused, or the account has no person of the „Zodpovedný“ group of the DEV register.
     """
     idea = _locked(db, idea)
     if idea.outcome == OUTCOME_ADDED and idea.outcome_project_id == project.id:
@@ -312,11 +326,28 @@ def add(
         raise OutcomeRefused(NOT_AN_ADDITION)
     if addition.project_slug != project.slug:
         raise OutcomeRefused(f"Zadanie je pre projekt {addition.project_slug}, nie pre {project.slug}.")
-    item = backlog_service.create(
-        db, BacklogItemCreate(project_id=project.id, title=addition.title, description=addition.brief)
+    if addition.work_kind is None:
+        raise OutcomeRefused(ADDITION_WITHOUT_KIND)
+    responsible = plane_responsible.responsible_of(user, plane_responsible.responsible_people(plane))
+    if responsible is None:
+        raise PlaneError(NO_RESPONSIBLE_ADDITION.format(username=user.username))
+    ref = plane_tickets.file_ticket(
+        db,
+        plane,
+        project=project,
+        user=user,
+        source="ideas",
+        title=addition.title,
+        description=f"{addition.brief}\n\nZadanie vzniklo v Nápadoch kokpitu („{conversation.title}“).",
+        labels=(
+            f"{plane_responsible.TICKET_TYPE_GROUP}: Task",
+            f"{plane_responsible.RESPONSIBLE_GROUP}: {responsible}",
+        ),
+        doer=responsible,
+        work_kind=addition.work_kind,
     )
     _conclude(idea, conversation, OUTCOME_ADDED, project, message, talk_moves=talk_moves)
-    idea.outcome_backlog_item_id = item.id
+    idea.plane_issue_id, idea.plane_identifier, idea.plane_url = ref.id, ref.identifier, ref.url
     db.flush()
     return idea
 

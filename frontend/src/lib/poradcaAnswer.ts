@@ -5,9 +5,9 @@ import type { PoradcaVersionInfo } from "@/types/poradca";
 /** Blocks from the Poradca charter (part 4) and the heading under which a person sees them. Cockpit makes buttons. */
 const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "pokyn-pre-agenta", heading: "Pokyn pre Staviteľa" },
-  { tag: "poziadavka-do-zasobnika", heading: "Požiadavka do Zásobníka" },
-  // DEV-29: answers from before the change carry the old block — it, too, only ever goes to the Zásobník.
-  { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka do Zásobníka" },
+  // Older answers carry the Zásobník's blocks (DEV-29); the Zásobník is gone (DEV-455) — they read as a plain request.
+  { tag: "poziadavka-do-zasobnika", heading: "Požiadavka" },
+  { tag: "poziadavka-na-novu-verziu", heading: "Požiadavka" },
   // DEV-119: a proposed ticket in Plane — the project's one carries its work kind and way as attributes.
   { tag: "tiket-nsv", heading: "Návrh tiketu pre kokpit (NEX Studio Visual)" },
   { tag: "tiket-projektu", heading: "Návrh tiketu projektu" },
