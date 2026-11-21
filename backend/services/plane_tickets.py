@@ -12,6 +12,7 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterable, Optional
 
 from sqlalchemy import select
@@ -153,6 +154,7 @@ class ProjectTicket:
     requirement_version: Optional[str]
     text: str
     fix_version: Optional[str]
+    named_in_version: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,7 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
             select(Version).where(Version.project_id == project.id, Version.plane_issue_id.is_not(None))
         ).scalars()
     }
+    named = versions_naming_tickets(db, project)
     rows: list[ProjectTicket] = []
     for issue in gateway.module_tickets(module["id"]):
         state, group = states.get(issue.get("state"), ("", ""))
@@ -228,6 +231,7 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
                 requirement_version=version,
                 text=ticket_text(issue),
                 fix_version=fixes.get(issue["id"]),
+                named_in_version=named.get(identifier(gateway, issue)),
             )
         )
     rows.sort(key=lambda t: t.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -273,6 +277,42 @@ class LinkedTicket:
     issue_id: str
     identifier: str
     url: str
+
+
+#: DEV-453: a ticket's identifier as a Zadanie names it (DEV-434) — whole, not the end of a longer word (the digits
+#: are taken greedily, so DEV-112 is never read as DEV-11).
+_TICKET_ID = re.compile(r"(?<![A-Za-z0-9-])([A-Z][A-Z0-9]*-\d+)")
+#: Where a version's Zadanie lies in the project — the cockpit writes it there when the version is founded.
+CUSTOMER_REQUIREMENTS = "docs/specs/versions/v{number}/customer-requirements.md"
+
+
+def versions_naming_tickets(db: Session, project: Project) -> dict[str, str]:
+    """DEV-453 — ``{ticket identifier: "vX"}`` for every ticket a version's Zadanie of the project names: the fast
+    fix's directive (its kickoff) or the version's ``customer-requirements.md``. The oldest version naming it wins —
+    the one its work went into.
+
+    20.11.2026 NEX HelpDesk: DEV-434 was fixed in 0.1.1, a fast fix started from the project's dialog with the ticket in
+    its directive, and DEV-412 was the Zadanie of the first version; neither had the version's link to the ticket (only
+    a fast fix started at the ticket gets it), so Plane tikety offered „Spustiť rýchlu opravu“ for work already done."""
+    from backend.services import fast_fix
+
+    found: dict[str, str] = {}
+    versions = (
+        db.execute(select(Version).where(Version.project_id == project.id).order_by(Version.created_at)).scalars().all()
+    )
+    for version in versions:
+        texts = [fast_fix.kickoff_directive(db, version.id) or ""]
+        # A version renamed at its first PROD (DEV-449) keeps its Zadanie under the number it was built as.
+        for number in {version.version_number, version.graduated_from} - {None} if project.source_path else ():
+            doc = Path(project.source_path) / CUSTOMER_REQUIREMENTS.format(number=number)
+            try:
+                texts.append(doc.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                pass
+        for text in texts:
+            for ticket in _TICKET_ID.findall(text):
+                found.setdefault(ticket, f"v{version.version_number}")
+    return found
 
 
 def identifier(gateway: PlaneGateway, issue: dict) -> str:

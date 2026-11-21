@@ -66,6 +66,31 @@ def _normalized(text: str) -> list[str]:
     return [line.rstrip() for line in text.replace("\r\n", "\n").strip("\n").split("\n")] if text.strip() else []
 
 
+#: DEV-444: the lines of a schema document that ARE the structure — headings, table rows, list items (keys, checks,
+#: indexes, triggers) and lines of code blocks. Paragraphs of prose are its description.
+_STRUCTURE_LINE = re.compile(r"^\s*(#|\||[-*+] |\d+\. )")
+
+
+def _structural(text: str) -> list[str]:
+    """DEV-444 — the structure a schema document describes, without its description.
+
+    20.11.2026 Orthodox Hermenia 0.2.0: only the introduction of ``DATABASE_SCHEMAS.md`` changed (the template's
+    version and migrations named in it), yet the cockpit said „Návrh mení štruktúru databázy … pribúda 13 a ubúda 2
+    riadkov“ and asked Ri to approve. Compared is what follows the introduction (from the first second-level heading)
+    and of it only headings, table rows, list items and code — a sentence of prose changes no table."""
+    lines = _normalized(text)
+    start = next((i for i, line in enumerate(lines) if line.startswith("## ")), len(lines))
+    kept: list[str] = []
+    in_code = False
+    for line in lines[start:]:
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            kept.append(line)
+        elif in_code or (line.strip() and _STRUCTURE_LINE.match(line)):
+            kept.append(line)
+    return kept
+
+
 @dataclass(frozen=True)
 class SchemaComparison:
     """The version's schema document against the approved one in the Knowledge Base."""
@@ -80,7 +105,8 @@ class SchemaComparison:
     @property
     def changes(self) -> bool:
         """The version asks for a schema Ri has not approved yet."""
-        return self.version_doc is not None and _normalized(self.version_doc) != _normalized(self.kb_doc or "")
+        # DEV-444: the structure, not its description — a changed sentence of prose asks no approval.
+        return self.version_doc is not None and _structural(self.version_doc) != _structural(self.kb_doc or "")
 
 
 def _read(path: Path) -> Optional[str]:
@@ -97,7 +123,7 @@ def compare(project_dir: Path, version_rel: str, kb: Path, slug: str) -> SchemaC
     if version_doc is None:
         return SchemaComparison(version_doc=None, kb_doc=kb_doc)
     added = removed = 0
-    for line in difflib.ndiff(_normalized(kb_doc or ""), _normalized(version_doc)):
+    for line in difflib.ndiff(_structural(kb_doc or ""), _structural(version_doc)):
         if line.startswith("+ "):
             added += 1
         elif line.startswith("- "):

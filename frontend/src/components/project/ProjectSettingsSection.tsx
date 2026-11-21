@@ -52,6 +52,8 @@ interface Props {
   onSaved: (project: ProjectRead) => void;
   /** False for a user who may look but not change this project. */
   canEdit: boolean;
+  /** DEV-452: after every upgrade or save of the template here — the page's other upgrade offers read again. */
+  onUpgraded?: () => void;
 }
 
 interface FormState {
@@ -126,7 +128,7 @@ function diff(project: ProjectRead, form: FormState): ProjectUpdate {
   return out;
 }
 
-export default function ProjectSettingsSection({ project, onSaved, canEdit }: Props) {
+export default function ProjectSettingsSection({ project, onSaved, canEdit, onUpgraded }: Props) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormState>(() => toForm(project));
   const [saving, setSaving] = useState(false);
@@ -195,6 +197,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
       setError(humanizeApiError(err, "Šablónu aplikácie sa nepodarilo povýšiť"));
     } finally {
       setUpgrading(false);
+      onUpgraded?.();
     }
   };
 
@@ -208,6 +211,7 @@ export default function ProjectSettingsSection({ project, onSaved, canEdit }: Pr
       setError(humanizeApiError(err, "Povýšenie šablóny sa nepodarilo uložiť do gitu"));
     } finally {
       setUpgrading(false);
+      onUpgraded?.();
     }
   };
 

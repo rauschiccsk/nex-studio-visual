@@ -25,7 +25,8 @@ RULES = ".claude/agents/ai-agent/CLAUDE.md"
 SKILL = ".claude/skills/fresh/SKILL.md"
 TASK_PLAN = "docs/specs/versions/v1.0.0/spec/task-plan.md"
 
-STAGED = "MEMORY.md"
+# DEV-451: the agent's MEMORY.md is no longer the card's work (saved when a version is founded) — a staged document is.
+STAGED = "docs/notes.md"
 CHANGED = "frontend/a.ts"
 DELETED = "docs/old-notes.md"
 DELETED_STAGED = "docs/retired.md"
@@ -60,7 +61,7 @@ def workspace(tmp_path) -> Path:
     _git(ws, "add", "-A")
     _git(ws, "commit", "-q", "-m", "founding")
 
-    _write(ws, STAGED, "notes of the agent\n")
+    _write(ws, STAGED, "notes of the Manažér\n")
     _git(ws, "add", STAGED)
     _write(ws, CHANGED, "export const a = 2;\n")
     (ws / DELETED).unlink()

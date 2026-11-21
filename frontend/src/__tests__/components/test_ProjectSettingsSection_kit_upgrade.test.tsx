@@ -5,7 +5,7 @@
  * founded — the Manažér: „Ja nevidím možnosť povýšiť“. Director: „Súhlasím“.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const api = vi.hoisted(() => ({
@@ -74,8 +74,8 @@ beforeEach(() => {
   api.upgradeAppKitApi.mockResolvedValue({ upgraded: true, target_version: "0.16.0", committed: true });
 });
 
-function open(project: ProjectRead = PROJECT) {
-  render(<ProjectSettingsSection project={project} canEdit onSaved={vi.fn()} />);
+function open(project: ProjectRead = PROJECT, onUpgraded?: () => void) {
+  render(<ProjectSettingsSection project={project} canEdit onSaved={vi.fn()} onUpgraded={onUpgraded} />);
   fireEvent.click(screen.getByRole("button", { name: /Upraviť/ }));
 }
 
@@ -128,5 +128,32 @@ describe("ProjectSettingsSection — the template's newest release (DEV-417)", (
 
     expect(await screen.findByTestId("kit-unsaved")).toBeInTheDocument();
     expect(screen.queryByTestId("kit-upgrade")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectSettingsSection — the page hears of the upgrade (DEV-452)", () => {
+  it("after the upgrade the page is told, so the offer under Zadanie od Deda reads the new state", async () => {
+    api.getAppKitStatusApi.mockResolvedValueOnce(kit("0.15.2")).mockResolvedValueOnce(kit("0.16.0"));
+    const onUpgraded = vi.fn();
+    open(PROJECT, onUpgraded);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Povýšiť na v0.16.0" }));
+
+    await waitFor(() => expect(onUpgraded).toHaveBeenCalledTimes(1));
+    expect(api.getAppKitStatusApi.mock.invocationCallOrder[1]).toBeLessThan(onUpgraded.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("saving an unsaved upgrade tells the page too", async () => {
+    api.getAppKitStatusApi
+      .mockResolvedValueOnce(kit("0.15.2", { uncommitted: "0.16.0" }))
+      .mockResolvedValueOnce(kit("0.16.0"));
+    api.commitAppKitApi.mockResolvedValue({ committed: true });
+    const onUpgraded = vi.fn();
+    open(PROJECT, onUpgraded);
+
+    const note = await screen.findByTestId("kit-unsaved");
+    fireEvent.click(within(note).getByRole("button"));
+
+    await waitFor(() => expect(onUpgraded).toHaveBeenCalledTimes(1));
   });
 });

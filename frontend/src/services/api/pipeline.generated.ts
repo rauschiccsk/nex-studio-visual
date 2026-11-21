@@ -6872,6 +6872,11 @@ export interface components {
              */
             issue_id: string;
             /**
+             * Named In Version
+             * @description The version whose Zadanie names the ticket — its work is there (DEV-453).
+             */
+            named_in_version?: string | null;
+            /**
              * Requirement
              * @description REQ-N of the Zásobník that founded the ticket.
              */

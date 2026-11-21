@@ -214,3 +214,27 @@ def test_commit_pin_upgrade_stages_the_lockfile(tmp_path: Path, monkeypatch) -> 
     # The lockfile is what `npm ci` reads — committing the manifest alone would ship the old version.
     assert "frontend/package-lock.json" in committed
     assert "frontend/package.json" in committed
+
+
+def test_an_upgrade_to_what_git_already_has_is_saved_without_a_new_commit(tmp_path: Path, monkeypatch) -> None:
+    """DEV-452 — 17.11.2026 NEX Manager: the template upgraded again to the version its project already had; ``git
+    commit`` ended 1 („nothing to commit“) and the cockpit said the upgrade was not saved."""
+
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    _seed(tmp_path)
+    _git("init", "-q")
+    _git("config", "user.email", "test@example.com")
+    _git("config", "user.name", "Test")
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "initial")
+    monkeypatch.setattr(nexshared, "resolve_lockfile", _resolver("0.15.0"))
+    assert nexshared.upgrade_source_pin(str(tmp_path), "0.15.0") is True
+    assert nexshared.commit_pin_upgrade(str(tmp_path), "0.15.0") is True
+    first = _git("rev-parse", "HEAD")
+
+    assert nexshared.commit_pin_upgrade(str(tmp_path), "0.15.0") is True
+    assert _git("rev-parse", "HEAD") == first, "nothing new to commit — no empty commit either"

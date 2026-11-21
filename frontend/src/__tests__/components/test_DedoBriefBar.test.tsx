@@ -361,3 +361,19 @@ describe("Nová verzia zo zadania ponúkne povýšenie šablóny ako stránka �
     expect(screen.queryByText("K dispozícii je novšia šablóna aplikácie")).toBeNull();
   });
 });
+
+describe("DEV-452 — an upgrade in Nastavenia reaches the offers of a new version", () => {
+  it("a new reload key reads the template, nex-shared and the working tree again", async () => {
+    const proposal = navrh({ proposed_action: "new_version", proposed_version_number: "1.1.0" });
+    const props = { projectId: PROJEKT, hasTemplate: true, proposal, onProposal: vi.fn(), onVersion: vi.fn() };
+    const { rerender } = render(<DedoBriefBar {...props} reloadKey={0} />);
+    await waitFor(() => expect(getAppKitStatusApi).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getGitStatusApi).toHaveBeenCalledTimes(1));
+
+    rerender(<DedoBriefBar {...props} reloadKey={1} />);
+
+    await waitFor(() => expect(getAppKitStatusApi).toHaveBeenCalledTimes(2));
+    expect(getNexsharedStatusApi).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(getGitStatusApi).toHaveBeenCalledTimes(2));
+  });
+});

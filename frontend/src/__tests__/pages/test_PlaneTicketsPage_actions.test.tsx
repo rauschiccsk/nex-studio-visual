@@ -48,6 +48,7 @@ function ticket(over: Partial<PlaneTicket> = {}): PlaneTicket {
     requirement_version: null,
     text: "Číslo faktúry je v ISDOC len vo variabilnom symbole.\n\nOver aj dobropis.",
     fix_version: null,
+    named_in_version: null,
     ...over,
   };
 }
@@ -80,6 +81,18 @@ describe("PlaneTicketsPage — from a ticket (DEV-122)", () => {
     const fixed = within(await row("DEV-131"));
     expect(fixed.queryByRole("button")).toBeNull();
     expect(fixed.getByText("Rýchla oprava v1.9.1")).toBeInTheDocument();
+  });
+
+  it("DEV-453: a ticket a version's Zadanie names shows the version and offers no fast fix", async () => {
+    list.mockResolvedValue(
+      answer(ticket(), ticket({ issue_id: "i434", identifier: "DEV-434", named_in_version: "v0.1.1" })),
+    );
+    render(<PlaneTicketsPage />);
+
+    const done = within(await row("DEV-434"));
+    expect(done.getByText("Vo verzii v0.1.1")).toBeInTheDocument();
+    expect(done.queryByRole("button")).toBeNull();
+    expect(within(await row("DEV-114")).getByRole("button", { name: /Spustiť rýchlu opravu/ })).toBeInTheDocument();
   });
 
   it("offers nothing at a finished ticket", async () => {

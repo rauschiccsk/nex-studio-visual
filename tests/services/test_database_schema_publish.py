@@ -261,7 +261,8 @@ def test_a_first_schema_is_a_change(tmp_path):
     cmp = database_schema.compare(_project(tmp_path, SCHEMA), REL, kb, "career-asistent")
 
     assert cmp.changes is True and cmp.kb_doc is None
-    assert cmp.added_lines == len(SCHEMA.splitlines()) and cmp.removed_lines == 0
+    # DEV-444: the lines counted are the structure (headings, table rows, list items), not the prose around it.
+    assert cmp.added_lines == len(database_schema._structural(SCHEMA)) and cmp.removed_lines == 0
 
 
 def test_the_same_schema_differing_only_in_trailing_space_is_no_change(tmp_path):

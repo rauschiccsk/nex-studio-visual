@@ -79,9 +79,11 @@ interface Props {
   onProposal: (proposal: DedoProjectProposal | null) => void;
   /** Kam ísť, keď z zadania vznikla verzia. */
   onVersion: (versionId: string, started: boolean) => void | Promise<void>;
+  /** DEV-452: changes when the template was upgraded elsewhere on the page — the offers and the tree read again. */
+  reloadKey?: number;
 }
 
-export default function DedoBriefBar({ projectId, hasTemplate, proposal, onProposal, onVersion }: Props) {
+export default function DedoBriefBar({ projectId, hasTemplate, proposal, onProposal, onVersion, reloadKey }: Props) {
   const proposalId = proposal?.id ?? null;
 
   // Jeho úpravy prežijú odchod z obrazovky. Bez toho by sa vrátil k nedotknutému originálu a odoslal
@@ -117,7 +119,7 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
   }, [projectId]);
   useEffect(() => {
     if (foundsVersion) void readTree();
-  }, [foundsVersion, proposalId, readTree]);
+  }, [foundsVersion, proposalId, readTree, reloadKey]);
 
   useEffect(() => {
     if (proposalId) {
@@ -264,6 +266,7 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
             projectId={projectId}
             hasTemplate={hasTemplate}
             clean={treeClean === true}
+            reloadKey={reloadKey}
             afterwards={readTree}
           />
         )}

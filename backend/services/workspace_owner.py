@@ -25,6 +25,9 @@ COCKPIT_WRITES: tuple[str, ...] = (
     "docs/specs/versions/*/spec/task-plan.md",
 )
 
+#: DEV-451: the AI Agent's own memory of the project (``project_memory``) — its notes, not the Manažér's unsaved work.
+AGENT_MEMORY: tuple[str, ...] = ("MEMORY.md", ".memory/**")
+
 
 def chown_workspace(source_path: str | None) -> None:
     """Best-effort ``chown -R 1000:1000`` of a freshly created project workspace.

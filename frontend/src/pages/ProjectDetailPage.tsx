@@ -145,6 +145,8 @@ export default function ProjectDetailPage() {
   // Zadanie, ktoré Dedo pripravil pre prácu, ktorá sa ešte nezačala (ICCINT-152). `null` je bežný
   // stav — väčšinu času nič nenavrhuje a stránka sa má tváriť presne tak, ako sa tvárila doteraz.
   const [dedoProposal, setDedoProposal] = useState<DedoProjectProposal | null>(null);
+  // DEV-452: bumped after the template is upgraded in Nastavenia — the brief panel's offers read the new state.
+  const [libraryReload, setLibraryReload] = useState(0);
   const [fastFixOpen, setFastFixOpen] = useState(false);
   const [fastFixDirective, setFastFixDirective] = useState("");
   // DEV-32: a half-written quick-fix instruction survives leaving the screen; it comes back when he opens the
@@ -576,6 +578,7 @@ export default function ProjectDetailPage() {
         project={project}
         canEdit={mayOperateProject(user, project.created_by)}
         onSaved={setProject}
+        onUpgraded={() => setLibraryReload((n) => n + 1)}
       />
 
       {/* DEV-164: a Štandardný project can become a Web project (administration + public web); a Web one names both. */}
@@ -621,6 +624,7 @@ export default function ProjectDetailPage() {
             hasTemplate={!!project.template}
             proposal={dedoProposal}
             onProposal={setDedoProposal}
+            reloadKey={libraryReload}
             onVersion={async (versionId, started) => {
               // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
               // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).

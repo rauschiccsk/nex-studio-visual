@@ -357,6 +357,17 @@ def commit_pin_upgrade(
         )
         if add.returncode != 0:
             return False
+        # DEV-452: the pins already in git as they are on disk — an upgrade to what the project has — is saved, not
+        # „neuložené“: ``git commit`` would end 1 („nothing to commit“).
+        unchanged = subprocess.run(
+            ["git", "-C", str(root), "diff", "--cached", "--quiet", "HEAD", "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if unchanged.returncode == 0:
+            return True
         commit = subprocess.run(
             [
                 "git",

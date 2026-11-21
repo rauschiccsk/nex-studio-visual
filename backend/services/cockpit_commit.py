@@ -51,13 +51,13 @@ def _known(root: Path, paths: Sequence[str]) -> list[str]:
     ]
 
 
-def _commit(root: Path, known: Sequence[str], message: str) -> subprocess.CompletedProcess:
+def _commit(root: Path, known: Sequence[str], message: str, *, verify: bool = True) -> subprocess.CompletedProcess:
     """``git commit`` of ``known`` alone — the paths after ``--`` make it ``--only``, and the project's check then sees
     only them. It runs in its own process group: when it does not end in time, the whole group goes (git, the check and
     the ``tsc`` the check started) and so does the index lock git held for it — a killed commit left
     ``.git/index.lock`` behind, and every later git call in the project refused to run. Raises ``TimeoutExpired``."""
     proc = subprocess.Popen(
-        ["git", "-C", str(root), "commit", "-q", "-m", message, "--", *known],
+        ["git", "-C", str(root), "commit", "-q", *([] if verify else ["--no-verify"]), "-m", message, "--", *known],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -85,7 +85,7 @@ def _reason(done: subprocess.CompletedProcess) -> str:
     return ((failed or lines or [f"kód {done.returncode}"])[-1])[:200]
 
 
-def commit(project_root: Path, paths: Sequence[str], message: str) -> Optional[str]:
+def commit(project_root: Path, paths: Sequence[str], message: str, *, verify: bool = True) -> Optional[str]:
     """Commit the project's ``paths`` (relative to its root) and nothing else, through the project's pre-commit check.
 
     ``None`` when they are in git — committed now, nothing to commit, or no git at all; otherwise why not, in the
@@ -102,7 +102,7 @@ def commit(project_root: Path, paths: Sequence[str], message: str) -> Optional[s
         if _git(root, "diff", "--cached", "--quiet", "--", *known).returncode == 0:
             return None
         try:
-            done = _commit(root, known, message)
+            done = _commit(root, known, message, verify=verify)
         except subprocess.TimeoutExpired:
             logger.warning(
                 "commit of %s in %s did not end in %s s", known, root, settings.project_commit_timeout_seconds

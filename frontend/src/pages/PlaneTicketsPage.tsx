@@ -172,6 +172,12 @@ export default function PlaneTicketsPage() {
                     Rýchla oprava {t.fix_version}
                   </span>
                 )}
+                {/* DEV-453: a version's Zadanie names the ticket — its work is in that version, no fast fix is offered. */}
+                {!t.fix_version && t.named_in_version && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-accent-primary)]/15 text-[var(--color-accent-primary)]">
+                    Vo verzii {t.named_in_version}
+                  </span>
+                )}
               </div>
               <div className="text-sm text-[var(--color-text-primary)] mt-1">{t.title}</div>
               <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -187,7 +193,7 @@ export default function PlaneTicketsPage() {
                   {n.text}
                 </div>
               ))}
-              {!t.closed && !t.requirement && !t.fix_version && (
+              {!t.closed && !t.requirement && !t.fix_version && !t.named_in_version && (
                 <div className="flex flex-wrap items-center gap-2 mt-2">
                   <button type="button" onClick={() => putToBacklog(t)} disabled={toBacklog !== null} className={ACTION}>
                     {toBacklog === t.issue_id ? <Loader2 size={13} className="animate-spin" /> : <Inbox size={13} />}
@@ -203,7 +209,7 @@ export default function PlaneTicketsPage() {
                   </button>
                 </div>
               )}
-              {fixing === t.issue_id && !t.requirement && !t.fix_version && (
+              {fixing === t.issue_id && !t.requirement && !t.fix_version && !t.named_in_version && (
                 <PlaneTicketFastFix
                   ticket={t}
                   project={{ id: data.project_id, slug: slug ?? "", name: data.project_name }}

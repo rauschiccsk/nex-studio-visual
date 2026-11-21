@@ -142,7 +142,7 @@ async def test_a_navrh_that_changes_the_schema_says_so_and_waits_for_ri(db_sessi
         "path": orchestrator._database_schema_rel(version.version_number),
         "kb_path": f"projects/{project.slug}/DATABASE_SCHEMAS.md",
         "kb_exists": False,
-        "added_lines": len(SCHEMA.splitlines()),
+        "added_lines": len(database_schema._structural(SCHEMA)),  # DEV-444: the structure, not the prose
         "removed_lines": 0,
     }
     assert "prvá schéma" in note.content
@@ -495,7 +495,7 @@ def test_the_board_says_what_the_manager_is_approving(db_session, monkeypatch, t
         "kb_path": f"projects/{project.slug}/DATABASE_SCHEMAS.md",
         "kb_exists": False,
         "changes": True,
-        "added_lines": len(SCHEMA.splitlines()),
+        "added_lines": len(database_schema._structural(SCHEMA)),  # DEV-444: the structure, not the prose
         "removed_lines": 0,
         "approver_role": "ri",
     }

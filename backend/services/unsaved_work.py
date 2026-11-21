@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from backend.services import git_state, workspace_owner
+from backend.services import cockpit_commit, git_state, workspace_owner
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,11 @@ COULD_NOT_CHECK = (
 
 _CLEAN = {"clean": True, "dirty_count": 0, "files": [], "truncated": False}
 
+#: What the unsaved-work check leaves out: the cockpit's own files (DEV-174) and the agent's memory (DEV-451).
+_NOT_THE_MANAGERS = (*workspace_owner.COCKPIT_WRITES, *workspace_owner.AGENT_MEMORY)
+#: DEV-451: the commit that keeps what the agent noted outside its turns' commits.
+MEMORY_COMMIT = "chore(memory): the agent's notes from its previous work"
+
 
 def status(source_path: Optional[str]) -> dict:
     """The project's unsaved work — what the New-Version page shows (``GET /projects/{id}/git-status``) and what
@@ -46,19 +52,20 @@ def status(source_path: Optional[str]) -> dict:
     if not git_state.workspace_is_git_repo(source_path):
         return {**_CLEAN, "not_a_repo": True}
     # DEV-174: the cockpit's own files (agents' rules and skills, the task plan) are not the Manažér's unsaved work.
-    return git_state.working_tree_status(source_path, exclude=workspace_owner.COCKPIT_WRITES)
+    # DEV-451: nor is the agent's memory — it is saved when a version is founded (:func:`refusal`).
+    return git_state.working_tree_status(source_path, exclude=_NOT_THE_MANAGERS)
 
 
 def save(source_path: str, message: str) -> dict:
     """„Uložiť ich“ — commits exactly what :func:`status` shows (DEV-203): the cockpit's own files stay out of the
     project's git, as they stay off the card. ``git_state.commit_all``'s answer."""
-    return git_state.commit_all(source_path, message, exclude=workspace_owner.COCKPIT_WRITES)
+    return git_state.commit_all(source_path, message, exclude=_NOT_THE_MANAGERS)
 
 
 def discard(source_path: str) -> dict:
     """„Zahodiť“ — throws away exactly what :func:`status` shows (DEV-203) and leaves the cockpit's own files as the
     cockpit wrote them. ``git_state.discard_all``'s answer."""
-    return git_state.discard_all(source_path, exclude=workspace_owner.COCKPIT_WRITES)
+    return git_state.discard_all(source_path, exclude=_NOT_THE_MANAGERS)
 
 
 def refusal(project_id: UUID, source_path: Optional[str]) -> Optional[dict]:
@@ -66,7 +73,12 @@ def refusal(project_id: UUID, source_path: Optional[str]) -> Optional[dict]:
     whose work it is and what is unsaved (the shape of :func:`status`), so a screen that knows only a version can still
     save or discard it.
 
-    When git cannot tell, founding is refused as well — „couldn't ask“ is not „clean“ — and the body carries no list."""
+    When git cannot tell, founding is refused as well — „couldn't ask“ is not „clean“ — and the body carries no list.
+
+    DEV-451: the agent's memory is saved first — 20.11.2026 Orthodox Hermenia: after 0.2.0 its ``MEMORY.md`` stayed
+    outside git and the next fast fix stopped on „Projekt má 1 zmena, ktoré neboli uložené“, a question about the
+    agent's own notes the Manažér could only guess at."""
+    save_agent_memory(source_path)
     try:
         found = status(source_path)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
@@ -79,3 +91,17 @@ def refusal(project_id: UUID, source_path: Optional[str]) -> Optional[dict]:
         "project_id": str(project_id),
         "unsaved_work": found,
     }
+
+
+def save_agent_memory(source_path: Optional[str]) -> Optional[str]:
+    """DEV-451 — commit what the agent noted in its memory and did not commit itself; ``None`` when it is in git (or
+    there was nothing), else why not (logged — a memory that stays unsaved never blocks founding, it is left out of
+    the unsaved work). Nothing else is committed."""
+    if not source_path or not git_state.workspace_is_git_repo(source_path):
+        return None
+    # Notes in Markdown, no code: the project's check (type-checks, up to minutes) would only outlast the founding's
+    # CHECK_CAP — as the template's pins, they are committed without it (DEV-400); the project's CI sees the commit.
+    why = cockpit_commit.commit(Path(source_path), ["MEMORY.md", ".memory"], MEMORY_COMMIT, verify=False)
+    if why:
+        logger.warning("the agent's memory in %s was not saved: %s", source_path, why)
+    return why

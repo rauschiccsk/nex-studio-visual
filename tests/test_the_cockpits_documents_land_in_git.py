@@ -165,8 +165,8 @@ def test_files_left_after_the_commit_are_said(tmp_path, monkeypatch):
     _write(root, SPEC)
     real = cockpit_commit._commit
 
-    def _commit_while_the_agent_writes(*args):
-        done = real(*args)
+    def _commit_while_the_agent_writes(*args, **kwargs):
+        done = real(*args, **kwargs)
         _write(root, SCHEMA)  # written while the check ran
         return done
 

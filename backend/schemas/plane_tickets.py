@@ -28,6 +28,9 @@ class PlaneTicketRead(BaseModel):
     requirement_version: Optional[str] = Field(default=None, description="The version that requirement is in.")
     text: str = Field(default="", description="The ticket's text without its „Robí:“ line — a fast fix's directive.")
     fix_version: Optional[str] = Field(default=None, description="The fast fix started from the ticket (DEV-122).")
+    named_in_version: Optional[str] = Field(
+        default=None, description="The version whose Zadanie names the ticket — its work is there (DEV-453)."
+    )
 
 
 class ProjectPlaneTicketsRead(BaseModel):
