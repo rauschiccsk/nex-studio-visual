@@ -10,7 +10,6 @@ Whenever a new model is added, import it here so the Alembic autogenerate
 pipeline picks it up automatically.
 """
 
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
@@ -31,7 +30,7 @@ from backend.db.models.versions import Version
 ALL_MODELS: tuple[type, ...] = (
     User,
     Project,
-    BacklogItem,
+    VersionTicket,
     Epic,
     Feat,
     Task,
@@ -50,7 +49,6 @@ ALL_MODELS: tuple[type, ...] = (
 
 __all__ = [
     "ALL_MODELS",
-    "BacklogItem",
     "VersionTicket",
     "Base",
     "Credential",

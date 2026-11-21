@@ -125,10 +125,6 @@ class PoradcaMessage(Base, UUIDMixin, TimestampMixin):
     #: The version the question referred to when it was asked — a conversation may change its version, yet a version's
     #: Náklady must sum only what was actually asked about it. Empty = the whole project.
     version_id = Column(UUID(as_uuid=True), ForeignKey("versions.id", ondelete="SET NULL"), nullable=True)
-    #: DEV-29: the backlog item the Manažér saved from this answer's request — a second click returns it.
-    captured_backlog_item_id = Column(
-        UUID(as_uuid=True), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True
-    )
     #: DEV-119: the ticket in Plane a person founded from this answer's proposal — a second click returns it.
     plane_issue_id = Column(String(64), nullable=True)
     plane_identifier = Column(String(32), nullable=True)

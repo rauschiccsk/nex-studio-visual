@@ -284,7 +284,6 @@ def _idea_read(db: Session, idea, conversation: PoradcaConversation) -> IdeaRead
         cost=ideas.cost(db, conversation.id),
         outcome_project_slug=project.slug if project else None,
         outcome_project_name=project.name if project else None,
-        outcome_backlog_number=ideas.outcome_backlog_number(db, idea),
         talk_in_project=conversation.project_id is not None,
         plane_identifier=idea.plane_identifier,
         plane_url=idea.plane_url,

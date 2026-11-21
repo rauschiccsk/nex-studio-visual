@@ -344,7 +344,6 @@ class IdeaRead(BaseModel):
     outcome_project_slug: Optional[str] = None
     outcome_project_name: Optional[str] = None
     #: When the brief was added to an existing project: the Zásobník requirement's number (REQ-N).
-    outcome_backlog_number: Optional[int] = None
     #: DEV-350 — the talk went on in the project's Poradca; ``False`` while open, or when it stayed with its author
     #: because he may not open the project it was added to.
     talk_in_project: bool = False

@@ -309,9 +309,7 @@ export default function IdeasPage() {
             <span>
               {current.state === "founded"
                 ? `Z nápadu vznikol projekt ${current.outcome_project_name}; zadanie je vo verzii 0.1.0.`
-                : current.outcome_backlog_number
-                  ? `Zadanie je v projekte ${current.outcome_project_name} ako požiadavka REQ-${current.outcome_backlog_number}.`
-                  : `Zadanie je tiketom projektu ${current.outcome_project_name}; verziu mu určí Manažér v Plane tiketoch.`}
+                : `Zadanie je tiketom projektu ${current.outcome_project_name}; verziu mu určí Manažér v Plane tiketoch.`}
               {current.plane_identifier
                 ? ` Tiket v DEV: ${current.plane_identifier}.`
                 : ""}{" "}

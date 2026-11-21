@@ -16,7 +16,6 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.config.settings import settings
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.poradca import PoradcaConversation, PoradcaMessage
 from backend.db.models.versions import Version
 from backend.services import plane_tickets
@@ -241,7 +240,6 @@ def test_a_click_founds_the_project_ticket_as_a_proposal_and_starts_nothing(setu
         "tiket ju nezakladá ani nespúšťa.</p>"
     )
     assert db_session.execute(select(func.count()).select_from(Version)).scalar_one() == versions
-    assert db_session.execute(select(BacklogItem).where(BacklogItem.project_id == project.id)).first() is None
 
 
 @pytest.mark.parametrize(

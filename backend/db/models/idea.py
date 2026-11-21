@@ -32,10 +32,6 @@ class Idea(Base, UUIDMixin, TimestampMixin):
     outcome = Column(String(16), nullable=True)
     #: The project the idea ended in — founded from it, or the one its brief was added to.
     outcome_project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
-    #: When the brief was added to an existing project: the Zásobník requirement it became (REQ-N).
-    outcome_backlog_item_id = Column(
-        UUID(as_uuid=True), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True
-    )
     #: The Poradca answer whose brief the outcome took — a second click finds the outcome instead of repeating it.
     outcome_message_id = Column(
         UUID(as_uuid=True), ForeignKey("poradca_messages.id", ondelete="SET NULL"), nullable=True

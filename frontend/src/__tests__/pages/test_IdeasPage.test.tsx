@@ -323,7 +323,7 @@ describe("an idea that needs another project goes on in the cockpit (DEV-350)", 
       talk_in_project: false,
       outcome_project_slug: "nex-knowledge",
       outcome_project_name: "NEX Knowledge",
-      outcome_backlog_number: 1,
+      plane_identifier: "DEV-610",
     });
     ideasApi.listIdeasApi.mockResolvedValue([added]);
     ideasApi.getIdeaApi.mockResolvedValue(added);

@@ -16,7 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
-from backend.db.models.backlog import BacklogItem
 from backend.db.models.foundation import User
 from backend.db.models.idea import OUTCOME_ADDED, OUTCOME_FOUNDED, Idea
 from backend.db.models.poradca import AUTHOR_PORADCA, DONE, PoradcaConversation, PoradcaMessage
@@ -154,11 +153,6 @@ def cost(db: Session, conversation_id: UUID) -> Optional[float]:
 
 def outcome_project(db: Session, idea: Idea) -> Optional[Project]:
     return db.get(Project, idea.outcome_project_id) if idea.outcome_project_id else None
-
-
-def outcome_backlog_number(db: Session, idea: Idea) -> Optional[int]:
-    item = db.get(BacklogItem, idea.outcome_backlog_item_id) if idea.outcome_backlog_item_id else None
-    return item.number if item is not None else None
 
 
 def _locked(db: Session, idea: Idea) -> Idea:
@@ -367,7 +361,6 @@ def back_to_ideas(db: Session, project_id: UUID) -> list[str]:
         idea.outcome = None
         idea.outcome_project_id = None
         idea.outcome_message_id = None
-        idea.outcome_backlog_item_id = None
         idea.concluded_at = None
         idea.plane_issue_id = idea.plane_identifier = idea.plane_url = None
         idea.deleted_at = None

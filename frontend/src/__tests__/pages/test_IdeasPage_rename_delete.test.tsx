@@ -50,7 +50,6 @@ const idea = (id: string, title: string, state: string, extra = {}) => ({
   cost: null,
   outcome_project_slug: null,
   outcome_project_name: null,
-  outcome_backlog_number: null,
   plane_identifier: null,
   plane_url: null,
   created_at: "2026-11-06T10:00:00Z",

@@ -32,7 +32,7 @@ describe("IdeaOutcomeActions (DEV-318)", () => {
 
   it("a brief for an existing project is added to its Zásobník with one click", async () => {
     const onEnded = vi.fn();
-    api.ideaAddedApi.mockResolvedValue({ ...IDEA, state: "added", outcome_backlog_number: 7 });
+    api.ideaAddedApi.mockResolvedValue({ ...IDEA, state: "added", plane_identifier: "DEV-610" });
     render(
       <MemoryRouter>
         <IdeaOutcomeActions idea={IDEA} message={message({ idea_addition: { project_slug: "nex-manager", title: "Skupiny" } })} onEnded={onEnded} />
@@ -40,6 +40,6 @@ describe("IdeaOutcomeActions (DEV-318)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Pridať do projektu nex-manager/ }));
     await waitFor(() => expect(api.ideaAddedApi).toHaveBeenCalledWith("i1", "m1"));
-    expect(onEnded).toHaveBeenCalledWith(expect.objectContaining({ state: "added", outcome_backlog_number: 7 }));
+    expect(onEnded).toHaveBeenCalledWith(expect.objectContaining({ state: "added", plane_identifier: "DEV-610" }));
   });
 });

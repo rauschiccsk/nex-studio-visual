@@ -146,7 +146,6 @@ export const IDEA: S["IdeaRead"] = {
   cost: 0.42,
   outcome_project_slug: null,
   outcome_project_name: null,
-  outcome_backlog_number: null,
   talk_in_project: false,
   plane_identifier: null,
   plane_url: null,

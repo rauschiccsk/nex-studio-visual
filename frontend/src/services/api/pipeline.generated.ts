@@ -5726,8 +5726,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Outcome Backlog Number */
-            outcome_backlog_number?: number | null;
             /** Outcome Project Name */
             outcome_project_name?: string | null;
             /** Outcome Project Slug */
@@ -5793,8 +5791,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Outcome Backlog Number */
-            outcome_backlog_number?: number | null;
             /** Outcome Project Name */
             outcome_project_name?: string | null;
             /** Outcome Project Slug */
@@ -5873,8 +5869,6 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Outcome Backlog Number */
-            outcome_backlog_number?: number | null;
             /** Outcome Project Name */
             outcome_project_name?: string | null;
             /** Outcome Project Slug */

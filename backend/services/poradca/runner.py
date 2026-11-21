@@ -787,7 +787,7 @@ def _wipe(db: Session, conversation: PoradcaConversation) -> Optional[Path]:
         db.execute(
             update(PoradcaMessage)
             .where(PoradcaMessage.conversation_id == conversation.id)
-            .values(content="", steps=[], attachments=[], error=None, captured_backlog_item_id=None)
+            .values(content="", steps=[], attachments=[], error=None)
         )
         db.execute(
             update(PoradcaConversation)
