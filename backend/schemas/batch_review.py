@@ -18,9 +18,13 @@ class BatchReviewRow(BaseModel):
     builder_option_id: Optional[str] = None
     poradca_label: Optional[str] = None
     poradca_why: Optional[str] = None
-    state: Literal["agree", "disagree", "manager", "missing", "waiting", "decided"]
-    #: The option both chose — sent by „Schváliť označené“; only on an agreement.
+    #: DEV-486 — what Poradca wants the Staviteľ to work in beside the choice; sent as the card's note.
+    poradca_instruction: Optional[str] = None
+    state: Literal["agree", "disagree", "missing", "waiting", "decided"]
+    #: Poradca's proposal, sent by „Schváliť všetko“: one of the card's options …
     option_id: Optional[str] = None
+    #: … or his own decision, word for word, when the card does not offer what he proposes.
+    free_text: Optional[str] = None
     decided_label: Optional[str] = None
     #: The cards whose premises this card's choice changes (DEV-34) — by number.
     related: list[int] = Field(default_factory=list)

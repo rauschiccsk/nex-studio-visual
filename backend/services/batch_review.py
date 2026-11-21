@@ -7,11 +7,17 @@ otázok je len maximálne 2-3 keď nesúhlasím s poradcom.“ Switchable per ac
 
 When the account that leads the project (``users.batch_review``) has it on and a build stops on new cards, the
 cockpit asks Poradca about all of them in one question (the phase's review conversation, DEV-138). Poradca writes one
-``<posudok karta="N">`` block per card: its choice, one sentence why, and whether the decision belongs to the Manažér
-alone (customer, money, what is offered). The summary compares it with the Staviteľ's recommendation: agreement, a
-disagreement, or the Manažér's own decision. Agreements are approved in one go through the ordinary ``decide`` action
-(``via=batch_review``, checked here again); everything else stays a card, decided one by one as before. When Poradca
-does not get the cards or does not answer, the cards simply wait one by one — the build never waits for the fast path.
+``<posudok karta="N">`` block per card: its choice, one sentence why, and what the Staviteľ should work in beside the
+choice (``pokyn``). The summary shows it beside the Staviteľ's recommendation, and one button approves Poradca's
+proposal on every card through the ordinary ``decide`` action (``via=batch_review``, checked here again): his choice,
+and his instruction as the card's note. A card the Manažér does not agree with he consults with Poradca and decides on
+its card. When Poradca does not get the cards or does not answer, the cards simply wait one by one — the build never
+waits for the fast path.
+
+DEV-486 — Director 21.11.2026: „Rýchla cesta má byť všetky otázky overené poradcom. … Ja to prečítam a ak všetko mi
+vyhovuje s jednám tlačítkom schválim všetky otázky. Chcem však mať možnosť, že v prípade môjho nesúhlasu podrobne
+rozobrať a prekonzuľtoať danú otázku. … pri overení Poradca pri cca 80% otázok mal aj nejaké dodatočné informácie pre
+Staviteľa, tu som to nevidel.“ Where the two disagree, Poradca's proposal is approved — he is the one who verified it.
 """
 
 from __future__ import annotations
@@ -38,14 +44,17 @@ BLOCK = "posudok"
 #: What ``decide`` carries when the Manažér approves agreements in the summary.
 VIA = "batch_review"
 _POSUDOK = re.compile(r'<posudok\s+karta="(\d{1,3})"\s*>(.*?)</posudok>', re.S)
-_FIELD = re.compile(r"^\s*(voľba|volba|prečo|preco|rozhoduje)\s*:\s*(.*)$", re.I | re.M)
+#: A line that starts a field of the block; the lines after it, up to the next field, carry on its value. „rozhoduje“
+#: came in answers before DEV-486 — read so that it never runs into the field above it, and ignored.
+_FIELD = re.compile(r"^\s*(voľba|volba|prečo|preco|pokyn(?:\s+pre\s+staviteľa)?|rozhoduje)\s*:\s*(.*)$", re.I)
+#: What Poradca writes where the Staviteľ needs no instruction.
+_NO_INSTRUCTION = {"", "-", "—", "–", "nič", "žiadny", "netreba", "pokyn netreba"}
 #: How the Manažér's own decision starts on a card (``pipeline_status.OWN_DECISION_LABEL``).
 OWN_DECISION = "Vlastné rozhodnutie"
 
 # The states of a row of the summary.
-AGREE = "agree"  # Poradca chose what the Staviteľ recommends — pre-approved
-DISAGREE = "disagree"  # another option, or an own decision
-MANAGER = "manager"  # a decision that belongs to the Manažér alone, whatever both proposed
+AGREE = "agree"  # Poradca chose what the Staviteľ recommends
+DISAGREE = "disagree"  # Poradca chose another option, or an own decision — his proposal is what is approved
 MISSING = "missing"  # Poradca did not assess this card
 WAITING = "waiting"  # Poradca is still answering
 DECIDED = "decided"  # the card is decided already
@@ -58,18 +67,32 @@ FAILED = "failed"
 NOT_READY = "Poradca teraz nevie bežať ({why}) — karty rozhodni po jednej ako doteraz."
 BUSY = "Poradca práve odpovedá v rozhovore kariet tejto fázy — karty rozhodni po jednej, alebo počkaj."
 NO_ANSWER = "Poradca súhrn nedokončil — karty rozhodni po jednej ako doteraz, s tlačidlom „Overiť s Poradcom“."
-NOT_AGREED = "Karta {number} nie je zhoda Staviteľa a Poradca — schváliť ju v súhrne nemožno, rozhodni ju na karte."
+NOT_PROPOSED = (
+    "Karta {number}: v súhrne sa schvaľuje len návrh Poradcu tak, ako ho súhrn ukazuje — obnov stránku a schváľ znova, "
+    "alebo kartu prekonzultuj."
+)
+NOT_ON_CARDS = "Stavba nestojí na kartách rozhodnutí — nie je čo posúdiť."
+NOT_WANTED = "Konto, ktoré vedie projekt, nemá rýchlu cestu s Poradcom zapnutú."
+STILL_ASSESSING = "Poradca karty práve posudzuje — súhrn sa ukáže, keď dopíše."
+
+
+class Refused(Exception):
+    """Why the cards cannot go to Poradca again now — one of the sentences above, for the Manažér (DEV-486). Its own
+    kind, not a ``ValueError``: the route shows only these, never an error from deeper in Poradca's machinery."""
+
 
 #: The request under the cards, in the Director's words of what he wants from Poradca.
 QUESTION_HEAD = (
-    "Posúď prosím naraz všetky karty rozhodnutí tejto konzultácie ({count}). Manažér chce súhrn: pri každej karte "
-    "návrh Staviteľa a tvoj návrh — schváli zhody a rozhodne len tam, kde sa nezhodnete alebo kde rozhoduje sám.\n\n"
+    "Posúď prosím naraz všetky karty rozhodnutí tejto konzultácie ({count}) — každú tak dôkladne, ako keby ťa Manažér "
+    "požiadal overiť len ju. Manažér si pri každej karte prečíta návrh Staviteľa a tvoj návrh a jedným tlačidlom "
+    "schváli tvoje návrhy: Staviteľ dostane pri každej karte tvoju voľbu a tvoj pokyn. Kartu, s ktorou nesúhlasí, s "
+    "tebou prekonzultuje.\n\n"
     "Ku každej karte napíš práve jeden blok v tomto tvare (bez ďalšieho textu vnútri):\n\n"
     '<posudok karta="N">\n'
     "voľba: presný text jednej z možností karty — alebo „Vlastné rozhodnutie: …“, keď nevyhovuje žiadna\n"
     "prečo: jedna veta\n"
-    "rozhoduje: poradca — alebo „manažér“, keď je to rozhodnutie, ktoré patrí len Manažérovi (zákazník, peniaze, "
-    "obchod, čo aplikácia ponúka); takú kartu Manažér nikdy neschvaľuje naslepo\n"
+    "pokyn: čo má Staviteľ pri tejto voľbe ešte zapracovať — len to, čo plánu v karte chýba (riziko, nepokrytý "
+    "prípad, rozpor so Špecifikáciou), krátko a s dôvodom; „—“, keď nič nechýba\n"
     "</posudok>\n\n"
     "Pred posudkom si over, čo treba (Špecifikácia, kód, dokumenty) — ako pri jednej karte. Karty:"
 )
@@ -81,7 +104,8 @@ class Assessment:
 
     choice: str
     why: str
-    manager: bool
+    #: What the Staviteľ should work in beside the choice — ``None`` when nothing.
+    instruction: Optional[str] = None
 
 
 @dataclass
@@ -93,9 +117,12 @@ class Row:
     builder_option_id: Optional[str]
     poradca_label: Optional[str] = None
     poradca_why: Optional[str] = None
+    poradca_instruction: Optional[str] = None
     state: str = WAITING
-    #: The option both chose — what „Schváliť označené“ sends; only on an agreement.
+    #: What „Schváliť všetko“ sends for the card — Poradca's proposal: one of the card's options …
     option_id: Optional[str] = None
+    #: … or, when he proposes what the card does not offer, his own decision word for word.
+    free_text: Optional[str] = None
     decided_label: Optional[str] = None
     related: list[int] = field(default_factory=list)
 
@@ -115,25 +142,46 @@ def wanted(db: Session, version_id: uuid.UUID) -> bool:
     return bool(owner is not None and owner.batch_review)
 
 
+def _fields(body: str) -> dict[str, str]:
+    """The fields of one block by name (``volba``, ``preco``, ``pokyn``) — a value may go on over several lines."""
+    found: dict[str, list[str]] = {}
+    current: Optional[str] = None
+    for line in body.splitlines():
+        started = _FIELD.match(line)
+        if started:
+            current = started.group(1).casefold().replace("ľ", "l").replace("č", "c").split()[0]
+            found.setdefault(current, []).append(started.group(2))
+        elif current is not None:
+            found[current].append(line)
+    return {name: "\n".join(lines).strip() for name, lines in found.items()}
+
+
 def parse(content: str) -> dict[int, Assessment]:
     """The ``<posudok>`` blocks of an answer, by card number; a block without a choice is no assessment."""
     found: dict[int, Assessment] = {}
     for number, body in _POSUDOK.findall(content or ""):
-        fields = {
-            name.casefold().replace("ľ", "l").replace("č", "c"): value.strip() for name, value in _FIELD.findall(body)
-        }
+        fields = _fields(body)
         choice = fields.get("volba", "").strip().strip('„“"')
         if not choice:
             continue
+        instruction = fields.get("pokyn", "").strip()
         found.setdefault(
             int(number),
             Assessment(
                 choice=choice,
                 why=fields.get("preco", ""),
-                manager=fields.get("rozhoduje", "").casefold().startswith("mana"),
+                instruction=None if instruction.casefold().strip(" .") in _NO_INSTRUCTION else instruction,
             ),
         )
     return found
+
+
+def _own_decision(choice: str) -> str:
+    """Poradca's own decision as the card takes it — without the „Vlastné rozhodnutie:“ in front."""
+    text = choice.strip()
+    if text.casefold().startswith(OWN_DECISION.casefold()):
+        text = text[len(OWN_DECISION) :].lstrip(" :—–-")
+    return text.strip()
 
 
 def _norm(text: str) -> str:
@@ -262,22 +310,23 @@ def summary(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
         assessment = assessed.get(number)
         if assessment is not None:
             row.poradca_label, row.poradca_why = assessment.choice, assessment.why
+            row.poradca_instruction = assessment.instruction
         if answer is not None and not answer.get("held"):
             row.state, row.decided_label = DECIDED, str(answer.get("label") or answer.get("free_text") or "")
         elif status != DONE:
             row.state = WAITING if status == RUNNING else MISSING
         elif assessment is None:
             row.state = MISSING
-        elif assessment.manager:
-            row.state = MANAGER
         else:
             option = _option_for(decision, assessment.choice)
-            if option is not None and recommended is not None and option.get("id") == recommended.get("id"):
-                row.state, row.option_id = AGREE, option.get("id")
+            if option is not None:
+                row.option_id = option.get("id")
+                agrees = recommended is not None and option.get("id") == recommended.get("id")
+                row.state = AGREE if agrees else DISAGREE
             else:
-                row.state = DISAGREE
+                row.free_text, row.state = _own_decision(assessment.choice), DISAGREE
         rows.append(row)
-    counts = {state: sum(1 for r in rows if r.state == state) for state in (AGREE, DISAGREE, MANAGER, MISSING, DECIDED)}
+    counts = {state: sum(1 for r in rows if r.state == state) for state in (AGREE, DISAGREE, MISSING, DECIDED)}
     return {
         "status": status,
         "failure": failure,
@@ -287,13 +336,68 @@ def summary(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
     }
 
 
-def check_agreement(db: Session, version_id: uuid.UUID, key: str, option_id: Optional[str]) -> None:
-    """``decide`` with ``via=batch_review`` approves only what the summary shows as an agreement — on that option.
+def check_proposal(
+    db: Session,
+    version_id: uuid.UUID,
+    key: str,
+    option_id: Optional[str],
+    free_text: Optional[str],
+    note: Optional[str],
+) -> dict[str, Any]:
+    """``decide`` with ``via=batch_review`` approves only Poradca's proposal as the summary shows it — his option or
+    his own decision, with his instruction as the note. Returns the card's row of the summary.
 
     Raises:
-        ValueError: the card is no agreement (the sentence for the Manažér).
+        ValueError: the card has no proposal of Poradca, or the request is not it (the sentence for the Manažér).
     """
     found = summary(db, version_id)
     row = next((r for r in (found or {}).get("rows", []) if r["key"] == key), None)
-    if row is None or row["state"] != AGREE or row["option_id"] != option_id:
-        raise ValueError(NOT_AGREED.format(number=row["number"] if row else "?"))
+    proposal = (row["option_id"], row["free_text"], row["poradca_instruction"]) if row else None
+    if row is None or row["state"] not in (AGREE, DISAGREE) or proposal != (option_id, free_text, note):
+        raise ValueError(NOT_PROPOSED.format(number=row["number"] if row else "?"))
+    return row
+
+
+def approved_in_summary(row: dict[str, Any], approver: str) -> str:
+    """What the history adds to the decision approved in the summary — whose proposal it was and who approved it."""
+    builder = (
+        "Staviteľ navrhol to isté"
+        if row["state"] == AGREE
+        else f"Staviteľ navrhol „{row['builder_label']}“"
+        if row.get("builder_label")
+        else "Staviteľ nenavrhol nič"
+    )
+    return f" — schválené v súhrne: návrh Poradcu, {builder} (schválil {approver})"
+
+
+def reviewed(db: Session, version_id: uuid.UUID, seq: int) -> bool:
+    """Were the cards of the consultation at ``seq`` handed to Poradca at once — does the Manažér decide them in the
+    summary, any of them in any order?"""
+    return _review_of(db, version_id, seq) is not None
+
+
+def again(db: Session, version_id: uuid.UUID) -> Optional[BatchReview]:
+    """Hand the open cards to Poradca at once again — after a failure, or when the summary came before the instruction
+    for the Staviteľ (DEV-486). Must run inside the event loop, like :func:`start_if_wanted`.
+
+    Raises:
+        Refused: nothing to assess, or Poradca is assessing them right now (the sentence for the Manažér).
+    """
+    from backend.db.models.poradca import RUNNING as MESSAGE_RUNNING
+    from backend.db.models.poradca import PoradcaMessage
+    from backend.services import orchestrator
+
+    state = db.execute(select(PipelineState).where(PipelineState.version_id == version_id)).scalar_one_or_none()
+    found = orchestrator._latest_consultation(db, version_id)
+    if state is None or not (state.status == "blocked" and state.block_reason == "decision_needed") or found is None:
+        raise Refused(NOT_ON_CARDS)
+    if not wanted(db, version_id):
+        raise Refused(NOT_WANTED)
+    record = _review_of(db, version_id, found[1])
+    if record is not None:
+        message = db.get(PoradcaMessage, record.answer_message_id) if record.answer_message_id else None
+        if message is not None and message.status == MESSAGE_RUNNING:
+            raise Refused(STILL_ASSESSING)
+        db.delete(record)
+        db.flush()
+    return start_if_wanted(db, version_id)

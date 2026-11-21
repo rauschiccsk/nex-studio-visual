@@ -573,6 +573,23 @@ def get_batch_review(
     return BatchReviewRead(**found) if found is not None else None
 
 
+@router.post("/{version_id}/batch-review/again", response_model=Optional[BatchReviewRead])
+async def post_batch_review_again(
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> Optional[BatchReviewRead]:
+    """DEV-486 — hand the open cards to Poradca at once again („Posúdiť znova“): after a failure, or when the summary
+    came before Poradca gave the Staviteľ his instructions. Async: Poradca answers in the background of the loop."""
+    authz.assert_version_access(db, current_user, version_id)
+    try:
+        batch_review.again(db, version_id)
+    except batch_review.Refused as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    found = batch_review.summary(db, version_id)
+    return BatchReviewRead(**found) if found is not None else None
+
+
 @router.get("/{version_id}", response_model=PipelineBoardRead)
 def get_board(
     version_id: uuid.UUID,

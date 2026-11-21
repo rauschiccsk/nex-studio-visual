@@ -4,6 +4,11 @@ approves a summary; switchable per account.
 Director 21.11.2026: „Chcel by som však vytvoriť nejakú rýchlejšiu cestu, kde Staviteľ zadal by tie otázky (všetky)
 Poradcovi, Následne mi kompaktne a prehľadne ukazál by otázku a návrh staviteľa a taktiež návrh Poradcu. … Chcem aby
 táto možnosť bola nastaviteľná pre každého používateľa osobitne.“
+
+DEV-486 — Director 21.11.2026: „Rýchla cesta má byť všetky otázky overené poradcom. … Ja to prečítam a ak všetko mi
+vyhovuje s jednám tlačítkom schválim všetky otázky. … pri overení Poradca pri cca 80% otázok mal aj nejaké dodatočné
+informácie pre Staviteľa, tu som to nevidel.“ Poradca gives each card his instruction for the Staviteľ, and the
+summary approves his proposal on every card — the card he proposes differently too.
 """
 
 from __future__ import annotations
@@ -33,15 +38,17 @@ ANSWER = """Posúdil som všetky karty.
 <posudok karta="1">
 voľba: Voľba A1
 prečo: Zodpovedá Špecifikácii §3.
-rozhoduje: poradca
+pokyn: —
 </posudok>
 
 <posudok karta="2">
 voľba: Voľba B2
 prečo: A2 by rozbila export.
-rozhoduje: poradca
+pokyn: Pri exporte over aj dobropis so zápornou sumou.
+Pridaj naň skúšku.
 </posudok>
 """
+INSTRUCTION_2 = "Pri exporte over aj dobropis so zápornou sumou.\nPridaj naň skúšku."
 
 
 def _owner(db, version) -> User:
@@ -80,16 +87,17 @@ def _reviewed(db, version, *, content=ANSWER, status=DONE, failure=None) -> Batc
 # ── Poradca's word per card ──────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_each_assessment_is_read_with_its_choice_why_and_who_decides():
+def test_each_assessment_is_read_with_its_choice_why_and_instruction_for_the_staviter():
     found = batch_review.parse(
         ANSWER
         + '<posudok karta="3">\nvoľba: „Vlastné rozhodnutie: dať oboje“\nprečo: x\nrozhoduje: manažér\n</posudok>'
         + '<posudok karta="4">\nprečo: bez voľby\n</posudok>'
     )
 
-    assert found[1] == batch_review.Assessment("Voľba A1", "Zodpovedá Špecifikácii §3.", False)
-    assert found[2].choice == "Voľba B2"
-    assert found[3] == batch_review.Assessment("Vlastné rozhodnutie: dať oboje", "x", True)
+    assert found[1] == batch_review.Assessment("Voľba A1", "Zodpovedá Špecifikácii §3.", None), "„—“ is no instruction"
+    assert found[2] == batch_review.Assessment("Voľba B2", "A2 by rozbila export.", INSTRUCTION_2)
+    # an answer from before DEV-486 says who decides — read without it, and it never runs into „prečo“
+    assert found[3] == batch_review.Assessment("Vlastné rozhodnutie: dať oboje", "x", None)
     assert 4 not in found, "an assessment without a choice is none"
 
 
@@ -98,15 +106,16 @@ def test_the_question_carries_every_card_with_the_builders_recommendation_marked
         [{"question": "Otázka 1?", "options": [{"label": "A", "recommended": True}, {"label": "B", "detail": "d"}]}]
     )
 
-    assert text.startswith("Posúď prosím naraz všetky karty rozhodnutí tejto konzultácie (1).")
+    assert text.startswith("Posúď prosím naraz všetky karty rozhodnutí tejto konzultácie (1) — každú tak dôkladne")
     assert '<posudok karta="N">' in text
+    assert "\npokyn: čo má Staviteľ pri tejto voľbe ešte zapracovať" in text and "rozhoduje" not in text
     assert "Karta 1: Otázka 1?\n- A (odporúča Staviteľ)\n- B — d" in text
 
 
 # ── the summary ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_the_summary_says_agreement_disagreement_and_the_managers_own_decisions(db_session):
+def test_the_summary_carries_poradcas_proposal_with_his_instruction_on_every_card(db_session):
     version = _seed_consultation(db_session)
     _reviewed(db_session, version)
 
@@ -114,19 +123,35 @@ def test_the_summary_says_agreement_disagreement_and_the_managers_own_decisions(
 
     assert found["status"] == "done"
     rows = {r["key"]: r for r in found["rows"]}
-    assert (rows["d1"]["state"], rows["d1"]["option_id"], rows["d1"]["builder_label"]) == ("agree", "a", "Voľba A1")
-    assert (rows["d2"]["state"], rows["d2"]["option_id"], rows["d2"]["poradca_label"]) == ("disagree", None, "Voľba B2")
-    assert rows["d2"]["poradca_why"] == "A2 by rozbila export."
-    assert found["counts"]["agree"] == 1 and found["counts"]["disagree"] == 1
+    d1, d2 = rows["d1"], rows["d2"]
+    assert (d1["state"], d1["option_id"], d1["free_text"], d1["poradca_instruction"]) == ("agree", "a", None, None)
+    assert (d2["state"], d2["option_id"], d2["poradca_label"], d2["builder_label"]) == (
+        "disagree",
+        "b",
+        "Voľba B2",
+        "Voľba A2",
+    ), "where they disagree, Poradca's option is what the summary approves"
+    assert (d2["poradca_why"], d2["poradca_instruction"]) == ("A2 by rozbila export.", INSTRUCTION_2)
+    assert found["counts"] == {"agree": 1, "disagree": 1, "missing": 0, "decided": 0}
 
 
-def test_a_card_that_belongs_to_the_manager_is_never_an_agreement(db_session):
+def test_poradcas_own_decision_is_his_proposal_word_for_word(db_session):
     version = _seed_consultation(db_session)
-    _reviewed(db_session, version, content=ANSWER.replace("rozhoduje: poradca", "rozhoduje: manažér", 1))
+    _reviewed(db_session, version, content=ANSWER.replace("voľba: Voľba B2", "voľba: „Vlastné rozhodnutie: dať oboje“"))
 
-    rows = {r["key"]: r for r in batch_review.summary(db_session, version.id)["rows"]}
+    d2 = {r["key"]: r for r in batch_review.summary(db_session, version.id)["rows"]}["d2"]
 
-    assert rows["d1"]["state"] == "manager" and rows["d1"]["option_id"] is None
+    assert (d2["state"], d2["option_id"], d2["free_text"]) == ("disagree", None, "dať oboje")
+
+
+def test_an_answer_from_before_says_who_decides_and_no_card_is_left_out_for_it(db_session):
+    version = _seed_consultation(db_session)
+    old = ANSWER.replace("pokyn: —", "rozhoduje: manažér", 1)
+    _reviewed(db_session, version, content=old)
+
+    d1 = {r["key"]: r for r in batch_review.summary(db_session, version.id)["rows"]}["d1"]
+
+    assert (d1["state"], d1["option_id"], d1["poradca_why"]) == ("agree", "a", "Zodpovedá Špecifikácii §3.")
 
 
 def test_while_poradca_answers_the_rows_wait_and_a_failure_is_said(db_session):
@@ -171,19 +196,64 @@ async def test_an_agreement_is_approved_in_the_summary_and_the_history_says_who(
         .first()
     )
     assert answer.content == (
-        "Otázka 1? → Voľba A1 — schválené v súhrne: Staviteľ a Poradca sa zhodli (schválil Zoltán Rausch)"
+        "Otázka 1? → Voľba A1 — schválené v súhrne: návrh Poradcu, Staviteľ navrhol to isté (schválil Zoltán Rausch)"
     )
     assert answer.payload["consultation_decision"]["via"] == batch_review.VIA
     rows = {r["key"]: r for r in batch_review.summary(db_session, version.id)["rows"]}
     assert rows["d1"]["state"] == "decided"
 
 
-async def test_a_disagreement_or_another_option_cannot_be_approved_in_the_summary(db_session):
+async def test_a_card_poradca_proposes_differently_is_approved_as_he_proposes_with_his_instruction(db_session):
+    version = _seed_consultation(db_session)
+    _reviewed(db_session, version)
+    owner = _owner(db_session, version)
+    owner.first_name, owner.last_name = "Zoltán", "Rausch"
+
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "d2", "option_id": "b", "note": INSTRUCTION_2, "via": batch_review.VIA},
+        acting_user=owner,
+    )
+
+    answer = (
+        db_session.query(PipelineMessage)
+        .filter_by(version_id=version.id, kind="answer")
+        .order_by(PipelineMessage.seq.desc())
+        .first()
+    )
+    assert answer.content == (
+        "Otázka 2? → Voľba B2 — schválené v súhrne: návrh Poradcu, Staviteľ navrhol „Voľba A2“ (schválil Zoltán Rausch)"
+    )
+    assert answer.payload["consultation_decision"]["note"] == INSTRUCTION_2, "the Staviteľ gets Poradca's instruction"
+
+
+async def test_poradcas_own_decision_is_approved_word_for_word(db_session):
+    version = _seed_consultation(db_session)
+    _reviewed(db_session, version, content=ANSWER.replace("voľba: Voľba B2", "voľba: Vlastné rozhodnutie: dať oboje"))
+
+    await orchestrator.apply_action(
+        db_session,
+        version_id=version.id,
+        action="decide",
+        payload={"decision_key": "d2", "free_text": "dať oboje", "note": INSTRUCTION_2, "via": batch_review.VIA},
+    )
+
+    assert {r["key"]: r for r in batch_review.summary(db_session, version.id)["rows"]}["d2"]["state"] == "decided"
+
+
+async def test_nothing_but_poradcas_proposal_is_approved_in_the_summary(db_session):
     version = _seed_consultation(db_session)
     _reviewed(db_session, version)
 
-    for payload in ({"decision_key": "d2", "option_id": "a"}, {"decision_key": "d1", "option_id": "b"}):
-        with pytest.raises(OrchestratorError, match="nie je zhoda Staviteľa a Poradca"):
+    for payload in (
+        {"decision_key": "d2", "option_id": "a", "note": INSTRUCTION_2},  # the Staviteľ's option, not Poradca's
+        {"decision_key": "d1", "option_id": "b"},  # an option nobody proposed
+        {"decision_key": "d2", "option_id": "b"},  # without Poradca's instruction
+        {"decision_key": "d2", "option_id": "b", "note": "iný pokyn"},  # with another one
+    ):
+        with pytest.raises(OrchestratorError, match="v súhrne sa schvaľuje len návrh Poradcu"):
             await orchestrator.apply_action(
                 db_session, version_id=version.id, action="decide", payload={**payload, "via": batch_review.VIA}
             )
@@ -242,6 +312,85 @@ def test_a_build_not_on_cards_hands_nothing(db_session, poradca):
     version = _seed_consultation(db_session, status="awaiting_manazer")
     _owner(db_session, version).batch_review = True
     assert batch_review.start_if_wanted(db_session, version.id) is None and poradca == []
+
+
+# ── assessing again („Posúdiť znova“) ────────────────────────────────────────────────────────────────────────────
+
+
+def test_the_cards_go_to_poradca_again_and_the_old_summary_is_gone(db_session, poradca):
+    version = _seed_consultation(db_session)
+    _owner(db_session, version).batch_review = True
+    old = _reviewed(db_session, version)
+    old_id = old.id
+
+    record = batch_review.again(db_session, version.id)
+
+    assert record.id != old_id and len(poradca) == 1 and "pokyn:" in poradca[0][1]
+    assert db_session.get(BatchReview, old_id) is None
+    assert batch_review.summary(db_session, version.id)["status"] == "running"
+
+
+def test_assessing_again_is_refused_while_poradca_answers_and_without_the_switch(db_session, poradca):
+    version = _seed_consultation(db_session)
+    with pytest.raises(batch_review.Refused, match="nemá rýchlu cestu s Poradcom zapnutú"):
+        batch_review.again(db_session, version.id)
+
+    _owner(db_session, version).batch_review = True
+    _reviewed(db_session, version, content="", status=RUNNING)
+    with pytest.raises(batch_review.Refused, match="Poradca karty práve posudzuje"):
+        batch_review.again(db_session, version.id)
+    assert poradca == []
+
+
+def test_assessing_again_is_refused_off_the_cards(db_session, poradca):
+    resting = _seed_consultation(db_session, status="awaiting_manazer")
+    _owner(db_session, resting).batch_review = True
+    with pytest.raises(batch_review.Refused, match="Stavba nestojí na kartách rozhodnutí"):
+        batch_review.again(db_session, resting.id)
+    assert poradca == []
+
+
+def _pipeline_client(db, user) -> TestClient:
+    from backend.api.routes.pipeline import router
+    from backend.core.security import get_current_user
+    from backend.db.session import get_db
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/pipeline")
+
+    def _db():
+        yield db
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: user
+    return TestClient(app)
+
+
+def test_the_route_assesses_again_and_says_why_not(db_session, poradca):
+    version = _seed_consultation(db_session)
+    owner = _owner(db_session, version)
+    client = _pipeline_client(db_session, owner)
+
+    refused = client.post(f"/api/v1/pipeline/{version.id}/batch-review/again")
+    assert refused.status_code == 409 and "nemá rýchlu cestu" in refused.json()["detail"]
+
+    owner.batch_review = True
+    done = client.post(f"/api/v1/pipeline/{version.id}/batch-review/again")
+    assert done.status_code == 200 and done.json()["status"] == "running" and len(poradca) == 1
+
+
+# ── Poradca's view of the cards ──────────────────────────────────────────────────────────────────────────────────
+
+
+def test_poradca_hears_of_a_card_on_turn_only_without_the_summary(db_session):
+    from backend.services.poradca.tools import _cards_lines
+
+    version = _seed_consultation(db_session)
+    assert "na rade je karta 1 z 2" in "\n".join(_cards_lines(db_session, version.id))
+
+    _reviewed(db_session, version)
+    cards = "\n".join(_cards_lines(db_session, version.id))
+    assert "na rade" not in cards and "rozhodnúť sa dá ktorákoľvek nerozhodnutá karta" in cards
 
 
 # ── Príprava asks at once ────────────────────────────────────────────────────────────────────────────────────────
@@ -367,4 +516,5 @@ def test_both_charters_know_the_fast_path():
     poradca = " ".join((TEMPLATES / "poradca-charter.md").read_text(encoding="utf-8").split())
 
     assert "keď ti kokpit v pokyne napíše **OTÁZKY NARAZ**" in builder
-    assert '`<posudok karta="N">`' in poradca and "`rozhoduje:`" in poradca
+    assert '`<posudok karta="N">`' in poradca and "`pokyn:`" in poradca and "`rozhoduje:`" not in poradca
+    assert "Pokyn píš ku **karte, ktorú Manažér práve rozhoduje**" in poradca

@@ -11,6 +11,11 @@ export function getBatchReviewApi(versionId: string): Promise<BatchReview | null
   return api.get<BatchReview | null>(`/pipeline/${versionId}/batch-review`);
 }
 
+/** DEV-486 — hand the open cards to Poradca at once again („Posúdiť znova“); the summary comes back assessing. */
+export function reviewAgainApi(versionId: string): Promise<BatchReview | null> {
+  return api.post<BatchReview | null>(`/pipeline/${versionId}/batch-review/again`);
+}
+
 export function listBatchReviewAccountsApi(): Promise<BatchReviewAccount[]> {
   return api.get<BatchReviewAccount[]>("/users/batch-review");
 }

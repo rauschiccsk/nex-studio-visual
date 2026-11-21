@@ -1,14 +1,25 @@
-// DEV-483 — the rules of the summary of the fast path with Poradca, apart from its screen (testable on their own).
+// DEV-483/DEV-486 — the rules of the summary of the fast path with Poradca, apart from its screen (testable on their own).
 import type { BatchReviewRow } from "@/services/api/batchReview";
 
 /** How often the summary is read while Poradca still answers. */
 export const POLL_MS = 5000;
 
-/** The rows that go with the approval: the agreements he kept checked, minus every card related to one he decides
- * himself — in both directions, until nothing changes.  */
-export function approvable(rows: BatchReviewRow[], unchecked: Set<string>): { keys: Set<string>; heldBy: Map<string, number> } {
+/** DEV-486 — a card Poradca proposed something for: „Schváliť všetko“ approves his proposal on it. */
+export function proposed(row: BatchReviewRow): boolean {
+  return row.state === "agree" || row.state === "disagree";
+}
+
+/** DEV-486 — a card the Manažér decides on its card inside the summary: one he consults, or one Poradca left out. */
+export function decidesHimself(row: BatchReviewRow, consulted: Set<string>): boolean {
+  if (row.state === "decided" || row.state === "waiting") return false;
+  return row.state === "missing" || consulted.has(row.key);
+}
+
+/** The rows „Schváliť všetko“ approves: every card with Poradca's proposal that he does not consult, minus every card
+ * related to one he decides himself — in both directions, until nothing changes. */
+export function approvable(rows: BatchReviewRow[], consulted: Set<string>): { keys: Set<string>; heldBy: Map<string, number> } {
   const open = rows.filter((r) => r.state !== "decided");
-  const keys = new Set(open.filter((r) => r.state === "agree" && !unchecked.has(r.key)).map((r) => r.key));
+  const keys = new Set(open.filter((r) => proposed(r) && !consulted.has(r.key)).map((r) => r.key));
   const heldBy = new Map<string, number>();
   let changed = true;
   while (changed) {
@@ -25,12 +36,4 @@ export function approvable(rows: BatchReviewRow[], unchecked: Set<string>): { ke
     }
   }
   return { keys, heldBy };
-}
-
-
-/** DEV-486 — a card the Manažér decides on its card inside the summary: his alone, a disagreement, one Poradca left
- * out, or an agreement he unchecked. A decided card is never one of them. */
-export function decidesHimself(row: BatchReviewRow, unchecked: Set<string>): boolean {
-  if (row.state === "manager" || row.state === "disagree" || row.state === "missing") return true;
-  return row.state === "agree" && unchecked.has(row.key);
 }

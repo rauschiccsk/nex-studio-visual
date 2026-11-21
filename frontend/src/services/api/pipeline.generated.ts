@@ -1016,6 +1016,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/batch-review/again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Batch Review Again
+         * @description DEV-486 — hand the open cards to Poradca at once again („Posúdiť znova“): after a failure, or when the summary
+         *     came before Poradca gave the Staviteľ his instructions. Async: Poradca answers in the background of the loop.
+         */
+        post: operations["post_batch_review_again_api_v1_pipeline__version_id__batch_review_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/ci": {
         parameters: {
             query?: never;
@@ -3903,12 +3924,16 @@ export interface components {
             builder_option_id?: string | null;
             /** Decided Label */
             decided_label?: string | null;
+            /** Free Text */
+            free_text?: string | null;
             /** Key */
             key: string;
             /** Number */
             number: number;
             /** Option Id */
             option_id?: string | null;
+            /** Poradca Instruction */
+            poradca_instruction?: string | null;
             /** Poradca Label */
             poradca_label?: string | null;
             /** Poradca Why */
@@ -3921,7 +3946,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "agree" | "disagree" | "manager" | "missing" | "waiting" | "decided";
+            state: "agree" | "disagree" | "missing" | "waiting" | "decided";
         };
         /** BatchReviewSet */
         BatchReviewSet: {
@@ -11031,6 +11056,37 @@ export interface operations {
         };
     };
     get_batch_review_api_v1_pipeline__version_id__batch_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReviewRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_batch_review_again_api_v1_pipeline__version_id__batch_review_again_post: {
         parameters: {
             query?: never;
             header?: never;

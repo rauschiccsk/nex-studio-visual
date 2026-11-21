@@ -143,11 +143,19 @@ def _cards_lines(db: Session, version_id: UUID) -> list[str]:
     head = "Karty rozhodnutí (konzultácia" + (
         f", kolo {rnd} z {rmax}" if rnd and rmax else f", kolo {rnd}" if rnd else ""
     )
-    head += (
-        f") — na rade je karta {current + 1} z {len(decisions)}:"
-        if current is not None
-        else ") — všetky sú rozhodnuté:"
-    )
+    from backend.services import batch_review
+
+    # DEV-486: with the summary of the fast path no card is „on turn“ — the Manažér decides any open card there, and
+    # the instruction belongs to the card he asks about.
+    if current is None:
+        head += ") — všetky sú rozhodnuté:"
+    elif batch_review.reviewed(db, version_id, seq):
+        head += (
+            ") — Manažér ich rozhoduje v súhrne s Poradcom: rozhodnúť sa dá ktorákoľvek nerozhodnutá karta a pokyn"
+            " patrí ku karte, na ktorú sa pýta:"
+        )
+    else:
+        head += f") — na rade je karta {current + 1} z {len(decisions)}:"
     out = ["", head]
     for i, d in enumerate(decisions):
         answer = answers.get(d.get("key"))

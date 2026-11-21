@@ -17656,17 +17656,20 @@ async def apply_action(
         label = free_text or next(
             (o.get("label") for o in decision.get("options", []) if o.get("id") == option_id), option_id
         )
-        # DEV-483: approved in the summary of the fast path — only an agreement of the Staviteľ and Poradca, on that
-        # option (checked against the summary, never taken from the request); the history says who approved it.
+        note = str(payload.get("note", "")).strip() or None
+        # DEV-483/DEV-486: approved in the summary of the fast path — only Poradca's proposal as the summary shows it,
+        # his option or own decision with his instruction as the note (checked against the summary, never taken from
+        # the request alone); the history says whose proposal it was and who approved it.
         via_summary = payload.get("via") == batch_review.VIA
+        proposal = None
         if via_summary:
             try:
-                batch_review.check_agreement(db, version_id, str(decision_key), option_id)
+                proposal = batch_review.check_proposal(db, version_id, str(decision_key), option_id, free_text, note)
             except ValueError as exc:
                 raise OrchestratorError(str(exc)) from exc
         approver = person_name(acting_user) if acting_user is not None else "Manažér"
         content = f"{decision.get('question', '')} → {label}" + (
-            f" — schválené v súhrne: Staviteľ a Poradca sa zhodli (schválil {approver})" if via_summary else ""
+            batch_review.approved_in_summary(proposal, approver) if proposal is not None else ""
         )
         _record_message(
             db,
@@ -17684,7 +17687,7 @@ async def apply_action(
                     "option_id": option_id,
                     "free_text": free_text,
                     "label": label,
-                    "note": (str(payload.get("note", "")).strip() or None),
+                    "note": note,
                     # DEV-107: the answer that keeps the card open — the screen reads it, never its own copy.
                     "held": _answer_holds(c, option_id),
                     "via": batch_review.VIA if via_summary else None,

@@ -1261,13 +1261,14 @@ export function registerFixtures(): void {
       "# Zadanie NEX Inbox 1.8.0\n\nFaktúry sa doručujú do zdieľaného priečinka NEX Genesis na pozadí. Pri výpadku spojenia faktúra čaká a obsluha dostane jeden e-mail.\n",
   });
   answer("get", "/api/v1/pipeline/{version_id}", PIPELINE);
-  // DEV-483/DEV-486: the summary of the fast path with Poradca over the build's own consultation — the first card is
-  // the Manažér's alone and opens inside the summary, the second waits for it; the layout check measures both.
+  // DEV-483/DEV-486: the summary of the fast path with Poradca over the build's own consultation — Poradca left the
+  // first card out, so it opens inside the summary; on the second he proposes otherwise, with an instruction for the
+  // Staviteľ, and it waits for the first. The layout check measures all of it.
   answer("get", "/api/v1/pipeline/{version_id}/batch-review", {
     status: "done",
     failure: null,
     conversation_id: null,
-    counts: { agree: 1, disagree: 0, manager: 1, missing: 0, decided: 0 },
+    counts: { agree: 0, disagree: 1, missing: 1, decided: 0 },
     rows: [
       {
         key: "opakovanie",
@@ -1275,10 +1276,12 @@ export function registerFixtures(): void {
         question: CONSULTATION.consultation.decisions[0]!.question,
         builder_label: "Skúšať 24 hodín, potom manuálny rad",
         builder_option_id: "a",
-        poradca_label: "Skúšať 24 hodín, potom manuálny rad",
-        poradca_why: "Krátke výpadky spojenia prekryje, dlhý skončí u obsluhy — ako to robí doručovanie e-mailov.",
-        state: "manager",
+        poradca_label: null,
+        poradca_why: null,
+        poradca_instruction: null,
+        state: "missing",
         option_id: null,
+        free_text: null,
         decided_label: null,
         related: [],
       },
@@ -1288,10 +1291,13 @@ export function registerFixtures(): void {
         question: CONSULTATION.consultation.decisions[1]!.question,
         builder_label: "Obsluhe aj správcovi systému",
         builder_option_id: "a",
-        poradca_label: "Obsluhe aj správcovi systému",
-        poradca_why: "Obsluha faktúru vidí, správca opraví spojenie.",
-        state: "agree",
-        option_id: "a",
+        poradca_label: "Len správcovi systému",
+        poradca_why: "Obsluha faktúru vidí v rade; e-mail by jej pri každom výpadku pridal prácu, ktorú nevyrieši.",
+        poradca_instruction:
+          "V e-maile správcovi uveď, koľko faktúr čaká a od kedy spojenie nejde — bez toho nevie posúdiť, či ide o krátky výpadok.",
+        state: "disagree",
+        option_id: "b",
+        free_text: null,
         decided_label: null,
         related: [1],
       },

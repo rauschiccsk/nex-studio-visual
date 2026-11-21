@@ -371,6 +371,15 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals,
           {proposals[current.key]?.poradca_why ? ` — ${proposals[current.key]?.poradca_why}` : ""}
         </p>
       )}
+      {/* DEV-486: what Poradca wants the Staviteľ to work in beside his choice — the summary sends it as the note. */}
+      {proposals?.[current.key]?.poradca_instruction && (
+        <p
+          className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]"
+          data-testid="poradca-instruction"
+        >
+          <span className="font-medium">Pokyn Poradcu pre Staviteľa:</span> {proposals[current.key]?.poradca_instruction}
+        </p>
+      )}
       {/* v4.0.11: the jargon (paths / codes / repro) is tucked behind a disclosure so the explanation
           above stays plain for a non-expert — nothing lost, one click away. */}
       {current.technical_detail && (
