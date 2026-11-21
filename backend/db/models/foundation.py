@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -40,6 +41,9 @@ class User(Base, UUIDMixin, TimestampMixin):
     # DEV-360: the person of the „Zodpovedný“ group of the DEV register who answers for this account's tickets;
     # NULL — the account is matched by its names (``plane_responsible.responsible_of``).
     plane_responsible = Column(String(100), nullable=True)
+    #: DEV-483: the fast path with Poradca — the Staviteľ's questions come at once as cards, Poradca assesses them all
+    #: and the account approves a summary. Set by the admin per account; off keeps the one-by-one way (learners).
+    batch_review = Column(Boolean, nullable=False, server_default=false())
 
     __table_args__ = (
         UniqueConstraint("username", name="uq_users_username"),

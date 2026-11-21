@@ -34,6 +34,7 @@ from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal, get_db
+from backend.schemas.batch_review import BatchReviewRead
 from backend.schemas.pipeline import (
     AgentSession,
     BoardCiGate,
@@ -52,7 +53,15 @@ from backend.schemas.pipeline import (
     VizualPreviewRead,
 )
 from backend.services import action_labels as action_labels_service
-from backend.services import ci_status, claude_agent, orchestrator, pipeline_runner, plane_tickets, unsaved_work
+from backend.services import (
+    batch_review,
+    ci_status,
+    claude_agent,
+    orchestrator,
+    pipeline_runner,
+    plane_tickets,
+    unsaved_work,
+)
 from backend.services import dedo_message as dedo_message_service
 from backend.services import fast_fix as fast_fix_service
 from backend.services.orchestrator import OrchestratorError
@@ -550,6 +559,18 @@ async def get_ci_status(
     koren = claude_agent.PROJECTS_ROOT / orchestrator._project_slug_for_version(db, version_id)
     v = await ci_status.snapshot(koren)
     return CiStatusRead(stav=v.stav, detail=v.detail, sha=v.sha, bezi=v.bezi, url=v.url)
+
+
+@router.get("/{version_id}/batch-review", response_model=Optional[BatchReviewRead])
+def get_batch_review(
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> Optional[BatchReviewRead]:
+    """DEV-483 — the summary of the open cards Poradca assessed at once; ``None`` when it was not asked about them."""
+    authz.assert_version_access(db, current_user, version_id)
+    found = batch_review.summary(db, version_id)
+    return BatchReviewRead(**found) if found is not None else None
 
 
 @router.get("/{version_id}", response_model=PipelineBoardRead)

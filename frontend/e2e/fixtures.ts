@@ -1261,6 +1261,54 @@ export function registerFixtures(): void {
       "# Zadanie NEX Inbox 1.8.0\n\nFaktúry sa doručujú do zdieľaného priečinka NEX Genesis na pozadí. Pri výpadku spojenia faktúra čaká a obsluha dostane jeden e-mail.\n",
   });
   answer("get", "/api/v1/pipeline/{version_id}", PIPELINE);
+  // DEV-483: the summary of the fast path with Poradca — the layout check measures it beside the cards.
+  answer("get", "/api/v1/pipeline/{version_id}/batch-review", {
+    status: "done",
+    failure: null,
+    conversation_id: null,
+    counts: { agree: 2, disagree: 1, manager: 0, missing: 0, decided: 0 },
+    rows: [
+      {
+        key: "d1",
+        number: 1,
+        question: "Má sa dobropis doručiť ako záporná faktúra, aj keď dodávateľ neuvedie pôvodnú faktúru?",
+        builder_label: "Áno, záporná faktúra s odkazom na pôvodnú, keď ju nájdeme",
+        builder_option_id: "a",
+        poradca_label: "Áno, záporná faktúra s odkazom na pôvodnú, keď ju nájdeme",
+        poradca_why: "Zodpovedá BEHAVIOR §8.1 aj tomu, ako NEX Genesis páruje doklady.",
+        state: "agree",
+        option_id: "a",
+        decided_label: null,
+        related: [2],
+      },
+      {
+        key: "d2",
+        number: 2,
+        question: "Kde sa ukáže, že pôvodná faktúra sa nenašla?",
+        builder_label: "Upozornenie v detaile faktúry",
+        builder_option_id: "a",
+        poradca_label: "Upozornenie v detaile faktúry",
+        poradca_why: "Manažér ho vidí pri kontrole, export to nemení.",
+        state: "agree",
+        option_id: "a",
+        decided_label: null,
+        related: [],
+      },
+      {
+        key: "d3",
+        number: 3,
+        question: "Má sa dobropis bez pôvodnej faktúry zastaviť pred exportom?",
+        builder_label: "Nie, len upozorniť",
+        builder_option_id: "a",
+        poradca_label: "Áno, zastaviť do rozhodnutia účtovníčky",
+        poradca_why: "Bez pôvodnej faktúry NEX Genesis dobropis nespáruje.",
+        state: "disagree",
+        option_id: null,
+        decided_label: null,
+        related: [],
+      },
+    ],
+  });
   answer("get", "/api/v1/pipeline/{version_id}/ci", {
     bezi: false,
     stav: "success",
@@ -1737,6 +1785,11 @@ export function registerFixtures(): void {
     chosen: "Mária Manažérová",
     by_name: null,
   };
+  // DEV-483: the fast path with Poradca per account — on for the admin, off for the colleague who learns.
+  answer("get", "/api/v1/users/batch-review", [
+    { id: USER.id, username: USER.username, name: "Mária Manažérová", on: true },
+    { id: COLLEAGUE.id, username: COLLEAGUE.username, name: "Tibor Technický", on: false },
+  ]);
   answer("get", "/api/v1/users/plane-responsible", {
     people: PLANE_PEOPLE,
     accounts: [

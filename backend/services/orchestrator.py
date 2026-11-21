@@ -68,6 +68,7 @@ from backend.services import (
     app_languages,
     app_template,
     back_to_priprava,
+    batch_review,
     build_db,
     build_forecast,
     build_leftovers,
@@ -112,6 +113,7 @@ from backend.services import system_setting as system_setting_service
 from backend.services import task as task_service
 from backend.services import version as version_service
 from backend.services.claude_agent import ClaudeAgentError, ClaudeAgentTimeout, invoke_claude
+from backend.services.people import person_name
 from backend.services.pipeline_metrics import aggregate_pipeline_usage
 from backend.services.pipeline_status import (
     FINDINGS_AS_DATA_RULE,
@@ -10847,6 +10849,39 @@ async def _complete_vizual_signoff(
     return state
 
 
+#: DEV-483 — what Príprava asks of the Staviteľ when the project's account decides with Poradca at once.
+QUESTIONS_AT_ONCE = (
+    "\n\nOTÁZKY NARAZ — Manažér rozhoduje otázky Prípravy s Poradcom naraz. Namiesto jednej otázky polož teraz "
+    "naraz všetky otázky, ktoré vieš položiť, ako konzultáciu (`kind=consultation`): každá otázka je jedno "
+    "rozhodnutie v `consultation.decisions` — `question`, krátke `explanation`, 2 až 4 `options` a práve jedna "
+    "odporúčaná (tvoj návrh); Manažér môže dať aj vlastné rozhodnutie. Otázky, ktoré závisia od odpovedí na tieto, "
+    "nechaj do ďalšieho kola. Keď už nemáš čo sa pýtať, pokračuj ako doteraz. Toto nahrádza pravidlo PO JEDNEJ "
+    "otázke.\n" + ORIGIN_RULE
+)
+
+
+def _settle_priprava_cards(db: Session, state: PipelineState, count: int) -> PipelineState:
+    """DEV-483 — the Staviteľ asked the questions of Príprava at once, as cards: the build stops on them as on the
+    cards of Návrh (``decide`` answers them, the last one hands every answer back). The cards say where they came from
+    (``source``) — the engine's to say, as for the other consultations (DEV-106)."""
+    cards = db.execute(
+        select(PipelineMessage)
+        .where(PipelineMessage.version_id == state.version_id, _carries_decision_queue())
+        .order_by(PipelineMessage.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if cards is not None and isinstance(cards.payload, dict):
+        payload = dict(cards.payload)
+        payload["consultation"] = {**(payload.get("consultation") or {}), "source": "priprava"}
+        cards.payload = payload
+    state.status = "blocked"
+    state.block_reason = "decision_needed"
+    word = "otázka" if count == 1 else ("otázky" if 2 <= count <= 4 else "otázok")
+    state.next_action = f"Manažér: rozhodni 1/{count} ({count} {word} Prípravy naraz)."
+    db.flush()
+    return state
+
+
 async def run_dispatch(
     db: Session,
     version_id: uuid.UUID,
@@ -10975,7 +11010,7 @@ async def run_dispatch(
     # uprav/ask/answer ``directive`` re-dispatch of any phase (the framed message IS the prompt; direct comms).
     # The v1 ``_run_gate_e_round`` per-question machinery is REMOVED wholesale (CR-V2-013) — there is no Gate-E
     # routing anywhere in this 4-phase dispatch.
-    # DEV-361: the Zásobník's requirements this round carries to the Staviteľ — marked delivered once it ran.
+    # DEV-361, DEV-455: the tickets this round carries to the Staviteľ — marked delivered once it ran.
     handed: list[VersionTicket] = []
     takes_requirements = stage == "priprava" and state.flow_type != "fast_fix"
     if directive is not None:
@@ -11000,6 +11035,9 @@ async def run_dispatch(
         notice = _back_to_priprava_notice(db, state.version_id)
         if notice is not None:
             prompt = f"{notice}\n\n{prompt}"
+        # DEV-483: the project's account decides with Poradca at once — the questions come together, as cards.
+        if takes_requirements and batch_review.wanted(db, state.version_id):
+            prompt += QUESTIONS_AT_ONCE
     result = await invoke_agent_with_parse_retry(
         db,
         version_id=state.version_id,
@@ -11056,6 +11094,9 @@ async def run_dispatch(
         # (NO recovery actions for the Manažér — only Dedo clears it). Same helper as the conversation spine.
         return await _settle_framework_issue(db, state, result, stage=stage, on_message=on_message)
 
+    if stage == "priprava" and result.consultation is not None and result.consultation.decisions:
+        # DEV-483: the questions of Príprava at once, as cards — the same decision cards the Manažér answers in Návrh.
+        return _settle_priprava_cards(db, state, len(result.consultation.decisions))
     if result.kind in ("question", "blocked"):
         # The agent asked the Manažér something (direct comms — no Coordinator relay, design §2.2). Settle
         # blocked with an agent_question reason so the board offers ``answer``.
@@ -17615,6 +17656,18 @@ async def apply_action(
         label = free_text or next(
             (o.get("label") for o in decision.get("options", []) if o.get("id") == option_id), option_id
         )
+        # DEV-483: approved in the summary of the fast path — only an agreement of the Staviteľ and Poradca, on that
+        # option (checked against the summary, never taken from the request); the history says who approved it.
+        via_summary = payload.get("via") == batch_review.VIA
+        if via_summary:
+            try:
+                batch_review.check_agreement(db, version_id, str(decision_key), option_id)
+            except ValueError as exc:
+                raise OrchestratorError(str(exc)) from exc
+        approver = person_name(acting_user) if acting_user is not None else "Manažér"
+        content = f"{decision.get('question', '')} → {label}" + (
+            f" — schválené v súhrne: Staviteľ a Poradca sa zhodli (schválil {approver})" if via_summary else ""
+        )
         _record_message(
             db,
             version_id=version_id,
@@ -17622,7 +17675,7 @@ async def apply_action(
             author="manazer",
             recipient=state.current_actor,
             kind="answer",
-            content=f"{decision.get('question', '')} → {label}",
+            content=content,
             payload={
                 "phase": state.current_stage,
                 "consultation_decision": {
@@ -17634,6 +17687,7 @@ async def apply_action(
                     "note": (str(payload.get("note", "")).strip() or None),
                     # DEV-107: the answer that keeps the card open — the screen reads it, never its own copy.
                     "held": _answer_holds(c, option_id),
+                    "via": batch_review.VIA if via_summary else None,
                 },
             },
         )

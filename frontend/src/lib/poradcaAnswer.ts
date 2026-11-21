@@ -13,6 +13,8 @@ const BLOCKS: { tag: string; heading: string }[] = [
   { tag: "tiket-projektu", heading: "Návrh tiketu projektu" },
   // DEV-218: the tickets the agent asked for — the cockpit attaches their content from Plane.
   { tag: "tiket-pre-agenta", heading: "Tiket pre Staviteľa" },
+  // DEV-483: Poradca's word on one card when the cockpit asked about all of them at once (the summary reads it).
+  { tag: "posudok", heading: "Posudok karty" },
 ];
 
 /** DEV-83 — the link a marked choice becomes in the rendered answer (`#volba-3` names card 3, `#volba` no card); since

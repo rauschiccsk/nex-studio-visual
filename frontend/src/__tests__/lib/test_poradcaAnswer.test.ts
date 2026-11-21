@@ -26,6 +26,12 @@ describe("answerForDisplay", () => {
     expect(answerForDisplay("Len odpoveď.")).toBe("Len odpoveď.");
   });
 
+  it("DEV-483: an assessment of a card shows as a block, never as a raw tag", () => {
+    const out = answerForDisplay('<posudok karta="2">\nvoľba: A\nprečo: lebo\n</posudok>');
+    expect(out).toContain("**Posudok karty:**");
+    expect(out).not.toContain("<posudok");
+  });
+
   // DEV-83: a marked choice becomes a link the answer draws as a badge — the tag itself never reaches the screen.
   it("turns a marked choice into a link that names its card", () => {
     const out = answerForDisplay('Na karte 3 vyber <volba karta="3">Zhasnúť  hneď,\nkeď sa obnoví</volba>. A <volba>Áno</volba>.');

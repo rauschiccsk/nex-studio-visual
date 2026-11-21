@@ -996,6 +996,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/batch-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Batch Review
+         * @description DEV-483 — the summary of the open cards Poradca assessed at once; ``None`` when it was not asked about them.
+         */
+        get: operations["get_batch_review_api_v1_pipeline__version_id__batch_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/ci": {
         parameters: {
             query?: never;
@@ -3107,6 +3127,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/batch-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Batch Review
+         * @description DEV-483 — each active account and whether it decides the Staviteľ's questions with Poradca at once.
+         */
+        get: operations["list_batch_review_api_v1_users_batch_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/plane-responsible": {
         parameters: {
             query?: never;
@@ -3170,6 +3210,26 @@ export interface paths {
          *     this prevents accidental self-lockout.
          */
         patch: operations["update_user_api_v1_users__user_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/users/{user_id}/batch-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Batch Review
+         * @description DEV-483 — the admin switches the fast path with Poradca for an account (the learners keep it off).
+         */
+        put: operations["set_batch_review_api_v1_users__user_id__batch_review_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/users/{user_id}/change-password": {
@@ -3799,6 +3859,74 @@ export interface components {
             updated_at: string;
             /** Username */
             username: string;
+        };
+        /** BatchReviewAccount */
+        BatchReviewAccount: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            /** On */
+            on: boolean;
+            /** Username */
+            username: string;
+        };
+        /** BatchReviewRead */
+        BatchReviewRead: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Failure */
+            failure?: string | null;
+            /** Rows */
+            rows: components["schemas"]["BatchReviewRow"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "failed";
+        };
+        /**
+         * BatchReviewRow
+         * @description One card: the Staviteľ's recommendation beside Poradca's word.
+         */
+        BatchReviewRow: {
+            /** Builder Label */
+            builder_label?: string | null;
+            /** Builder Option Id */
+            builder_option_id?: string | null;
+            /** Decided Label */
+            decided_label?: string | null;
+            /** Key */
+            key: string;
+            /** Number */
+            number: number;
+            /** Option Id */
+            option_id?: string | null;
+            /** Poradca Label */
+            poradca_label?: string | null;
+            /** Poradca Why */
+            poradca_why?: string | null;
+            /** Question */
+            question: string;
+            /** Related */
+            related?: number[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "agree" | "disagree" | "manager" | "missing" | "waiting" | "decided";
+        };
+        /** BatchReviewSet */
+        BatchReviewSet: {
+            /** On */
+            on: boolean;
         };
         /**
          * BillingOverviewRead
@@ -10902,6 +11030,37 @@ export interface operations {
             };
         };
     };
+    get_batch_review_api_v1_pipeline__version_id__batch_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReviewRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ci_status_api_v1_pipeline__version_id__ci_get: {
         parameters: {
             query?: never;
@@ -14287,6 +14446,26 @@ export interface operations {
             };
         };
     };
+    list_batch_review_api_v1_users_batch_review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReviewAccount"][];
+                };
+            };
+        };
+    };
     list_plane_responsible_api_v1_users_plane_responsible_get: {
         parameters: {
             query?: never;
@@ -14358,6 +14537,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_batch_review_api_v1_users__user_id__batch_review_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchReviewSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchReviewAccount"];
                 };
             };
             /** @description Validation Error */

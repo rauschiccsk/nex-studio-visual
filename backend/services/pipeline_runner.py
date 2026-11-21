@@ -26,7 +26,7 @@ from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.db.session import SessionLocal
 from backend.schemas.pipeline import PipelineMessageRead
-from backend.services import action_labels, notify, orchestrator
+from backend.services import action_labels, batch_review, notify, orchestrator
 from backend.services.pipeline_activity import HelperTracker, activity_line
 from backend.services.pipeline_ws import registry
 
@@ -338,6 +338,13 @@ async def _run(version_id: uuid.UUID, directive: str | None = None) -> None:
         db.refresh(state)
         await _broadcast_state(db, version_id, state)
         await _maybe_notify(db, version_id, state)
+        # DEV-483: the build stopped on new cards and the project's account decides with Poradca at once — Poradca
+        # gets them all now, in the background; its trouble never touches the build (the cards wait one by one).
+        try:
+            batch_review.start_if_wanted(db, version_id)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception("version %s: the cards could not be handed to Poradca at once", version_id)
     finally:
         try:
             _clear_dispatch_flags(db, version_id)

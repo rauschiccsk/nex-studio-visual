@@ -33,6 +33,7 @@ import { directionToRow, roundGain } from "@/lib/consultationDirection";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import ReviewWithPoradcaButton from "@/components/controlCenter/ReviewWithPoradcaButton";
+import type { BatchReviewRow } from "@/services/api/batchReview";
 import { reviewRequestFor } from "@/lib/poradcaReview";
 
 interface ConsultOption {
@@ -216,6 +217,8 @@ interface Props {
   versionId: string;
   /** Replace the live board with the fresh one the action returns (setBoard from usePipelineWs). */
   onBoard: (board: PipelineBoard) => void;
+  /** DEV-483 — Poradca's word on each card from the summary of the fast path, by the card's key. */
+  proposals?: Record<string, BatchReviewRow>;
 }
 
 /** One look for every choice on the card — the agent's options and the Manažér's own decision (DEV-220). */
@@ -227,7 +230,7 @@ function choiceClass(selected: boolean): string {
   }`;
 }
 
-export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
+export default function DecisionCardsBar({ board, versionId, onBoard, proposals }: Props) {
   const messages = useMemo(() => board?.recent_messages ?? [], [board?.recent_messages]);
   const latest = useMemo(() => latestConsultation(messages), [messages]);
   const answered = useMemo(() => (latest ? answeredLabels(messages, latest.seq) : {}), [messages, latest]);
@@ -408,6 +411,14 @@ export default function DecisionCardsBar({ board, versionId, onBoard }: Props) {
           {current.explanation && (
             <p className="mt-1 whitespace-pre-line text-xs text-[var(--color-text-secondary)]">
               {current.explanation}
+            </p>
+          )}
+          {/* DEV-483: the card left from the summary carries both proposals — the Staviteľ's is the recommended
+              option below, Poradca's is said here with its reason. */}
+          {proposals?.[current.key]?.poradca_label && (
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)]" data-testid="poradca-proposal">
+              <span className="font-medium">Poradca navrhuje:</span> {proposals[current.key]?.poradca_label}
+              {proposals[current.key]?.poradca_why ? ` — ${proposals[current.key]?.poradca_why}` : ""}
             </p>
           )}
           {/* v4.0.11: the jargon (paths / codes / repro) is tucked behind a disclosure so the explanation

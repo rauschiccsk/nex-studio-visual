@@ -172,6 +172,12 @@ treba prevziať do tiketu DEV. Keď `plane_tiket` tiket neprečíta, povedz mu v
 - Keď žiadna možnosť nesedí, poraď „Vlastné rozhodnutie“ — karta ho ponúka vždy, pod možnosťami agenta — a navrhni
   jeho text.
 
+**Keď ťa kokpit požiada posúdiť naraz všetky karty** (rýchla cesta, DEV-483), ku každej karte napíš práve jeden blok
+`<posudok karta="N">` s riadkami `voľba:` (presný text možnosti z karty, alebo „Vlastné rozhodnutie: …“), `prečo:`
+(jedna veta) a `rozhoduje:` (`poradca`, alebo `manažér`, keď rozhodnutie patrí len Manažérovi — zákazník, peniaze,
+obchod, čo aplikácia ponúka). Kokpit z blokov zostaví súhrn: zhody s návrhom Staviteľa Manažér schváli jedným
+klikom, ostatné rozhodne na kartách. Pred posudkom si over, čo treba, ako pri jednej karte.
+
 **Keď agent čaká na odpoveď na svoju otázku** (bez kariet), zelená je len to, čo treba vybrať:
 - **Krátku odpoveď** — jednu vetu, napríklad súhlas alebo voľbu — daj medzi značky bez čísla karty, tiež hneď v prvej
   vete. Kokpit ju ukáže zelenou na konci odpovede: `Odpovedz agentovi <volba>Áno, súhlasím</volba>.`

@@ -33,6 +33,7 @@ from backend.core.errors import http_error
 from backend.core.security import get_current_user, require_ri_role
 from backend.db.models.foundation import User
 from backend.db.session import get_db
+from backend.schemas.batch_review import BatchReviewAccount, BatchReviewSet
 from backend.schemas.pagination import PaginatedResponse
 from backend.schemas.user import (
     ChangePasswordRequest,
@@ -107,6 +108,42 @@ def _plane_account(user: User, people: list[str]) -> PlaneResponsibleAccount:
         chosen=user.plane_responsible,
         by_name=plane_responsible.responsible_by_name(user, by_key),
     )
+
+
+def _batch_account(user: User) -> BatchReviewAccount:
+    return BatchReviewAccount(
+        id=user.id,
+        username=user.username,
+        name=" ".join(part for part in (user.first_name, user.last_name) if part) or None,
+        on=bool(user.batch_review),
+    )
+
+
+@router.get("/batch-review", response_model=list[BatchReviewAccount])
+def list_batch_review(
+    db: Session = Depends(get_db), current_user: User = Depends(require_ri_role)
+) -> list[BatchReviewAccount]:
+    """DEV-483 — each active account and whether it decides the Staviteľ's questions with Poradca at once."""
+    accounts = user_service.list_users(db, is_active=True, limit=1000, offset=0)
+    return [_batch_account(user) for user in sorted(accounts, key=lambda u: u.username)]
+
+
+@router.put("/{user_id}/batch-review", response_model=BatchReviewAccount)
+def set_batch_review(
+    user_id: UUID,
+    payload: BatchReviewSet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ri_role),
+) -> BatchReviewAccount:
+    """DEV-483 — the admin switches the fast path with Poradca for an account (the learners keep it off)."""
+    try:
+        user = user_service.get_by_id(db, user_id)
+    except ValueError as exc:
+        raise http_error(exc) from exc
+    user.batch_review = payload.on
+    db.commit()
+    db.refresh(user)
+    return _batch_account(user)
 
 
 @router.get("/plane-responsible", response_model=PlaneResponsibleRead)

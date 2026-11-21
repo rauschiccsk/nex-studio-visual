@@ -11,6 +11,7 @@ pipeline picks it up automatically.
 """
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
+from backend.db.models.batch_review import BatchReview
 from backend.db.models.credentials import Credential
 from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
@@ -31,6 +32,7 @@ ALL_MODELS: tuple[type, ...] = (
     User,
     Project,
     VersionTicket,
+    BatchReview,
     Epic,
     Feat,
     Task,
@@ -50,6 +52,7 @@ ALL_MODELS: tuple[type, ...] = (
 __all__ = [
     "ALL_MODELS",
     "VersionTicket",
+    "BatchReview",
     "Base",
     "Credential",
     "Customer",

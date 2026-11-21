@@ -43,6 +43,7 @@ import {
 import { buildUsernameIndex } from "@/components/settings/sessionUsernames";
 import { useAuthStore } from "@/store/authStore";
 import AccountColorPicker from "@/components/settings/AccountColorPicker";
+import BatchReviewPanel from "@/components/settings/BatchReviewPanel";
 import PlaneResponsiblePanel from "@/components/settings/PlaneResponsiblePanel";
 import { ROLE_LABELS } from "@/components/cockpit/labels";
 import { humanizeApiError } from "@/services/apiError";
@@ -720,6 +721,8 @@ export default function SettingsPage() {
                 .map((u) => `${u.id}:${u.is_active}:${u.first_name}:${u.last_name}`)
                 .join("|")}
             />
+            {/* DEV-483: which accounts decide the Staviteľ's questions with Poradca at once (the learners do not). */}
+            <BatchReviewPanel key={users.map((u) => `${u.id}:${u.is_active}`).join("|")} />
           </>
         ),
         sessions: (

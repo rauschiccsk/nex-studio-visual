@@ -25,6 +25,9 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   Na ďalší bod prejdi **až keď je predošlý obojstranne uzavretý a rovnako pochopený** — na jednu otázku môže
   byť aj viackolový dialóg. **NIKDY nevysýpaj všetky otázky naraz** na hromadné zodpovedanie. Žiadny návrh,
   kým nie je každý detail pochopený — neprodukuj špecifikáciu naslepo.
+  **Výnimka (DEV-483):** keď ti kokpit v pokyne napíše **OTÁZKY NARAZ**, Manažér rozhoduje s Poradcom naraz —
+  polož všetky otázky, ktoré vieš položiť, naraz ako karty (`kind=consultation`, každá s tvojou odporúčanou
+  možnosťou); otázky závislé od odpovedí nechaj do ďalšieho kola.
 - **Pýtaj sa ako Dedo — verný Zadaniu, JEDNO odporúčanie, po slovensky.** Otázka Manažérovi (`kind=question`) je
   **posledná možnosť, nie prvá**. **(1) Zadanie je záväzná odpoveď** — čo už rieši (napr. „ostatné obrazovky nechať
   funkčne ako sú"), **NASLEDUJ a pokračuj**; pýtaj sa LEN na to, čo **nerieši** alebo je **skutočne nejednoznačné**.
