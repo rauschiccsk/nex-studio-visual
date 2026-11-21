@@ -467,7 +467,19 @@ class ConsultationBlock(BaseModel):
     #: z piatich, alebo posledné. Voliteľné — staršie záznamy ich nemajú.
     round: Optional[int] = None
     round_max: Optional[int] = None
-    decisions: list[ConsultDecision] = Field(min_length=1)
+    decisions: list[ConsultDecision] = Field(default_factory=list)
+    #: DEV-487 — the points of a review that need no decision of the Manažér: technical corrections with one right
+    #: answer the Staviteľ works in himself, each one sentence for the Manažér („Zapracujem bez otázky“).
+    applied: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _something_to_decide_or_work_in(self) -> "ConsultationBlock":
+        """DEV-487: a consultation carries a card for the Manažér or a correction worked in without one — never
+        nothing (an empty queue would block the build on a decision nobody can make)."""
+        self.applied = [a.strip() for a in self.applied if a and a.strip()]
+        if not self.decisions and not self.applied:
+            raise ValueError("a consultation needs a decision for the Manažér or a correction worked in without one")
+        return self
 
     @model_validator(mode="after")
     def _unique_decision_keys(self) -> "ConsultationBlock":

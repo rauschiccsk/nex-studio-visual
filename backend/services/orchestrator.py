@@ -2560,6 +2560,25 @@ def _auditor_upfront_directive(db: Session, version_id: uuid.UUID, *, narrowed_t
     )
 
 
+#: DEV-487 — what the Manažér reads when the review needed none of his decisions.
+NOTHING_TO_DECIDE = (
+    "Previerka Auditora nenašla nič, čo by potrebovalo tvoje rozhodnutie — Staviteľ zapracuje {n} {corrections} sám "
+    "a Auditor ich pri ďalšej previerke overí:"
+)
+#: DEV-487 — what the apply turn is told about the corrections the Staviteľ sorted out without a card.
+APPLIED_HEAD = "Zapracuj aj technické opravy z previerky, ktoré si zaradil bez otázky:"
+
+
+def _applied_lines(consultation: dict[str, Any]) -> str:
+    """The corrections worked in without a card, as the apply turn's list (``""`` when none)."""
+    applied = [str(a).strip() for a in consultation.get("applied") or [] if str(a).strip()]
+    return (APPLIED_HEAD + "\n" + "\n".join(f"- {a}" for a in applied) + "\n") if applied else ""
+
+
+def _corrections(n: int) -> str:
+    return "technickú opravu" if n == 1 else ("technické opravy" if 2 <= n <= 4 else "technických opráv")
+
+
 def _consultation_directive(
     db: Session, version_id: uuid.UUID, *, source: str, findings: list[str], proposed_fix: Optional[str]
 ) -> str:
@@ -2592,9 +2611,28 @@ def _consultation_directive(
         f"{findings_block}{fix_block}\n\n"
         "NEOPRAVUJ zatiaľ NIČ. Vráť JEDEN `kind=consultation` blok:\n"
         "- `consultation.intro`: 1-2 vety po ľudsky — čo a prečo treba rozhodnúť.\n"
-        "- `consultation.decisions[]`: KAŽDÝ bod ako VLASTNÉ rozhodnutie (nezlučuj a nevynechaj žiadny). "
-        "Každé rozhodnutie:\n"
-        "  • `key` — krátky stabilný identifikátor, UNIKÁTNY v rámci konzultácie (napr. 'telegram', "
+        # DEV-487: of the Auditor's points, a card only where the Manažér must decide; a technical correction with one
+        # right answer the Staviteľ works in himself, listed for the Manažér („Zapracujem bez otázky“). Director
+        # 21.11.2026, on 13 cards made of 2 blocking findings and 11 notes: „podľa mňa príliš veľa problémov tam je.“ —
+        # „Súhlasím“. Every point still goes somewhere (the CR-V2-041 worry: a finding silently dropped).
+        + (
+            "- `consultation.decisions[]` a `consultation.applied[]`: KAŽDÝ bod previerky patrí práve do jedného "
+            "z nich — žiadny nevynechaj ani nezlúč:\n"
+            "  • do `decisions[]` (karta pre Manažéra) LEN bod, ktorý potrebuje JEHO rozhodnutie: voľba, ktorá "
+            "mení, čo aplikácia ponúka alebo ako sa správa pre ľudí, rozsah verzie (oprava staršej chyby, práca "
+            "navyše), zákazník alebo peniaze, alebo viac rovnocenných riešení;\n"
+            "  • do `applied[]` technickú opravu s jedným správnym riešením (nesúlad dokumentov, chýbajúca skúška, "
+            "meno osoby v texte, zjednotenie s tým, čo aplikácia robí inde…) — jednou vetou po ľudsky, čo "
+            "zapracuješ. Zapracuješ ju sám v opravnom kole spolu s rozhodnutiami Manažéra; on ju vidí v zozname "
+            "„Zapracujem bez otázky“ a Auditor ju pri ďalšej previerke overí.\n"
+            "  Keď ŽIADNY bod nepotrebuje rozhodnutie Manažéra, `decisions[]` nechaj prázdne — opravy potom "
+            "zapracuješ hneď.\n"
+            "  Každá karta v `decisions[]`:\n"
+            if source == "auditor_upfront"
+            else "- `consultation.decisions[]`: KAŽDÝ bod ako VLASTNÉ rozhodnutie (nezlučuj a nevynechaj žiadny). "
+            "Každé rozhodnutie:\n"
+        )
+        + "  • `key` — krátky stabilný identifikátor, UNIKÁTNY v rámci konzultácie (napr. 'telegram', "
         "'topologia'); dva rovnaké kľúče sú chyba.\n"
         "  • `question` — problém po ľudsky, BEZ žargónu (nie 'asyncpg/DDL/lockfile' — vysvetli podstatu "
         "tak, aby ju pochopil nešpecialista) a JASNE čo sa rozhoduje.\n"
@@ -2707,9 +2745,14 @@ async def _settle_for_consultation(
     verdict: Optional[PipelineStatusBlock] = None,
     on_event: Optional[claude_agent.EventCallback] = None,
     on_message: Optional[MessageCallback] = None,
+    apply_now: Optional[Callable[[str], Awaitable[PipelineState]]] = None,
 ) -> PipelineState:
     """CR-V2-041: turn a problem (Auditor findings, later any blocker) into an interactive Manažér
-    consultation. Dispatches ONE AI-Agent turn to translate it into a ``kind=consultation`` (decisions[]
+    consultation.
+
+    DEV-487: when not one point needs the Manažér's decision and the caller can rework at once (``apply_now``),
+    the corrections the Staviteľ sorted out are worked in right away — said to the Manažér, never a stop on an
+    empty queue. Dispatches ONE AI-Agent turn to translate it into a ``kind=consultation`` (decisions[]
     the Manažér answers one-at-a-time). On success settles ``blocked``/``decision_needed``; on parse failure,
     a non-consultation output, or the re-consult cap, FALLS BACK to a plain ``awaiting_manazer`` stop. Runs
     inside the dispatch path (sole-mutator holds)."""
@@ -2760,11 +2803,30 @@ async def _settle_for_consultation(
     # app was telling him something untrue about what the agent had said, and hiding the very thing meant to
     # make the decision easy. Validation of the queue is keyed the same way (``pipeline_status``), so a queue
     # used here is a queue that was checked.
-    usable_consultation = (
-        None
-        if isinstance(result, ParseFailure) or result.consultation is None or not result.consultation.decisions
-        else result.consultation
-    )
+    offered = None if isinstance(result, ParseFailure) else result.consultation
+    if offered is not None and not offered.decisions and offered.applied and apply_now is not None:
+        n = len(offered.applied)
+        note = _record_message(
+            db,
+            version_id=state.version_id,
+            stage=state.current_stage,
+            author="system",
+            recipient="manazer",
+            kind="notification",
+            content=NOTHING_TO_DECIDE.format(n=n, corrections=_corrections(n))
+            + "\n\n"
+            + "\n".join(f"- {a}" for a in offered.applied),
+            payload={"phase": state.current_stage, "applied": list(offered.applied)},
+        )
+        if on_message is not None:
+            await on_message(note)
+        return await apply_now(
+            "Previerka nenašla nič, čo by musel rozhodnúť Manažér.\n"
+            + _applied_lines({"applied": offered.applied})
+            + CONSULTATION_APPLY_CHECK
+            + "\nTeraz PREPRACUJ Špecifikáciu/Návrh podľa nich a uzavri fázu (gate_report)."
+        )
+    usable_consultation = None if offered is None or not offered.decisions else offered
     if usable_consultation is None:
         # MARKDOWN (rendered by ConversationThread's SpecMarkdown): a proper ``- `` list with a blank line
         # before it, so the findings render as a readable bulleted list — NOT one collapsed wall of text
@@ -5094,6 +5156,8 @@ def dispatch_directive(
             "Manažér rozhodol v konzultácii:\n"
             + "\n".join(lines)
             + "\n"
+            # DEV-487: the corrections the Staviteľ sorted out without a card go with the decisions.
+            + _applied_lines(c)
             + CONSULTATION_APPLY_CHECK
             + "\nTeraz PREPRACUJ Špecifikáciu/Návrh podľa týchto rozhodnutí a uzavri fázu (gate_report)."
         )
@@ -12290,8 +12354,10 @@ async def _run_auditor_upfront_review(
         content=(
             # ICCINT-72: povedz KOĽKÉ kolo sa spúšťa a koľko ich môže prísť. Dovtedy kolá 1 až 4 ohlásili
             # len „spúšťa sa konzultácia“ a číslo sa objavilo až pri eskalácii — teda keď už bolo po všetkom.
-            "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka) — spúšťa sa konzultácia "
-            f"s Manažérom, kolo {_kolo} z {AUDITOR_LOOP_MAX} (rozhodnutia po jednom)."
+            # DEV-487: no „po jednom“ — with the fast path the cards go to the summary, and a point that needs no
+            # decision is worked in by the Staviteľ.
+            "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka) — Staviteľ z nálezov pripraví karty "
+            f"na tvoje rozhodnutie a technické opravy zapracuje sám, kolo {_kolo} z {AUDITOR_LOOP_MAX}."
             if _kolo <= AUDITOR_LOOP_MAX
             else (
                 "Auditor našiel medzeru v Špecifikácii/Návrhu (upfront previerka), ale konzultácia sa už "
@@ -12436,8 +12502,20 @@ async def _run_navrh_round(
     # governs: auto-continue to Vizuál/Programovanie vs stop at the post-Návrh schvaľovací bod (the design doc
     # + the AI Agent's own clarification questions; the task plan is now built later, at Programovanie start).
     if review_verdict is not None:
+
+        async def _rework(directive: str) -> PipelineState:
+            # DEV-487: nothing for the Manažér to decide — the corrections are worked in at once, and the round
+            # (with the Auditor's review after it) runs again; the consultation cap bounds it like any round.
+            return await _run_navrh_round(db, state, on_event=on_event, directive=directive, on_message=on_message)
+
         return await _settle_for_consultation(
-            db, state, source="auditor_upfront", verdict=review_verdict, on_event=on_event, on_message=on_message
+            db,
+            state,
+            source="auditor_upfront",
+            verdict=review_verdict,
+            on_event=on_event,
+            on_message=on_message,
+            apply_now=_rework,
         )
     # DEV-7: a Návrh that changes the database says so where the Manažér approves it — and never auto-continues,
     # because only Ri may approve it and approving it is what writes the Knowledge Base.

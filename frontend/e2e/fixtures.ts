@@ -1269,6 +1269,11 @@ export function registerFixtures(): void {
     failure: null,
     conversation_id: null,
     counts: { agree: 0, disagree: 1, missing: 1, decided: 0 },
+    // DEV-487: the review's corrections the Staviteľ works in without a card — listed beside the cards.
+    applied: [
+      "Doplniť skúšku, že doručovanie pri výpadku nikdy nepošle tú istú faktúru dvakrát.",
+      "Zladiť názov nastavenia stropu pokusov medzi Špecifikáciou a Návrhom.",
+    ],
     rows: [
       {
         key: "opakovanie",

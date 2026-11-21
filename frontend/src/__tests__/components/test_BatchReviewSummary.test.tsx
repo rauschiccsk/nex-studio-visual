@@ -283,6 +283,40 @@ describe("the rule of what goes with the approval", () => {
   });
 });
 
+describe("the corrections the Staviteľ works in without a card (DEV-487)", () => {
+  const CORRECTIONS = ["Doplniť skúšku, že skúška na vzorke nič nedoručí.", "Zladiť typ identifikátora."];
+
+  it("the summary lists them beside the cards — nothing the review found is lost", async () => {
+    api.getBatchReviewApi.mockResolvedValue({ ...review([row(1, "agree")]), applied: CORRECTIONS });
+    summary();
+
+    const list = await screen.findByRole("region", { name: "Zapracujem bez otázky" });
+    expect(within(list).getByText("Zapracujem bez otázky (2)")).toBeInTheDocument();
+    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual(CORRECTIONS);
+    expect(screen.getByRole("button", { name: /Schváliť všetko \(1\)/ })).toBeEnabled();
+  });
+
+  it("the cards one by one list them too, and without any there is no list", () => {
+    const board = consulting(["d1"]);
+    const message = board.recent_messages[0] as unknown as { payload: { consultation: Record<string, unknown> } };
+    message.payload.consultation.applied = CORRECTIONS;
+    const { unmount } = render(
+      <MemoryRouter>
+        <DecisionCardsBar board={board} versionId="v1" onBoard={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("region", { name: "Zapracujem bez otázky" })).toHaveTextContent(CORRECTIONS[0]!);
+    unmount();
+
+    render(
+      <MemoryRouter>
+        <DecisionCardsBar board={consulting(["d1"])} versionId="v1" onBoard={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("region", { name: "Zapracujem bez otázky" })).toBeNull();
+  });
+});
+
 describe("the card under a consulted row carries Poradca's proposal and instruction", () => {
   it("shows Poradca's choice, why and his instruction for the Staviteľ", () => {
     render(

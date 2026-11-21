@@ -32,6 +32,7 @@ import { FROM_PORADCA_LABEL, type HandedChoice } from "@/lib/poradcaHandoff";
 import { directionToRow, roundGain } from "@/lib/consultationDirection";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
+import AppliedWithoutQuestion from "@/components/controlCenter/AppliedWithoutQuestion";
 import ReviewWithPoradcaButton from "@/components/controlCenter/ReviewWithPoradcaButton";
 import type { BatchReviewRow } from "@/services/api/batchReview";
 import { reviewRequestFor } from "@/lib/poradcaReview";
@@ -144,6 +145,8 @@ interface Consultation {
   /** Why the consultation came — the engine writes it (DEV-106); the review-with-Poradca request depends on it. */
   source?: string;
   decisions: ConsultDecision[];
+  /** DEV-487 — the Auditor's points the Staviteľ works in without a card, one sentence each. */
+  applied?: string[];
   /**
    * ICCINT-72: koľké kolo konzultácie o tej istej veci to je a koľko ich môže prísť.
    *
@@ -561,6 +564,7 @@ export default function DecisionCardsBar({ board, versionId, onBoard, proposals,
         {consultation.intro && (
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">{consultation.intro}</p>
         )}
+        <AppliedWithoutQuestion applied={consultation.applied} />
 
         {/* Answered trail — what's already decided. */}
         {Object.keys(answered).length > 0 && (

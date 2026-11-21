@@ -333,6 +333,8 @@ def summary(db: Session, version_id: uuid.UUID) -> Optional[dict[str, Any]]:
         "conversation_id": record.conversation_id,
         "counts": counts,
         "rows": [row.__dict__ for row in rows],
+        # DEV-487: the Auditor's points the Staviteľ works in without a card — the Manažér sees them in the summary.
+        "applied": [str(a) for a in consultation.get("applied") or []],
     }
 
 

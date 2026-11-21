@@ -37,6 +37,8 @@ class BatchReviewRead(BaseModel):
     conversation_id: Optional[UUID] = None
     counts: dict[str, int]
     rows: list[BatchReviewRow]
+    #: DEV-487 — the corrections the Staviteľ works in without a card („Zapracujem bez otázky“).
+    applied: list[str] = Field(default_factory=list)
 
 
 class BatchReviewAccount(BaseModel):

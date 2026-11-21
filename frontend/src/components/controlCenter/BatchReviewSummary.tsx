@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCheck, Loader2, MessageSquare, RotateCcw } from "lucide-react";
 
+import AppliedWithoutQuestion from "@/components/controlCenter/AppliedWithoutQuestion";
 import DecisionCardsBar from "@/components/controlCenter/DecisionCardsBar";
 import ErrorNote from "@/components/common/ErrorNote";
 import { getBatchReviewApi, reviewAgainApi, type BatchReview, type BatchReviewRow } from "@/services/api/batchReview";
@@ -261,6 +262,7 @@ export default function BatchReviewSummary({ board, versionId, onBoard }: Props)
           );
         })}
       </ul>
+      <AppliedWithoutQuestion applied={review.applied} />
       <ErrorNote error={error} className="mt-2" />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] text-[var(--color-text-muted)]">

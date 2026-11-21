@@ -3897,6 +3897,8 @@ export interface components {
         };
         /** BatchReviewRead */
         BatchReviewRead: {
+            /** Applied */
+            applied?: string[];
             /** Conversation Id */
             conversation_id?: string | null;
             /** Counts */
