@@ -17,6 +17,7 @@ from backend.db.models.customers import Customer
 from backend.db.models.deploy import DeployEvent
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
+from backend.db.models.maintenance_run import MaintenanceRun
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
 from backend.db.models.projects import Project
@@ -33,6 +34,7 @@ ALL_MODELS: tuple[type, ...] = (
     Project,
     VersionTicket,
     BatchReview,
+    MaintenanceRun,
     Epic,
     Feat,
     Task,
@@ -53,6 +55,7 @@ __all__ = [
     "ALL_MODELS",
     "VersionTicket",
     "BatchReview",
+    "MaintenanceRun",
     "Base",
     "Credential",
     "Customer",

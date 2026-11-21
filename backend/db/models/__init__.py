@@ -12,6 +12,7 @@ from backend.db.models.deploy import DeployEvent, DeployRefusal
 from backend.db.models.external_cost import ExternalCost
 from backend.db.models.foundation import User, UserAgentSettings, UserSession
 from backend.db.models.idea import Idea
+from backend.db.models.maintenance_run import MaintenanceRun
 from backend.db.models.model_price import ModelPrice
 from backend.db.models.orchestrator import OrchestratorSession
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -35,6 +36,7 @@ __all__ = [
     "AgentTerminalSession",
     "VersionTicket",
     "BatchReview",
+    "MaintenanceRun",
     "Idea",
     "Base",
     "UUIDMixin",

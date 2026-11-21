@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     # is not touched (DEV-166, DEV-305).
     ci_runner_cache_retention_enabled: bool = True
     ci_runner_cache_retention_interval_seconds: int = 24 * 3600
+    # DEV-484: after a start, a due pruning waits this long — a deploy's own checks run undisturbed first.
+    ci_runner_cache_retention_grace_seconds: int = 300
     ci_runner_cache_keep_hours: int = 72
     # DEV-201: how long a version passed by the Auditor waits for the CI of its last commit before the wait is given up
     # (said out loud). Measured 23.10.2026: NEX Inbox's CI took up to 100 minutes, its jobs waiting for the only runner.

@@ -53,6 +53,7 @@ from backend.services import agent_terminal as agent_terminal_service
 from backend.services import build_db as build_db_service
 from backend.services import build_sandbox as build_sandbox_service
 from backend.services import kb_index_sync as kb_index_sync_service
+from backend.services import maintenance as maintenance_service
 from backend.services import orchestrator as orchestrator_service
 from backend.services import smoke_scratch
 from backend.services.poradca import readiness as poradca_readiness
@@ -178,17 +179,37 @@ async def _orchestrator_session_retention_loop() -> None:
             logger.exception("orchestrator session retention loop iteration failed")
 
 
+def _ci_runner_prune_wait() -> float:
+    with SessionLocal() as db:
+        return maintenance_service.seconds_until_due(
+            db,
+            maintenance_service.CI_RUNNER_PRUNE,
+            settings.ci_runner_cache_retention_interval_seconds,
+            settings.ci_runner_cache_retention_grace_seconds,
+        )
+
+
+def _ci_runner_prune_and_mark() -> None:
+    orchestrator_service.prune_ci_runner_caches()
+    with SessionLocal() as db:
+        maintenance_service.mark_run(db, maintenance_service.CI_RUNNER_PRUNE)
+
+
 async def _ci_runner_cache_retention_loop() -> None:
     """Background task: daily, prune the CI runners' own Docker of the build cache and images unused for long (DEV-435)
-    — the disk of ANDROS crossed 85 % with 400 GB the runners kept and nobody pruned."""
+    — the disk of ANDROS crossed 85 % with 400 GB the runners kept and nobody pruned.
+
+    DEV-484: it waits only for what is left of the day since the last pruning (kept in the database). Until then it
+    slept a whole day after every start, and the cockpit is deployed several times a day — in 72 hours it never ran."""
     while True:
         try:
-            await asyncio.sleep(settings.ci_runner_cache_retention_interval_seconds)
-            await asyncio.to_thread(orchestrator_service.prune_ci_runner_caches)
+            await asyncio.sleep(await asyncio.to_thread(_ci_runner_prune_wait))
+            await asyncio.to_thread(_ci_runner_prune_and_mark)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("CI runner cache retention loop iteration failed")
+            await asyncio.sleep(settings.ci_runner_cache_retention_grace_seconds)
 
 
 async def _ci_watch_loop() -> None:
