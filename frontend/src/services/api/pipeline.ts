@@ -75,6 +75,10 @@ export interface PipelineState {
    * tretiu hodinu, vyzerajú inak rovnako a Manažér nemá ako rozhodnúť, či počkať, alebo volať pomoc.
    */
   working_since?: string | null;
+  /** DEV-491 — „Zrušiť rýchlu opravu“ is taken only for a fast fix that did nothing yet; absent = refused. */
+  cancellable?: boolean;
+  /** DEV-491 — why the fast fix cannot be cancelled now, in words (`null` when it can). */
+  cancel_refusal?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -328,6 +332,17 @@ export function startFastFixApi(
     ...(workKind ? { work_kind: workKind } : {}),
     ...(planeIssueId ? { plane_issue_id: planeIssueId } : {}),
   });
+}
+
+// DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not go back, why.
+export interface FastFixCancelResponse {
+  version_number: string;
+  plane_warning?: string | null;
+}
+
+/** DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number. */
+export function cancelFastFixApi(versionId: string): Promise<FastFixCancelResponse> {
+  return api.delete<FastFixCancelResponse>(`/pipeline/${versionId}/fast-fix`);
 }
 
 export function postPipelineActionApi(

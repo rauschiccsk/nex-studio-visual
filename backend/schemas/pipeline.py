@@ -73,6 +73,10 @@ class PipelineStateRead(BaseModel):
     #: pol minútou od ťahu, ktorý visí tretiu hodinu — inak ticho pri práci a ticho pri poruche vyzerajú
     #: rovnako a on nemá ako rozhodnúť, či počkať, alebo volať pomoc.
     working_since: Optional[datetime] = None
+    #: DEV-491 — „Zrušiť rýchlu opravu“: ``True`` only for a fast fix that did nothing yet; ``cancel_refusal`` says
+    #: why not in words. The default refuses, so a state read anywhere else never offers a cancel the route refuses.
+    cancellable: bool = False
+    cancel_refusal: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -427,6 +431,15 @@ class FastFixStartRequest(BaseModel):
     #: DEV-122: the ticket of the project's module in Plane the fix is started from — it then follows the version
     #: (started → In Progress, UAT → a comment, PROD → Done).
     plane_issue_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class FastFixCancelResponse(BaseModel):
+    """DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not follow, why."""
+
+    version_number: str
+    plane_warning: Optional[str] = Field(
+        default=None, description="The fix is cancelled, but its ticket in Plane did not go back — said in words."
+    )
 
 
 class FastFixStartResponse(BaseModel):

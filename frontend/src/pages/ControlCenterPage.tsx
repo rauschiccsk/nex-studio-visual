@@ -61,12 +61,14 @@ import { useBuildStatus } from "@/components/controlCenter/useBuildStatus";
 import HonestStatusStrip from "@/components/controlCenter/HonestStatusStrip";
 import TaskPlanRail from "@/components/controlCenter/TaskPlanRail";
 import WhereWeLeftOff from "@/components/controlCenter/WhereWeLeftOff";
+import CancelFastFix from "@/components/controlCenter/CancelFastFix";
 
 export default function ControlCenterPage() {
   const navigate = useNavigate();
 
   const selectedProject = useActiveContextStore((s) => s.selectedProject);
   const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const versionId = selectedVersion?.versionId ?? null;
 
   // The event-rendered transcript + live activity, streamed over the EXISTING pipeline WS (INVARIANT: no new
@@ -272,6 +274,16 @@ export default function ControlCenterPage() {
         <PhaseBar board={board ?? null} />
         {/* DEV-151: why the development of this version stands and what next — written by a person. */}
         <WhereWeLeftOff versionId={versionId} />
+        {/* DEV-491: a fast fix that did nothing yet goes away whole — the project page, its number free again. */}
+        <CancelFastFix
+          board={board ?? null}
+          versionId={versionId}
+          versionNumber={selectedVersion?.versionNumber ?? ""}
+          onCancelled={() => {
+            setSelectedVersion(null);
+            navigate(`/projects/${selectedProject.slug}`);
+          }}
+        />
         {/* ICCINT-129: stav posledného zostavenia patrí VEDĽA fáz, jednou vetou. Kto vidí červenú
             pri druhom commite, nedostane sa do stavu, že prerába hotovú verziu. */}
         <BuildStatus stav={ci} />

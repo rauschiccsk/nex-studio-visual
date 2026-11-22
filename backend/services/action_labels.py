@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy.orm import Session
 
 from backend.db.models.pipeline import PipelineState
+from backend.services import fast_fix
 
 if TYPE_CHECKING:
     from backend.schemas.pipeline import PipelineStateRead
@@ -177,7 +178,14 @@ def read_state(db: Session, state: PipelineState, labels: Optional[dict[str, str
     from backend.schemas.pipeline import PipelineStateRead
 
     read = PipelineStateRead.model_validate(state)
-    return read.model_copy(update={"next_action": state_sentence(db, state, labels)})
+    refused = fast_fix.cancel_refusal(state)
+    return read.model_copy(
+        update={
+            "next_action": state_sentence(db, state, labels),
+            "cancellable": refused is None,
+            "cancel_refusal": refused,
+        }
+    )
 
 
 def say(db: Session, state: Optional[PipelineState], text: str) -> str:

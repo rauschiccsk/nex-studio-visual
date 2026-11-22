@@ -244,6 +244,12 @@ FIX_MOVES = {
         "Rýchla oprava {version} je nasadená na PROD u zákazníka {customer} ({date}).",
         "Tiket {ticket} rýchlej opravy sa po nasadení na PROD neuzavrel",
     ),
+    # DEV-491: a fast fix cancelled before it did anything gives its ticket back to the queue.
+    "cancelled": (
+        "Todo",
+        "Rýchla oprava {version} je zrušená skôr, než niečo urobila — tiket čaká na novú opravu. Zrušil: {who}.",
+        "Rýchla oprava je zrušená, ale tiket {ticket} sa v Plane nevrátil do Todo",
+    ),
 }
 _DOER_LINE = re.compile(r"^Robí:.*$", re.MULTILINE)
 

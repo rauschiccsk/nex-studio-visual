@@ -1138,6 +1138,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipeline/{version_id}/fast-fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel Fast Fix
+         * @description DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number.
+         *
+         *     Refused in words (409) when the fix is past Príprava or the Staviteľ is on a turn. The ticket it was started from
+         *     goes back to Todo with a comment; when Plane does not follow, the fix is cancelled anyway and the sentence says so.
+         */
+        delete: operations["cancel_fast_fix_api_v1_pipeline__version_id__fast_fix_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipeline/{version_id}/files": {
         parameters: {
             query?: never;
@@ -5756,6 +5779,19 @@ export interface components {
             version_id?: string | null;
         };
         /**
+         * FastFixCancelResponse
+         * @description DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not follow, why.
+         */
+        FastFixCancelResponse: {
+            /**
+             * Plane Warning
+             * @description The fix is cancelled, but its ticket in Plane did not go back — said in words.
+             */
+            plane_warning?: string | null;
+            /** Version Number */
+            version_number: string;
+        };
+        /**
          * FastFixStartRequest
          * @description Body for ``POST /pipeline/fast-fix`` (F-009, CR-NS-094) — the "Rýchla oprava" entry.
          *
@@ -6600,6 +6636,13 @@ export interface components {
         PipelineStateRead: {
             /** Block Reason */
             block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue" | "check_failed" | "schema_approval") | null;
+            /** Cancel Refusal */
+            cancel_refusal?: string | null;
+            /**
+             * Cancellable
+             * @default false
+             */
+            cancellable: boolean;
             /**
              * Created At
              * Format: date-time
@@ -11207,6 +11250,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineBoardRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_fast_fix_api_v1_pipeline__version_id__fast_fix_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FastFixCancelResponse"];
                 };
             };
             /** @description Validation Error */

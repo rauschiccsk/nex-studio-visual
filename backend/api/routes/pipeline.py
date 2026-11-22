@@ -43,6 +43,7 @@ from backend.schemas.pipeline import (
     DedoProposalRead,
     DedoProposalRejectRequest,
     DedoProposalSendRequest,
+    FastFixCancelResponse,
     FastFixStartRequest,
     FastFixStartResponse,
     PipelineActionRequest,
@@ -538,6 +539,44 @@ async def _fix_ticket_started(ticket: plane_tickets.LinkedTicket, version_number
         return await run_blocking(plane_tickets.follow_fix, plane_tickets.gateway, ticket, "started", **words, cap=60)
     except BlockingWorkTimedOut:
         return plane_tickets.fix_failed(ticket, "started", "Plane do minúty neodpovedal.")
+
+
+@router.delete("/{version_id}/fast-fix", response_model=FastFixCancelResponse)
+async def cancel_fast_fix(
+    version_id: uuid.UUID,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> FastFixCancelResponse:
+    """DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number.
+
+    Refused in words (409) when the fix is past Príprava or the Staviteľ is on a turn. The ticket it was started from
+    goes back to Todo with a comment; when Plane does not follow, the fix is cancelled anyway and the sentence says so.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    if not await pipeline_runner.idle_within(version_id, pipeline_runner.SETTLE_GRACE_SECONDS):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=fast_fix_service.CANCEL_AGENT_WORKING)
+    try:
+        cancelled = fast_fix_service.cancel(db, version_id)
+    except fast_fix_service.CancelRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    plane_warning = None
+    if cancelled.plane_issue_id:
+        ticket = plane_tickets.LinkedTicket(
+            issue_id=cancelled.plane_issue_id,
+            identifier=cancelled.plane_identifier or cancelled.plane_issue_id,
+            url=cancelled.plane_url or "",
+        )
+        words = {"version": f"v{cancelled.version_number}", "who": plane_tickets.person(current_user)}
+        try:
+            plane_warning = await run_blocking(
+                plane_tickets.follow_fix, plane_tickets.gateway, ticket, "cancelled", **words, cap=60
+            )
+        except BlockingWorkTimedOut:
+            plane_warning = plane_tickets.fix_failed(ticket, "cancelled", "Plane do minúty neodpovedal.")
+    logger.info("Fast-Fix cancelled: version %s (%s)", version_id, cancelled.version_number)
+    return FastFixCancelResponse(version_number=cancelled.version_number, plane_warning=plane_warning)
 
 
 @router.get("/{version_id}/ci", response_model=CiStatusRead)

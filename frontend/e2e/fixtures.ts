@@ -250,6 +250,8 @@ export const PIPELINE: S["PipelineBoardRead"] = {
     resume_after_framework_fix: false,
     resume_after_restart: false,
     working_since: null,
+    cancellable: false,
+    cancel_refusal: "Zrušiť sa dá len rýchla oprava — riadna verzia sa neruší.",
     created_at: T1,
     updated_at: T2,
   },
