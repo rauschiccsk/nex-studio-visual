@@ -2120,12 +2120,6 @@ def _service_pairs(zdroj_sluzby: dict[str, Any], inst_sluzby: dict[str, Any]) ->
     return pairs
 
 
-def _reads_env_file(svc: Any) -> bool:
-    """Does the service read the installation's ``.env`` as a whole (``env_file``)? Only then is a key written there
-    delivered to it; a service with its own ``environment`` gets only what that names (DEV-488)."""
-    return isinstance(svc, dict) and bool(svc.get("env_file"))
-
-
 def _chybajuce_env(
     instalacia: dict[str, Any], source: Optional[dict[str, Any]], z_env_suboru: Optional[set[str]] = None
 ) -> dict[str, list[str]]:
@@ -2151,7 +2145,8 @@ def _chybajuce_env(
         zdroj_env = _env_mapa(zdroj_sluzby.get(zdroj_meno) or {})
         inst_svc = inst_sluzby.get(inst_meno) or {}
         inst_env = _env_mapa(inst_svc)
-        mimo = (z_env_suboru or set()) if _reads_env_file(inst_svc) else set()
+        # DEV-488: only a service that reads the .env (``env_file``) gets its keys from there.
+        mimo = (z_env_suboru or set()) if isinstance(inst_svc, dict) and _reads_env_file(inst_svc) else set()
         nove = [k for k in zdroj_env if k not in inst_env and k not in mimo]
         if nove:
             chyba[inst_meno] = sorted(nove)
