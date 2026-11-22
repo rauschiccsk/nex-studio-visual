@@ -2098,6 +2098,34 @@ def _env_mapa(svc: Any) -> dict[str, Any]:
     return {}
 
 
+def _service_pairs(zdroj_sluzby: dict[str, Any], inst_sluzby: dict[str, Any]) -> list[tuple[str, str]]:
+    """(the project's service, the installation's service) — by ROLE first (backend, frontend and the database may be
+    named differently in a hand-written installation), then every other service by its NAME.
+
+    DEV-488: pairing by role alone left out every other service. 22.11.2026 Orthodox Hermenia 1.1.0 asked for the
+    yearly Claude code in its backend and its worker; the deploy filled it into the backend only, and the worker — the
+    one that calls Claude — went on without it."""
+    pairs: list[tuple[str, str]] = []
+    zdroj_role = identify_service_roles(zdroj_sluzby)
+    inst_role = identify_service_roles(inst_sluzby)
+    for rola, zdroj_meno in zdroj_role.items():
+        inst_meno = inst_role.get(rola)
+        if zdroj_meno and inst_meno:
+            pairs.append((zdroj_meno, inst_meno))
+    taken_source = {zdroj for zdroj, _ in pairs}
+    taken_installation = {inst for _, inst in pairs}
+    for meno in zdroj_sluzby:
+        if meno in inst_sluzby and meno not in taken_source and meno not in taken_installation:
+            pairs.append((meno, meno))
+    return pairs
+
+
+def _reads_env_file(svc: Any) -> bool:
+    """Does the service read the installation's ``.env`` as a whole (``env_file``)? Only then is a key written there
+    delivered to it; a service with its own ``environment`` gets only what that names (DEV-488)."""
+    return isinstance(svc, dict) and bool(svc.get("env_file"))
+
+
 def _chybajuce_env(
     instalacia: dict[str, Any], source: Optional[dict[str, Any]], z_env_suboru: Optional[set[str]] = None
 ) -> dict[str, list[str]]:
@@ -2108,23 +2136,22 @@ def _chybajuce_env(
     sama nedostane — a chrbtica potom hlási verziu, ktorú nepozná. Doplniť CHÝBAJÚCU sa smie;
     prepísať EXISTUJÚCU nikdy (september 2026: prestavba prepísala ostré hodnoty vývojovými).
 
-    ⚠️ Kľúč zo sprievodného ``.env`` NIE JE chýbajúci: služby ho dostávajú cez ``env_file``. Bez tejto
+    ⚠️ Kľúč zo sprievodného ``.env`` NIE JE chýbajúci pre službu, ktorá ``.env`` číta (``env_file``). Bez tejto
     výnimky by porovnanie hlásilo ako chýbajúce takmer všetko, čo inštalácia bežne má — a varovanie,
-    ktoré chodí vždy, naučí človeka ignorovať aj to pravdivé."""
+    ktoré chodí vždy, naučí človeka ignorovať aj to pravdivé. DEV-488: služba s vlastným ``environment``
+    dostane len to, čo v ňom stojí — kľúč v ``.env`` jej nič nedá (worker Orthodox Hermenie).
+
+    Služby sa párujú podľa úlohy a potom podľa mena (:func:`_service_pairs`)."""
     zdroj_sluzby = ((source or {}).get("services") or {}) if source else {}
     inst_sluzby = instalacia.get("services") or {}
     if not zdroj_sluzby or not inst_sluzby:
         return {}
-    zdroj_role = identify_service_roles(zdroj_sluzby)
-    inst_role = identify_service_roles(inst_sluzby)
     chyba: dict[str, list[str]] = {}
-    for rola, zdroj_meno in zdroj_role.items():
-        inst_meno = inst_role.get(rola)
-        if not zdroj_meno or not inst_meno:
-            continue
+    for zdroj_meno, inst_meno in _service_pairs(zdroj_sluzby, inst_sluzby):
         zdroj_env = _env_mapa(zdroj_sluzby.get(zdroj_meno) or {})
-        inst_env = _env_mapa(inst_sluzby.get(inst_meno) or {})
-        mimo = z_env_suboru or set()
+        inst_svc = inst_sluzby.get(inst_meno) or {}
+        inst_env = _env_mapa(inst_svc)
+        mimo = (z_env_suboru or set()) if _reads_env_file(inst_svc) else set()
         nove = [k for k in zdroj_env if k not in inst_env and k not in mimo]
         if nove:
             chyba[inst_meno] = sorted(nove)
@@ -2341,22 +2368,24 @@ def version_bump_from_text(
     # hodnotu nikdy neprepisujeme: to je presne to, čo v septembri prepísalo ostré nastavenia
     # vývojovými. Pridanie chýbajúceho kľúča a prepísanie existujúceho sú dve rôzne veci.
     _z_env = set(_parse_env_text(env_text))
+    # DEV-488: the same pairs as :func:`_chybajuce_env` — by role, then by name (a worker gets what it is missing too).
+    _zdroj_k_instalacii = {inst: zdroj for zdroj, inst in _service_pairs((source or {}).get("services") or {}, sluzby)}
     for _inst_meno, _kluce in _chybajuce_env(novy, source, _z_env).items():
-        _zdroj_role = identify_service_roles((source or {}).get("services") or {})
-        _inst_role = identify_service_roles(sluzby)
-        _rola = next((r for r, m in _inst_role.items() if m == _inst_meno), None)
-        _zdroj_meno = _zdroj_role.get(_rola) if _rola else None
+        _zdroj_meno = _zdroj_k_instalacii.get(_inst_meno)
         if not _zdroj_meno:
             continue
         _zdroj_env = _env_mapa(((source or {}).get("services") or {}).get(_zdroj_meno) or {})
         _svc = sluzby.get(_inst_meno) or {}
         _cielove = _svc.get("environment")
+        # DEV-488: a key the installation keeps in its .env goes in as a reference to its OWN value — never with the
+        # project's (a development ``TENANT_SLUG: dev`` must not reach a customer; the September lesson above).
+        _hodnoty = {k: (f"${{{k}}}" if k in _z_env else _zdroj_env[k]) for k in _kluce}
         if isinstance(_cielove, list):
-            _svc["environment"] = {**_env_mapa(_svc), **{k: _zdroj_env[k] for k in _kluce}}
+            _svc["environment"] = {**_env_mapa(_svc), **_hodnoty}
         else:
             _svc.setdefault("environment", {})
-            for _k in _kluce:
-                _svc["environment"].setdefault(_k, _zdroj_env[_k])
+            for _k, _hodnota in _hodnoty.items():
+                _svc["environment"].setdefault(_k, _hodnota)
 
     # Kľúčom je MENO OBRAZU, nie meno služby. ``identify_service_roles`` pozná len backend/frontend/db,
     # takže ``alembic-init`` by cezeň prepadol — a pritom práve on potrebuje ``nex-inbox-backend``,

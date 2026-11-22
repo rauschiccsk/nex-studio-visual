@@ -131,7 +131,20 @@ def test_what_was_added_is_named(tmp_path):
 
     chyba = P.env_keys_missing_against_source(d, ZDROJ_S_NOVOU_PREMENNOU)
 
-    assert chyba == {"backend": ["APP_VERSION"]}, chyba
+    # DEV-488: TENANT_SLUG stands in the .env, but this backend reads no .env (no ``env_file``) — it never got it, so it
+    # is missing too; it goes in as ``${TENANT_SLUG}`` (the installation's own value, see the next test).
+    assert chyba == {"backend": ["APP_VERSION", "TENANT_SLUG"]}, chyba
+
+
+def test_a_key_the_installation_keeps_goes_in_with_the_installations_own_value(tmp_path):
+    """DEV-488: the project says ``TENANT_SLUG: dev`` — the installation keeps ``mager`` in its .env. The key reaches
+    the backend as a reference to the installation's own value, never as the project's (the September lesson)."""
+    d = _instalacia(tmp_path)
+    novy = P.render_version_bump(
+        d, version="1.5.0", project_slug="nex-inbox", source=ZDROJ_S_NOVOU_PREMENNOU, project_path=tmp_path
+    )
+
+    assert novy["services"]["backend"]["environment"]["TENANT_SLUG"] == "${TENANT_SLUG}"
 
 
 # -- Stavba instalacie sa nasadenim NEMENI ------------------------------------
