@@ -48,6 +48,8 @@ vi.mock("@/services/api/projects", () => ({ listProjectsApi: listProjectsApiMock
 // určovať — a test, ktorý sa oň opiera, meria rozloženie stránky namiesto správania Zadania.
 vi.mock("@/services/api/versions", () => ({
   getVersion: getVersionMock,
+  // DEV-498: the page lists the version's tickets above „Spustiť tvorbu špecifikácie“.
+  listVersionTicketsApi: vi.fn(() => Promise.resolve([])),
   readZadanie: readZadanieMock,
   writeZadanie: writeZadanieMock,
   // ICCINT-100: stránka odteraz nesie aj panel Nastavenia verzie. Atrapa modulu musí vrátiť VŠETKO,

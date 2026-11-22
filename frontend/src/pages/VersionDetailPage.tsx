@@ -17,6 +17,7 @@ import { useAuthStore } from "@/store/authStore";
 import { mayOperateProject } from "@/services/permissions";
 import VersionSettingsSection from "@/components/version/VersionSettingsSection";
 import FastFixTickets from "@/components/version/FastFixTickets";
+import PlannedVersionTickets from "@/components/version/PlannedVersionTickets";
 import CancelVersion from "@/components/version/CancelVersion";
 import { useActiveContextStore } from "@/store/activeContextStore";
 
@@ -301,6 +302,8 @@ export default function VersionDetailPage() {
                 />
                 </>
               )}
+              {/* DEV-498: the tickets put into the version, right where it is started — no numbers in the Zadanie. */}
+              <PlannedVersionTickets slug={slug ?? ""} versionId={version.id} />
               <ErrorNote error={zadanieError} className="mt-2" />
               {briefClash && (
                 <BriefConflictPanel

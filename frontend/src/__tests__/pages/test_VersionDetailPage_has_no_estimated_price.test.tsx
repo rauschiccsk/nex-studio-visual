@@ -25,6 +25,8 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("@/services/api/projects", () => ({ listProjectsApi: listProjectsApiMock }));
 vi.mock("@/services/api/versions", () => ({
   getVersion: getVersionMock,
+  // DEV-498: the page lists the version's tickets above „Spustiť tvorbu špecifikácie“.
+  listVersionTicketsApi: vi.fn(() => Promise.resolve([])),
   readZadanie: vi.fn(() => Promise.resolve({ content: "Zadanie." })),
   writeZadanie: vi.fn(),
   getVersionSettings: vi.fn(() => Promise.resolve({ version_number_lock_reason: null })),

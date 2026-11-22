@@ -791,7 +791,7 @@ describe("NewVersionPage — the engine refuses founding over unsaved work (DEV-
 // DEV-440 — Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte nemusel niečo
 // dopisovať do zadania, veď úloha je jasná“. The cockpit writes the Zadanie from the upgraded libraries' change notes.
 describe("NewVersionPage — a version that only upgrades gets its Zadanie written (DEV-440)", () => {
-  const WRITTEN = "# Povýšenie knižníc rámu aplikácie\n\nVerzia prináša len povýšenie, ktoré Manažér prijal pri jej zakladaní.";
+  const WRITTEN = "# Povýšenie knižníc rámu aplikácie\n\nVerzia prináša povýšenie, ktoré Manažér prijal pri jej zakladaní.";
   const onTemplate = { ...project, template: "nsv-standard" };
   const behindKit: AppKitStatus = {
     current: "0.16.4",

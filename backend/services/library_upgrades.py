@@ -124,17 +124,22 @@ def brief_for(repo: Path, steps: list[delivery_statement.BaseStep]) -> str:
 
 
 def founding_brief(found: list[Upgrade]) -> Optional[str]:
-    """DEV-440 — the Zadanie of a version that only upgrades the frame's libraries, written by the cockpit so the
-    Manažér only approves it. Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte
-    nemusel niečo dopisovať do zadania, veď úloha je jasná“. ``None`` without an upgrade."""
+    """DEV-440 — the Zadanie of a version that upgrades the frame's libraries, written by the cockpit so the Manažér
+    only approves it. Director 20.11.2026: „keď robím len povýšenie a nič iné a schválim to tak aby som ešte nemusel
+    niečo dopisovať do zadania, veď úloha je jasná“. ``None`` without an upgrade.
+
+    DEV-498: it never excludes other work — since DEV-492 tickets go into a version after it is founded, and the
+    Staviteľ gets them in Príprava with this Zadanie. 22.11.2026 „Žiadna iná zmena … nepatrí“ stood against the three
+    tickets of Orthodox Hermenia 1.2.0; the Director: „dopisovanie čísla tiketov z mojej strany je nezmyseľná práca.“"""
     if not found:
         return None
     moved = "\n".join(f"- {u.label}: z v{u.old} na v{u.new}" for u in found)
     notes = "\n\n".join(_changes(u) for u in found)
     return (
         "# Povýšenie knižníc rámu aplikácie\n\n"
-        f"Verzia prináša len povýšenie, ktoré Manažér prijal pri jej zakladaní:\n{moved}\n\n"
-        "Žiadna iná zmena aplikácie do tejto verzie nepatrí.\n\n"
+        f"Verzia prináša povýšenie, ktoré Manažér prijal pri jej zakladaní:\n{moved}\n\n"
+        "Tikety, ktoré Manažér do verzie zaradí, sú tiež jej súčasťou — Staviteľ ich dostane v Príprave spolu s týmto "
+        "zadaním.\n\n"
         f"## Čo povýšenie prináša (zápisy zmien knižníc)\n\n{notes}\n\n"
         "## Hotové, keď\n\n"
         "- Aplikácia sa postaví a prejde všetkými kontrolami s novými verziami knižníc.\n"

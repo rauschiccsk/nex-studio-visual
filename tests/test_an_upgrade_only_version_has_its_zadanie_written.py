@@ -22,13 +22,20 @@ def _brief(repo: Path) -> str | None:
     return library_upgrades.founding_brief(library_upgrades.upgrades(repo, [("tag", "1.0.0")], changelog=_notes))
 
 
-def test_the_zadanie_names_what_rose_says_nothing_else_belongs_and_carries_the_changes_between(tmp_path):
+def test_the_zadanie_names_what_rose_takes_in_the_tickets_and_carries_the_changes_between(tmp_path):
+    """DEV-498 — the Zadanie never excludes other work: tickets go into a version after it is founded (DEV-492) and the
+    Staviteľ gets them with it. 22.11.2026 „Žiadna iná zmena … nepatrí“ stood against three tickets of Orthodox
+    Hermenia 1.2.0; the Director: „dopisovanie čísla tiketov z mojej strany je nezmyseľná práca.“"""
     text = _brief(_repo(tmp_path / "p"))
 
     assert text is not None
-    assert text.startswith("# Povýšenie knižníc rámu aplikácie\n\nVerzia prináša len povýšenie, ktoré Manažér prijal")
+    assert text.startswith("# Povýšenie knižníc rámu aplikácie\n\nVerzia prináša povýšenie, ktoré Manažér prijal")
     assert "- šablóna aplikácie nex-app-kit: z v0.9.0 na v0.11.2\n- nex-shared: z v0.29.0 na v0.35.0" in text
-    assert "Žiadna iná zmena aplikácie do tejto verzie nepatrí." in text
+    assert (
+        "Tikety, ktoré Manažér do verzie zaradí, sú tiež jej súčasťou — Staviteľ ich dostane v Príprave spolu s týmto "
+        "zadaním." in text
+    )
+    assert "Žiadna iná zmena" not in text and "len povýšenie" not in text, "nothing that excludes the tickets"
     assert "migrácia kit_0002 ruší jedinečnosť e-mailu" in text and "nové tlačidlá" in text
     assert "budúca verzia" not in text and "už bolo" not in text, "only the changes between the two releases"
     assert "## Hotové, keď" in text
