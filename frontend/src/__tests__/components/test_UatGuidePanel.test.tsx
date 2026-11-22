@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { ReactElement } from "react";
 import "@testing-library/jest-dom/vitest";
 
@@ -15,18 +15,13 @@ import { getUatChecks, getUatGuide, setUatCheck } from "@/services/api/deploy";
 import type { DeployMatrixRow, UatGuide, UatProgress } from "@/types/deploy";
 
 vi.mock("@/services/api/deploy", () => ({ getUatGuide: vi.fn(), getUatChecks: vi.fn(), setUatCheck: vi.fn() }));
-
-function Where() {
-  const location = useLocation();
-  return <div data-testid="where">{location.pathname + location.search}</div>;
-}
+vi.mock("@/services/api/planeTickets", () => ({ filePreparedTicketApi: vi.fn() }));
 
 function render(ui: ReactElement) {
   return rtlRender(
     <MemoryRouter initialEntries={["/uat"]}>
       <Routes>
         <Route path="/uat" element={ui} />
-        <Route path="*" element={<Where />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -204,25 +199,26 @@ describe("UatGuidePanel (DEV-90)", () => {
     expect(screen.getByLabelText("Zákazník, u ktorého skúšaš")).toHaveValue("c1");
   });
 
-  it("turns a change that does not work into a fast fix he starts himself", async () => {
+  it("turns a change that does not work into a ticket he files himself — nothing starts (DEV-492)", async () => {
     vi.mocked(getUatGuide).mockResolvedValue(GUIDE);
     vi.mocked(setUatCheck).mockResolvedValue({ ...PROGRESS, broken: ["Detail faktúry v Chrome 109"] });
     render(<UatGuidePanel slug="nex-inbox" versions={["1.8.0"]} rows={ROWS} />);
     fireEvent.click(await screen.findByRole("button", { name: "Nefunguje" }));
     fireEvent.change(screen.getByLabelText("Čo sa stalo?"), { target: { value: "Biela stránka." } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Pripraviť rýchlu opravu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pripraviť tiket" }));
 
-    expect(await screen.findByTestId("where")).toHaveTextContent("/projects/nex-inbox?rychla-oprava=1");
+    expect(await screen.findByRole("dialog", { name: "Založiť tiket" })).toBeInTheDocument();
     expect(setUatCheck).toHaveBeenCalledWith("c1", {
       version_number: "1.8.0",
       item: "Detail faktúry v Chrome 109",
       status: "broken",
       note: "Biela stránka.",
     });
-    const draft = window.localStorage.getItem("nex.draft.rychla-oprava.nex-inbox") ?? "";
-    expect(draft).toContain("V UAT u zákazníka MÁGERSTAV vo verzii 1.8.0 nefunguje: Detail faktúry v Chrome 109.");
-    expect(draft).toContain("Čo sa stalo: Biela stránka.");
+    expect(screen.getByLabelText("Názov tiketu")).toHaveValue("Nefunguje v UAT: Detail faktúry v Chrome 109");
+    const text = (screen.getByLabelText("Text tiketu") as HTMLTextAreaElement).value;
+    expect(text).toContain("V UAT u zákazníka MÁGERSTAV vo verzii 1.8.0 nefunguje: Detail faktúry v Chrome 109.");
+    expect(text).toContain("Čo sa stalo: Biela stránka.");
   });
 
   it("shows a change that does not work with what happened, and takes the record back", async () => {

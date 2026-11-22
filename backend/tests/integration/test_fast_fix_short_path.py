@@ -32,6 +32,7 @@ from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.services import fast_fix, orchestrator
 from backend.services.pipeline_status import PipelineStatusBlock
+from backend.tests.fast_fix_tickets import as_fast_fix, put_ticket
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -103,12 +104,9 @@ async def test_fast_fix_start_creates_patch_version_at_priprava(db_session) -> N
     assert patch.version_number == "0.4.10"  # semver bump, NOT lexicographic
     assert patch.name == "Rýchla oprava"
 
-    state = await orchestrator.apply_action(
-        db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": "Rename label Firmy → Dodávatelia"},
-    )
+    assert patch.fast_fix is True, "DEV-492: a fast fix knows it is one from its founding"
+    ticket = put_ticket(db_session, patch, "Rename label Firmy → Dodávatelia")
+    state = await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
     assert state.flow_type == "fast_fix"
     assert state.current_stage == "priprava"
     assert state.status == "agent_working"
@@ -120,7 +118,56 @@ async def test_fast_fix_start_creates_patch_version_at_priprava(db_session) -> N
         )
     ).scalar_one()
     assert kickoff.stage == "priprava" and kickoff.author == "manazer"
-    assert kickoff.payload["directive"] == "Rename label Firmy → Dodávatelia"
+    assert kickoff.payload["directive"] == f"{ticket.plane_identifier} — Rename label Firmy → Dodávatelia"
+    assert ticket.delivered_at is not None, "the ticket reached the Staviteľ with the brief"
+
+
+@pytest.mark.asyncio
+async def test_a_fast_fix_without_a_ticket_does_not_start(db_session) -> None:
+    """DEV-492: a fast fix starts from the tickets put into it — with none it has nothing to fix; it says what to do."""
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    _seed_base_version(db_session, project, "1.0.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
+
+    with pytest.raises(orchestrator.OrchestratorConflict) as refused:
+        await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
+
+    assert str(refused.value) == fast_fix.NO_TICKET.format(number="1.0.1")
+    assert db_session.execute(select(PipelineState).where(PipelineState.version_id == patch.id)).first() is None
+
+
+@pytest.mark.asyncio
+async def test_no_text_starts_a_fast_fix_of_a_version_founded_otherwise(db_session) -> None:
+    """DEV-492: „no text without a ticket“ — a version not founded as a fast fix cannot be started as one."""
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = _seed_base_version(db_session, project, "2.0.0")
+    version.status = "planned"
+
+    with pytest.raises(orchestrator.OrchestratorError) as refused:
+        await orchestrator.apply_action(
+            db_session, version_id=version.id, action="start", payload={"flow_type": "fast_fix", "directive": "x"}
+        )
+
+    assert str(refused.value) == orchestrator.FAST_FIX_IS_FOUNDED
+
+
+@pytest.mark.asyncio
+async def test_the_brief_is_every_ticket_put_in_each_under_its_name(db_session) -> None:
+    creator = _seed_user(db_session)
+    project = _seed_project(db_session, creator=creator)
+    version = _seed_base_version(db_session, project, "3.0.0")
+    version.status = "planned"
+    first = as_fast_fix(db_session, version, "Karta neukáže výsledok", "Po „Overiť spojenie“ ostane „Overuje sa…“.")
+    second = put_ticket(db_session, version, "Predvolený model Sonnet")
+
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start", payload={})
+
+    assert fast_fix.kickoff_directive(db_session, version.id) == (
+        f"{first.plane_identifier} — Karta neukáže výsledok\n\nPo „Overiť spojenie“ ostane „Overuje sa…“."
+        f"\n\n---\n\n{second.plane_identifier} — Predvolený model Sonnet"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,19 +184,16 @@ async def test_ensure_build_task_reads_v2_kickoff_directive(db_session) -> None:
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    await orchestrator.apply_action(
-        db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": "Fix the IBAN validator off-by-one"},
-    )
+    ticket = put_ticket(db_session, patch, "Fix the IBAN validator off-by-one")
+    await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
+    brief = f"{ticket.plane_identifier} — Fix the IBAN validator off-by-one"
 
     # The re-keyed reader sees the v2 kickoff directive.
-    assert fast_fix.kickoff_directive(db_session, patch.id) == "Fix the IBAN validator off-by-one"
+    assert fast_fix.kickoff_directive(db_session, patch.id) == brief
 
     task = fast_fix.ensure_build_task(db_session, patch.id)
-    assert task.description == "Fix the IBAN validator off-by-one"
-    assert task.title == "Fix the IBAN validator off-by-one"
+    assert task.description == brief
+    assert task.title == brief
 
     # Idempotent: a second call reuses the same Task (a re-entry into build), never a duplicate.
     again = fast_fix.ensure_build_task(db_session, patch.id)
@@ -178,19 +222,18 @@ async def test_ensure_build_task_multiline_directive_titles_from_first_line(db_s
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    directive = (
-        "  Fix the IBAN validator off-by-one  \nIt drops the last check digit on 24-char IBANs.\nAdd a regression test."
-    )
-    await orchestrator.apply_action(
+    ticket = put_ticket(
         db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": directive},
+        patch,
+        "Fix the IBAN validator off-by-one",
+        "It drops the last check digit on 24-char IBANs.\nAdd a regression test.",
     )
+    await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
+    directive = fast_fix.kickoff_directive(db_session, patch.id)
 
     task = fast_fix.ensure_build_task(db_session, patch.id)
     # Title = the trimmed FIRST non-empty line; description keeps the FULL multi-line directive.
-    assert task.title == "Fix the IBAN validator off-by-one"
+    assert task.title == f"{ticket.plane_identifier} — Fix the IBAN validator off-by-one"
     assert task.description == directive
     assert "regression test" in task.description  # later lines survive in the description, not the title
     assert task.task_type == "backend"
@@ -247,12 +290,8 @@ async def test_run_dispatch_fast_fix_priprava_auto_advances_without_spec(db_sess
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    state = await orchestrator.apply_action(
-        db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": "Tighten the rate-limit window"},
-    )
+    put_ticket(db_session, patch, "Tighten the rate-limit window")
+    state = await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
     assert state.current_stage == "priprava"
 
     async def _fake_invoke(db, **kw):
@@ -324,19 +363,15 @@ async def test_fast_fix_priprava_brief_carries_the_manager_directive(db_session)
     _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
     directive = "Aplikácia sa nedá otvoriť z NEX Managera — spúšťací token sa neoveruje lokálne."
-    await orchestrator.apply_action(
-        db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": directive},
-    )
+    put_ticket(db_session, patch, "NEX Manager neotvorí aplikáciu", directive)
+    await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
 
     brief = orchestrator._priprava_directive(db_session, patch.id, flow_type="fast_fix")
 
     assert directive in brief, "smernica Manažéra sa k agentovi nedostala"
     assert "VYŠŠIE v tomto vlákne" not in brief, "brief ukazuje na vlákno, ktoré agent nevidí"
     # ...and it reads the SAME row the build Task's brief reads — one source, no drift.
-    assert fast_fix.kickoff_directive(db_session, patch.id) == directive
+    assert directive in fast_fix.kickoff_directive(db_session, patch.id)
 
 
 def test_fast_fix_priprava_brief_asks_when_the_directive_is_missing(db_session) -> None:
@@ -385,12 +420,8 @@ async def test_build_round_materializes_fast_fix_task_and_runs_it(db_session, mo
     project = _seed_project(db_session, creator=creator)
     _seed_base_version(db_session, project, "1.0.0")
     patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=creator.id, work_kind="fix")
-    state = await orchestrator.apply_action(
-        db_session,
-        version_id=patch.id,
-        action="start",
-        payload={"flow_type": "fast_fix", "directive": "Bump retry timeout to 30s"},
-    )
+    put_ticket(db_session, patch, "Bump retry timeout to 30s")
+    state = await orchestrator.apply_action(db_session, version_id=patch.id, action="start", payload={})
     # Move the (already-started, agent_working) state into Programovanie as the lane would after Príprava.
     state.current_stage = "programovanie"
     state.current_actor = "ai_agent"

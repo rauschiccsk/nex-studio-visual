@@ -9,11 +9,19 @@
  *   - ``GET    /projects/{projectId}/zadanie-na-disku`` → peekZadanieOnDisk
  *   - ``GET    /versions/{id}/nastavenia``             → getVersionSettings
  *   - ``PATCH  /versions/{id}``                        → updateVersion
+ *   - ``POST   /projects/{projectId}/fast-fixes``      → foundFastFixApi (DEV-492)
+ *   - ``GET    /versions/{id}/tickets``                → listVersionTicketsApi (DEV-492)
+ *   - ``DELETE /versions/{id}``                        → cancelVersionApi (DEV-491, DEV-492)
  */
 
 import api from "../api";
 import type { Version, VersionCreate, VersionUpdate } from "../../types/version";
 import type { TaskPlanResponse } from "../../types/task-plan";
+import type { WorkKind } from "../../lib/workKind";
+import type { components } from "./pipeline.generated";
+
+export type VersionTicketItem = components["schemas"]["VersionTicketItem"];
+export type VersionCancelled = components["schemas"]["VersionCancelled"];
 
 /**
  * List every version belonging to a project, ordered by
@@ -39,6 +47,21 @@ export function createVersion(
   data: VersionCreate,
 ): Promise<Version> {
   return api.post<Version>(`/projects/${projectId}/versions`, data);
+}
+
+/** DEV-492 — „Nová verzia“ → „Rýchla oprava“: the next patch version, founded and waiting; nothing starts. */
+export function foundFastFixApi(projectId: string, workKind: WorkKind): Promise<Version> {
+  return api.post<Version>(`/projects/${projectId}/fast-fixes`, { work_kind: workKind });
+}
+
+/** DEV-492 — the tickets the version solves, in the order they were put in (a fast fix starts from them). */
+export function listVersionTicketsApi(versionId: string): Promise<VersionTicketItem[]> {
+  return api.get<VersionTicketItem[]>(`/versions/${versionId}/tickets`);
+}
+
+/** DEV-491, DEV-492 — „Zrušiť verziu“: a version that did nothing yet goes away whole and frees its number. */
+export function cancelVersionApi(versionId: string): Promise<VersionCancelled> {
+  return api.delete<VersionCancelled>(`/versions/${versionId}`);
 }
 
 /**

@@ -146,10 +146,12 @@ describe("the deployment screen says why „Nasadiť“ is closed", () => {
     expect(screen.getByText(/postup Release smoke gate, beh 38042619283/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Pozrieť beh na GitHube/ })).toHaveAttribute("href", RUN);
 
-    // DEV-57: the way on is the fix, not the finished version — with nothing begun, start a fast fix.
+    // DEV-57: the way on is the fix, not the finished version — with nothing begun, found a fast fix (DEV-492: it waits
+    // for its ticket, so the page founds it with „Rýchla oprava“ chosen and starts nothing).
     expect(screen.queryByRole("button", { name: /Otvoriť verziu/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Spustiť rýchlu opravu" }));
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox?rychla-oprava=1"));
+    expect(screen.getByText(/založ ju a zaraď do nej tiket s chybou/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Založiť rýchlu opravu" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/projects/nex-inbox/versions/new?rychla-oprava=1"));
   });
 
   it("⚠️ failed checks and a fix already running: it leads to it, offers no second one (DEV-57)", async () => {

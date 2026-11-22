@@ -163,8 +163,8 @@ def test_a_version_past_priprava_a_fast_fix_and_a_finished_one_are_refused_with_
             "Verzia 2.0.0 má schválenú Špecifikáciu — tiket by sa do nej už nedostal. Zaraď ho do ďalšej verzie."
         ),
         _version(db, project, "2.0.1", stage="priprava", flow_type="fast_fix"): (
-            "Verzia 2.0.1 je rýchla oprava — nemá Špecifikáciu, do ktorej by sa tiket dostal. Zaraď ho do novej "
-            "verzie alebo z neho spusti vlastnú rýchlu opravu."
+            "Rýchla oprava 2.0.1 už beží — tiket by sa do nej nedostal. Zaraď ho do inej verzie alebo do novej "
+            "rýchlej opravy."
         ),
         _version(db, project, "1.0.0", status="done"): "Verzia 1.0.0 je hotová — tiket by sa do nej už nedostal.",
     }
@@ -175,6 +175,8 @@ def test_a_version_past_priprava_a_fast_fix_and_a_finished_one_are_refused_with_
 def test_only_a_version_not_started_and_one_in_priprava_are_offered(world):
     db, project = world["db"], world["project"]
     planned = _version(db, project, "3.0.0", status="planned")
+    waiting_fix = _version(db, project, "3.0.1", status="planned")
+    waiting_fix.fast_fix = True  # DEV-492: a fast fix not started yet takes tickets
     preparing = _version(db, project, "3.1.0", stage="priprava")
     _version(db, project, "3.2.0", stage="programovanie")
     _version(db, project, "2.0.0", status="released")
@@ -182,4 +184,5 @@ def test_only_a_version_not_started_and_one_in_priprava_are_offered(world):
     offered = [v.version_number for v in version_tickets.open_versions(db, project.id)]
 
     assert planned.version_number in offered and preparing.version_number in offered
+    assert waiting_fix.version_number in offered
     assert "3.2.0" not in offered and "2.0.0" not in offered

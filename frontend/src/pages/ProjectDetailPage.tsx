@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { versionStatusCls, versionStatusLabel } from "@/components/cockpit/labels";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { DeletedProjectState } from "@/components/project/DeletedProjectNotice";
-import { AlertTriangle, Loader2, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
 import {
   deleteProjectApi,
   getProjectApi,
@@ -16,23 +16,14 @@ import {
 } from "@/services/api/projects";
 import { listUsersApi } from "@/services/api/users";
 import { getNextVersionNumberApi, listVersions } from "@/services/api/versions";
-import { DEDO_BRIEF_ANCHOR, FAST_FIX_PARAM } from "@/lib/projectLinks";
-import { ORIGIN_DEAD_CODE, fastFixOriginLabel, forgetFastFixOrigin, markFastFixOrigin } from "@/lib/fastFixHandoff";
-import { appendInstruction } from "@/lib/poradcaHandoff";
+import { DEDO_BRIEF_ANCHOR } from "@/lib/projectLinks";
 import DeadCodeCleanupPanel from "@/components/projects/DeadCodeCleanupPanel";
 import DedoBriefBar from "@/components/projects/DedoBriefBar";
 import { AppTemplateConversionPrompt } from "@/components/controlCenter/AppTemplateConversionPrompt";
 import { templateConversionApplies } from "@/components/controlCenter/templateConversion";
-import { startFastFixApi } from "@/services/api/pipeline";
-import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
-import { draftKey, useDraft } from "@/hooks/useDraft";
 import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
-import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
-import WorkKindChoice from "@/components/common/WorkKindChoice";
-import type { WorkKind } from "@/lib/workKind";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
 import WebSwitchPanel from "@/components/project/WebSwitchPanel";
 import type { ProjectRead, UserRead } from "@/types";
@@ -139,27 +130,11 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Fast-Fix Lane entry (F-009 §4 CR-B, CR-NS-095): one prompt → POST /pipeline/fast-fix → the backend
-  // auto-creates the next PATCH version + starts the short `fast_fix` pipeline → open its cockpit board.
-  const openVersionCockpit = useOpenVersionCockpit();
   // Zadanie, ktoré Dedo pripravil pre prácu, ktorá sa ešte nezačala (ICCINT-152). `null` je bežný
   // stav — väčšinu času nič nenavrhuje a stránka sa má tváriť presne tak, ako sa tvárila doteraz.
   const [dedoProposal, setDedoProposal] = useState<DedoProjectProposal | null>(null);
   // DEV-452: bumped after the template is upgraded in Nastavenia — the brief panel's offers read the new state.
   const [libraryReload, setLibraryReload] = useState(0);
-  const [fastFixOpen, setFastFixOpen] = useState(false);
-  const [fastFixDirective, setFastFixDirective] = useState("");
-  // DEV-32: a half-written quick-fix instruction survives leaving the screen; it comes back when he opens the
-  // dialog again, and is forgotten once the fix has started.
-  const fastFixDraft = useDraft(draftKey("rychla-oprava", slug));
-  // DEV-91: the text was prepared from a UAT test that failed — the dialog says so until he edits it.
-  const [fastFixOrigin, setFastFixOrigin] = useState<string | null>(null);
-  const [fastFixSubmitting, setFastFixSubmitting] = useState(false);
-  const [fastFixError, setFastFixError] = useState<HumanError | null>(null);
-  // DEV-175: the fix is a new version, founded only over saved work — save or discard it in the dialog, then start again.
-  const [fastFixUnsaved, setFastFixUnsaved] = useState<UnsavedWorkRefusal | null>(null);
-  // DEV-50: a fast fix says up front whether it fixes our own error (never billed) or changes what was agreed.
-  const [fastFixKind, setFastFixKind] = useState<WorkKind | null>(null);
 
   // Guarded project deletion (CR-V2-027): admin-only (role `ri`) + only before any PROD deploy. The
   // backend enforces both; the UI mirrors them (disabled-over-hidden) and adds a type-DELETE confirm.
@@ -234,27 +209,6 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const submitFastFix = async () => {
-    const directive = fastFixDirective.trim();
-    if (!project || !directive || !fastFixKind || fastFixSubmitting) return;
-    setFastFixSubmitting(true);
-    setFastFixError(null);
-    setFastFixUnsaved(null);
-    try {
-      const res = await startFastFixApi(project.id, directive, fastFixKind);
-      fastFixDraft.clear();
-      forgetFastFixOrigin(slug);
-      // ICCINT-62: shared with the Dedo proposal bar, the OTHER entry into this same lane — it omitted this
-      // step and the build started with the Manažér left on the previous version. One helper, both entries.
-      await openVersionCockpit(res.version_id, { slug: project.slug, name: project.name });
-    } catch (e: unknown) {
-      const refusal = unsavedWorkOf(e);
-      if (refusal) setFastFixUnsaved(refusal);
-      else setFastFixError(humanizeApiError(e, "Spustenie rýchlej opravy zlyhalo"));
-      setFastFixSubmitting(false);
-    }
-  };
-
   // "Project just created" banner — shown only immediately after a
   // successful POST /projects navigate. The state is cleared (via
   // history replaceState) the moment this component reads it so a
@@ -306,43 +260,6 @@ export default function ProjectDetailPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [slug]);
-
-  const openFastFix = useCallback(() => {
-    setFastFixError(null);
-    setFastFixUnsaved(null);
-    setFastFixDirective(fastFixDraft.text);
-    setFastFixOrigin(fastFixOriginLabel(slug));
-    setFastFixKind(null);
-    setFastFixOpen(true);
-  }, [fastFixDraft.text, slug]);
-
-  // DEV-156: „Upratať nepoužívaný kód“ — the prepared cleanup goes under his own draft and the dialog opens on it,
-  // labelled as the check's text. The page owns the dialog's text: a hand-off through the storage alone would not
-  // reach it, the page does not mount again for its own address.
-  const cleanUpDeadCode = useCallback(
-    (brief: string) => {
-      const text = appendInstruction(fastFixDraft.text, brief);
-      fastFixDraft.setText(text);
-      markFastFixOrigin(slug, ORIGIN_DEAD_CODE);
-      setFastFixError(null);
-      setFastFixUnsaved(null);
-      setFastFixDirective(text);
-      setFastFixOrigin(fastFixOriginLabel(slug));
-      setFastFixKind(null);
-      setFastFixOpen(true);
-    },
-    [fastFixDraft, slug],
-  );
-
-  // DEV-57: a screen that sends the manager here to start a fast fix (the deploy stopped by failed checks) lands
-  // on the open dialog — once the versions are loaded (a fast fix patches the newest one), and only once: the
-  // parameter is dropped, so going back or reloading does not open it again.
-  const wantsFastFix = new URLSearchParams(location.search).has(FAST_FIX_PARAM);
-  useEffect(() => {
-    if (!wantsFastFix || loading || versions.length === 0) return;
-    openFastFix();
-    navigate({ pathname: location.pathname, hash: location.hash }, { replace: true });
-  }, [wantsFastFix, loading, versions.length, openFastFix, navigate, location.pathname, location.hash]);
 
   // DEV-57: sent here to Dedo's brief — it is above the versions, below the project's settings, often off-screen.
   useEffect(() => {
@@ -591,10 +508,7 @@ export default function ProjectDetailPage() {
       )}
 
       {/* DEV-156: code nobody uses that earlier versions left behind — Verifikácia stops the new; the old is offered here. */}
-      <DeadCodeCleanupPanel
-        slug={project.slug}
-        onCleanUp={mayOperateProject(user, project.created_by) ? cleanUpDeadCode : undefined}
-      />
+      <DeadCodeCleanupPanel slug={project.slug} canFile={mayOperateProject(user, project.created_by)} />
 
       {/* Zadanie od Deda pre prácu, ktorá sa ešte nezačala (ICCINT-152). Panel sa nevykreslí, keď
           žiadne nie je — stránka potom vyzerá presne tak, ako vyzerala doteraz.
@@ -625,13 +539,7 @@ export default function ProjectDetailPage() {
             proposal={dedoProposal}
             onProposal={setDedoProposal}
             reloadKey={libraryReload}
-            onVersion={async (versionId, started) => {
-              // Rýchla oprava BEŽÍ — Manažéra treba vziať k nej, inak by pozeral na stránku projektu
-              // presvedčený, že sa nič nestalo, kým agent už pracuje (tá istá chyba ako ICCINT-62).
-              if (started) {
-                await openVersionCockpit(versionId, { slug: project.slug, name: project.name });
-                return;
-              }
+            onVersion={() => {
               // Koncept nikam neberie — len sa objaví v zozname verzií, kde ho Manažér uvidí.
               listVersions(project.id).then(setVersions).catch(() => undefined);
               // DEV-169: the number offered next moves past the version just founded.
@@ -648,18 +556,6 @@ export default function ProjectDetailPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-widest">Verzie</h2>
           <div className="flex items-center gap-2">
-            {/* Fast-Fix Lane (F-009): a lightweight lane for a small, obvious fix — only meaningful once
-                there is a base version to patch (vX.Y.Z+1). */}
-            {versions.length > 0 && (
-              <button
-                aria-haspopup="dialog"
-                onClick={openFastFix}
-                className="flex items-center gap-1.5 border border-[var(--color-accent-primary)]/40 text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                Rýchla oprava
-              </button>
-            )}
             <button
               onClick={() => navigate(`/projects/${slug}/versions/new`)}
               className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -929,82 +825,6 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* Fast-Fix Lane modal (F-009 §4 CR-B): the Director types the fix directive (the whole brief);
-          submit auto-creates a PATCH version + starts the short `fast_fix` pipeline, then opens its board. */}
-      {fastFixOpen && (
-        <div
-          className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="fastfix-title"
-        >
-          <div className="m-auto w-full max-w-lg rounded-xl border border-[var(--color-border-default)] bg-[var(--color-canvas)] p-5 shadow-xl">
-            <div className="flex items-center gap-2 mb-1">
-              <Zap className="w-4 h-4 text-[var(--color-accent-primary)]" />
-              <h3 id="fastfix-title" className="text-sm font-bold text-[var(--color-text-primary)]">Rýchla oprava</h3>
-            </div>
-            <p className="text-xs text-[var(--color-text-muted)] mb-3">
-              Pre malú, jednoznačnú opravu. Vytvorí sa nová opravná verzia a spustí sa odľahčená linka
-              (Príprava → Programovanie → Vydanie) — bez plného postupu novej verzie.
-            </p>
-            <label htmlFor="fastfix-directive" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-              Popis opravy
-            </label>
-            {fastFixOrigin && (
-              <p className="mb-1 text-[11px] font-medium text-[var(--color-accent-primary)]">{fastFixOrigin}</p>
-            )}
-            <textarea
-              data-draft="rychla-oprava"
-              lang="sk"
-              spellCheck={true}
-              id="fastfix-directive"
-              autoFocus
-              value={fastFixDirective}
-              onChange={(e) => {
-                setFastFixDirective(e.target.value);
-                fastFixDraft.setText(e.target.value);
-                if (fastFixOrigin) {
-                  setFastFixOrigin(null); // he edited it — the text is his now
-                  forgetFastFixOrigin(slug);
-                }
-              }}
-              rows={5}
-              placeholder="Napríklad: V ľavom menu oprav preklep „Nastvenia“ na „Nastavenia“."
-              className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-primary-500 focus:outline-none"
-            />
-            <div className="mt-3">
-              <WorkKindChoice name="fastfix-kind" value={fastFixKind} onChange={setFastFixKind} disabled={fastFixSubmitting} />
-            </div>
-            {fastFixUnsaved && (
-              <div className="mt-3">
-                <UnsavedWorkPanel refusal={fastFixUnsaved} />
-              </div>
-            )}
-            <ErrorNote
-              error={fastFixError}
-              className="mt-2 rounded-lg bg-[var(--color-state-error-bg)] border border-[var(--color-state-error-bg)] px-3 py-2"
-            />
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setFastFixOpen(false)}
-                disabled={fastFixSubmitting}
-                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-50"
-              >
-                Zrušiť
-              </button>
-              <button
-                onClick={submitFastFix}
-                disabled={!fastFixDirective.trim() || !fastFixKind || fastFixSubmitting}
-                title={fastFixKind ? undefined : "Najprv zvoľ druh práce — oprava chyby, alebo zmena"}
-                className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {fastFixSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                Spustiť rýchlu opravu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

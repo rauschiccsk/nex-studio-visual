@@ -39,6 +39,8 @@ class OpenVersionRead(BaseModel):
 
     id: UUID
     version_number: str
+    #: DEV-492 — a fast fix waiting for its tickets; the tab names it so the Manažér knows where the ticket goes.
+    fast_fix: bool = False
 
 
 class VersionTicketRead(BaseModel):
@@ -56,3 +58,17 @@ class ProjectPlaneTicketsRead(BaseModel):
     module: Optional[str] = Field(description="The project's module in DEV; none until its first ticket.")
     tickets: list[PlaneTicketRead]
     open_versions: list[OpenVersionRead] = Field(description="The versions a ticket may still go into (DEV-455).")
+
+
+class PreparedTicketCreate(BaseModel):
+    """DEV-492 — a ticket of the project from a text the cockpit prepared (a broken UAT test, dead code)."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=1, max_length=20000)
+    work_kind: WorkKind
+    source: Literal["uat", "dead_code"]
+
+
+class PreparedTicketFounded(BaseModel):
+    identifier: str
+    url: str

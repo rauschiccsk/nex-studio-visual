@@ -168,6 +168,12 @@ class VersionRead(BaseModel):
     release_date: Optional[date] = None
     created_at: datetime
     updated_at: datetime
+    #: DEV-492 — a fast fix from its founding on: it takes tickets, starts from them and has no Zadanie of its own.
+    fast_fix: bool = False
+    #: DEV-492 — „Zrušiť verziu“ on the version's page: ``True`` only for a version that did nothing yet; filled where
+    #: one version is read (``GET /versions/{id}``); the default refuses, so a list never offers a cancel by mistake.
+    cancellable: bool = False
+    cancel_refusal: Optional[str] = None
 
     # Service-populated aggregate counts — see module docstring.
     epic_count: int = Field(
@@ -180,3 +186,26 @@ class VersionRead(BaseModel):
         ge=0,
         description="Number of Epics in this version with status='done'.",
     )
+
+
+class FastFixCreate(BaseModel):
+    """DEV-492 — „Nová verzia“ → „Rýchla oprava“: founded, not started; the cockpit numbers it (the next patch)."""
+
+    #: DEV-56: decided when the fix is founded — without it no fast fix is founded (400 with the sentence why).
+    work_kind: Optional[WorkKind] = None
+
+
+class VersionTicketItem(BaseModel):
+    """DEV-492 — a ticket the version solves, as its page lists it."""
+
+    identifier: str
+    title: str
+    url: str
+
+
+class VersionCancelled(BaseModel):
+    """DEV-491, DEV-492 — what is left of a cancelled version: the number it freed and, when a ticket did not go back
+    to Todo, why."""
+
+    version_number: str
+    plane_warning: Optional[str] = None

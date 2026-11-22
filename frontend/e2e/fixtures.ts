@@ -86,6 +86,9 @@ export const VERSION: S["VersionRead"] = {
   description:
     "Nová verzia so spoľahlivým doručovaním faktúr do zdieľaného priečinka NEX Genesis",
   status: "active",
+  fast_fix: false,
+  cancellable: false,
+  cancel_refusal: "Verzia 1.8.0 sa už začala stavať — zrušiť sa dá len verzia, ktorá ešte nič neurobila.",
   epic_count: 6,
   epics_done: 4,
   target_date: "2026-10-20",
@@ -250,8 +253,6 @@ export const PIPELINE: S["PipelineBoardRead"] = {
     resume_after_framework_fix: false,
     resume_after_restart: false,
     working_since: null,
-    cancellable: false,
-    cancel_refusal: "Zrušiť sa dá len rýchla oprava — riadna verzia sa neruší.",
     created_at: T1,
     updated_at: T2,
   },
@@ -1337,7 +1338,7 @@ export function registerFixtures(): void {
     project_id: PROJECT.id,
     project_name: PROJECT.name,
     module: PROJECT.name,
-    open_versions: [{ id: VERSION.id, version_number: VERSION.version_number }],
+    open_versions: [{ id: VERSION.id, version_number: VERSION.version_number, fast_fix: false }],
     tickets: [
       {
         issue_id: "i130",

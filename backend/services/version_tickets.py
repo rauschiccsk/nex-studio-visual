@@ -36,6 +36,12 @@ MOVES = {
     "assigned": ("In Progress", "Tiket je zaradený do verzie {version} projektu {project}. Zaradil: {who}."),
     "removed": ("Todo", "Tiket je vyradený z verzie {version} projektu {project}. Vyradil: {who}."),
     "deployed": ("Done", "Verzia {version}, ktorá tiket rieši, je nasadená na PROD u zákazníka {customer}."),
+    # DEV-492: the version was cancelled before it did anything — the ticket waits for the next one.
+    "cancelled": (
+        "Todo",
+        "Verzia {version} projektu {project}, do ktorej bol tiket zaradený, je zrušená skôr, než niečo urobila — tiket "
+        "čaká na ďalšiu verziu. Zrušil: {who}.",
+    ),
 }
 
 
@@ -47,8 +53,9 @@ def assign_refusal(db: Session, version: Version) -> Optional[str]:
     """Why a ticket can no longer be put into ``version`` — ``None`` when it can (DEV-361, DEV-455).
 
     The Staviteľ takes the version's tickets into the Špecifikácia, and only in Príprava: in its opening brief or with
-    its next round. A version past Príprava has an approved Špecifikácia, a fast fix has none, a finished version
-    builds no more — a ticket put in there would be closed at PROD without anyone building it.
+    its next round. A fast fix takes them before it starts — they are its brief (DEV-492). A version past Príprava has
+    an approved Špecifikácia, a running fast fix has its brief, a finished version builds no more — a ticket put in
+    there would be closed at PROD without anyone building it.
     """
     if version.status in FINISHED_STATUSES:
         return f"Verzia {version.version_number} je hotová — tiket by sa do nej už nedostal."
@@ -57,8 +64,8 @@ def assign_refusal(db: Session, version: Version) -> Optional[str]:
         return None
     if state.flow_type == "fast_fix":
         return (
-            f"Verzia {version.version_number} je rýchla oprava — nemá Špecifikáciu, do ktorej by sa tiket dostal. "
-            "Zaraď ho do novej verzie alebo z neho spusti vlastnú rýchlu opravu."
+            f"Rýchla oprava {version.version_number} už beží — tiket by sa do nej nedostal. "
+            "Zaraď ho do inej verzie alebo do novej rýchlej opravy."
         )
     if state.current_stage != "priprava":
         return (
@@ -190,6 +197,20 @@ def remove(
         project=project.name,
         who=plane_tickets.person(user),
     )
+
+
+def cancel_failed(identifier: str, why: str) -> str:
+    """DEV-492 — the sentence when a ticket of a cancelled version did not go back to Todo."""
+    return f"Verzia je zrušená, ale tiket {identifier} sa v Plane nevrátil do Todo: {why}"
+
+
+def follow_cancelled(plane: PlaneGateway, ticket, **words: str) -> Optional[str]:
+    """DEV-492 — a ticket of a cancelled version (``issue_id``, ``identifier``) back to Todo with a comment."""
+    try:
+        _move(plane, ticket.issue_id, "cancelled", **words)
+    except PlaneError as exc:
+        return cancel_failed(ticket.identifier, str(exc))
+    return None
 
 
 def _follow(plane: PlaneGateway, link: VersionTicket, event: str, **words: str) -> Optional[str]:

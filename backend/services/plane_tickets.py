@@ -31,6 +31,8 @@ SOURCES = {
     "plane_tikety": "zo záložky Plane tikety",
     "kokpit": "z kokpitu",
     "ideas": "z Nápadov",  # DEV-318 — the ticket of a project founded from an idea
+    "uat": "zo skúšky na UAT",  # DEV-492 — a test that did not pass
+    "dead_code": "z kontroly nepoužívaného kódu",  # DEV-492 — the cleanup of old dead code
 }
 
 
@@ -229,11 +231,6 @@ def project_tickets(db: Session, gateway: PlaneGateway, project: Project, *, clo
 #: How the ticket of a fast fix follows its version: the column (``None`` = only the comment), the comment for people,
 #: and the sentence when Plane did not follow — the fix itself never waits for Plane.
 FIX_MOVES = {
-    "started": (
-        "In Progress",
-        "Rýchla oprava {version} je spustená z tohto tiketu. Spustil: {who}.",
-        "Rýchla oprava je spustená, ale tiket {ticket} sa v Plane neposunul",
-    ),
     "uat": (
         None,
         "Rýchla oprava {version} je nasadená na UAT u zákazníka {customer} ({date}).",
@@ -256,7 +253,8 @@ _DOER_LINE = re.compile(r"^Robí:.*$", re.MULTILINE)
 
 @dataclass(frozen=True)
 class LinkedTicket:
-    """A ticket a fast fix is started from — plain data, safe to hand to a thread."""
+    """A ticket a fast fix was started from before DEV-492 — plain data, safe to hand to a thread; it still follows
+    its version to PROD, and back to Todo when the version is cancelled."""
 
     issue_id: str
     identifier: str
@@ -284,27 +282,8 @@ def find_project_ticket(gateway: PlaneGateway, module_id: Optional[str], project
     raise ValueError(f"Tiket v module projektu {project_name} nie je (zmazaný, archivovaný alebo z iného projektu).")
 
 
-def linked_ticket(gateway: PlaneGateway, module_id: Optional[str], project_name: str, issue_id: str) -> LinkedTicket:
-    issue = find_project_ticket(gateway, module_id, project_name, issue_id)
-    return LinkedTicket(issue["id"], identifier(gateway, issue), gateway.ticket_url(issue))
-
-
-def way_taken(db: Session, project_id, issue_id: str) -> Optional[str]:
-    """Where the ticket already went, in words — ``None`` while it may still go either way."""
-    fix = fix_of_ticket(db, project_id, issue_id)
-    if fix is not None:
-        return f"Z tohto tiketu už je spustená rýchla oprava v{fix.version_number}."
-    from backend.services import version_tickets
-
-    link = version_tickets.of_issue(db, issue_id)
-    if link is not None:
-        version = db.get(Version, link.version_id)
-        return f"Tiket už rieši verzia v{version.version_number if version else '?'} — pôjde s ňou."
-    return None
-
-
 def fix_of_ticket(db: Session, project_id, issue_id: str) -> Optional[Version]:
-    """The version a fast fix from this ticket already runs in — one ticket, one fix."""
+    """The version a fast fix started from this ticket runs in (before DEV-492) — one ticket, one way."""
     return (
         db.execute(
             select(Version)

@@ -16,7 +16,6 @@ from backend.db.models.pipeline import (
     STAGE_VALUES,
     STATUS_VALUES,
 )
-from backend.schemas.delivery_statement import WorkKind
 
 # Literal aliases sourced from the DB CHECK value tuples (v0.7.0 R2, D2) — the response-schema enums
 # and the DB constraints share ONE source so they cannot drift. FastAPI introspects each ``Literal``
@@ -73,10 +72,6 @@ class PipelineStateRead(BaseModel):
     #: pol minútou od ťahu, ktorý visí tretiu hodinu — inak ticho pri práci a ticho pri poruche vyzerajú
     #: rovnako a on nemá ako rozhodnúť, či počkať, alebo volať pomoc.
     working_since: Optional[datetime] = None
-    #: DEV-491 — „Zrušiť rýchlu opravu“: ``True`` only for a fast fix that did nothing yet; ``cancel_refusal`` says
-    #: why not in words. The default refuses, so a state read anywhere else never offers a cancel the route refuses.
-    cancellable: bool = False
-    cancel_refusal: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -365,13 +360,6 @@ class DedoProposalSendRequest(BaseModel):
 
     message_id: UUID = Field(..., description="The proposal the Manažér was shown (PipelineBoardRead.dedo_proposal).")
     text: str = Field(..., min_length=1, description="The text to send — Dedo's proposal as the Manažér edited it.")
-    work_kind: Optional[WorkKind] = Field(
-        default=None,
-        description=(
-            "DEV-56 — for a proposal that starts a fast fix: a fix of an error in delivered code ('fix') or a change "
-            "('change'). Required for that verb (400 without it); other verbs ignore it."
-        ),
-    )
 
 
 class DedoProposalRejectRequest(BaseModel):
@@ -414,39 +402,3 @@ class PipelineRelayResponse(BaseModel):
 
     deferred: bool
     board: PipelineBoardRead
-
-
-class FastFixStartRequest(BaseModel):
-    """Body for ``POST /pipeline/fast-fix`` (F-009, CR-NS-094) — the "Rýchla oprava" entry.
-
-    One prompt: ``project_id`` + the Director ``directive`` (the whole fix brief). The backend
-    auto-creates the next PATCH version and starts a ``fast_fix`` pipeline carrying the directive.
-    """
-
-    project_id: UUID
-    directive: str = Field(..., min_length=1, description="The Manažér's fast-fix directive (the task brief).")
-    #: DEV-50: a fix of an error in delivered code (``fix`` — never billed) or a change (``change`` — billed).
-    #: Required (DEV-56): without it the fast fix does not start — 400 with the sentence why, never a guess.
-    work_kind: Optional[WorkKind] = None
-    #: DEV-122: the ticket of the project's module in Plane the fix is started from — it then follows the version
-    #: (started → In Progress, UAT → a comment, PROD → Done).
-    plane_issue_id: Optional[str] = Field(default=None, max_length=64)
-
-
-class FastFixCancelResponse(BaseModel):
-    """DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not follow, why."""
-
-    version_number: str
-    plane_warning: Optional[str] = Field(
-        default=None, description="The fix is cancelled, but its ticket in Plane did not go back — said in words."
-    )
-
-
-class FastFixStartResponse(BaseModel):
-    """Result of starting a Fast-Fix: the new PATCH ``version_id`` + the initial board snapshot."""
-
-    version_id: UUID
-    board: PipelineBoardRead
-    plane_warning: Optional[str] = Field(
-        default=None, description="The fix started, but its ticket in Plane did not follow — said in words."
-    )

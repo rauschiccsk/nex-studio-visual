@@ -17,6 +17,7 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.services import orchestrator
+from backend.tests.fast_fix_tickets import as_fast_fix
 
 # (pytest ``asyncio_mode = auto`` — async tests run without an explicit mark.)
 
@@ -201,9 +202,8 @@ async def test_approve_spec_rejected_outside_priprava(db_session, fake_claude):
 
 async def test_fast_fix_approve_spec_skips_navrh(db_session, fake_claude):
     version, _ = _make_version(db_session)
-    await orchestrator.apply_action(
-        db_session, version_id=version.id, action="start", payload={"flow_type": "fast_fix", "directive": "fix the bug"}
-    )
+    as_fast_fix(db_session, version, "fix the bug")
+    await orchestrator.apply_action(db_session, version_id=version.id, action="start", payload={})
     _settle(db_session, version.id)
     state = await orchestrator.apply_action(db_session, version_id=version.id, action="approve_spec")
     assert state.current_stage == "programovanie"  # fast_fix has no Návrh

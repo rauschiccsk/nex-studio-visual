@@ -17,8 +17,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.schemas.delivery_statement import WorkKind
-
 
 class DedoBuildRead(BaseModel):
     """One build as Dedo needs to see it: which project, where it stands, and why it is stuck.
@@ -62,7 +60,7 @@ class DedoProposalCreate(BaseModel):
     The extra field over :class:`DedoMessageCreate` is the whole point: a proposal carries the ACTION it
     should be sent with, because the Manažér must not be asked to pick a verb out of the engine's
     vocabulary. It is one the cockpit already offers him — ``uprav`` / ``answer`` / ``ask`` continue the build
-    in front of him, ``fast_fix`` starts a patch version (ICCINT-54), ``decide`` answers an open decision card
+    in front of him (DEV-492: no ``fast_fix`` — Dedo files a ticket), ``decide`` answers an open decision card
     (ICCINT-56); the send goes through that action with all of its guards, so there is no second way into the
     agent's prompt.
     """
@@ -70,7 +68,7 @@ class DedoProposalCreate(BaseModel):
     content: str = Field(min_length=1)
     #: Validated against :data:`~backend.services.dedo_message.PROPOSAL_ACTIONS` in the service (409), so
     #: the allowed set lives in ONE place next to the writer instead of being restated as a Literal here.
-    proposed_action: str = Field(min_length=1, description="uprav | answer | ask | fast_fix | decide")
+    proposed_action: str = Field(min_length=1, description="uprav | answer | ask | decide")
 
 
 class DedoProjectProposalCreate(BaseModel):
@@ -84,7 +82,7 @@ class DedoProjectProposalCreate(BaseModel):
     content: str = Field(min_length=1)
     #: Overuje sa proti :data:`~backend.db.models.dedo_proposal.PROJECT_PROPOSAL_ACTIONS` v službe (409),
     #: aby povolená množina žila na JEDNOM mieste vedľa zapisovateľa.
-    proposed_action: str = Field(min_length=1, description="fast_fix | new_version")
+    proposed_action: str = Field(min_length=1, description="new_version")
     #: DEV-149 — the version number Dedo proposes for ``new_version``; without it the cockpit suggests one. On
     #: 19.10.2026 the number stood only in the text, the cockpit could not read it and founded 2.0.0 for 1.10.0.
     proposed_version_number: Optional[str] = Field(default=None, min_length=1, max_length=50)
@@ -119,11 +117,8 @@ class DedoProjectProposalSendRequest(BaseModel):
 
     proposal_id: UUID
     text: str = Field(min_length=1)
-    #: DEV-56 — pri zadaní rýchlej opravy: oprava chyby v dodanom kóde (``fix``) alebo zmena (``change``).
-    #: Pre rýchlu opravu povinné (bez neho 400 s vetou prečo); pri novej verzii sa nečíta.
-    work_kind: Optional[WorkKind] = None
     #: DEV-149 — the number the Manažér founds the new version with, as he had it on screen; without it the
-    #: number shown to him (:attr:`DedoProjectProposalRead.version_number`). Not read for a fast fix.
+    #: number shown to him (:attr:`DedoProjectProposalRead.version_number`).
     version_number: Optional[str] = Field(default=None, min_length=1, max_length=50)
 
 
@@ -137,8 +132,6 @@ class DedoProjectProposalSendResponse(BaseModel):
     """Čo z kliknutia vzniklo. Verzia je jediná odpoveď, ktorá Manažéra zaujíma — vezme ho tam."""
 
     version_id: UUID
-    #: ``True`` pri ``fast_fix``; pri ``new_version`` je verzia koncept a nič nebeží.
-    started: bool
 
 
 class DedoUnblockRequest(BaseModel):

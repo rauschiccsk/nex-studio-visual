@@ -925,37 +925,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pipeline/fast-fix": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Fast Fix
-         * @description Fast-Fix Lane entry (F-009, CR-NS-094; v2 short path CR-V2-028) — the "Rýchla oprava" one-prompt action.
-         *
-         *     Auto-creates the next PATCH version (``vX.Y.Z+1`` from the project's semver max) and starts a
-         *     ``fast_fix`` pipeline carrying the Manažér's directive (which IS the brief). The lane runs the v2 SHORT
-         *     path autonomously to the verified boundary — lightweight Príprava (no spec dialogue) → AI Agent
-         *     self-checking Programovanie → a LIGHT focused Auditor Verifikácia (fix works + no regression) → Hotovo
-         *     — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
-         *     deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
-         *     ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
-         *
-         *     DEV-122: started from a ticket of the project's module (``plane_issue_id``), the version remembers it — the ticket
-         *     goes In Progress now and follows the deploys; one ticket starts one fix.
-         */
-        post: operations["start_fast_fix_api_v1_pipeline_fast_fix_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/pipeline/{version_id}": {
         parameters: {
             query?: never;
@@ -1133,29 +1102,6 @@ export interface paths {
          */
         post: operations["send_dedo_proposal_api_v1_pipeline__version_id__dedo_proposal_send_post"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/pipeline/{version_id}/fast-fix": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Cancel Fast Fix
-         * @description DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number.
-         *
-         *     Refused in words (409) when the fix is past Príprava or the Staviteľ is on a turn. The ticket it was started from
-         *     goes back to Todo with a comment; when Plane does not follow, the fix is cancelled anyway and the sentence says so.
-         */
-        delete: operations["cancel_fast_fix_api_v1_pipeline__version_id__fast_fix_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2134,6 +2080,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/fast-fixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Found Fast Fix
+         * @description DEV-492 — „Nová verzia“ → „Rýchla oprava“: the next patch version, founded and waiting; nothing starts.
+         *
+         *     The Manažér puts tickets into it on the „Plane tikety“ tab and starts it from its page — their text is its brief.
+         */
+        post: operations["found_fast_fix_api_v1_projects__project_id__fast_fixes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/git-commit": {
         parameters: {
             query?: never;
@@ -2782,7 +2750,13 @@ export interface paths {
          */
         get: operations["list_project_plane_tickets_api_v1_projects__slug__plane_tickets_get"];
         put?: never;
-        post?: never;
+        /**
+         * File Prepared Ticket
+         * @description DEV-492 — „Založiť tiket“ from a text the cockpit prepared (a broken UAT test, dead code); nothing starts.
+         *
+         *     The Manažér puts the ticket into a version or a fast fix on this tab, like any other.
+         */
+        post: operations["file_prepared_ticket_api_v1_projects__slug__plane_tickets_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3374,7 +3348,14 @@ export interface paths {
         get: operations["get_version_api_v1_versions__version_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Cancel Version
+         * @description DEV-491, DEV-492 — „Zrušiť verziu“: a version that did nothing yet goes away whole and frees its number.
+         *
+         *     Refused in words (409) when it started (a fast fix past Príprava or on a turn). Its tickets go back to Todo with a
+         *     comment; when Plane does not follow, the version is cancelled anyway and the sentence says so.
+         */
+        delete: operations["cancel_version_api_v1_versions__version_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -3558,6 +3539,26 @@ export interface paths {
          *     project's task plan.
          */
         get: operations["get_task_plan_api_v1_versions__version_id__task_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/versions/{version_id}/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Version Tickets
+         * @description DEV-492 — the tickets the version solves, in the order they were put in (a fast fix starts from them).
+         */
+        get: operations["list_version_tickets_api_v1_versions__version_id__tickets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5072,7 +5073,7 @@ export interface components {
             content: string;
             /**
              * Proposed Action
-             * @description fast_fix | new_version
+             * @description new_version
              */
             proposed_action: string;
             /** Proposed Version Number */
@@ -5142,16 +5143,12 @@ export interface components {
             text: string;
             /** Version Number */
             version_number?: string | null;
-            /** Work Kind */
-            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * DedoProjectProposalSendResponse
          * @description Čo z kliknutia vzniklo. Verzia je jediná odpoveď, ktorá Manažéra zaujíma — vezme ho tam.
          */
         DedoProjectProposalSendResponse: {
-            /** Started */
-            started: boolean;
             /**
              * Version Id
              * Format: uuid
@@ -5165,7 +5162,7 @@ export interface components {
          *     The extra field over :class:`DedoMessageCreate` is the whole point: a proposal carries the ACTION it
          *     should be sent with, because the Manažér must not be asked to pick a verb out of the engine's
          *     vocabulary. It is one the cockpit already offers him — ``uprav`` / ``answer`` / ``ask`` continue the build
-         *     in front of him, ``fast_fix`` starts a patch version (ICCINT-54), ``decide`` answers an open decision card
+         *     in front of him (DEV-492: no ``fast_fix`` — Dedo files a ticket), ``decide`` answers an open decision card
          *     (ICCINT-56); the send goes through that action with all of its guards, so there is no second way into the
          *     agent's prompt.
          */
@@ -5174,7 +5171,7 @@ export interface components {
             content: string;
             /**
              * Proposed Action
-             * @description uprav | answer | ask | fast_fix | decide
+             * @description uprav | answer | ask | decide
              */
             proposed_action: string;
         };
@@ -5251,11 +5248,6 @@ export interface components {
              * @description The text to send — Dedo's proposal as the Manažér edited it.
              */
             text: string;
-            /**
-             * Work Kind
-             * @description DEV-56 — for a proposal that starts a fast fix: a fix of an error in delivered code ('fix') or a change ('change'). Required for that verb (400 without it); other verbs ignore it.
-             */
-            work_kind?: ("fix" | "change" | "gift") | null;
         };
         /**
          * DedoUnblockRequest
@@ -5779,57 +5771,12 @@ export interface components {
             version_id?: string | null;
         };
         /**
-         * FastFixCancelResponse
-         * @description DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not follow, why.
+         * FastFixCreate
+         * @description DEV-492 — „Nová verzia“ → „Rýchla oprava“: founded, not started; the cockpit numbers it (the next patch).
          */
-        FastFixCancelResponse: {
-            /**
-             * Plane Warning
-             * @description The fix is cancelled, but its ticket in Plane did not go back — said in words.
-             */
-            plane_warning?: string | null;
-            /** Version Number */
-            version_number: string;
-        };
-        /**
-         * FastFixStartRequest
-         * @description Body for ``POST /pipeline/fast-fix`` (F-009, CR-NS-094) — the "Rýchla oprava" entry.
-         *
-         *     One prompt: ``project_id`` + the Director ``directive`` (the whole fix brief). The backend
-         *     auto-creates the next PATCH version and starts a ``fast_fix`` pipeline carrying the directive.
-         */
-        FastFixStartRequest: {
-            /**
-             * Directive
-             * @description The Manažér's fast-fix directive (the task brief).
-             */
-            directive: string;
-            /** Plane Issue Id */
-            plane_issue_id?: string | null;
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
+        FastFixCreate: {
             /** Work Kind */
             work_kind?: ("fix" | "change" | "gift") | null;
-        };
-        /**
-         * FastFixStartResponse
-         * @description Result of starting a Fast-Fix: the new PATCH ``version_id`` + the initial board snapshot.
-         */
-        FastFixStartResponse: {
-            board: components["schemas"]["PipelineBoardRead"];
-            /**
-             * Plane Warning
-             * @description The fix started, but its ticket in Plane did not follow — said in words.
-             */
-            plane_warning?: string | null;
-            /**
-             * Version Id
-             * Format: uuid
-             */
-            version_id: string;
         };
         /**
          * FrontendLinkRead
@@ -6388,6 +6335,11 @@ export interface components {
          */
         OpenVersionRead: {
             /**
+             * Fast Fix
+             * @default false
+             */
+            fast_fix: boolean;
+            /**
              * Id
              * Format: uuid
              */
@@ -6636,13 +6588,6 @@ export interface components {
         PipelineStateRead: {
             /** Block Reason */
             block_reason?: ("agent_question" | "decision_needed" | "agent_error" | "system_error" | "parse_exhaustion" | "framework_issue" | "check_failed" | "schema_approval") | null;
-            /** Cancel Refusal */
-            cancel_refusal?: string | null;
-            /**
-             * Cancellable
-             * @default false
-             */
-            cancellable: boolean;
             /**
              * Created At
              * Format: date-time
@@ -7305,6 +7250,33 @@ export interface components {
              * @description The conflicting port number.
              */
             port: number;
+        };
+        /**
+         * PreparedTicketCreate
+         * @description DEV-492 — a ticket of the project from a text the cockpit prepared (a broken UAT test, dead code).
+         */
+        PreparedTicketCreate: {
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "uat" | "dead_code";
+            /** Title */
+            title: string;
+            /**
+             * Work Kind
+             * @enum {string}
+             */
+            work_kind: "fix" | "change" | "gift";
+        };
+        /** PreparedTicketFounded */
+        PreparedTicketFounded: {
+            /** Identifier */
+            identifier: string;
+            /** Url */
+            url: string;
         };
         /**
          * PriceEstimateRead
@@ -8863,6 +8835,17 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VersionCancelled
+         * @description DEV-491, DEV-492 — what is left of a cancelled version: the number it freed and, when a ticket did not go back
+         *     to Todo, why.
+         */
+        VersionCancelled: {
+            /** Plane Warning */
+            plane_warning?: string | null;
+            /** Version Number */
+            version_number: string;
+        };
         /** VersionCostsRead */
         VersionCostsRead: {
             /** Internal Idle Seconds */
@@ -8968,6 +8951,13 @@ export interface components {
          *     supplied explicitly by the service layer.
          */
         VersionRead: {
+            /** Cancel Refusal */
+            cancel_refusal?: string | null;
+            /**
+             * Cancellable
+             * @default false
+             */
+            cancellable: boolean;
             /**
              * Created At
              * Format: date-time
@@ -8987,6 +8977,11 @@ export interface components {
              * @default 0
              */
             epics_done: number;
+            /**
+             * Fast Fix
+             * @default false
+             */
+            fast_fix: boolean;
             /**
              * Id
              * Format: uuid
@@ -9015,6 +9010,18 @@ export interface components {
             updated_at: string;
             /** Version Number */
             version_number: string;
+        };
+        /**
+         * VersionTicketItem
+         * @description DEV-492 — a ticket the version solves, as its page lists it.
+         */
+        VersionTicketItem: {
+            /** Identifier */
+            identifier: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
         };
         /**
          * VersionTicketRead
@@ -10999,39 +11006,6 @@ export interface operations {
             };
         };
     };
-    start_fast_fix_api_v1_pipeline_fast_fix_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FastFixStartRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FastFixStartResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_board_api_v1_pipeline__version_id__get: {
         parameters: {
             query?: {
@@ -11250,37 +11224,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineBoardRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_fast_fix_api_v1_pipeline__version_id__fast_fix_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FastFixCancelResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12920,6 +12863,41 @@ export interface operations {
             };
         };
     };
+    found_fast_fix_api_v1_projects__project_id__fast_fixes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FastFixCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     commit_git_api_v1_projects__project_id__git_commit_post: {
         parameters: {
             query?: never;
@@ -13996,6 +13974,41 @@ export interface operations {
             };
         };
     };
+    file_prepared_ticket_api_v1_projects__slug__plane_tickets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreparedTicketCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreparedTicketFounded"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     put_plane_ticket_into_version_api_v1_projects__slug__plane_tickets__issue_id__version_post: {
         parameters: {
             query?: never;
@@ -14840,6 +14853,37 @@ export interface operations {
             };
         };
     };
+    cancel_version_api_v1_versions__version_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionCancelled"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_version_api_v1_versions__version_id__patch: {
         parameters: {
             query?: never;
@@ -15161,6 +15205,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_TaskPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_version_tickets_api_v1_versions__version_id__tickets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionTicketItem"][];
                 };
             };
             /** @description Validation Error */

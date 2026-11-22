@@ -157,11 +157,11 @@ export default function DeployBlockNotice({ block, projectSlug, onReverifyStarte
         } else {
           remedy =
             "K zákazníkovi ju nepustíme, kým chyba nie je opravená a kontroly neprejdú — oprav ju rýchlou " +
-            "opravou alebo novou verziou. ";
+            "opravou alebo novou verziou: založ ju a zaraď do nej tiket s chybou. ";
           action = {
-            label: "Spustiť rýchlu opravu",
+            label: "Založiť rýchlu opravu",
             icon: "fix",
-            run: () => navigate(`/projects/${projectSlug}?${FAST_FIX_PARAM}=1`),
+            run: () => navigate(`/projects/${projectSlug}/versions/new?${FAST_FIX_PARAM}=1`),
           };
         }
         body = (

@@ -121,7 +121,13 @@ PROPOSAL_MARKER = "dedo_proposal"
 #: sa preto zavesí na NAJNOVŠIU verziu projektu (tam, kam sa Manažér pozerá) a jeho odoslanie nespustí
 #: ``apply_action``, ale štart rýchlej opravy — pod účtom Manažéra, presne ako keby formulár vyplnil sám.
 #: Bez neho by Dedo musel Directorovi dávať blok na skopírovanie, a to pri KAŽDEJ rýchlej oprave.
-PROPOSAL_ACTIONS = ("uprav", "answer", "ask", "fast_fix", "decide")
+PROPOSAL_ACTIONS = ("uprav", "answer", "ask", "decide")
+
+#: DEV-492 — one way for every version: a fast fix is founded as a version, takes tickets and starts from them. Dedo
+#: does not propose one; he files a DEV ticket and the Manažér puts it into a fast fix.
+FAST_FIX_IS_A_TICKET = (
+    "Rýchlu opravu Dedo nenavrhuje — založí tiket DEV a Manažér ho zaradí do rýchlej opravy na karte „Plane tikety“."
+)
 
 #: Why a proposal was archived without the Manažér deciding on it: Dedo wrote a NEWER one. Kept distinct
 #: from ``sent`` / ``rejected`` so the log never claims he handled something he never saw.
@@ -265,6 +271,8 @@ def record_dedo_proposal(
     text = (content or "").strip()
     if not text:
         raise DedoMessageError("Dedo proposal is empty — there is nothing to propose")
+    if proposed_action == "fast_fix":
+        raise DedoMessageError(FAST_FIX_IS_A_TICKET)
     if proposed_action not in PROPOSAL_ACTIONS:
         raise DedoMessageError(
             f"Unknown proposed action {proposed_action!r} — Dedo may propose only: {', '.join(PROPOSAL_ACTIONS)}"

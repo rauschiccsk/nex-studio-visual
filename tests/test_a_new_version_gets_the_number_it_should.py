@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.config.settings import settings
+from backend.db.models.dedo_proposal import DedoProjectProposal
 from backend.db.models.pipeline import PipelineState
 from backend.db.models.versions import Version
 from backend.schemas.version import VersionUpdate
@@ -149,14 +150,15 @@ def test_without_a_proposed_number_the_manazer_sees_the_cockpits_suggestion(clie
 
 
 def test_a_fast_fix_shows_no_number_of_its_own(client, db_session, dedo_token) -> None:
+    """A fast fix brief from before DEV-492 (Dedo proposes none since) still shows no number of its own."""
     user = _make_user(db_session)
     project = _make_project(db_session, user)
-    db_session.commit()
-    client.post(
-        f"/api/v1/dedo/projects/{project.id}/proposals",
-        headers=_dedo_auth(),
-        json={"content": _ZADANIE, "proposed_action": "fast_fix", "proposed_version_number": "9.9.9"},
+    db_session.add(
+        DedoProjectProposal(
+            project_id=project.id, content=_ZADANIE, proposed_action="fast_fix", proposed_version_number="9.9.9"
+        )
     )
+    db_session.commit()
 
     shown = client.get(f"/api/v1/projects/{project.id}/dedo-proposal", headers=_bearer(user)).json()
 

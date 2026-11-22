@@ -29,11 +29,11 @@ from backend.config.settings import settings
 from backend.core import dedo_auth
 from backend.db.models.dedo_proposal import PROPOSED, SENT, SUPERSEDED, DedoProjectProposal
 from backend.db.models.foundation import User, UserSession
-from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.pipeline import PipelineState
 from backend.db.models.projects import Project
 from backend.db.models.versions import Version
 from backend.services import auth as auth_service
-from backend.services import pipeline_runner
+from backend.services import dedo_message, pipeline_runner
 
 _TOKEN = "d" * 64
 
@@ -101,7 +101,7 @@ def _bearer(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _navrhni(client, project_id, *, content: str = _ZADANIE, action: str = "fast_fix"):
+def _navrhni(client, project_id, *, content: str = _ZADANIE, action: str = "new_version"):
     return client.post(
         f"/api/v1/dedo/projects/{project_id}/proposals",
         headers=_dedo_auth(),
@@ -141,7 +141,7 @@ class TestDedoMozeNapisatZadanie:
         assert r.status_code == 201, r.text
         telo = r.json()
         assert telo["content"] == _ZADANIE
-        assert telo["proposed_action"] == "fast_fix"
+        assert telo["proposed_action"] == "new_version"
         assert telo["status"] == PROPOSED
 
     def test_writing_a_brief_starts_nothing(self, client, db_session, dedo_token, no_dispatch):
@@ -255,22 +255,25 @@ class TestManazerRozhoduje:
 
         assert r.status_code == 200 and r.json() is None
 
-    def test_his_click_starts_the_fast_fix(self, client, db_session, dedo_token, no_dispatch):
-        """⚠️ Verzia vzniká až TU — pod jeho účtom, tou istou cestou, akou by formulár vyplnil sám."""
+    def test_a_fast_fix_brief_is_refused_and_one_from_before_is_not_sent(self, client, db_session, dedo_token):
+        """DEV-492: a fast fix is founded as a version and starts from its tickets — Dedo files a DEV ticket instead."""
         user = _make_user(db_session)
         project = _make_project(db_session, user)
         db_session.commit()
-        navrh = _navrhni(client, project.id).json()
 
-        r = _posli(client, user, project.id, navrh["id"])
+        refused = _navrhni(client, project.id, action="fast_fix")
 
-        assert r.status_code == 200, r.text
-        nova = db_session.get(Version, uuid.UUID(r.json()["version_id"]))
-        assert nova.version_number == "1.5.6", "rýchla oprava nepovýšila opravné číslo"
-        assert (
-            db_session.execute(select(PipelineState).where(PipelineState.version_id == nova.id)).scalar_one_or_none()
-            is not None
-        ), "stavba sa nespustila"
+        assert (refused.status_code, refused.json()["detail"]) == (409, dedo_message.FAST_FIX_IS_A_TICKET)
+        old = DedoProjectProposal(project_id=project.id, content=_ZADANIE, proposed_action="fast_fix")
+        db_session.add(old)
+        db_session.commit()
+        before = db_session.execute(select(Version.version_number).where(Version.project_id == project.id)).all()
+
+        sent = _posli(client, user, project.id, str(old.id))
+
+        assert (sent.status_code, sent.json()["detail"]) == (409, dedo_message.FAST_FIX_IS_A_TICKET)
+        after = db_session.execute(select(Version.version_number).where(Version.project_id == project.id)).all()
+        assert after == before, "a fast fix was founded from a proposal's text"
 
     def test_what_he_edited_is_what_goes_in(self, client, db_session, dedo_token, no_dispatch):
         """Text v okienku je jeho — Dedov návrh je predloha, nie príkaz."""
@@ -283,14 +286,7 @@ class TestManazerRozhoduje:
         r = _posli(client, user, project.id, navrh["id"], text=upravene)
 
         assert r.status_code == 200, r.text
-        # Zadanie sa overuje tam, kam SKUTOČNE ide: do štartovacej správy novej stavby, ktorú agent číta.
-        kickoff = db_session.execute(
-            select(PipelineMessage).where(
-                PipelineMessage.version_id == uuid.UUID(r.json()["version_id"]),
-                PipelineMessage.kind == "kickoff",
-            )
-        ).scalar_one()
-        assert (kickoff.payload or {}).get("directive") == upravene, kickoff.payload
+        assert db_session.get(Version, uuid.UUID(r.json()["version_id"])).description == upravene
 
     def test_the_sent_brief_is_closed_and_points_at_its_version(self, client, db_session, dedo_token, no_dispatch):
         user = _make_user(db_session)

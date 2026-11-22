@@ -22,12 +22,11 @@ from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.errors import ConflictError, NotFoundError
-from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import require_shu_or_above, verify_ws_token
 from backend.db.models.foundation import User
 from backend.db.models.pipeline import PipelineMessage, PipelineState
@@ -43,9 +42,6 @@ from backend.schemas.pipeline import (
     DedoProposalRead,
     DedoProposalRejectRequest,
     DedoProposalSendRequest,
-    FastFixCancelResponse,
-    FastFixStartRequest,
-    FastFixStartResponse,
     PipelineActionRequest,
     PipelineBoardRead,
     PipelineMessageRead,
@@ -60,14 +56,10 @@ from backend.services import (
     claude_agent,
     orchestrator,
     pipeline_runner,
-    plane_tickets,
-    unsaved_work,
 )
 from backend.services import dedo_message as dedo_message_service
-from backend.services import fast_fix as fast_fix_service
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
-from backend.services.plane_gateway import PlaneError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline"])
@@ -436,149 +428,6 @@ def _map_orch_error(db: Session, version_id: Optional[uuid.UUID], exc: Orchestra
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
 
 
-@router.post("/fast-fix", response_model=FastFixStartResponse, status_code=status.HTTP_201_CREATED)
-async def start_fast_fix(
-    payload: FastFixStartRequest,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> FastFixStartResponse:
-    """Fast-Fix Lane entry (F-009, CR-NS-094; v2 short path CR-V2-028) — the "Rýchla oprava" one-prompt action.
-
-    Auto-creates the next PATCH version (``vX.Y.Z+1`` from the project's semver max) and starts a
-    ``fast_fix`` pipeline carrying the Manažér's directive (which IS the brief). The lane runs the v2 SHORT
-    path autonomously to the verified boundary — lightweight Príprava (no spec dialogue) → AI Agent
-    self-checking Programovanie → a LIGHT focused Auditor Verifikácia (fix works + no regression) → Hotovo
-    — with ZERO mid-flight approvals by default. It STOPS at verified; it does NOT auto-deploy (OQ-3/D6 —
-    deploy is the normal manual per-customer Nasadiť in the UAT/PROD tabs, CR-V2-027). Declared before the
-    ``/{version_id}`` routes so ``fast-fix`` is never parsed as a version id.
-
-    DEV-122: started from a ticket of the project's module (``plane_issue_id``), the version remembers it — the ticket
-    goes In Progress now and follows the deploys; one ticket starts one fix.
-    """
-    project = authz.assert_project_id_access(db, current_user, payload.project_id)
-    # DEV-175: a version is founded only over saved work.
-    refused = await run_blocking(unsaved_work.refusal, project.id, project.source_path, cap=unsaved_work.CHECK_CAP)
-    if refused:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
-    ticket = await _fix_ticket(db, project, payload.plane_issue_id) if payload.plane_issue_id else None
-
-    pre_count = db.execute(
-        select(func.count()).select_from(Version).where(Version.project_id == payload.project_id)
-    ).scalar_one()
-    try:
-        version = fast_fix_service.create_patch_version(
-            db, project_id=payload.project_id, user_id=current_user.id, work_kind=payload.work_kind
-        )
-        if ticket is not None:
-            version.plane_issue_id, version.plane_identifier, version.plane_url = (
-                ticket.issue_id,
-                ticket.identifier,
-                ticket.url,
-            )
-        state = await orchestrator.apply_action(
-            db,
-            version_id=version.id,
-            action="start",
-            payload={"flow_type": "fast_fix", "directive": payload.directive},
-        )
-    except OrchestratorError as exc:
-        db.rollback()
-        raise _map_orch_error(db, None, exc) from exc
-    except ValueError as exc:
-        db.rollback()
-        # No semver base version / bumped collision — a client/data precondition, not a server fault.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    version_id = version.id
-    version_number = version.version_number
-    db.commit()
-    db.refresh(state)
-    plane_warning = await _fix_ticket_started(ticket, version_number, current_user) if ticket else None
-
-    # Stream the fresh board to any already-open sockets (none yet for a brand-new version, but
-    # symmetric with post_action and harmless). The kickoff Coordinator runs in the background.
-    await registry.broadcast(
-        version_id,
-        {"type": "state_changed", "state": action_labels_service.read_state(db, state).model_dump(mode="json")},
-    )
-    if state.status == "agent_working":
-        pipeline_runner.schedule_dispatch(version_id, None)
-
-    logger.info("Fast-Fix started: version %s (project had %d versions before)", version_id, pre_count)
-    return FastFixStartResponse(version_id=version_id, board=_board(db, version_id), plane_warning=plane_warning)
-
-
-async def _fix_ticket(db: Session, project: Project, issue_id: str) -> plane_tickets.LinkedTicket:
-    """The ticket a fast fix starts from — of this project's module, gone neither to the Zásobník nor to another fix;
-    else 400/409/502 in words."""
-    taken = plane_tickets.way_taken(db, project.id, issue_id)
-    if taken is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=taken)
-    try:
-        return await run_blocking(
-            plane_tickets.linked_ticket,
-            plane_tickets.gateway(),
-            project.plane_module_id,
-            project.name,
-            issue_id,
-            cap=60,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except PlaneError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    except BlockingWorkTimedOut as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Plane do minúty neodpovedal — rýchla oprava nezačala."
-        ) from exc
-
-
-async def _fix_ticket_started(ticket: plane_tickets.LinkedTicket, version_number: str, user: User) -> Optional[str]:
-    """In Progress with a comment once the fix runs; the sentence when Plane did not follow (the fix runs anyway)."""
-    words = {"version": f"v{version_number}", "who": plane_tickets.person(user)}
-    try:
-        return await run_blocking(plane_tickets.follow_fix, plane_tickets.gateway, ticket, "started", **words, cap=60)
-    except BlockingWorkTimedOut:
-        return plane_tickets.fix_failed(ticket, "started", "Plane do minúty neodpovedal.")
-
-
-@router.delete("/{version_id}/fast-fix", response_model=FastFixCancelResponse)
-async def cancel_fast_fix(
-    version_id: uuid.UUID,
-    current_user: User = Depends(require_shu_or_above),
-    db: Session = Depends(get_db),
-) -> FastFixCancelResponse:
-    """DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number.
-
-    Refused in words (409) when the fix is past Príprava or the Staviteľ is on a turn. The ticket it was started from
-    goes back to Todo with a comment; when Plane does not follow, the fix is cancelled anyway and the sentence says so.
-    """
-    authz.assert_version_access(db, current_user, version_id)
-    if not await pipeline_runner.idle_within(version_id, pipeline_runner.SETTLE_GRACE_SECONDS):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=fast_fix_service.CANCEL_AGENT_WORKING)
-    try:
-        cancelled = fast_fix_service.cancel(db, version_id)
-    except fast_fix_service.CancelRefused as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    db.commit()
-    plane_warning = None
-    if cancelled.plane_issue_id:
-        ticket = plane_tickets.LinkedTicket(
-            issue_id=cancelled.plane_issue_id,
-            identifier=cancelled.plane_identifier or cancelled.plane_issue_id,
-            url=cancelled.plane_url or "",
-        )
-        words = {"version": f"v{cancelled.version_number}", "who": plane_tickets.person(current_user)}
-        try:
-            plane_warning = await run_blocking(
-                plane_tickets.follow_fix, plane_tickets.gateway, ticket, "cancelled", **words, cap=60
-            )
-        except BlockingWorkTimedOut:
-            plane_warning = plane_tickets.fix_failed(ticket, "cancelled", "Plane do minúty neodpovedal.")
-    logger.info("Fast-Fix cancelled: version %s (%s)", version_id, cancelled.version_number)
-    return FastFixCancelResponse(version_number=cancelled.version_number, plane_warning=plane_warning)
-
-
 @router.get("/{version_id}/ci", response_model=CiStatusRead)
 async def get_ci_status(
     version_id: uuid.UUID,
@@ -826,6 +675,9 @@ async def send_dedo_proposal(
     authz.assert_version_access(db, current_user, version_id)
     proposal = _proposal_he_decided_about(db, version_id, body.message_id, verb="odoslať")
     action = str((proposal.payload or {}).get("proposed_action", ""))
+    if action == "fast_fix":
+        # DEV-492: a fast fix is founded as a version and started from its tickets — never from a proposal's text.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=dedo_message_service.FAST_FIX_IS_A_TICKET)
     if action not in dedo_message_service.PROPOSAL_ACTIONS:
         # A proposal whose verb we no longer honour is not sendable — refusing beats guessing a verb the
         # Manažér never saw described.
@@ -836,63 +688,6 @@ async def send_dedo_proposal(
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Text návrhu je prázdny.")
-
-    # ICCINT-54: ``fast_fix`` je jediné sloveso, ktoré NEPOKRAČUJE v tejto stavbe — zakladá NOVÚ záplatovú
-    # verziu. Rýchla oprava totiž verziu vytvára až odoslaním formulára, takže dovtedy niet stavby, do ktorej
-    # by Dedo text podal; návrh sa preto zavesí na najnovšiu verziu a odtiaľ sa spustí nová.
-    #
-    # Hranica sa nemení: verzia aj priebeh vznikajú pod účtom Manažéra (``current_user``), presne ako keby
-    # formulár vyplnil sám. Dedo naďalej stavbu spustiť NEVIE — jeho dvere taký endpoint nemajú.
-    if action == "fast_fix":
-        project_id = db.execute(select(Version.project_id).where(Version.id == version_id)).scalar_one()
-        project = authz.assert_project_id_access(db, current_user, project_id)
-        # DEV-175: a version is founded only over saved work; the proposal stays open for after it is saved.
-        refused = await run_blocking(unsaved_work.refusal, project.id, project.source_path, cap=unsaved_work.CHECK_CAP)
-        if refused:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
-        try:
-            new_version = fast_fix_service.create_patch_version(
-                db, project_id=project_id, user_id=current_user.id, work_kind=body.work_kind
-            )
-            new_state = await orchestrator.apply_action(
-                db,
-                version_id=new_version.id,
-                action="start",
-                payload={"flow_type": "fast_fix", "directive": text},
-            )
-        except OrchestratorError as exc:
-            db.rollback()
-            raise _map_orch_error(db, version_id, exc) from exc
-        except ValueError as exc:
-            db.rollback()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        # Archivované v TEJ ISTEJ transakcii ako štart — návrh sa nemôže označiť za odoslaný, ak sa oprava
-        # nerozbehla, ani sa nedá odoslať dvakrát.
-        dedo_message_service.resolve_proposal(
-            db, proposal, resolution="sent", sent_text=text, sent_action=action, sent_message_id=None
-        )
-        db.commit()
-        db.refresh(new_state)
-        # Rovnaký chvost ako pri ``start_fast_fix`` — bez naplánovaného ťahu by oprava VZNIKLA a nikdy sa
-        # nerozbehla. Chytil to test; prvá verzia tejto vetvy končila commitom a stavba by bola ostala stáť.
-        await registry.broadcast(
-            new_version.id,
-            {"type": "state_changed", "state": action_labels_service.read_state(db, new_state).model_dump(mode="json")},
-        )
-        if new_state.status == "agent_working":
-            pipeline_runner.schedule_dispatch(new_version.id, None)
-        logger.info(
-            "Dedo proposal %s started fast-fix %s by %s (from version %s)",
-            proposal.id,
-            new_version.id,
-            current_user.id,
-            version_id,
-        )
-        # ICCINT-62: the board of the build that was just STARTED, not of the one he was looking at. ``fast_fix``
-        # is the only verb here that creates a new version; returning the old board made the cockpit sit on the
-        # previous one, so the bar vanished and nothing seemed to happen — twice in one evening (05.09.2026).
-        # The native "Rýchla oprava" button always opened the new build's board; this is the same answer.
-        return _board(db, new_version.id)
 
     # ICCINT-56: ``decide`` answers a DECISION CARD, so it carries the card's key alongside the text. The key
     # was PINNED onto the proposal when Dedo wrote it; re-check it against the card that is open NOW and refuse

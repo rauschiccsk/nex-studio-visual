@@ -5,7 +5,6 @@
 
 import api from "../api";
 import type { components } from "./pipeline.generated";
-import type { WorkKind } from "@/lib/workKind";
 
 // ── stage / actor / status enums (GENERATED — single source of truth, v0.7.0 R2) ─────────────
 //
@@ -75,10 +74,6 @@ export interface PipelineState {
    * tretiu hodinu, vyzerajú inak rovnako a Manažér nemá ako rozhodnúť, či počkať, alebo volať pomoc.
    */
   working_since?: string | null;
-  /** DEV-491 — „Zrušiť rýchlu opravu“ is taken only for a fast fix that did nothing yet; absent = refused. */
-  cancellable?: boolean;
-  /** DEV-491 — why the fast fix cannot be cancelled now, in words (`null` when it can). */
-  cancel_refusal?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -291,15 +286,6 @@ export interface PipelineActionRequest {
   payload?: Record<string, unknown>;
 }
 
-// Fast-Fix Lane (F-009, CR-NS-094/095): the result of the "Rýchla oprava" one-prompt entry — the
-// auto-created PATCH version's id + its initial board snapshot. Mirrors backend FastFixStartResponse.
-export interface FastFixStartResponse {
-  version_id: string;
-  board: PipelineBoard;
-  /** DEV-122 — the fix started, but its ticket in Plane did not follow; said in words. */
-  plane_warning?: string | null;
-}
-
 // CR-V2-015 / SPIKE-IO Model B: the result of relaying a Manažér message to the AI Agent. The engine is the
 // SOLE writer to the warm `claude` session — the message becomes the next `--resume` turn (never a raw
 // keystroke). `deferred === true` ⇒ a turn was in flight and the message was ENQUEUED behind it (it lands at
@@ -313,36 +299,6 @@ export interface PipelineRelayResponse {
 
 export function getPipelineBoardApi(versionId: string, limit = 50): Promise<PipelineBoard> {
   return api.get<PipelineBoard>(`/pipeline/${versionId}?limit=${limit}`);
-}
-
-// Fast-Fix Lane entry (F-009 §3, CR-NS-095): one prompt → the backend auto-creates the next PATCH
-// version (vX.Y.Z+1) and starts a `fast_fix` pipeline carrying the Director directive. Returns the new
-// version_id (navigate the cockpit to it) + the initial board.
-export function startFastFixApi(
-  projectId: string,
-  directive: string,
-  /** DEV-50 — decided when the fast fix starts; omitted (a Dedo proposal) leaves it for the statement to ask. */
-  workKind?: WorkKind,
-  /** DEV-122 — the ticket in Plane the fix starts from; it then follows the version up to PROD. */
-  planeIssueId?: string,
-): Promise<FastFixStartResponse> {
-  return api.post<FastFixStartResponse>("/pipeline/fast-fix", {
-    project_id: projectId,
-    directive,
-    ...(workKind ? { work_kind: workKind } : {}),
-    ...(planeIssueId ? { plane_issue_id: planeIssueId } : {}),
-  });
-}
-
-// DEV-491 — what is left of a cancelled fast fix: the number it freed and, when its ticket did not go back, why.
-export interface FastFixCancelResponse {
-  version_number: string;
-  plane_warning?: string | null;
-}
-
-/** DEV-491 — „Zrušiť rýchlu opravu“: a fast fix that did nothing yet goes away whole and frees its number. */
-export function cancelFastFixApi(versionId: string): Promise<FastFixCancelResponse> {
-  return api.delete<FastFixCancelResponse>(`/pipeline/${versionId}/fast-fix`);
 }
 
 export function postPipelineActionApi(
@@ -367,13 +323,10 @@ export function sendDedoProposalApi(
   versionId: string,
   messageId: string,
   text: string,
-  workKind: WorkKind | null = null,
 ): Promise<PipelineBoard> {
-  // DEV-56: a proposal that starts a fast fix carries the Manažér's work kind (the server refuses it without one).
   return api.post<PipelineBoard>(`/pipeline/${versionId}/dedo-proposal/send`, {
     message_id: messageId,
     text,
-    work_kind: workKind,
   });
 }
 

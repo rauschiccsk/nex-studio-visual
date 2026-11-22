@@ -26,8 +26,9 @@ from backend.db.models.projects import Project
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import Version
 from backend.db.session import get_db
-from backend.services import orchestrator, pipeline_runner
+from backend.services import fast_fix, orchestrator, pipeline_runner
 from backend.services.pipeline_ws import _Conn, registry
+from backend.tests.fast_fix_tickets import put_ticket
 
 
 def _seed_user(db_session, role="ri") -> User:
@@ -151,44 +152,34 @@ def test_board_unknown_version_404(client):
 # ── fast-fix route status codes + response shape ────────────────────────────────
 
 
-def test_fast_fix_route_creates_patch_version_and_starts(client, db_session):
+def test_a_founded_fast_fix_starts_from_its_ticket_through_the_action(client, db_session):
+    """DEV-492: founded first, a ticket put in, started then — through the same „start“ as any version."""
     project = _make_project_with_semver(db_session, client._ri, "0.3.0")
-    r = client.post(
-        "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(project.id), "directive": "Oprav preklep v hlavičke faktúry", "work_kind": "fix"},
-    )
-    assert r.status_code == 201, r.text
-    body = r.json()
-    new_version_id = uuid.UUID(body["version_id"])
-    assert body["board"]["state"]["flow_type"] == "fast_fix"
-    # the bumped PATCH version was created (vX.Y.Z+1)
-    v = db_session.execute(select(Version).where(Version.id == new_version_id)).scalar_one()
-    assert v.version_number == "0.3.1"
-    # the v2 kickoff (stage=priprava, author=manazer) carries the directive; the dispatch was scheduled
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=client._ri.id, work_kind="fix")
+    ticket = put_ticket(db_session, patch, "Oprav preklep v hlavičke faktúry")
+    db_session.commit()
+
+    r = client.post(f"/api/v1/pipeline/{patch.id}/action", json={"action": "start"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["state"]["flow_type"] == "fast_fix"
+    assert patch.version_number == "0.3.1"
     kickoff = db_session.execute(
-        select(PipelineMessage).where(PipelineMessage.version_id == new_version_id, PipelineMessage.kind == "kickoff")
+        select(PipelineMessage).where(PipelineMessage.version_id == patch.id, PipelineMessage.kind == "kickoff")
     ).scalar_one()
-    assert kickoff.payload["directive"] == "Oprav preklep v hlavičke faktúry"
-    assert new_version_id in client._scheduled
+    assert kickoff.payload["directive"] == f"{ticket.plane_identifier} — Oprav preklep v hlavičke faktúry"
+    assert patch.id in client._scheduled
 
 
-def test_fast_fix_route_unknown_project_404(client):
-    r = client.post(
-        "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(uuid.uuid4()), "directive": "x", "work_kind": "fix"},
-    )
-    assert r.status_code == 404
+def test_a_fast_fix_without_a_ticket_is_refused_in_words(client, db_session):
+    project = _make_project_with_semver(db_session, client._ri, "0.3.0")
+    patch = fast_fix.create_patch_version(db_session, project_id=project.id, user_id=client._ri.id, work_kind="fix")
+    db_session.commit()
 
+    r = client.post(f"/api/v1/pipeline/{patch.id}/action", json={"action": "start"})
 
-def test_fast_fix_route_no_finished_base_400(client, db_session):
-    # A project with no finished version cannot be patched → 400 (precondition), not 500. DEV-170: a number that is
-    # not major.minor.patch (the old „pilot-x“) cannot be stored any more.
-    project = _make_project_with_semver(db_session, client._ri, None)
-    r = client.post(
-        "/api/v1/pipeline/fast-fix",
-        json={"project_id": str(project.id), "directive": "x", "work_kind": "fix"},
-    )
-    assert r.status_code == 400
+    assert (r.status_code, r.json()["detail"]) == (409, fast_fix.NO_TICKET.format(number="0.3.1"))
+    assert patch.id not in client._scheduled
 
 
 # ── messages pagination ─────────────────────────────────────────────────────────

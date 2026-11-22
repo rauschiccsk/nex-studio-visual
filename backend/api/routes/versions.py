@@ -55,14 +55,32 @@ from sqlalchemy.orm import Session
 
 from backend.core import authz
 from backend.core.errors import http_error
+from backend.core.offload import BlockingWorkTimedOut, run_blocking
 from backend.core.security import get_current_user, require_shu_or_above
 from backend.db.models.foundation import User
 from backend.db.models.tasks import Epic, Feat, Task
 from backend.db.models.versions import VERSION_NUMBER_PATTERN, VERSION_NUMBER_RULE, Version
 from backend.db.session import get_db
-from backend.schemas.version import VersionCreate, VersionRead, VersionUpdate
-from backend.services import build_forecast, metrics, pipeline_metrics, unsaved_work
+from backend.schemas.version import (
+    FastFixCreate,
+    VersionCancelled,
+    VersionCreate,
+    VersionRead,
+    VersionTicketItem,
+    VersionUpdate,
+)
+from backend.services import (
+    build_forecast,
+    metrics,
+    pipeline_metrics,
+    pipeline_runner,
+    plane_tickets,
+    unsaved_work,
+    version_cancel,
+    version_tickets,
+)
 from backend.services import delivery_statement as statements
+from backend.services import fast_fix as fast_fix_service
 from backend.services import version as version_service
 
 router = APIRouter(tags=["Versions"])
@@ -177,7 +195,94 @@ def get_version(
         version = version_service.get_by_id(db, version_id)
     except ValueError as exc:
         raise http_error(exc) from exc
+    # DEV-492: the page offers „Zrušiť verziu“ exactly when the route takes it — the same function decides both.
+    refused = version_cancel.refusal_of(db, version)
+    return VersionRead.model_validate(version).model_copy(
+        update={"cancellable": refused is None, "cancel_refusal": refused}
+    )
+
+
+@router.post(
+    "/projects/{project_id}/fast-fixes",
+    response_model=VersionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def found_fast_fix(
+    project_id: UUID,
+    payload: FastFixCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> VersionRead:
+    """DEV-492 — „Nová verzia“ → „Rýchla oprava“: the next patch version, founded and waiting; nothing starts.
+
+    The Manažér puts tickets into it on the „Plane tikety“ tab and starts it from its page — their text is its brief.
+    """
+    project = authz.assert_project_id_access(db, current_user, project_id)
+    # DEV-175: a version is founded only over saved work — the page asks first, the engine holds it.
+    refused = unsaved_work.refusal(project.id, project.source_path)
+    if refused:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
+    try:
+        version = fast_fix_service.create_patch_version(
+            db, project_id=project_id, user_id=current_user.id, work_kind=payload.work_kind
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.refresh(version)
     return VersionRead.model_validate(version)
+
+
+@router.get("/versions/{version_id}/tickets", response_model=list[VersionTicketItem])
+def list_version_tickets(
+    version_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[VersionTicketItem]:
+    """DEV-492 — the tickets the version solves, in the order they were put in (a fast fix starts from them)."""
+    authz.assert_version_access(db, current_user, version_id)
+    return [
+        VersionTicketItem(identifier=t.plane_identifier, title=t.title, url=t.plane_url)
+        for t in version_tickets.for_version(db, version_id)
+    ]
+
+
+@router.delete("/versions/{version_id}", response_model=VersionCancelled)
+async def cancel_version(
+    version_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> VersionCancelled:
+    """DEV-491, DEV-492 — „Zrušiť verziu“: a version that did nothing yet goes away whole and frees its number.
+
+    Refused in words (409) when it started (a fast fix past Príprava or on a turn). Its tickets go back to Todo with a
+    comment; when Plane does not follow, the version is cancelled anyway and the sentence says so.
+    """
+    authz.assert_version_access(db, current_user, version_id)
+    version = db.get(Version, version_id)
+    if not await pipeline_runner.idle_within(version_id, pipeline_runner.SETTLE_GRACE_SECONDS):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=version_cancel.CANCEL_AGENT_WORKING.format(number=version.version_number),
+        )
+    try:
+        cancelled = version_cancel.cancel(db, version_id)
+    except version_cancel.CancelRefused as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    try:
+        plane_warning = await run_blocking(
+            version_cancel.give_tickets_back,
+            plane_tickets.gateway,
+            cancelled,
+            plane_tickets.person(current_user),
+            cap=60,
+        )
+    except BlockingWorkTimedOut:
+        plane_warning = "Verzia je zrušená, ale Plane do minúty neodpovedal — tikety sa do Todo nevrátili."
+    return VersionCancelled(version_number=cancelled.version_number, plane_warning=plane_warning)
 
 
 @router.patch(

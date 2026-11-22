@@ -3570,6 +3570,12 @@ def _review_notes_gap(skeleton: TaskPlanSkeleton, note_count: int) -> Optional[s
 # required — the v1 helper is gone, but its job is not.)
 
 
+#: DEV-492 — a fast fix is founded as one („Nová verzia“ → „Rýchla oprava“) and starts from its tickets.
+FAST_FIX_IS_FOUNDED = (
+    "Rýchla oprava sa zakladá ako rýchla oprava („Nová verzia“ → „Rýchla oprava“) a spúšťa sa z tiketov, ktoré do nej "
+    "zaradíš — táto verzia ňou nie je."
+)
+
 #: DEV-134, DEV-455 — the heading under which the tickets the version solves enter the agent's brief.
 BACKLOG_HEADING = "TIKETY, KTORÉ VERZIA RIEŠI"
 
@@ -3595,9 +3601,9 @@ def _requirement_lines(items: list[VersionTicket]) -> list[str]:
 def _backlog_scope_block(db: Session, version_id: uuid.UUID, items: Optional[list[VersionTicket]] = None) -> str:
     """The tickets the Manažér put into this version, for the Príprava brief (DEV-134, DEV-455).
 
-    Empty when the version has none — no empty heading. A fast fix starts the moment it is founded, so nothing can be
-    put into it before its Príprava — the block belongs to a new version only. ``items`` — the ones the caller hands
-    over and then marks delivered; ``None`` reads them here.
+    Empty when the version has none — no empty heading. A fast fix carries its tickets as its brief from the start
+    (DEV-492) — the block belongs to a new version only. ``items`` — the ones the caller hands over and then marks
+    delivered; ``None`` reads them here.
     """
     items = _included_requirements(db, version_id) if items is None else items
     if not items:
@@ -16830,6 +16836,18 @@ async def apply_action(
     if action == "start":
         if state is not None:
             raise OrchestratorConflict("Stavba tejto verzie už bola spustená.")
+        # DEV-492: one way for every version — founded first, tickets put in, started then. A fast fix is a fast fix
+        # from its founding (``versions.fast_fix``) and starts from the tickets put into it: their text is its brief,
+        # and they reach the Staviteľ with it. Nothing else may start a fast fix — no text without a ticket.
+        founded = db.get(Version, version_id)
+        if founded is not None and founded.fast_fix:
+            tickets = version_tickets.for_version(db, version_id)
+            if not tickets:
+                raise OrchestratorConflict(fast_fix.NO_TICKET.format(number=founded.version_number))
+            payload = {**payload, "flow_type": "fast_fix", "directive": fast_fix.ticket_brief(tickets)}
+            version_tickets.mark_delivered(db, tickets)
+        elif payload.get("flow_type") == "fast_fix":
+            raise OrchestratorError(FAST_FIX_IS_FOUNDED)
         # OQ-1: only two flow_types survive — a full ``new_version`` (4-phase) or a ``fast_fix`` short path.
         flow_type = payload.get("flow_type", "new_version")
         if flow_type not in ("new_version", "fast_fix"):

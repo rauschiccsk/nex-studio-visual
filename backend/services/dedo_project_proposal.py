@@ -25,6 +25,7 @@ from backend.db.models.dedo_proposal import (
     DedoProjectProposal,
 )
 from backend.db.models.projects import Project
+from backend.services import dedo_message
 
 #: Ľudské zdôvodnenie odmietnutia, keď Manažér koná nad návrhom, ktorý už neplatí. Kľúč je stav, do
 #: ktorého sa medzičasom dostal — text musí povedať, ČO sa stalo, nie že „to nejde".
@@ -92,6 +93,8 @@ def record(
     text = (content or "").strip()
     if not text:
         raise ProposalError("Návrh bez textu nie je návrh")
+    if proposed_action == "fast_fix":
+        raise ProposalError(dedo_message.FAST_FIX_IS_A_TICKET)
     if proposed_action not in PROJECT_PROPOSAL_ACTIONS:
         raise ProposalError(f"Neznáme sloveso {proposed_action!r}; poznám: {', '.join(PROJECT_PROPOSAL_ACTIONS)}")
     if db.get(Project, project_id) is None:

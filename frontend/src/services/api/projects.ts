@@ -1,6 +1,5 @@
 import api from "../api";
 import type { PaginatedResponse, ProjectCreate, ProjectRead, ProjectUpdate } from "../../types";
-import type { WorkKind } from "@/lib/workKind";
 import type { components } from "@/services/api/pipeline.generated";
 
 export interface ListProjectsParams {
@@ -322,7 +321,7 @@ export interface DedoProjectProposal {
   id: string;
   project_id: string;
   content: string;
-  /** `fast_fix` založí opravnú verziu a spustí ju; `new_version` založí koncept a nespustí nič. */
+  /** `new_version` founds a draft and starts nothing; `fast_fix` only on a brief from before DEV-492 (not sendable). */
   proposed_action: string;
   status: string;
   created_at: string;
@@ -336,8 +335,6 @@ export interface DedoProjectProposal {
 
 export interface DedoProjectProposalSent {
   version_id: string;
-  /** `true` pri rýchlej oprave; pri novej verzii je to koncept a nič nebeží. */
-  started: boolean;
 }
 
 /** Zadanie, ktoré čaká na rozhodnutie — `null`, keď žiadne nie je. */
@@ -355,15 +352,12 @@ export function sendProjectDedoProposalApi(
   projectId: string,
   proposalId: string,
   text: string,
-  workKind: WorkKind | null = null,
   versionNumber: string | null = null,
 ): Promise<DedoProjectProposalSent> {
-  // DEV-56: a brief that starts a fast fix carries the Manažér's work kind (the server refuses it without one).
   // DEV-149: a new version is founded with the number he had on screen.
   return api.post<DedoProjectProposalSent>(`/projects/${projectId}/dedo-proposal/send`, {
     proposal_id: proposalId,
     text,
-    work_kind: workKind,
     ...(versionNumber ? { version_number: versionNumber } : {}),
   });
 }

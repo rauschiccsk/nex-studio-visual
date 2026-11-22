@@ -37,6 +37,12 @@ export interface Version {
   epic_count: number;
   /** Number of Epics with status 'done'. */
   epics_done: number;
+  /** DEV-492 — a fast fix from its founding on: it takes tickets, starts from them and has no Zadanie of its own. */
+  fast_fix?: boolean;
+  /** DEV-492 — „Zrušiť verziu“ is taken only for a version that did nothing yet (filled when one version is read). */
+  cancellable?: boolean;
+  /** DEV-492 — why the version cannot be cancelled now, in words (`null` when it can). */
+  cancel_refusal?: string | null;
 }
 
 /** Payload for creating a new version (``POST /projects/{id}/versions``). */

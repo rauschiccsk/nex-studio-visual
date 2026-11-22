@@ -25,10 +25,12 @@ from backend.db.session import get_db
 from backend.schemas.plane_tickets import (
     OpenVersionRead,
     PlaneTicketRead,
+    PreparedTicketCreate,
+    PreparedTicketFounded,
     ProjectPlaneTicketsRead,
     VersionTicketRead,
 )
-from backend.services import plane_tickets, version_tickets
+from backend.services import plane_tickets, prepared_tickets, version_tickets
 from backend.services.plane_gateway import PlaneError
 
 router = APIRouter(tags=["Plane tikety"])
@@ -56,7 +58,7 @@ def list_project_plane_tickets(
             for t in found.tickets
         ],
         open_versions=[
-            OpenVersionRead(id=v.id, version_number=v.version_number)
+            OpenVersionRead(id=v.id, version_number=v.version_number, fast_fix=v.fast_fix)
             for v in version_tickets.open_versions(db, project.id)
         ],
     )
@@ -71,6 +73,27 @@ def _version_of(db: Session, project, version_id: UUID) -> Version:
     if version is None or version.project_id != project.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Verzia v tomto projekte nie je.")
     return version
+
+
+@router.post("/projects/{slug}/plane-tickets", response_model=PreparedTicketFounded, status_code=201)
+def file_prepared_ticket(
+    slug: str,
+    payload: PreparedTicketCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PreparedTicketFounded:
+    """DEV-492 — „Založiť tiket“ from a text the cockpit prepared (a broken UAT test, dead code); nothing starts.
+
+    The Manažér puts the ticket into a version or a fast fix on this tab, like any other.
+    """
+    project = authz.assert_project_slug_access(db, current_user, slug)
+    try:
+        ref = prepared_tickets.file(db, plane_tickets.gateway(), current_user, project, **payload.model_dump())
+    except PlaneError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    db.commit()
+    return PreparedTicketFounded(identifier=ref.identifier, url=ref.url)
 
 
 @router.post("/projects/{slug}/plane-tickets/{issue_id}/version", response_model=VersionTicketRead)

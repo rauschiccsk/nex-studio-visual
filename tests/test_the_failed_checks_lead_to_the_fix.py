@@ -87,13 +87,13 @@ def test_a_finished_newer_version_is_not_a_fix_in_progress(db_session):
 def test_dedos_brief_waiting_on_the_project_is_named(db_session):
     project, _version = _blocked(db_session)
     dedo_project_proposal.record(
-        db_session, project_id=project.id, content="Fix the unstable gate check.", proposed_action="fast_fix"
+        db_session, project_id=project.id, content="Fix the unstable gate check.", proposed_action="new_version"
     )
     db_session.flush()
 
     matrix = deploy_service.build_matrix(db_session, project, ci=_ci("red"))
 
-    assert _fix_fields(matrix) == (None, None, "fast_fix")
+    assert _fix_fields(matrix) == (None, None, "new_version")
 
 
 def test_running_checks_say_nothing_about_a_fix(db_session):
@@ -111,7 +111,7 @@ def test_the_deploy_screen_gets_where_the_fix_is(client, db_session, monkeypatch
     project, _version = _blocked(db_session)
     fix = _add_version(db_session, project, "1.7.1", created_at=BLOCKED_AT + timedelta(days=2), stage="programovanie")
     dedo_project_proposal.record(
-        db_session, project_id=project.id, content="Fix the unstable gate check.", proposed_action="fast_fix"
+        db_session, project_id=project.id, content="Fix the unstable gate check.", proposed_action="new_version"
     )
     db_session.flush()
     _as_owner(db_session, project)
@@ -127,5 +127,5 @@ def test_the_deploy_screen_gets_where_the_fix_is(client, db_session, monkeypatch
         "ci_red",
         str(fix.id),
         "1.7.1",
-        "fast_fix",
+        "new_version",
     )

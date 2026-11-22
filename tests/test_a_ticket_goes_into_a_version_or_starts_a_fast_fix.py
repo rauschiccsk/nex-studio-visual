@@ -167,14 +167,13 @@ def test_a_ticket_of_another_projects_module_goes_into_no_version(client, setup,
     assert _comments(plane, "x21") == []
 
 
-def test_a_ticket_with_a_fast_fix_goes_into_no_version(client, setup, plane, db_session, dispatched):
-    """One ticket goes one way — otherwise the version and the fix would both move it."""
+def test_a_ticket_with_a_fast_fix_goes_into_no_version(client, setup, plane, db_session):
+    """One ticket goes one way — otherwise the version and the fix would both move it (a fix started from the ticket
+    before DEV-492)."""
     user, project = setup
-    started = _fast_fix(client, user, project)
-    assert started.status_code == 201, started.text
-    number = db_session.get(Version, uuid.UUID(started.json()["version_id"])).version_number
+    _fix_version(plane, project, db_session)
     r = _into(client, user, project, _new_version(db_session, project, "3.0.0"))
-    assert (r.status_code, r.json()["detail"]) == (409, f"Z tohto tiketu už je spustená rýchla oprava v{number}.")
+    assert (r.status_code, r.json()["detail"]) == (409, "Z tohto tiketu už je spustená rýchla oprava v1.5.6.")
 
 
 def test_when_the_ticket_does_not_take_the_comment_the_link_stays(client, setup, plane, db_session):
@@ -186,103 +185,70 @@ def test_when_the_ticket_does_not_take_the_comment_the_link_stays(client, setup,
     assert db_session.execute(select(VersionTicket).where(VersionTicket.plane_issue_id == "x11")).scalar_one()
 
 
-# ── „Spustiť rýchlu opravu" ─────────────────────────────────────────────────────────────────────────────────────
+# ── a fast fix takes tickets like a version (DEV-492) ───────────────────────────
 
 
-def _fast_fix(client, user, project, issue_id="x11", **over):
-    body = {
-        "project_id": str(project.id),
-        "directive": "Faktúra FLORASERVIS sa z ISDOC nespracuje.",
-        "work_kind": "fix",
-        "plane_issue_id": issue_id,
-        **over,
-    }
-    return client.post("/api/v1/pipeline/fast-fix", headers=_bearer(user), json=body)
-
-
-def _versions(db_session, project) -> list[str]:
-    return sorted(
-        db_session.execute(select(Version.version_number).where(Version.project_id == project.id)).scalars().all()
-    )
-
-
-def test_a_fast_fix_from_a_ticket_remembers_it_and_moves_it_to_in_progress(
-    client, setup, plane, db_session, dispatched
-):
-    user, project = setup
-    r = _fast_fix(client, user, project)
+def _founded_fix(client, user, project) -> dict:
+    r = client.post(f"/api/v1/projects/{project.id}/fast-fixes", headers=_bearer(user), json={"work_kind": "fix"})
     assert r.status_code == 201, r.text
-    assert r.json()["plane_warning"] is None
-    version = db_session.get(Version, uuid.UUID(r.json()["version_id"]))
-    assert (version.plane_issue_id, version.plane_identifier, version.work_kind) == ("x11", "DEV-11", "fix")
-    assert version.plane_url == "http://plane.test/icc/projects/p1/issues/x11"
+    return r.json()
+
+
+def test_a_ticket_goes_into_a_founded_fast_fix_and_the_tab_offers_it(client, setup, plane, db_session):
+    """DEV-492 (Director 22.11.2026: „najprv verzia a potom priradzovanie tiketov“): a fast fix waits for its tickets
+    and the tab offers it like any version; the ticket moves to In Progress with the same comment."""
+    user, project = setup
+    founded = _founded_fix(client, user, project)
+    fix = db_session.get(Version, uuid.UUID(founded["id"]))
+
+    offered = client.get(f"/api/v1/projects/{project.slug}/plane-tickets", headers=_bearer(user)).json()
+    assert f"{fix.version_number}" in [v["version_number"] for v in offered["open_versions"]]
+    r = _into(client, user, project, fix)
+
+    assert r.status_code == 200, r.text
     assert plane.issues["x11"]["state"] == "s-ip"
     assert _comments(plane, "x11") == [
-        f"<p>Rýchla oprava v{version.version_number} je spustená z tohto tiketu. Spustil: Zoltán Rausch.</p>"
+        f"<p>Tiket je zaradený do verzie v{fix.version_number} projektu {project.name}. Zaradil: Zoltán Rausch.</p>"
     ]
-    assert _tickets(client, user, project)["DEV-11"]["fix_version"] == f"v{version.version_number}"
 
 
-def test_one_ticket_starts_one_fast_fix(client, setup, plane, db_session, dispatched):
+def test_a_running_fast_fix_takes_no_more_tickets(client, setup, plane, db_session, dispatched):
     user, project = setup
-    first = _fast_fix(client, user, project)
-    assert first.status_code == 201, first.text
-    before = _versions(db_session, project)
-    again = _fast_fix(client, user, project)
-    number = db_session.get(Version, uuid.UUID(first.json()["version_id"])).version_number
-    assert (again.status_code, again.json()["detail"]) == (
+    fix = db_session.get(Version, uuid.UUID(_founded_fix(client, user, project)["id"]))
+    assert _into(client, user, project, fix).status_code == 200
+    started = client.post(f"/api/v1/pipeline/{fix.id}/action", headers=_bearer(user), json={"action": "start"})
+    assert started.status_code == 200, started.text
+    _issue(plane, "x12")
+
+    r = _into(client, user, project, fix, "x12")
+
+    assert (r.status_code, r.json()["detail"]) == (
         409,
-        f"Z tohto tiketu už je spustená rýchla oprava v{number}.",
+        f"Rýchla oprava {fix.version_number} už beží — tiket by sa do nej nedostal. "
+        "Zaraď ho do inej verzie alebo do novej rýchlej opravy.",
     )
-    assert _versions(db_session, project) == before and len(dispatched) == 1
-
-
-def test_a_ticket_in_a_version_starts_no_fast_fix(client, setup, plane, db_session, dispatched):
-    user, project = setup
-    _into(client, user, project, _new_version(db_session, project))
-    before = _versions(db_session, project)
-    r = _fast_fix(client, user, project)
-    assert r.status_code == 409
-    assert r.json()["detail"] == "Tiket už rieši verzia v2.0.0 — pôjde s ňou."
-    assert _versions(db_session, project) == before and dispatched == []
-
-
-def test_a_ticket_of_another_project_starts_no_fast_fix(client, setup, plane, db_session, dispatched):
-    user, project = setup
-    before = _versions(db_session, project)
-    r = _fast_fix(client, user, project, "x21")
-    assert r.status_code == 400 and "nie je" in r.json()["detail"]
-    assert _versions(db_session, project) == before and dispatched == []
-    assert plane.issues["x21"]["state"] == "s-todo"
-
-
-def test_when_plane_does_not_follow_the_fast_fix_runs_and_a_sentence_says_so(
-    client, setup, plane, db_session, dispatched
-):
-    user, project = setup
-    plane.ignore_patch = True
-    r = _fast_fix(client, user, project)
-    assert r.status_code == 201, r.text
-    assert r.json()["plane_warning"].startswith("Rýchla oprava je spustená, ale tiket DEV-11 sa v Plane neposunul: ")
-    assert len(dispatched) == 1
-
-
-def test_a_fast_fix_without_a_ticket_never_asks_plane(client, setup, plane, db_session, dispatched):
-    user, project = setup
-    plane.requests.clear()
-    r = _fast_fix(client, user, project, None)
-    assert r.status_code == 201, r.text
-    assert plane.requests == []
-    assert db_session.get(Version, uuid.UUID(r.json()["version_id"])).plane_issue_id is None
+    assert dispatched == [fix.id]
 
 
 # ── deployed ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _fix_version(client, user, project, db_session) -> Version:
-    r = _fast_fix(client, user, project)
-    assert r.status_code == 201, r.text
-    return db_session.get(Version, uuid.UUID(r.json()["version_id"]))
+def _fix_version(plane, project, db_session) -> Version:
+    """A fast fix started from the ticket before DEV-492 — it still follows its version to PROD."""
+    version = Version(
+        project_id=project.id,
+        version_number="1.5.6",
+        name="Rýchla oprava",
+        work_kind="fix",
+        fast_fix=True,
+        plane_issue_id="x11",
+        plane_identifier="DEV-11",
+        plane_url="http://plane.test/icc/projects/p1/issues/x11",
+    )
+    db_session.add(version)
+    db_session.commit()
+    plane.issues["x11"]["state"] = "s-ip"
+    return version
 
 
 class _Clock(datetime):
@@ -300,7 +266,7 @@ def today(monkeypatch) -> str:
 
 def test_uat_says_where_the_fix_runs_and_prod_closes_the_ticket(client, setup, plane, db_session, dispatched, today):
     user, project = setup
-    version = _fix_version(client, user, project, db_session)
+    version = _fix_version(plane, project, db_session)
     customer = type("C", (), {"name": "FLORASERVIS"})()
     v = f"v{version.version_number}"
 
@@ -308,7 +274,7 @@ def test_uat_says_where_the_fix_runs_and_prod_closes_the_ticket(client, setup, p
     assert plane.issues["x11"]["state"] == "s-ip"
     assert asyncio.run(deploy._follow_fix_ticket(version, version.version_number, customer, "prod")) is None
     assert plane.issues["x11"]["state"] == "s-done"
-    assert _comments(plane, "x11")[1:] == [
+    assert _comments(plane, "x11") == [
         f"<p>Rýchla oprava {v} je nasadená na UAT u zákazníka FLORASERVIS ({today}).</p>",
         f"<p>Rýchla oprava {v} je nasadená na PROD u zákazníka FLORASERVIS ({today}).</p>",
     ]
@@ -316,7 +282,7 @@ def test_uat_says_where_the_fix_runs_and_prod_closes_the_ticket(client, setup, p
 
 def test_a_ticket_that_does_not_close_is_a_warning_not_a_failed_deploy(client, setup, plane, db_session, dispatched):
     user, project = setup
-    version = _fix_version(client, user, project, db_session)
+    version = _fix_version(plane, project, db_session)
     plane.status = 503
     customer = type("C", (), {"name": "FLORASERVIS"})()
     warning = asyncio.run(deploy._follow_fix_ticket(version, version.version_number, customer, "prod"))

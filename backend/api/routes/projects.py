@@ -76,14 +76,12 @@ from backend.schemas.project import (
     UpgradeBrief,
 )
 from backend.schemas.version import VersionCreate
-from backend.services import action_labels as action_labels_service
 from backend.services import app_kit as app_kit_service
 from backend.services import (
     app_languages,
     delivery_statement,
     library_upgrades,
     orchestrator,
-    pipeline_runner,
     project_adoption,
     project_memory,
     uat_provisioner,
@@ -92,9 +90,9 @@ from backend.services import (
     workspace_owner,
 )
 from backend.services import app_template as app_template_service
+from backend.services import dedo_message as dedo_message_service
 from backend.services import dedo_project_proposal as dedo_proposal_service
 from backend.services import deploy as deploy_service
-from backend.services import fast_fix as fast_fix_service
 from backend.services import github_validation as github_validation_service
 from backend.services import nexshared as nexshared_service
 from backend.services import port_registry as port_registry_service
@@ -103,7 +101,6 @@ from backend.services import project_surfaces as project_surfaces_service
 from backend.services import system_setting as system_setting_service
 from backend.services import version as version_service
 from backend.services.knowledge_base_writer import KnowledgeBaseWriter
-from backend.services.pipeline_ws import registry
 from backend.services.poradca import ideas as ideas_service
 from backend.services.template_bootstrap import (
     GitPushVerificationError,
@@ -1905,42 +1902,33 @@ async def send_dedo_proposal(
     if refused:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refused)
     verb = proposal.proposed_action
+    if verb == "fast_fix":
+        # DEV-492: a fast fix is founded as a version and started from its tickets — never from a proposal's text.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=dedo_message_service.FAST_FIX_IS_A_TICKET)
     try:
-        if verb == "fast_fix":
-            version = fast_fix_service.create_patch_version(
-                db, project_id=project_id, user_id=current_user.id, work_kind=payload.work_kind
-            )
-            state = await orchestrator.apply_action(
-                db,
-                version_id=version.id,
-                action="start",
-                payload={"flow_type": "fast_fix", "directive": payload.text},
-            )
+        # DEV-149: the number the Manažér had on screen — Dedo's proposed one or the suggestion.
+        number = payload.version_number or dedo_proposal_service.founding_number(db, proposal)
+        # DEV-206: a version that has not started yet (a new project's 0.1.0) is filled, not founded next to.
+        version = version_service.unstarted_version(db, project_id, number)
+        if version is not None:
+            version.description = payload.text
+            db.flush()
         else:
-            # DEV-149: the number the Manažér had on screen — Dedo's proposed one or the suggestion.
-            number = payload.version_number or dedo_proposal_service.founding_number(db, proposal)
-            # DEV-206: a version that has not started yet (a new project's 0.1.0) is filled, not founded next to.
-            version = version_service.unstarted_version(db, project_id, number)
-            if version is not None:
-                version.description = payload.text
-                db.flush()
-            else:
-                version = version_service.create(
-                    db,
-                    project_id,
-                    VersionCreate(version_number=number, name="Nová verzia", description=payload.text),
-                    current_user.id,
-                )
-            # ⚠️ Dva kroky, nie jeden. Popis je nadpisová poznámka; ZADANIE je to, čo číta fáza
-            # Príprava (`customer-requirements.md`). 26.09.2026 pri prvom skutočnom použití vyšlo
-            # najavo, že sa zapisoval len popis — verzia vznikla, v kokpite vyzerala správne a agent
-            # by dostal prázdny brief. Presne tá jedna vec, kvôli ktorej ICCINT-152 vznikol.
-            #
-            # `replace_existing` zostáva vypnuté: keď v priečinku verzie už zákaznícka špecifikácia
-            # je, Dedov návrh ju NESMIE prepísať (ICCINT-71 — takto sa raz stratilo 71 riadkov
-            # ručnej práce a agent dostal 51 znakov namiesto 3 380).
-            version_service.write_zadanie(db, version.id, payload.text)
-            state = None
+            version = version_service.create(
+                db,
+                project_id,
+                VersionCreate(version_number=number, name="Nová verzia", description=payload.text),
+                current_user.id,
+            )
+        # ⚠️ Dva kroky, nie jeden. Popis je nadpisová poznámka; ZADANIE je to, čo číta fáza
+        # Príprava (`customer-requirements.md`). 26.09.2026 pri prvom skutočnom použití vyšlo
+        # najavo, že sa zapisoval len popis — verzia vznikla, v kokpite vyzerala správne a agent
+        # by dostal prázdny brief. Presne tá jedna vec, kvôli ktorej ICCINT-152 vznikol.
+        #
+        # `replace_existing` zostáva vypnuté: keď v priečinku verzie už zákaznícka špecifikácia
+        # je, Dedov návrh ju NESMIE prepísať (ICCINT-71 — takto sa raz stratilo 71 riadkov
+        # ručnej práce a agent dostal 51 znakov namiesto 3 380).
+        version_service.write_zadanie(db, version.id, payload.text)
     except version_service.ZadanieWouldBeOverwritten as exc:
         # ⚠️ ICCINT-71: v priečinku tej verzie UŽ leží zákaznícka špecifikácia. Raz sa takto stratilo
         # 71 riadkov ručnej práce a agent dostal 51 znakov namiesto 3 380. Dedov návrh nesmie byť tá
@@ -1960,18 +1948,8 @@ async def send_dedo_proposal(
     dedo_proposal_service.mark_sent(db, proposal, user_id=current_user.id, version_id=version.id)
     version_id = version.id
     db.commit()
-
-    if state is not None:
-        db.refresh(state)
-        await registry.broadcast(
-            version_id,
-            {"type": "state_changed", "state": action_labels_service.read_state(db, state).model_dump(mode="json")},
-        )
-        if state.status == "agent_working":
-            pipeline_runner.schedule_dispatch(version_id, None)
-
     logger.info("Manažér poslal Dedovo zadanie (%s) — vznikla verzia %s", verb, version_id)
-    return DedoProjectProposalSendResponse(version_id=version_id, started=state is not None)
+    return DedoProjectProposalSendResponse(version_id=version_id)
 
 
 @router.post("/{project_id}/dedo-proposal/reject", status_code=status.HTTP_200_OK)

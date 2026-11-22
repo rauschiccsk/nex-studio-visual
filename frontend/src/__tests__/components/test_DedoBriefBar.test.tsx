@@ -59,11 +59,11 @@ function navrh(over: Partial<DedoProjectProposal> = {}): DedoProjectProposal {
     id: "n-1",
     project_id: PROJEKT,
     content: ZADANIE,
-    proposed_action: "fast_fix",
+    proposed_action: "new_version",
     status: "proposed",
     created_at: "2026-09-25T10:00:00Z",
     proposed_version_number: null,
-    version_number: null,
+    version_number: "1.10.0",
     unstarted_version_numbers: [],
     ...over,
   };
@@ -112,11 +112,18 @@ describe("Panel sa ukáže len vtedy, keď je čo rozhodnúť", () => {
 });
 
 describe("Čo tlačidlo spraví, je povedané ako dôsledok", () => {
-  it("rýchla oprava hovorí, že sa verzia vytvorí a rozbehne", () => {
-    vykresli(navrh());
+  it("DEV-492: rýchlu opravu zo zadania už nespustí — povie prečo a nechá ho zamietnuť", () => {
+    vykresli(navrh({ proposed_action: "fast_fix", version_number: null }));
 
-    expect(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i })).toBeInTheDocument();
-    expect(screen.getByText(/rozbehne odľahčená linka/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Spustiť rýchlu opravu/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Použiť zadanie/i })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Rýchla oprava sa už zo zadania nespúšťa — zakladá sa ako verzia a spúšťa sa z tiketov, ktoré do nej " +
+          "zaradíš. Zadanie zamietni; Dedo z neho založí tiket.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Zamietnuť zadanie/i })).toBeEnabled();
   });
 
   it("nová verzia hovorí, že sa NIČ nerozbehne", () => {
@@ -129,29 +136,27 @@ describe("Čo tlačidlo spraví, je povedané ako dôsledok", () => {
 
 describe("Rozhoduje Manažér", () => {
   it("spustenie pošle identifikátor zadania, ktoré má na obrazovke", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: true });
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9" });
     const { onVersion } = vykresli(navrh());
 
-    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
-    fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "fix"),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "1.10.0"),
     );
-    await waitFor(() => expect(onVersion).toHaveBeenCalledWith("v-9", true));
+    await waitFor(() => expect(onVersion).toHaveBeenCalledWith("v-9"));
   });
 
   it("použije sa to, čo je v okienku — nie pôvodné znenie", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: true });
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9" });
     vykresli(navrh());
     const upravene = ZADANIE + " Najprv over, či to na UAT naozaj padá.";
 
     fireEvent.change(screen.getByLabelText("Zadanie od Deda"), { target: { value: upravene } });
-    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
-    fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", upravene, "fix"),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", upravene, "1.10.0"),
     );
   });
 
@@ -185,8 +190,7 @@ describe("Keď sa zadanie zmenilo pod rukami", () => {
     vi.mocked(getProjectDedoProposalApi).mockResolvedValue(novsie);
     const { onProposal, onVersion } = vykresli(navrh());
 
-    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
-    fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     expect(await screen.findByText(/napísal novší návrh/i)).toBeInTheDocument();
     await waitFor(() => expect(onProposal).toHaveBeenCalledWith(novsie));
@@ -194,22 +198,7 @@ describe("Keď sa zadanie zmenilo pod rukami", () => {
   });
 });
 
-describe("Druh práce pri rýchlej oprave (DEV-56)", () => {
-  it("⚠️ rýchlu opravu zo zadania nespustí, kým Manažér neurčí druh práce — a ten pošle", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: true });
-    vykresli(navrh());
-    const start = screen.getByRole("button", { name: /Spustiť rýchlu opravu/i });
-
-    expect(start).toBeDisabled();
-    fireEvent.click(start);
-    expect(sendProjectDedoProposalApi).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByLabelText(/Zmena alebo nová práca/));
-    expect(start).toBeEnabled();
-    fireEvent.click(start);
-    await waitFor(() => expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "change"));
-  });
-
+describe("Druh práce (DEV-56)", () => {
   it("nová verzia zo zadania sa na druh práce nepýta", () => {
     // DEV-149: a new-version brief always arrives with the number it founds the version with.
     vykresli(navrh({ proposed_action: "new_version", version_number: "1.10.0" }));
@@ -225,26 +214,26 @@ describe("Číslo novej verzie Manažér vidí pred založením (DEV-149)", () =
     navrh({ proposed_action: "new_version", proposed_version_number: "1.10.0", version_number: "1.10.0", ...over });
 
   it("ukáže číslo, s ktorým verzia vznikne, a založí ju s ním", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: false });
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9" });
     vykresli(novaVerzia());
 
     expect(screen.getByLabelText("Číslo verzie")).toHaveValue("1.10.0");
     fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "1.10.0"),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "1.10.0"),
     );
   });
 
   it("založí ju s číslom, ktoré Manažér zmenil", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9", started: false });
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-9" });
     vykresli(novaVerzia());
 
     fireEvent.change(screen.getByLabelText("Číslo verzie"), { target: { value: "2.0.0" } });
     fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "2.0.0"),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "2.0.0"),
     );
   });
 
@@ -258,7 +247,7 @@ describe("Číslo novej verzie Manažér vidí pred založením (DEV-149)", () =
   });
 
   it("rýchla oprava vlastné číslo neukazuje — určuje ho pravidlo opravy", () => {
-    vykresli(navrh());
+    vykresli(navrh({ proposed_action: "fast_fix", version_number: null }));
 
     expect(screen.queryByLabelText("Číslo verzie")).not.toBeInTheDocument();
   });
@@ -270,7 +259,7 @@ describe("Zadanie doplní verziu, ktorá sa ešte nezačala (DEV-206)", () => {
     navrh({ proposed_action: "new_version", version_number: "0.1.0", unstarted_version_numbers: ["0.1.0"] });
 
   it("povie, že doplní pripravenú verziu, a pošle ju s jej číslom", async () => {
-    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-1", started: false });
+    vi.mocked(sendProjectDedoProposalApi).mockResolvedValue({ version_id: "v-1" });
     vykresli(prvaVerzia());
 
     expect(screen.getByText(/Zadanie sa zapíše do pripravenej verzie 0\.1\.0, ktorá sa ešte nezačala/)).toBeInTheDocument();
@@ -278,7 +267,7 @@ describe("Zadanie doplní verziu, ktorá sa ešte nezačala (DEV-206)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Doplniť verziu 0.1.0" }));
 
     await waitFor(() =>
-      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, null, "0.1.0"),
+      expect(sendProjectDedoProposalApi).toHaveBeenCalledWith(PROJEKT, "n-1", ZADANIE, "0.1.0"),
     );
   });
 
@@ -305,15 +294,11 @@ function unsavedWorkRefusal(): ApiError {
 }
 
 describe("Neuložené zmeny projektu (DEV-175)", () => {
-  it.each([
-    ["fast_fix", /Spustiť rýchlu opravu/i],
-    ["new_version", /Založiť novú verziu/i],
-  ])("⚠️ %s: odmietnutie ponúkne Uložiť / Zahodiť a zadanie ostane otvorené", async (action, button) => {
+  it("⚠️ odmietnutie ponúkne Uložiť / Zahodiť a zadanie ostane otvorené", async () => {
     vi.mocked(sendProjectDedoProposalApi).mockRejectedValue(unsavedWorkRefusal());
-    const { onProposal, onVersion } = vykresli(navrh({ proposed_action: action, version_number: "1.1.0" }));
+    const { onProposal, onVersion } = vykresli(navrh({ version_number: "1.1.0" }));
 
-    if (action === "fast_fix") fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
-    fireEvent.click(screen.getByRole("button", { name: button }));
+    fireEvent.click(screen.getByRole("button", { name: /Založiť novú verziu/i }));
 
     expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();

@@ -21,10 +21,10 @@ from sqlalchemy.orm import relationship
 
 from backend.db.models.base import Base, TimestampMixin, UUIDMixin
 
-#: Čo Dedo navrhuje spraviť. ``fast_fix`` založí opravnú verziu a SPUSTÍ ju so zadaním; ``new_version``
-#: založí verziu ako koncept so zadaním v popise a nespustí nič. Obe sú veci, ktoré Manažér v kokpite
-#: robí aj sám — návrh mu ich len predvyplní.
-PROJECT_PROPOSAL_ACTIONS = ("fast_fix", "new_version")
+#: What Dedo proposes: ``new_version`` founds a version as a draft with the brief in its description and starts
+#: nothing — a thing the Manažér does in the cockpit himself, the proposal only fills it in. DEV-492: Dedo no longer
+#: proposes a fast fix (he files a ticket instead); the rows from before keep their verb, so the table still allows it.
+PROJECT_PROPOSAL_ACTIONS = ("new_version",)
 
 #: Návrh čaká na Manažéra.
 PROPOSED = "proposed"

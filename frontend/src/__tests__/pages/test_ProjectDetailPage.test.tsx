@@ -1,21 +1,17 @@
 /**
- * ProjectDetailPage — Fast-Fix Lane entry (F-009 §4 CR-B, CR-NS-095).
+ * ProjectDetailPage — the project's versions, Dedo's brief, the delete and the hand-over.
  *
- * The "Rýchla oprava" button opens a modal; submitting the directive POSTs to
- * /pipeline/fast-fix, pins the auto-created PATCH version into the active context
- * (project FIRST, then version), and navigates to the Vývoj board (/vyvoj,
- * renamed from /cockpit in CR-V2-019).
+ * DEV-492: the page no longer starts a fast fix — „Nová verzia“ founds a regular version or a fast fix, which then
+ * takes its tickets on the „Plane tikety“ tab (Director 22.11.2026: „najprv verzia a potom priradzovanie tiketov“).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
-import { ApiError } from "@/services/api";
 
 import type { ProjectRead } from "@/types";
 import type { Version } from "@/types/version";
-import { FROM_DEAD_CODE_LABEL, FROM_UAT_LABEL } from "@/lib/fastFixHandoff";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
@@ -30,7 +26,6 @@ const {
   listVersionsMock,
   getVersionMock,
   getNextVersionNumberApiMock,
-  startFastFixApiMock,
   getDeadCodeApiMock,
   getProjectDedoProposalApiMock,
   getAppTemplateConversionApiMock,
@@ -51,7 +46,6 @@ const {
   listVersionsMock: vi.fn(),
   getVersionMock: vi.fn(),
   getNextVersionNumberApiMock: vi.fn(),
-  startFastFixApiMock: vi.fn(),
   getDeadCodeApiMock: vi.fn(),
   getProjectDedoProposalApiMock: vi.fn(),
   getAppTemplateConversionApiMock: vi.fn(),
@@ -116,7 +110,6 @@ vi.mock("@/services/api/versions", () => ({
   getVersion: getVersionMock,
   getNextVersionNumberApi: getNextVersionNumberApiMock,
 }));
-vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: startFastFixApiMock }));
 vi.mock("@/services/api/deadCode", () => ({ getDeadCodeApi: getDeadCodeApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
   useActiveContextStore: (selector: (s: Record<string, unknown>) => unknown) =>
@@ -181,7 +174,6 @@ beforeEach(() => {
   listVersionsMock.mockResolvedValue([baseVersion]);
   getVersionMock.mockResolvedValue(patchVersion);
   getNextVersionNumberApiMock.mockResolvedValue({ version_number: "0.7.0" });
-  startFastFixApiMock.mockResolvedValue({ version_id: "v2", board: { state: null, recent_messages: [] } });
   // Bežný stav: Dedo nič nenavrhol. Stránka sa má vtedy tváriť presne tak, ako sa tvárila doteraz.
   getProjectDedoProposalApiMock.mockResolvedValue(null);
   getAppTemplateConversionApiMock.mockResolvedValue({
@@ -250,7 +242,7 @@ describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
 
-    await screen.findByRole("button", { name: /^rýchla oprava$/i });
+    await screen.findByRole("button", { name: /Nová verzia/ });
     expect(screen.queryByText(/pripravil zadanie/i)).not.toBeInTheDocument();
   });
 
@@ -261,7 +253,7 @@ describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
 
-    expect(await screen.findByRole("button", { name: /^rýchla oprava$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Nová verzia/ })).toBeInTheDocument();
     expect(screen.queryByText(/Nepodarilo sa načítať projekt/i)).not.toBeInTheDocument();
   });
 
@@ -274,90 +266,21 @@ describe("ProjectDetailPage — Dedovo zadanie (ICCINT-152)", () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
 
-    expect(await screen.findByRole("button", { name: /^rýchla oprava$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Nová verzia/ })).toBeInTheDocument();
     expect(screen.queryByText(/Nepodarilo sa načítať projekt/i)).not.toBeInTheDocument();
   });
 });
 
-describe("ProjectDetailPage — Fast-Fix Lane (CR-NS-095)", () => {
-  it("posts the directive, pins the patch version (project first), and opens the cockpit", async () => {
+describe("ProjectDetailPage — one way for every version (DEV-492)", () => {
+  it("offers no fast fix of its own — „Nová verzia“ founds a version or a fast fix", async () => {
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
 
-    // Entry button appears once the project + its (>0) versions load.
-    const entry = await screen.findByRole("button", { name: /^rýchla oprava$/i });
-    await userEvent.click(entry);
+    fireEvent.click(await screen.findByRole("button", { name: /Nová verzia/ }));
 
-    await userEvent.type(screen.getByLabelText(/popis opravy/i), "Oprav preklep v sidebare.");
-    // DEV-50: the fast fix says whether it fixes our own error (never billed) — required before it can start.
-    expect(screen.getByRole("button", { name: /spustiť rýchlu opravu/i })).toBeDisabled();
-    await userEvent.click(screen.getByRole("radio", { name: /oprava chyby v dodanom kóde/i }));
-    await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
-
-    await waitFor(() =>
-      expect(startFastFixApiMock).toHaveBeenCalledWith("p1", "Oprav preklep v sidebare.", "fix"),
-    );
-    // CR-V2-019 (OQ-7): the build board route is /vyvoj (renamed from /cockpit).
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/vyvoj"));
-
-    expect(getVersionMock).toHaveBeenCalledWith("v2");
-    expect(setSelectedProjectMock).toHaveBeenCalledWith({ slug: "demo", name: "Demo" });
-    expect(setSelectedVersionMock).toHaveBeenCalledWith({ versionId: "v2", versionNumber: "v0.6.1" });
-
-    // Context must be pinned project-FIRST (setSelectedProject clears the version slot).
-    const projOrder = setSelectedProjectMock.mock.invocationCallOrder[0] ?? 0;
-    const verOrder = setSelectedVersionMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER;
-    expect(projOrder).toBeLessThan(verOrder);
-  });
-
-  it("submit is disabled on an empty directive and the modal can be cancelled", async () => {
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    await userEvent.click(await screen.findByRole("button", { name: /^rýchla oprava$/i }));
-    expect(screen.getByRole("button", { name: /spustiť rýchlu opravu/i })).toBeDisabled();
-
-    await userEvent.click(screen.getByRole("button", { name: /zrušiť/i }));
-    expect(screen.queryByLabelText(/popis opravy/i)).not.toBeInTheDocument();
-    expect(startFastFixApiMock).not.toHaveBeenCalled();
-  });
-
-  it("surfaces a backend error without navigating away", async () => {
-    startFastFixApiMock.mockRejectedValue(new Error("Project has no semver version to patch from"));
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    await userEvent.click(await screen.findByRole("button", { name: /^rýchla oprava$/i }));
-    await userEvent.type(screen.getByLabelText(/popis opravy/i), "x");
-    await userEvent.click(screen.getByRole("radio", { name: /zmena alebo nová práca/i }));
-    await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
-
-    expect(await screen.findByText(/no semver version to patch/i)).toBeInTheDocument();
-    expect(navigateMock).not.toHaveBeenCalled();
-  });
-
-  it("⚠️ DEV-175: refused for unsaved work, the dialog offers Uložiť / Zahodiť and opens no build", async () => {
-    startFastFixApiMock.mockRejectedValue(
-      new ApiError(409, "conflict", {
-        detail: {
-          message:
-            "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
-          project_id: "p1",
-          unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
-        },
-      }),
-    );
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    await userEvent.click(await screen.findByRole("button", { name: /^rýchla oprava$/i }));
-    await userEvent.type(screen.getByLabelText(/popis opravy/i), "x");
-    await userEvent.click(screen.getByRole("radio", { name: /oprava chyby v dodanom kóde/i }));
-    await userEvent.click(screen.getByRole("button", { name: /spustiť rýchlu opravu/i }));
-
-    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
-    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Rýchla oprava/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(navigateMock).toHaveBeenCalledWith("/projects/demo/versions/new");
   });
 });
 
@@ -611,83 +534,7 @@ describe("ProjectDetailPage — záznam o nedokončenom zakladaní", () => {
   });
 });
 
-describe("ProjectDetailPage — príchod zo zastaveného nasadenia (DEV-57)", () => {
-  it("⚠️ odkaz „Spustiť rýchlu opravu“ otvorí dialóg Rýchla oprava a parameter zahodí", async () => {
-    locationMock.search = "?rychla-oprava=1";
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    expect(await screen.findByRole("dialog", { name: "Rýchla oprava" })).toBeInTheDocument();
-    expect(navigateMock).toHaveBeenCalledWith({ pathname: "/projects/demo", hash: "" }, { replace: true });
-  });
-
-  it("DEV-91: a brief prepared from a UAT test lands in the dialog saying where it came from, until he edits it", async () => {
-    window.localStorage.setItem("nex.draft.rychla-oprava.demo", "V UAT nefunguje: Detail faktúry.");
-    window.localStorage.setItem("nex.draft.rychla-oprava.demo.origin", "uat");
-    locationMock.search = "?rychla-oprava=1";
-    try {
-      const ProjectDetailPage = await importPage();
-      render(<ProjectDetailPage />);
-
-      const dialog = await screen.findByRole("dialog", { name: "Rýchla oprava" });
-      expect(within(dialog).getByLabelText("Popis opravy")).toHaveValue("V UAT nefunguje: Detail faktúry.");
-      expect(within(dialog).getByText(FROM_UAT_LABEL)).toBeInTheDocument();
-      fireEvent.change(within(dialog).getByLabelText("Popis opravy"), { target: { value: "Vlastný text." } });
-
-      expect(within(dialog).queryByText(FROM_UAT_LABEL)).not.toBeInTheDocument();
-      expect(window.localStorage.getItem("nex.draft.rychla-oprava.demo.origin")).toBeNull();
-    } finally {
-      window.localStorage.clear();
-    }
-  });
-
-  it("DEV-156: „Upratať nepoužívaný kód“ opens the dialog on the prepared cleanup under his draft — nothing starts", async () => {
-    window.localStorage.setItem("nex.draft.rychla-oprava.demo", "Môj rozpísaný text.");
-    getDeadCodeApiMock.mockResolvedValue({
-      findings: [
-        { kind: "function", path: "app/x.py", name: "f", line: 3, sentence: "funkciu f (app/x.py:3) nikto nevolá" },
-      ],
-      not_run: [],
-      brief: "Uprac kód, ktorý nikto nepoužíva.",
-    });
-    try {
-      const ProjectDetailPage = await importPage();
-      render(<ProjectDetailPage />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Upratať nepoužívaný kód" }));
-
-      const dialog = await screen.findByRole("dialog", { name: "Rýchla oprava" });
-      expect(within(dialog).getByLabelText("Popis opravy")).toHaveValue(
-        "Môj rozpísaný text.\n\nUprac kód, ktorý nikto nepoužíva.",
-      );
-      expect(within(dialog).getByText(FROM_DEAD_CODE_LABEL)).toBeInTheDocument();
-      expect(window.localStorage.getItem("nex.draft.rychla-oprava.demo")).toBe(
-        "Môj rozpísaný text.\n\nUprac kód, ktorý nikto nepoužíva.",
-      );
-      expect(startFastFixApiMock).not.toHaveBeenCalled();
-    } finally {
-      window.localStorage.clear();
-    }
-  });
-
-  it("bez odkazu sa dialóg sám neotvorí", async () => {
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    expect(await screen.findByRole("button", { name: /Rýchla oprava/ })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Rýchla oprava" })).not.toBeInTheDocument();
-  });
-
-  it("⚠️ projekt bez verzie nemá čo opraviť — dialóg sa neotvorí ani z odkazu", async () => {
-    locationMock.search = "?rychla-oprava=1";
-    listVersionsMock.mockResolvedValue([]);
-    const ProjectDetailPage = await importPage();
-    render(<ProjectDetailPage />);
-
-    expect(await screen.findByRole("button", { name: /Nová verzia/ })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Rýchla oprava" })).not.toBeInTheDocument();
-  });
-
+describe("ProjectDetailPage — príchod z odkazu na Dedovo zadanie (DEV-57)", () => {
   it("⚠️ odkaz na Dedovo zadanie k nemu stránku posunie", async () => {
     locationMock.hash = "#zadanie-od-deda";
     getProjectDedoProposalApiMock.mockResolvedValue({
@@ -752,7 +599,7 @@ describe("ProjectDetailPage — the next version's number comes from the cockpit
     getNextVersionNumberApiMock
       .mockResolvedValueOnce({ version_number: "1.1.0" })
       .mockResolvedValue({ version_number: "1.2.0" });
-    sendProjectDedoProposalApiMock.mockResolvedValue({ version_id: "v9", started: false });
+    sendProjectDedoProposalApiMock.mockResolvedValue({ version_id: "v9" });
     const ProjectDetailPage = await importPage();
     render(<ProjectDetailPage />);
     await screen.findByRole("button", { name: "Pridať verziu 1.1.0" });
@@ -765,7 +612,6 @@ describe("ProjectDetailPage — the next version's number comes from the cockpit
       "p1",
       "n-1",
       "Kandidátska časť na verejnom webe.",
-      null,
       "1.1.0",
     );
   });

@@ -79,7 +79,7 @@ def test_sending_it_fills_the_unstarted_version(client, db_session, dedo_token, 
     answer = _send(client, user, project.id, brief["id"], number)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json() == {"version_id": str(first.id), "started": False}
+    assert answer.json() == {"version_id": str(first.id)}
     assert _versions(db_session, project.id) == ["0.1.0"], "a second version was founded next to the empty 0.1.0"
     assert version_service.read_zadanie(db_session, first.id).strip() == _ZADANIE
     filled = db_session.get(Version, first.id)

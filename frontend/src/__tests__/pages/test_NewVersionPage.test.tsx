@@ -39,8 +39,12 @@ const {
   postPipelineActionApiMock,
   getNextVersionNumberApiMock,
   getUpgradeBriefApiMock,
+  foundFastFixApiMock,
+  searchMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
+  foundFastFixApiMock: vi.fn(),
+  searchMock: { value: "" },
   listProjectsApiMock: vi.fn(),
   getNexsharedStatusApiMock: vi.fn(),
   upgradeNexsharedApiMock: vi.fn(),
@@ -63,7 +67,13 @@ const {
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
-  return { ...actual, useNavigate: () => navigateMock, useParams: () => ({ slug: "demo" }) };
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+    useParams: () => ({ slug: "demo" }),
+    // DEV-492: the page reads `?rychla-oprava=1`; rendered without a router here.
+    useSearchParams: () => [new URLSearchParams(searchMock.value), vi.fn()],
+  };
 });
 
 vi.mock("@/services/api/projects", () => ({
@@ -86,6 +96,7 @@ vi.mock("@/services/api/versions", () => ({
   updateVersion: updateVersionMock,
   peekZadanieOnDisk: peekZadanieOnDiskMock,
   getNextVersionNumberApi: getNextVersionNumberApiMock,
+  foundFastFixApi: foundFastFixApiMock,
 }));
 vi.mock("@/services/api/pipeline", () => ({ postPipelineActionApi: postPipelineActionApiMock }));
 vi.mock("@/store/activeContextStore", () => ({
@@ -156,6 +167,7 @@ const behindNexshared: NexsharedStatus = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchMock.value = "";
   window.localStorage.clear(); // DEV-32: the Zadanie keeps a draft — one test must not leave it for the next
   listProjectsApiMock.mockResolvedValue({ items: [project], total: 1, skip: 0, limit: 100 });
   listVersionsMock.mockResolvedValue([]);
@@ -850,5 +862,58 @@ describe("NewVersionPage — a version that only upgrades gets its Zadanie writt
 
     await waitFor(() => expect(screen.queryByRole("button", { name: /povýšiť na v0\.19\.0/i })).toBeNull());
     expect(upgradeNexsharedApiMock).not.toHaveBeenCalled();
+  });
+});
+
+// DEV-492 — Director 22.11.2026: „Treba mať jednotný postup a to najprv verzia a potom priradzovanie tiketov.“ A fast
+// fix is founded on this page like a version and waits for its tickets; nothing starts here.
+describe("NewVersionPage — a fast fix is founded here and waits for its tickets (DEV-492)", () => {
+  const released = { id: "v-150", version_number: "1.5.0", status: "released" };
+
+  it("founds the fast fix with the work kind chosen and opens its page — no Zadanie, nothing started", async () => {
+    listVersionsMock.mockResolvedValue([released]);
+    foundFastFixApiMock.mockResolvedValue({ id: "v-fix", version_number: "1.5.1", status: "planned", fast_fix: true });
+    await renderPage();
+
+    await userEvent.click(await screen.findByLabelText("Rýchla oprava"));
+    expect(screen.queryByText(/Zadanie/)).not.toBeInTheDocument();
+    const found = screen.getByRole("button", { name: /Založiť rýchlu opravu/ });
+    expect(found).toBeDisabled();
+    await userEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
+    await userEvent.click(found);
+
+    await waitFor(() => expect(foundFastFixApiMock).toHaveBeenCalledWith("p1", "fix"));
+    expect(navigateMock).toHaveBeenCalledWith("/projects/demo/versions/v-fix");
+    expect(createVersionMock).not.toHaveBeenCalled();
+    expect(postPipelineActionApiMock).not.toHaveBeenCalled();
+  });
+
+  it("arrives with „Rýchla oprava“ chosen from the deploy stopped by failed checks", async () => {
+    listVersionsMock.mockResolvedValue([released]);
+    searchMock.value = "rychla-oprava=1";
+    await renderPage();
+
+    expect(await screen.findByRole("button", { name: /Založiť rýchlu opravu/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Rýchla oprava")).toBeChecked();
+  });
+
+  it("a project without a finished version has nothing to fix — the choice says why", async () => {
+    await renderPage();
+
+    expect(await screen.findByLabelText("Rýchla oprava")).toBeDisabled();
+    expect(screen.getByText("Rýchla oprava opravuje hotovú verziu — projekt ešte žiadnu nemá.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Riadna verzia")).toBeChecked();
+  });
+
+  it("over unsaved work the fast fix waits behind the same guard", async () => {
+    listVersionsMock.mockResolvedValue([released]);
+    getGitStatusApiMock.mockResolvedValue(dirtyTree);
+    await renderPage();
+
+    await userEvent.click(await screen.findByLabelText("Rýchla oprava"));
+    await userEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
+
+    expect(screen.getByRole("button", { name: /Založiť rýchlu opravu/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /uložiť ich/i })).toBeInTheDocument();
   });
 });

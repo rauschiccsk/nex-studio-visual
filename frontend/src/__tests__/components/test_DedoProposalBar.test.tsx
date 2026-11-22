@@ -31,13 +31,6 @@ vi.mock("@/services/api/pipeline", () => ({
   getPipelineBoardApi: vi.fn(),
 }));
 
-// ICCINT-62: starting a fast fix creates a NEW version, so the bar must move the cockpit onto it. Mocked so
-// the test asserts the bar ASKS for that — the hook itself is covered by the pages that use it.
-const openVersionCockpit = vi.fn();
-vi.mock("@/hooks/useOpenVersionCockpit", () => ({
-  useOpenVersionCockpit: () => openVersionCockpit,
-}));
-
 const FINDING =
   "Úloha #4 nemá test na zápornú cenu, hoci špecifikácia ho žiada v §3.2. Doplň ho a spusti overenie znova.";
 
@@ -109,7 +102,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-42", "m-1", FINDING, null));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-42", "m-1", FINDING));
     await waitFor(() => expect(onBoard).toHaveBeenCalledWith(NEXT_BOARD));
   });
 
@@ -121,7 +114,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
     expect(screen.getByText(/odošle sa tvoje znenie/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", edited, null));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", edited));
   });
 
   it("cannot send an empty box", () => {
@@ -167,7 +160,7 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
 
     fireEvent.click(screen.getByRole("button", { name: /Vrátiť Staviteľovi/ }));
 
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", FINDING, null));
+    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-1", "m-1", FINDING));
   });
 
   it("when the finding changed under him, it says so and swaps in the current one", async () => {
@@ -221,83 +214,32 @@ describe("DedoProposalBar — a finding from the technical team, one click away"
   });
 });
 
-describe("ICCINT-62 — a fast fix moves the cockpit onto the build it started", () => {
+describe("DEV-492 — a fast fix proposal from before is declined, not sent", () => {
   beforeEach(() => {
     vi.mocked(sendDedoProposalApi).mockReset();
-    openVersionCockpit.mockReset();
+    vi.mocked(rejectDedoProposalApi).mockReset();
   });
 
-  it("opens the NEW version after starting a fast fix", async () => {
-    vi.mocked(sendDedoProposalApi).mockResolvedValue({
-      state: { status: "agent_working", version_id: "v-new" },
-      dedo_proposal: null,
-    } as unknown as PipelineBoard);
-
+  it("says why it is not sent, offers no work kind and leaves declining open", async () => {
+    vi.mocked(rejectDedoProposalApi).mockResolvedValue(NEXT_BOARD);
     render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/)); // DEV-56: the work kind first
-    fireEvent.click(screen.getByRole("button", { name: /rýchlu opravu/i }));
 
-    await waitFor(() => expect(openVersionCockpit).toHaveBeenCalledWith("v-new"));
-  });
-
-  it("stays put for the verbs that continue THIS build", async () => {
-    vi.mocked(sendDedoProposalApi).mockResolvedValue({
-      state: { status: "agent_working", version_id: "v-old" },
-      dedo_proposal: null,
-    } as unknown as PipelineBoard);
-
-    render(<DedoProposalBar board={board({ action: "uprav" })} versionId="v-old" onBoard={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /vrátiť Staviteľovi/i }));
-
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalled());
-    expect(openVersionCockpit).not.toHaveBeenCalled();
-  });
-});
-
-describe("DedoProposalBar — a fast fix carries the work kind (DEV-56)", () => {
-  it("⚠️ does not start a fast fix until the Manažér decides the work kind, and sends it", async () => {
-    vi.mocked(sendDedoProposalApi).mockResolvedValue(board({ proposal: false }));
-    render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={vi.fn()} />);
-    const start = screen.getByRole("button", { name: /rýchlu opravu/i });
-
-    expect(start).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/Zmena alebo nová práca/));
-    fireEvent.click(start);
-
-    await waitFor(() => expect(sendDedoProposalApi).toHaveBeenCalledWith("v-old", "m-1", FINDING, "change"));
+    expect(
+      screen.getByText(
+        "Rýchla oprava sa už z návrhu nespúšťa — zakladá sa ako verzia a spúšťa sa z tiketov, ktoré do nej zaradíš. " +
+          "Návrh odmietni; Dedo z neho založí tiket.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
+    const send = screen.getAllByRole("button").find((b) => !/odmietnuť|zamietnuť/i.test(b.textContent ?? ""));
+    expect(send).toBeDisabled();
+    fireEvent.click(send!);
+    expect(sendDedoProposalApi).not.toHaveBeenCalled();
   });
 
   it("other verbs are not asked for a work kind", () => {
     render(<DedoProposalBar board={board()} versionId="v-1" onBoard={vi.fn()} />);
 
     expect(screen.queryByText("Druh práce")).not.toBeInTheDocument();
-  });
-});
-
-// DEV-175: the engine's refusal to found a version over unsaved work — the same body the backend sends.
-function unsavedWorkRefusal(): ApiError {
-  return new ApiError(409, "conflict", {
-    detail: {
-      message: "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. Verzia sa nezaložila.",
-      project_id: "p-1",
-      unsaved_work: { clean: false, dirty_count: 1, files: [{ code: "M", path: "frontend/a.ts" }], truncated: false },
-    },
-  });
-}
-
-describe("DedoProposalBar — a fast fix refused for unsaved work (DEV-175)", () => {
-  it("⚠️ offers Uložiť / Zahodiť and keeps the proposal — not „the proposal changed“", async () => {
-    vi.mocked(sendDedoProposalApi).mockRejectedValue(unsavedWorkRefusal());
-    const onBoard = vi.fn();
-    render(<DedoProposalBar board={board({ action: "fast_fix" })} versionId="v-old" onBoard={onBoard} />);
-
-    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
-    fireEvent.click(screen.getByRole("button", { name: /rýchlu opravu/i }));
-
-    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
-    expect(getPipelineBoardApi).not.toHaveBeenCalled();
-    expect(onBoard).not.toHaveBeenCalled();
-    expect(openVersionCockpit).not.toHaveBeenCalled();
   });
 });

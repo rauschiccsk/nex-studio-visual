@@ -34,18 +34,11 @@ import ErrorNote from "@/components/common/ErrorNote";
 import LibraryUpgradeOffers from "@/components/controlCenter/LibraryUpgradeOffers";
 import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
 import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
-import WorkKindChoice from "@/components/common/WorkKindChoice";
 import { WARNING_CHROME } from "@/components/common/WarningActionBar";
-import type { WorkKind } from "@/lib/workKind";
 
 // Čo tlačidlo spraví, povedané ako dôsledok — nie ako sloveso enginu. Manažér si akciu nevyberá; zadanie
 // ju nesie a panel mu len povie, čo stlačenie znamená.
 const ACTION_COPY: Record<string, { button: string; effect: string }> = {
-  fast_fix: {
-    button: "Spustiť rýchlu opravu",
-    effect:
-      "Vytvorí sa nová opravná verzia a hneď sa rozbehne odľahčená linka (Príprava → Programovanie → Vydanie).",
-  },
   new_version: {
     button: "Založiť novú verziu",
     effect: "Verzia vznikne ako koncept s týmto zadaním v popise. Nič sa nerozbehne — spustíš ju, keď budeš chcieť.",
@@ -67,6 +60,11 @@ const FALLBACK_COPY = {
   effect: "Zo zadania vznikne nová verzia.",
 };
 
+/** DEV-492 — a fast fix brief written before the one way for every version; it is declined, not sent. */
+const FAST_FIX_BEFORE =
+  "Rýchla oprava sa už zo zadania nespúšťa — zakladá sa ako verzia a spúšťa sa z tiketov, ktoré do nej zaradíš. " +
+  "Zadanie zamietni; Dedo z neho založí tiket.";
+
 /** DEV-149 — the shape a version number has (the same one the new-version screen asks for). */
 const VERSION_NUMBER_RE = /^\d+\.\d+\.\d+$/;
 
@@ -78,7 +76,7 @@ interface Props {
   /** Nahradí zadanie tým, čo hovorí server — alebo `null`, keď už žiadne nie je. */
   onProposal: (proposal: DedoProjectProposal | null) => void;
   /** Kam ísť, keď z zadania vznikla verzia. */
-  onVersion: (versionId: string, started: boolean) => void | Promise<void>;
+  onVersion: (versionId: string) => void | Promise<void>;
   /** DEV-452: changes when the template was upgraded elsewhere on the page — the offers and the tree read again. */
   reloadKey?: number;
 }
@@ -100,7 +98,6 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
   const [unsaved, setUnsaved] = useState<UnsavedWorkRefusal | null>(null);
   // DEV-56: a fast fix starts only with the Manažér's work kind, as in the „Rýchla oprava“ dialog — the
   // delivered-token statement bills by it, and the cockpit never guesses it.
-  const [workKind, setWorkKind] = useState<WorkKind | null>(null);
   // DEV-149: the number a new version is founded with, shown before the click and his to change. On 19.10.2026 the
   // cockpit founded NEX Inbox 2.0.0 for a brief that proposed 1.10.0 — the Manažér never saw the number.
   const [versionNumber, setVersionNumber] = useState(proposal?.version_number ?? "");
@@ -125,7 +122,6 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
     if (proposalId) {
       draft.clear();
       setError(null);
-      setWorkKind(null);
       setVersionNumber(proposal?.version_number ?? "");
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -135,13 +131,14 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
   if (!proposal) return null;
 
   const decidingAbout = proposal.id;
-  const needsKind = proposal.proposed_action === "fast_fix";
+  // DEV-492: a fast fix brief from before — a fast fix is founded as a version and started from its tickets now.
+  const fastFixBefore = proposal.proposed_action === "fast_fix";
   const needsNumber = proposal.proposed_action === "new_version";
   const fills = needsNumber && proposal.unstarted_version_numbers.includes(versionNumber.trim());
   const copy = fills ? fillCopy(versionNumber.trim()) : (ACTION_COPY[proposal.proposed_action] ?? FALLBACK_COPY);
   const edited = text.trim() !== proposal.content.trim();
   const numberOk = !needsNumber || VERSION_NUMBER_RE.test(versionNumber.trim());
-  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null) && numberOk;
+  const canSend = busy === null && text.trim().length > 0 && !fastFixBefore && numberOk;
 
   async function handleFailure(err: unknown, phrase: string): Promise<void> {
     // Before the „proposal changed“ 409 below: this one is about the project's work, and the brief stays open.
@@ -171,10 +168,10 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
     setBusy("send");
     try {
       const vysledok = needsNumber
-        ? await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), null, versionNumber.trim())
-        : await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), needsKind ? workKind : null);
+        ? await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim(), versionNumber.trim())
+        : await sendProjectDedoProposalApi(projectId, decidingAbout, text.trim());
       onProposal(null);
-      await onVersion(vysledok.version_id, vysledok.started);
+      await onVersion(vysledok.version_id);
     } catch (err: unknown) {
       await handleFailure(err, "Spustenie zo zadania zlyhalo");
     } finally {
@@ -271,8 +268,8 @@ export default function DedoBriefBar({ projectId, hasTemplate, proposal, onPropo
           />
         )}
 
-        {needsKind && (
-          <WorkKindChoice name="zadanie-od-deda-druh" value={workKind} onChange={setWorkKind} disabled={busy !== null} />
+        {fastFixBefore && (
+          <p className="text-xs text-[var(--color-state-warning-fg)]">{FAST_FIX_BEFORE}</p>
         )}
 
         <div className="flex items-center justify-end gap-2">

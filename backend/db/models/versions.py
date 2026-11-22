@@ -5,6 +5,7 @@ project. Each project has many versions (e.g. ``1.0.0``, ``1.1.0``).
 """
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     Date,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -57,6 +59,9 @@ class Version(Base, UUIDMixin, TimestampMixin):
     # says), never billed; ``change`` — new work or a change, billed. NULL = not decided: a new version counts as
     # ``change``, a fast fix must be decided by the Manažér before its delivered-token statement is issued.
     work_kind = Column(String(10), nullable=True)
+    # DEV-492: a fast fix is founded first and started later, from the tickets put into it — the version knows what it
+    # is before it has a build (``pipeline_state.flow_type`` follows it at the start).
+    fast_fix = Column(Boolean, nullable=False, server_default=false())
     # DEV-122: the ticket in Plane's DEV register a fast fix was started from — it follows the version on its own
     # (started → In Progress, deployed to UAT → a comment, deployed to PROD → Done).
     plane_issue_id = Column(String(64), nullable=True)

@@ -5,7 +5,7 @@
 // The agent writes the version's test guide while it builds and the verification stage checks it; this panel
 // shows the guide of the verified commit — or, for a version from before the guide, the changes its release note
 // lists — with each customer's UAT link and the login of its first admin. Each change is ticked off as tried, or
-// marked as not working with what happened; that prepares a fast fix the manager starts himself. What was tried is
+// marked as not working with what happened; that prepares a ticket of the project (DEV-492). What was tried is
 // kept on the server per customer and version, and the acceptance records it.
 //
 // DEV-247 — 28.10.2026 NEX Manager for MÁGERSTAV: UAT got 1.4.1, a fast fix carrying 1.3.0 and 1.4.0 that MÁGERSTAV
@@ -16,13 +16,13 @@
 // DEV-340 — the guide writes a placeholder where an address goes; the panel shows the full address of the customer
 // being tried in its place, as a link (lib/uatAddresses).
 import { Fragment, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ExternalLink, ListChecks } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
 import { getUatChecks, getUatGuide, setUatCheck } from "@/services/api/deploy";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { fastFixText, handOffFastFix } from "@/lib/fastFixHandoff";
+import { uatTicket } from "@/lib/preparedTicket";
+import PreparedTicketDialog, { type PreparedText } from "@/components/planeTickets/PreparedTicketDialog";
 import { combineProgress } from "@/lib/uatTesting";
 import { addressesOf, withAddresses } from "@/lib/uatAddresses";
 import type { DeployMatrixRow, UatGuide, UatProgress } from "@/types/deploy";
@@ -89,7 +89,6 @@ function Linked({ text, addresses }: { text: string; addresses: Record<string, s
 }
 
 export default function UatGuidePanel({ slug, versions, rows }: Props) {
-  const navigate = useNavigate();
   const [version, setVersion] = useState<string>(versions[0] ?? "");
   const [customerId, setCustomerId] = useState<string>(() => defaultCustomer(rows, versions[0] ?? ""));
   const [guides, setGuides] = useState<Record<string, UatGuide>>({});
@@ -98,6 +97,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
   const [busy, setBusy] = useState(false);
   const [noting, setNoting] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [filing, setFiling] = useState<PreparedText | null>(null);
 
   useEffect(() => {
     if (!versions.includes(version)) setVersion(versions[0] ?? "");
@@ -165,24 +165,18 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
 
   async function prepareFix(v: string, change: Change, text: string) {
     if (!(await record(v, change.title, "broken", text))) return;
-    try {
-      const where = handOffFastFix(
-        slug,
-        fastFixText({
-          version: v,
-          customer: customer?.customer_name ?? "",
-          title: change.title,
-          steps: change.steps,
-          expected: change.expected,
-          note: text,
-        }),
-      );
-      setNoting(null);
-      setNote("");
-      navigate(where);
-    } catch (e) {
-      setError(humanizeApiError(e, "Zadanie rýchlej opravy sa nepodarilo pripraviť"));
-    }
+    setFiling(
+      uatTicket({
+        version: v,
+        customer: customer?.customer_name ?? "",
+        title: change.title,
+        steps: change.steps,
+        expected: change.expected,
+        note: text,
+      }),
+    );
+    setNoting(null);
+    setNote("");
   }
 
   /** DEV-247: one version's walkthrough — under its number when the customer has more than one to try. */
@@ -262,7 +256,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
                               onClick={() => void prepareFix(v, change, check?.note ?? "")}
                               className="rounded border border-[var(--color-border-default)] px-2 py-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-50"
                             >
-                              Pripraviť rýchlu opravu
+                              Pripraviť tiket
                             </button>
                             <button
                               type="button"
@@ -305,7 +299,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
                         <label className="block text-xs text-[var(--color-text-secondary)]">
                           Čo sa stalo?
                           <textarea
-                            data-no-draft="krátka poznámka ku skúške — hneď sa z nej stane zadanie rýchlej opravy, ktoré sa už pamätá"
+                            data-no-draft="krátka poznámka ku skúške — hneď sa z nej stane text tiketu, ktorý sa už pamätá"
                             lang="sk"
                             spellCheck={true}
                             rows={3}
@@ -320,7 +314,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
                           onClick={() => void prepareFix(v, change, note)}
                           className="rounded bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-500 disabled:opacity-50"
                         >
-                          Pripraviť rýchlu opravu
+                          Pripraviť tiket
                         </button>
                       </div>
                     )}
@@ -422,6 +416,7 @@ export default function UatGuidePanel({ slug, versions, rows }: Props) {
         </p>
       )}
       {toTry.map((v) => renderVersion(v))}
+      {filing && <PreparedTicketDialog slug={slug} prepared={filing} onClose={() => setFiling(null)} />}
     </section>
   );
 }

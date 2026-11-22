@@ -2,14 +2,13 @@
 // Director 14.10.2026: „Chcel by som pridať novú záložku "Plane tikety" tu by som videl tikety pre konkrétny projekt.“
 // Identifier with a link to Plane, title, column, type, work kind, who works on it, last change; open or finished.
 // DEV-455: an open ticket goes into a version that solves it („Zaradiť do verzie“ — the Príprava gets it, PROD closes
-// it) or starts a fast fix from its text (DEV-122) — one way per ticket, which then moves the ticket on its own.
+// it). DEV-492: a fast fix takes its tickets the same way — founded first, started from its page; one way for both.
 // Director 21.11.2026: „Zásobník by sme mali teraz už úplne zrušiť a ponechať len jediný zdroj - PLANE tikety.“
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ListPlus, Loader2, Undo2, Zap } from "lucide-react";
+import { ListPlus, Loader2, Undo2 } from "lucide-react";
 
-import PlaneTicketFastFix from "@/components/planeTickets/PlaneTicketFastFix";
 import {
   listProjectPlaneTicketsApi,
   putTicketIntoVersionApi,
@@ -45,7 +44,6 @@ export default function PlaneTicketsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
-  const [fixing, setFixing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notices, setNotices] = useState<Record<string, Notice[]>>({});
   // The version each ticket's picker shows — the newest open version until the Manažér picks another.
@@ -220,6 +218,7 @@ export default function PlaneTicketsPage() {
                         {data.open_versions.map((v) => (
                           <option key={v.id} value={v.id}>
                             v{v.version_number}
+                            {v.fast_fix ? " (rýchla oprava)" : ""}
                           </option>
                         ))}
                       </select>
@@ -239,17 +238,10 @@ export default function PlaneTicketsPage() {
                     </>
                   ) : (
                     <span className="text-xs text-[var(--color-text-muted)]">
-                      Verzia, do ktorej by sa tiket dal zaradiť, nie je — založ novú verziu.
+                      Verzia, do ktorej by sa tiket dal zaradiť, nie je — založ novú verziu alebo rýchlu opravu
+                      (Verzie → Nová verzia).
                     </span>
                   )}
-                  <button
-                    type="button"
-                    aria-expanded={fixing === t.issue_id}
-                    onClick={() => setFixing(fixing === t.issue_id ? null : t.issue_id)}
-                    className={ACTION}
-                  >
-                    <Zap size={13} /> Spustiť rýchlu opravu
-                  </button>
                 </div>
               )}
               {!t.closed &&
@@ -270,13 +262,6 @@ export default function PlaneTicketsPage() {
                     </div>
                   ) : null;
                 })()}
-              {fixing === t.issue_id && !t.fix_version && !t.in_version && (
-                <PlaneTicketFastFix
-                  ticket={t}
-                  project={{ id: data.project_id, slug: slug ?? "", name: data.project_name }}
-                  onClose={() => setFixing(null)}
-                />
-              )}
             </li>
           ))}
         </ul>

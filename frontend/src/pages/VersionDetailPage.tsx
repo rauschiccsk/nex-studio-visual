@@ -16,6 +16,9 @@ import { useActiveContextSync } from "@/hooks/useActiveContextSync";
 import { useAuthStore } from "@/store/authStore";
 import { mayOperateProject } from "@/services/permissions";
 import VersionSettingsSection from "@/components/version/VersionSettingsSection";
+import FastFixTickets from "@/components/version/FastFixTickets";
+import CancelVersion from "@/components/version/CancelVersion";
+import { useActiveContextStore } from "@/store/activeContextStore";
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
@@ -32,6 +35,8 @@ export default function VersionDetailPage() {
   const [project, setProject] = useState<ProjectRead | null>(null);
   const [version, setVersion] = useState<Version | null>(null);
   const user = useAuthStore((s) => s.user);
+  const selectedVersion = useActiveContextStore((s) => s.selectedVersion);
+  const setSelectedVersion = useActiveContextStore((s) => s.setSelectedVersion);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -240,7 +245,10 @@ export default function VersionDetailPage() {
       {/* ── Body ── */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="">
-          {version.status === "planned" ? (
+          {/* DEV-492: a fast fix not started yet has no Zadanie — its tickets are its brief, and it starts here. */}
+          {version.status === "planned" && version.fast_fix ? (
+            <FastFixTickets slug={slug ?? ""} version={version} canStart={mayOperateProject(user, project.created_by)} />
+          ) : version.status === "planned" ? (
             <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface)] p-5">
               <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
                 Zadanie — {version.version_number}
@@ -372,6 +380,16 @@ export default function VersionDetailPage() {
             canEdit={mayOperateProject(user, project.created_by)}
             onSaved={setVersion}
           />
+          {/* DEV-491, DEV-492: a version that did nothing yet is cancelled here — not in the Riadiace centrum. */}
+          {mayOperateProject(user, project.created_by) && (
+            <CancelVersion
+              version={version}
+              onCancelled={() => {
+                if (selectedVersion?.versionId === version.id) setSelectedVersion(null);
+                navigate(`/projects/${slug}`);
+              }}
+            />
+          )}
         </div>
       </div>
     </div>

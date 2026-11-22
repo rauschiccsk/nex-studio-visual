@@ -13,8 +13,8 @@ plumbing the orchestrator does NOT:
 * :func:`ensure_build_task` — materialize the ONE minimal Task (Epic → Feat → Task) from the Manažér's
   directive carried in the kickoff message, so the v2 self-checking Programovanie loop has a task to run.
   Re-targeted off the v1 per-task-audited loop onto the v2 short path (CR-V2-028). Idempotent.
-* :func:`cancel` — „Zrušiť rýchlu opravu“ (DEV-491): a fast fix that did nothing yet goes away whole, so its
-  number is free for the next one; :func:`cancel_refusal` says why not, in words, wherever it cannot.
+* :func:`ticket_brief` — DEV-492: a fast fix is founded first, takes its tickets like any version and starts from them;
+  the tickets' text is its brief (the orchestrator's ``start`` carries it as the kickoff directive).
 
 Design notes:
     * No dependency on :mod:`backend.services.orchestrator` — the orchestrator imports THIS module
@@ -27,15 +27,15 @@ Design notes:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Optional, get_args
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.db.models.pipeline import PipelineMessage, PipelineState
+from backend.db.models.pipeline import PipelineMessage
 from backend.db.models.tasks import Epic, Feat, Task
+from backend.db.models.version_tickets import VersionTicket
 from backend.db.models.versions import Version
 from backend.schemas.delivery_statement import WorkKind
 from backend.schemas.epic import EpicCreate
@@ -144,12 +144,16 @@ def create_patch_version(db: Session, *, project_id: UUID, user_id: UUID, work_k
             f"Rýchla oprava verzie {base.version_number} by mala číslo {next_number}, ale to už má verzia "
             f"{held.version_number} ({state}). Dokonči alebo zruš ju — novú rýchlu opravu som nezaložil."
         )
-    return version_service.create(
+    version = version_service.create(
         db,
         project_id,
         VersionCreate(version_number=next_number, name="Rýchla oprava", work_kind=work_kind),
         user_id,
     )
+    # DEV-492: founded, not started — the version knows it is a fast fix before it takes its tickets.
+    version.fast_fix = True
+    db.flush()
+    return version
 
 
 #: Title of the machine-created fast-fix Epic/Feat. ONE definition, imported by every consumer —
@@ -259,66 +263,16 @@ def ensure_build_task(db: Session, version_id: UUID) -> Task:
     )
 
 
-#: DEV-491 — why „Zrušiť rýchlu opravu“ is refused now. The button shows the sentence; the route refuses with it.
-CANCEL_NOT_A_FIX = "Zrušiť sa dá len rýchla oprava — riadna verzia sa neruší."
-CANCEL_PAST_PRIPRAVA = (
-    "Rýchla oprava už prešla Prípravou a pracovala na kóde — zrušiť sa dá len tá, ktorá ešte nič neurobila."
+#: DEV-492 — a fast fix starts from the tickets put into it; without one it has nothing to fix.
+NO_TICKET = (
+    "Rýchla oprava {number} nemá zaradený žiadny tiket — zaraď ho na karte „Plane tikety“ tlačidlom "
+    "„Zaradiť do verzie“ a potom ju spusti."
 )
-CANCEL_AGENT_WORKING = "Staviteľ na rýchlej oprave práve pracuje — zrušiť ju pôjde, keď ťah skončí."
 
 
-class CancelRefused(Exception):
-    """A fast fix that cannot be cancelled now — the message is the sentence for the Manažér."""
+def ticket_brief(tickets: list[VersionTicket]) -> str:
+    """The brief of a fast fix — the text of the tickets put into it, each under its identifier and title (DEV-492).
 
-
-@dataclass(frozen=True)
-class Cancelled:
-    """What is left of a cancelled fast fix: its number and the ticket it was started from, if any."""
-
-    version_number: str
-    plane_issue_id: Optional[str]
-    plane_identifier: Optional[str]
-    plane_url: Optional[str]
-
-
-def cancel_refusal(state: Optional[PipelineState]) -> Optional[str]:
-    """Why the fast fix of ``state`` cannot be cancelled now; ``None`` when it did nothing yet (DEV-491).
-
-    On the short path a fast fix only reads and asks in its Príprava — code is written from Programovanie on
-    (CR-V2-028). A fix still in Príprava with no agent turn running has therefore done nothing that would be lost.
+    The first line names the first ticket, so the fix's one Task is titled by it (:func:`_title_from_directive`).
     """
-    if state is None or state.flow_type != "fast_fix":
-        return CANCEL_NOT_A_FIX
-    if state.current_stage != "priprava":
-        return CANCEL_PAST_PRIPRAVA
-    if state.status == "agent_working" or state.dispatch_in_flight:
-        return CANCEL_AGENT_WORKING
-    return None
-
-
-def cancel(db: Session, version_id: UUID) -> Cancelled:
-    """Delete a fast fix that did nothing yet — the version and everything that hangs on it (DEV-491).
-
-    The whole version goes, so the next fast fix of the project gets its number again (:func:`create_patch_version`
-    refuses a number another version holds). The refusal is re-checked under a row lock, so an agent turn started a
-    moment ago cannot be pulled from under the runner. Raises :class:`CancelRefused`; commit is the router's.
-    """
-    state = db.execute(
-        select(PipelineState).where(PipelineState.version_id == version_id).with_for_update()
-    ).scalar_one_or_none()
-    refused = cancel_refusal(state)
-    if refused is not None:
-        raise CancelRefused(refused)
-    version = db.get(Version, version_id)
-    cancelled = Cancelled(
-        version_number=version.version_number,
-        plane_issue_id=version.plane_issue_id,
-        plane_identifier=version.plane_identifier,
-        plane_url=version.plane_url,
-    )
-    # Epics hold the version with ON DELETE RESTRICT (their feats and tasks go with them); every other row that
-    # points at a version cascades or lets go of it in the database.
-    db.execute(delete(Epic).where(Epic.version_id == version_id))
-    db.execute(delete(Version).where(Version.id == version_id))
-    db.expire_all()
-    return cancelled
+    return "\n\n---\n\n".join(f"{t.plane_identifier} — {t.title}\n\n{(t.text or '').strip()}".rstrip() for t in tickets)

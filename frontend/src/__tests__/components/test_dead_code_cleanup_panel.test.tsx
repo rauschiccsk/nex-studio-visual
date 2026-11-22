@@ -1,15 +1,21 @@
 /**
  * DEV-156 — the project page offers the cleanup of the code nobody uses that earlier versions left behind: the
- * findings, and one click that puts the prepared fast fix into the „Rýchla oprava“ dialog. Nothing starts by itself.
+ * findings, and one click that prepares a ticket of the project from the check's text (DEV-492). Nothing starts.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 vi.mock("@/services/api/deadCode", () => ({ getDeadCodeApi: vi.fn() }));
+vi.mock("@/services/api/planeTickets", () => ({ filePreparedTicketApi: vi.fn() }));
+vi.mock("react-router-dom", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  useNavigate: () => vi.fn(),
+}));
 
 import DeadCodeCleanupPanel from "@/components/projects/DeadCodeCleanupPanel";
 import { getDeadCodeApi, type DeadCode } from "@/services/api/deadCode";
+import { filePreparedTicketApi } from "@/services/api/planeTickets";
 
 function finding(n: number) {
   return {
@@ -23,9 +29,9 @@ function finding(n: number) {
 
 const BRIEF = "Uprac kód, ktorý nikto nepoužíva — …";
 
-function renderPanel(found: DeadCode, onCleanUp?: (brief: string) => void) {
+function renderPanel(found: DeadCode, canFile = false) {
   vi.mocked(getDeadCodeApi).mockResolvedValue(found);
-  render(<DeadCodeCleanupPanel slug="nex-inbox" onCleanUp={onCleanUp} />);
+  render(<DeadCodeCleanupPanel slug="nex-inbox" canFile={canFile} />);
 }
 
 afterEach(() => vi.clearAllMocks());
@@ -52,18 +58,17 @@ describe("the cleanup of the code nobody uses", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(7);
   });
 
-  it("one click hands the prepared fast fix to the page — the page opens its dialog (the page's own test)", async () => {
-    const onCleanUp = vi.fn();
-    renderPanel(
-      { findings: [finding(1)], not_run: [], brief: BRIEF },
-      onCleanUp,
-    );
+  it("one click prepares a ticket of the project from the check's text — a fix, a version or nothing, he decides", async () => {
+    renderPanel({ findings: [finding(1)], not_run: [], brief: BRIEF }, true);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Upratať nepoužívaný kód" }),
     );
 
-    expect(onCleanUp).toHaveBeenCalledWith(BRIEF);
+    expect(screen.getByRole("dialog", { name: "Založiť tiket" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Názov tiketu")).toHaveValue("Upratať nepoužívaný kód z minulých verzií");
+    expect(screen.getByLabelText("Text tiketu")).toHaveValue(BRIEF);
+    expect(filePreparedTicketApi).not.toHaveBeenCalled();
   });
 
   it("someone who may not operate the project reads the findings without the button", async () => {

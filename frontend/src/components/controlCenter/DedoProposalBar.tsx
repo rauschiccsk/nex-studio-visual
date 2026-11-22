@@ -34,7 +34,6 @@ import { useDraft, draftKey } from "@/hooks/useDraft";
 import { useEffect, useState } from "react";
 import { Lightbulb, Send, X } from "lucide-react";
 
-import { useOpenVersionCockpit } from "@/hooks/useOpenVersionCockpit";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 
 import {
@@ -46,10 +45,6 @@ import {
 import { ApiError } from "@/services/api";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
-import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
-import { unsavedWorkOf, type UnsavedWorkRefusal } from "@/components/controlCenter/unsavedWork";
-import WorkKindChoice from "@/components/common/WorkKindChoice";
-import type { WorkKind } from "@/lib/workKind";
 // The amber chrome only — NOT WarningActionBar itself: that shape is title + one sentence + ONE button, and
 // this bar is an editable box with two (send / decline). Sharing the tokens is DRY; sharing a shape that
 // does not fit would be abstraction for its own sake (the note that component carries about itself).
@@ -70,14 +65,6 @@ const ACTION_COPY: Record<string, { button: string; effect: string }> = {
   ask: {
     button: "Spýtať sa Staviteľa",
     effect: "Text sa odošle Staviteľovi ako otázka a on na ňu v ďalšom ťahu odpovie.",
-  },
-  // ICCINT-54: jediné sloveso, ktoré nepokračuje v TEJTO stavbe, ale zakladá novú záplatovú verziu.
-  // Text to hovorí nahlas — Manažér musí vedieť, že klikom nevzniká správa, ale nová stavba.
-  fast_fix: {
-    button: "Spustiť rýchlu opravu",
-    effect:
-      "Vznikne nová záplatová verzia a rovno sa na nej rozbehne rýchla oprava s týmto zadaním — " +
-      "krátkou cestou bez Vizuálu. Nasadenie sa nespustí; to zostáva samostatným krokom.",
   },
   // ICCINT-56: jediné sloveso mierené na KARTU ROZHODNUTIA, nie na agenta priamo. Keď je stavba zaseknutá
   // na karte, kokpit iné slovesá neponúka — a po piatich neúspešných kolách engine zámerne odoberá aj
@@ -109,7 +96,6 @@ interface Props {
 }
 
 export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
-  const openVersionCockpit = useOpenVersionCockpit();
   const proposal = board?.dedo_proposal ?? null;
   const proposalId = proposal?.message_id ?? null;
 
@@ -127,10 +113,8 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   // when he acts again.
   const [staleNotice, setStaleNotice] = useState<string | null>(null);
   // DEV-175: a fast fix is a new version, founded only over saved work — save or discard it here, then send again.
-  const [unsaved, setUnsaved] = useState<UnsavedWorkRefusal | null>(null);
   // DEV-56: a proposal that starts a fast fix goes only with the Manažér's work kind, as in the „Rýchla oprava“
   // dialog — the delivered-token statement bills by it, and the cockpit never guesses it.
-  const [workKind, setWorkKind] = useState<WorkKind | null>(null);
   // Hooks run BEFORE the honest-by-construction early return below — a hook after a conditional return is
   // a hook that sometimes does not run, which React forbids.
   const growRef = useAutoGrowTextarea(text);
@@ -142,7 +126,6 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
     if (proposalId) {
       draft.clear();
       setError(null);
-      setWorkKind(null);
     }
   }, [proposalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -155,8 +138,9 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   const atTheCards = board?.state?.block_reason === "decision_needed";
   const effect = proposal.proposed_action === "uprav" && atTheCards ? UPRAV_AT_THE_CARDS : copy.effect;
   const edited = text.trim() !== proposal.content.trim();
-  const needsKind = proposal.proposed_action === "fast_fix";
-  const canSend = busy === null && text.trim().length > 0 && (!needsKind || workKind !== null);
+  // DEV-492: a fast fix proposal from before — a fast fix is founded as a version and started from its tickets now.
+  const fastFixBefore = proposal.proposed_action === "fast_fix";
+  const canSend = busy === null && text.trim().length > 0 && !fastFixBefore;
 
   // A 409 means exactly one thing here: the finding on this screen is not the one on the desk any more —
   // it was already sent, already declined, or Dedo replaced it while the Manažér was reading. The server
@@ -165,12 +149,6 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
   // keep the server's sentence on screen, so the swap he is about to see has a reason next to it. Telling
   // him "refresh the page" instead would be the app handing its own work back to the manager.
   async function handleFailure(err: unknown, phrase: string): Promise<void> {
-    // Before the „proposal changed“ 409 below: this one is about the project's work, and the proposal stays open.
-    const refusal = unsavedWorkOf(err);
-    if (refusal) {
-      setUnsaved(refusal);
-      return;
-    }
     if (err instanceof ApiError && err.status === 409) {
       setStaleNotice(err.message || "Návrh sa medzitým zmenil.");
       setError(null);
@@ -192,18 +170,9 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
     if (!canSend) return;
     setError(null);
     setStaleNotice(null);
-    setUnsaved(null);
     setBusy("send");
     try {
-      const next = await sendDedoProposalApi(versionId, decidingAbout, text.trim(), needsKind ? workKind : null);
-      onBoard(next);
-      // ICCINT-62: `fast_fix` is the one verb that STARTS A NEW VERSION rather than continuing this one, so
-      // the response describes a different build. Without this the bar vanished and the Manažér kept staring
-      // at the old version, certain nothing had happened — while the agent was already working.
-      const started = next.state?.version_id;
-      if (proposal?.proposed_action === "fast_fix" && started && started !== versionId) {
-        await openVersionCockpit(started);
-      }
+      onBoard(await sendDedoProposalApi(versionId, decidingAbout, text.trim()));
     } catch (err: unknown) {
       await handleFailure(err, "Odoslanie návrhu zlyhalo");
     } finally {
@@ -274,8 +243,11 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
           </p>
         )}
 
-        {needsKind && (
-          <WorkKindChoice name="navrh-od-deda-druh" value={workKind} onChange={setWorkKind} disabled={busy !== null} />
+        {fastFixBefore && (
+          <p className="text-xs text-[var(--color-state-warning-fg)]">
+            Rýchla oprava sa už z návrhu nespúšťa — zakladá sa ako verzia a spúšťa sa z tiketov, ktoré do nej zaradíš.
+            Návrh odmietni; Dedo z neho založí tiket.
+          </p>
         )}
 
         <div className="flex items-center justify-end gap-2">
@@ -299,7 +271,6 @@ export default function DedoProposalBar({ board, versionId, onBoard }: Props) {
           </button>
         </div>
 
-        {unsaved && <UnsavedWorkPanel refusal={unsaved} />}
         <ErrorNote error={error} />
       </div>
     </div>

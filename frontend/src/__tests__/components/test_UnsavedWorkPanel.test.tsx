@@ -10,12 +10,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import PlaneTicketFastFix from "@/components/planeTickets/PlaneTicketFastFix";
+import FastFixFounding from "@/components/version/FastFixFounding";
 import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
 import { unsavedWorkOf } from "@/components/controlCenter/unsavedWork";
 import { ApiError } from "@/services/api";
-import { startFastFixApi } from "@/services/api/pipeline";
-import type { PlaneTicket } from "@/services/api/planeTickets";
+import { foundFastFixApi } from "@/services/api/versions";
 import { commitGitApi, discardGitApi, getGitStatusApi, type GitStatus } from "@/services/api/projects";
 
 vi.mock("@/services/api/projects", () => ({
@@ -23,9 +22,7 @@ vi.mock("@/services/api/projects", () => ({
   discardGitApi: vi.fn(),
   getGitStatusApi: vi.fn(),
 }));
-vi.mock("@/services/api/pipeline", () => ({ startFastFixApi: vi.fn() }));
-const openVersionCockpit = vi.fn();
-vi.mock("@/hooks/useOpenVersionCockpit", () => ({ useOpenVersionCockpit: () => openVersionCockpit }));
+vi.mock("@/services/api/versions", () => ({ foundFastFixApi: vi.fn() }));
 
 const MESSAGE =
   "Projekt má neuložené zmeny (1). Ulož ich alebo zahoď — inak by kokpit nevedel, čo do novej verzie patrí. " +
@@ -117,24 +114,18 @@ describe("UnsavedWorkPanel — the New-Version page's Uložiť / Zahodiť wherev
   });
 });
 
-describe("a fast fix from a ticket (DEV-122) refused for unsaved work", () => {
-  const ticket = {
-    issue_id: "i-1",
-    identifier: "DEV-1",
-    title: "Preklep v menu",
-    text: "Nastvenia → Nastavenia",
-    work_kind: "fix",
-  } as unknown as PlaneTicket;
+describe("a fast fix founded on „Nová verzia“ (DEV-492) refused for unsaved work", () => {
+  it("hands the refusal to the page's guard and founds nothing", async () => {
+    vi.mocked(foundFastFixApi).mockRejectedValue(refused());
+    const onUnsaved = vi.fn();
+    const onFounded = vi.fn();
+    render(<FastFixFounding projectId="p-1" blocked={false} onFounded={onFounded} onUnsaved={onUnsaved} />);
 
-  it("offers Uložiť / Zahodiť in place and opens no build", async () => {
-    vi.mocked(startFastFixApi).mockRejectedValue(refused());
-    render(<PlaneTicketFastFix ticket={ticket} project={{ id: "p-1", slug: "demo", name: "Demo" }} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/Oprava chyby v dodanom kóde/));
+    fireEvent.click(screen.getByRole("button", { name: /Založiť rýchlu opravu/ }));
 
-    fireEvent.click(screen.getByRole("button", { name: /Spustiť rýchlu opravu/ }));
-
-    expect(await screen.findByText("Projekt má 1 zmena, ktoré neboli uložené")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Uložiť ich" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: /Spustiť rýchlu opravu/ })).toBeEnabled());
-    expect(openVersionCockpit).not.toHaveBeenCalled();
+    await waitFor(() => expect(onUnsaved).toHaveBeenCalledWith({ message: MESSAGE, projectId: "p-1", status: DIRTY }));
+    expect(onFounded).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Založiť rýchlu opravu/ })).toBeEnabled());
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   listProjectsApi,
   getGitStatusApi,
@@ -30,6 +30,8 @@ import { unsavedWorkOf } from "@/components/controlCenter/unsavedWork";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import WorkKindChoice from "@/components/common/WorkKindChoice";
+import FastFixFounding from "@/components/version/FastFixFounding";
+import { FAST_FIX_PARAM } from "@/lib/projectLinks";
 import type { WorkKind } from "@/lib/workKind";
 import type { ProjectRead } from "@/types";
 import type { Version, VersionUpdate } from "@/types/version";
@@ -38,6 +40,8 @@ import type { Version, VersionUpdate } from "@/types/version";
 
 
 // ─── Input style ──────────────────────────────────────────────────────────────
+
+const FAST_FIX_NEEDS_A_FINISHED_VERSION = "Rýchla oprava opravuje hotovú verziu — projekt ešte žiadnu nemá.";
 
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-primary-500 transition-colors";
@@ -67,6 +71,10 @@ export default function NewVersionPage() {
   const [targetDate, setTargetDate] = useState("");
   // DEV-50: a new version is new work unless the Manažér says it fixes an error in code we delivered.
   const [workKind, setWorkKind] = useState<WorkKind>("change");
+  // DEV-492: one way for every version — a regular version or a fast fix is founded here and waits; a fast fix takes its
+  // tickets on the „Plane tikety“ tab and starts from its page. `?rychla-oprava=1` arrives with the fast fix chosen.
+  const [searchParams] = useSearchParams();
+  const [kind, setKind] = useState<"version" | "fast_fix">(searchParams.has(FAST_FIX_PARAM) ? "fast_fix" : "version");
   // The Zadanie — the free-text brief, the MAIN input (design §4.3). Persisted on save to
   // docs/specs/versions/v<N>/customer-requirements.md; the Príprava phase reads it.
   const [zadanie, setZadanie] = useState("");
@@ -207,6 +215,8 @@ export default function NewVersionPage() {
 
   // v4.0.25: a loaded-and-dirty tree blocks founding (null = not yet loaded → don't block).
   const isDirty = gitStatus !== null && !gitStatus.clean;
+  // DEV-110: a fast fix patches a finished version — one the customer has.
+  const hasFinished = prevVersions.some((v) => v.status === "done" || v.status === "released");
   // ...and so does a preflight that FAILED. Rendering the red "Overenie neuložených zmien zlyhalo"
   // note while leaving the founding button live meant the guard was decorative: on a 500 the status
   // stayed null, `isDirty` stayed false, and the Manager founded a version over a tree nobody had
@@ -482,6 +492,48 @@ export default function NewVersionPage() {
               )}
             </div>
           )}
+          {/* DEV-492: what is founded — the same page, the same guard above, then the tickets on „Plane tikety“. */}
+          {!savedVersion && (
+            <fieldset className="mb-5">
+              <legend className="mb-2 text-sm font-medium text-[var(--color-text-secondary)]">Čo zakladáš</legend>
+              <div className="flex flex-wrap gap-4 text-sm text-[var(--color-text-primary)]">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="version-or-fix"
+                    checked={kind === "version"}
+                    onChange={() => setKind("version")}
+                  />
+                  Riadna verzia
+                </label>
+                <label
+                  className="inline-flex items-center gap-2"
+                  title={hasFinished ? undefined : FAST_FIX_NEEDS_A_FINISHED_VERSION}
+                >
+                  <input
+                    type="radio"
+                    name="version-or-fix"
+                    checked={kind === "fast_fix"}
+                    disabled={!hasFinished}
+                    onChange={() => setKind("fast_fix")}
+                  />
+                  Rýchla oprava
+                </label>
+              </div>
+              {!hasFinished && (
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{FAST_FIX_NEEDS_A_FINISHED_VERSION}</p>
+              )}
+            </fieldset>
+          )}
+          {kind === "fast_fix" && hasFinished && project ? (
+            <FastFixFounding
+              projectId={project.id}
+              blocked={isDirty || treeUnverified}
+              onFounded={(v) => navigate(`/projects/${slug}/versions/${v.id}`)}
+              onUnsaved={(refusal) => (refusal.status ? setGitStatus(refusal.status) : setFormError({ message: refusal.message }))}
+            />
+          ) : (
+          <>
           {/* DEV-254: a project built without a template may be put onto one — only once the tree is clean. */}
           {!isDirty && !savedVersion && project && templateConversionApplies(project) && (
             <div className="mb-5">
@@ -770,6 +822,8 @@ export default function NewVersionPage() {
             )}
 
           </form>
+          </>
+          )}
         </div>
       </div>
     </div>

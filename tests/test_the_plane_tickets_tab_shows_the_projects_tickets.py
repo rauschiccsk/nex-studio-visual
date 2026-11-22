@@ -110,7 +110,9 @@ def test_a_ticket_put_into_a_version_names_it_and_the_tab_offers_the_open_versio
         "DEV-12": f"v{version.version_number}",
         "DEV-11": None,
     }
-    assert body["open_versions"] == [{"id": str(version.id), "version_number": version.version_number}]
+    assert body["open_versions"] == [
+        {"id": str(version.id), "version_number": version.version_number, "fast_fix": False}
+    ]
 
 
 def test_a_ticket_with_two_work_kinds_says_so_instead_of_guessing(setup, plane):

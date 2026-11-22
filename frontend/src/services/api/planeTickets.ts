@@ -5,6 +5,8 @@ import type { components } from "./pipeline.generated";
 export type ProjectPlaneTickets = components["schemas"]["ProjectPlaneTicketsRead"];
 export type PlaneTicket = components["schemas"]["PlaneTicketRead"];
 export type VersionTicket = components["schemas"]["VersionTicketRead"];
+export type PreparedTicket = components["schemas"]["PreparedTicketCreate"];
+export type PreparedTicketFounded = components["schemas"]["PreparedTicketFounded"];
 
 /** Open tickets, or with ``closed`` the done and cancelled ones — newest change first. */
 export function listProjectPlaneTicketsApi(slug: string, closed: boolean): Promise<ProjectPlaneTickets> {
@@ -19,4 +21,9 @@ export function putTicketIntoVersionApi(slug: string, issueId: string, versionId
 /** DEV-455 — „Vyradiť z verzie": while the version has not carried the ticket to the Staviteľ yet. */
 export function takeTicketOutOfVersionApi(slug: string, issueId: string, versionId: string): Promise<VersionTicket> {
   return api.delete<VersionTicket>(`/projects/${slug}/plane-tickets/${issueId}/version/${versionId}`);
+}
+
+/** DEV-492 — a text the cockpit prepared (a broken UAT test, dead code) becomes a ticket of the project; nothing starts. */
+export function filePreparedTicketApi(slug: string, ticket: PreparedTicket): Promise<PreparedTicketFounded> {
+  return api.post<PreparedTicketFounded>(`/projects/${slug}/plane-tickets`, ticket);
 }

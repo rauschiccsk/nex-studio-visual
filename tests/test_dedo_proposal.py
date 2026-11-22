@@ -777,94 +777,53 @@ class TestAHandledProposalIsGoneForGood:
         assert resp.status_code == 404
 
 
-class TestAProposalCanStartAFastFix:
-    """ICCINT-54 — štvrté sloveso: návrh, ktorý nepokračuje v tejto stavbe, ale zakladá novú.
+class TestAFastFixIsATicketNotAProposal:
+    """DEV-492 — one way for every version (Director 22.11.2026: „Treba mať jednotný postup a to najprv verzia a potom
+    priradzovanie tiketov.“): a fast fix is founded as a version, takes tickets and starts from them. Dedo no longer
+    proposes one (ICCINT-54's verb is gone) — he files a DEV ticket and the Manažér puts it into a fast fix."""
 
-    Rýchla oprava vytvára verziu až odoslaním formulára, takže dovtedy niet stavby, do ktorej by Dedo
-    text podal. Bez tohto slovesa by mu musel dať blok na skopírovanie — a to pri KAŽDEJ rýchlej oprave,
-    nie raz. Návrh sa preto zavesí na najnovšiu verziu a odtiaľ sa spustí nová.
-    """
+    def test_dedos_door_refuses_a_fast_fix_proposal_in_words(self, client, db_session, dedo_token) -> None:
+        _user, version, _state = _build(db_session)
 
-    # DEV-110: a fast fix numbers itself from a finished version, so these builds have ended.
-    def test_the_send_creates_a_patch_version_and_starts_the_lane_with_dedos_text(
+        resp = client.post(
+            f"/api/v1/dedo/builds/{version.id}/proposals",
+            headers=_dedo_auth(),
+            json={"content": "Oprav vstupnú bránu.", "proposed_action": "fast_fix"},
+        )
+
+        assert (resp.status_code, resp.json()["detail"]) == (409, dedo_message.FAST_FIX_IS_A_TICKET)
+
+    def test_a_fast_fix_proposal_from_before_is_not_sent_and_can_be_declined(
         self, client, db_session, no_dispatch
     ) -> None:
         user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
-        proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
+        proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.")
+        proposal.payload = {**proposal.payload, "proposed_action": "fast_fix"}  # a row written before DEV-492
+        db_session.commit()
 
-        response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
-        assert response.status_code == 200, response.text
+        sent = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
 
-        # NOVÁ verzia, nie pokračovanie tej starej.
-        versions = db_session.execute(select(Version).where(Version.project_id == version.project_id)).scalars().all()
-        numbers = sorted(v.version_number for v in versions)
-        assert numbers == ["0.1.0", "0.1.1"], numbers
-
-        # A beží na nej rýchla dráha s Dedovým textom ako ZADANÍM — nie ako správou.
-        new_version = next(v for v in versions if v.version_number == "0.1.1")
-        new_state = db_session.execute(
-            select(PipelineState).where(PipelineState.version_id == new_version.id)
-        ).scalar_one()
-        assert new_state.flow_type == "fast_fix"
-        assert any(vid == new_version.id for vid, _d in no_dispatch), "rýchla dráha sa nerozbehla"
-
-    def test_the_answer_describes_the_build_that_was_started(self, client, db_session, no_dispatch) -> None:
-        """ICCINT-62: the response must be the NEW build's board, not the one he was looking at.
-
-        ``fast_fix`` is the only verb here that creates a version; every other one continues the open build. The
-        cockpit pins whatever this returns, so answering with the OLD board left the Manažér standing on the
-        previous version: the bar vanished, nothing appeared to happen, and the agent was already working. He
-        reported it as a failure twice in one evening (05.09.2026).
-        """
-        user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
-        proposal = _propose(db_session, version.id, content="Oprav vstupnú bránu.", action="fast_fix")
-
-        response = _send(client, user, version.id, proposal, text="Oprav vstupnú bránu.")
-
-        assert response.status_code == 200, response.text
-        new_version = db_session.execute(
-            select(Version).where(Version.project_id == version.project_id, Version.version_number == "0.1.1")
-        ).scalar_one()
-        returned = response.json().get("state") or {}
-        assert returned.get("version_id") == str(new_version.id), (
-            "odpoveď popisuje starú stavbu — kokpit zostane stáť na nej"
+        assert (sent.status_code, sent.json()["detail"]) == (409, dedo_message.FAST_FIX_IS_A_TICKET)
+        numbers = db_session.execute(select(Version.version_number).where(Version.project_id == version.project_id))
+        assert sorted(numbers.scalars()) == ["0.1.0"] and no_dispatch == []
+        declined = client.post(
+            f"/api/v1/pipeline/{version.id}/dedo-proposal/reject",
+            headers=_bearer(user),
+            json={"message_id": str(proposal.id)},
         )
+        assert declined.status_code == 200, declined.text
 
-    def test_the_old_build_is_left_alone(self, client, db_session, no_dispatch) -> None:
-        """Stará stavba je hotová vec — návrh na nej nesmie nič pohnúť."""
-        user, version, state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
-        proposal = _propose(db_session, version.id, content="Oprav bránu.", action="fast_fix")
-        before = (state.current_stage, state.status)
-
-        assert _send(client, user, version.id, proposal, text="Oprav bránu.").status_code == 200
-
-        db_session.refresh(state)
-        assert (state.current_stage, state.status) == before
-
-    def test_the_proposal_is_archived_so_it_cannot_start_a_second_one(self, client, db_session, no_dispatch) -> None:
-        """Archivácia je v tej istej transakcii ako štart — nedá sa odoslať dvakrát a nedá sa označiť
-        za odoslaný návrh, ktorý sa nerozbehol."""
-        user, version, _state = _build(db_session, version_number="0.1.0", current_stage="done", status="done")
-        proposal = _propose(db_session, version.id, content="Oprav bránu.", action="fast_fix")
-
-        assert _send(client, user, version.id, proposal, text="Oprav bránu.").status_code == 200
-        second = _send(client, user, version.id, proposal, text="Oprav bránu.")
-        assert second.status_code == 409, second.text
-
-        versions = db_session.execute(select(Version).where(Version.project_id == version.project_id)).scalars().all()
-        assert len(versions) == 2, "druhé odoslanie založilo ďalšiu verziu"
-
-    def test_dedo_still_cannot_start_a_build_himself(self, client, dedo_token, db_session) -> None:
-        """TOTO je hranica, na ktorej všetko stojí. Dedove dvere taký endpoint NEMAJÚ — a nesmú ho dostať
-        ani omylom. Podanie návrhu je jediné, čo vie; spustenie zostáva na kliknutí Manažéra."""
+    def test_dedo_still_cannot_found_or_start_a_build_himself(self, client, dedo_token, db_session) -> None:
+        """TOTO je hranica, na ktorej všetko stojí: Dedove dvere nezakladajú ani nespúšťajú — len navrhujú."""
         _user, version, _state = _build(db_session, version_number="0.1.0")
         db_session.commit()
 
-        started = client.post(
-            "/api/v1/pipeline/fast-fix",
-            headers=_dedo_auth(),
-            json={"project_id": str(version.project_id), "directive": "Skús to spustiť sám."},
+        founded = client.post(
+            f"/api/v1/projects/{version.project_id}/fast-fixes", headers=_dedo_auth(), json={"work_kind": "fix"}
         )
+        started = client.post(f"/api/v1/pipeline/{version.id}/action", headers=_dedo_auth(), json={"action": "start"})
+
+        assert founded.status_code in (401, 403), founded.text
         assert started.status_code in (401, 403), started.text
 
 
