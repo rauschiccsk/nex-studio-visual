@@ -291,3 +291,111 @@ async def test_a_vizual_turn_ends_with_the_preview_on_the_libraries_the_agent_le
     # one start at the beginning of the round, one rebuild after the agent — and both before the Manažér is told
     assert spins == [project.slug, project.slug]
     assert order == ["agent", "zmena (spins=2)"]
+
+
+# ── DEV-505: not during the agent's turn; at its end even a preview that does not run ──────────────────────────────
+# 23.11.2026 NEX Inbox 1.12.0: a look of the Riadiace centrum rebuilt the preview while the Vizuál agent installed the
+# new libraries into the same frontend — npm ci failed (ENOTEMPTY) and the preview was gone; the look at the end of the
+# turn rebuilt only a RUNNING preview, so the Manažér was sent to a dead link („404 page not found“).
+
+
+def _in_flight(state) -> None:
+    state.dispatch_in_flight = True
+
+
+@pytest.mark.asyncio
+async def test_a_look_during_the_agent_s_turn_leaves_the_preview_as_it_is(db_session, monkeypatch) -> None:
+    version, _ = _make_version(db_session)
+    _in_flight(_seed_state(db_session, version.id, stage="vizual", actor="ai_agent"))
+    spins = _cockpit(monkeypatch, current=[False])
+
+    seen = await orchestrator.vizual_preview(db_session, version.id)
+
+    assert spins == []
+    assert seen["state"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_the_look_at_the_end_of_the_turn_rebuilds_it_although_the_turn_still_runs(
+    db_session, monkeypatch
+) -> None:
+    version, project = _make_version(db_session)
+    _in_flight(_seed_state(db_session, version.id, stage="vizual", actor="ai_agent"))
+    spins = _cockpit(monkeypatch, current=[False])
+
+    await orchestrator.vizual_preview(db_session, version.id, turn_over=True)
+
+    assert spins == [project.slug]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("down", ["stopped", "missing"])
+async def test_the_end_of_the_turn_starts_a_preview_that_does_not_run(db_session, monkeypatch, down) -> None:
+    version, project = _make_version(db_session)
+    _in_flight(_seed_state(db_session, version.id, stage="vizual", actor="ai_agent"))
+    spins: list[str] = []
+    states = iter([down])
+
+    def _state(slug, *, private=False):
+        return {"state": next(states, "running"), "url": f"https://vizual-{slug}.isnex.eu", "reason": None}
+
+    def _spin(slug, frontend_path=None, *, private=False, fresh=False):
+        spins.append(slug)
+        return f"https://vizual-{slug}.isnex.eu"
+
+    monkeypatch.setattr(vizual_sandbox, "preview_state", _state)
+    monkeypatch.setattr(vizual_sandbox, "preview_is_current", lambda slug: True)
+    monkeypatch.setattr(vizual_sandbox, "spin_up", _spin)
+
+    seen = await orchestrator.vizual_preview(db_session, version.id, turn_over=True)
+
+    assert spins == [project.slug]
+    assert seen["state"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_a_look_outside_the_turn_does_not_start_a_preview_that_does_not_run(db_session, monkeypatch) -> None:
+    """Only the end of the turn starts it on its own; the Riadiace centrum offers „Spustiť náhľad znova“."""
+    version, _ = _make_version(db_session)
+    _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    spins: list[str] = []
+    monkeypatch.setattr(
+        vizual_sandbox, "preview_state", lambda slug, *, private=False: {"state": "stopped", "url": None, "reason": "x"}
+    )
+    monkeypatch.setattr(vizual_sandbox, "spin_up", lambda *a, **k: spins.append("spun"))
+
+    await orchestrator.vizual_preview(db_session, version.id)
+
+    assert spins == []
+
+
+@pytest.mark.asyncio
+async def test_start_again_during_the_agent_s_turn_is_refused_in_words(db_session, monkeypatch) -> None:
+    version, _ = _make_version(db_session)
+    _in_flight(_seed_state(db_session, version.id, stage="vizual", actor="ai_agent"))
+    spins = _cockpit(monkeypatch, current=[True])
+
+    with pytest.raises(orchestrator.OrchestratorError) as refused:
+        await orchestrator.restart_vizual_preview(db_session, version.id)
+
+    assert str(refused.value) == orchestrator.VIZUAL_PREVIEW_WAITS_FOR_TURN
+    assert spins == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_in_flight_still_ends_with_the_preview_on_the_agent_s_libraries(db_session, monkeypatch) -> None:
+    version, project = _make_version(db_session)
+    state = _seed_state(db_session, version.id, stage="vizual", actor="ai_agent")
+    _in_flight(state)
+    spins = _cockpit(monkeypatch, current=[False, False])
+    _stub_invoke_capture(
+        monkeypatch,
+        lambda s: _gate_report(
+            s,
+            vizual_checklist={"items": [{"screen": "Domov", "path": "/", "action": "Pozri.", "expected": "Odstup."}]},
+        ),
+    )
+
+    await orchestrator._run_vizual_round(db_session, state, directive="povýš nex-shared")
+
+    assert spins == [project.slug, project.slug]

@@ -15490,7 +15490,20 @@ VIZUAL_PREVIEW_DOWN = (
 VIZUAL_PREVIEW_STARTING = "Živý náhľad sa ešte pripravuje — počkaj, kým sa otvorí, pozri si ho a potom vizuál schváľ."
 
 
-async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
+#: DEV-505 — „Spustiť náhľad znova“ while the agent's turn runs: the agent may be installing the project's libraries.
+VIZUAL_PREVIEW_WAITS_FOR_TURN = (
+    "Agent práve pracuje na projekte a môže meniť jeho knižnice — náhľad sa obnoví sám, keď dokončí ťah. Potom ho "
+    "môžeš spustiť znova."
+)
+
+
+def _turn_in_flight(db: Session, version_id: uuid.UUID) -> bool:
+    """DEV-505 — an agent turn of the version runs now (it may install libraries into the frontend itself)."""
+    state = _get_state(db, version_id)
+    return bool(state is not None and state.dispatch_in_flight)
+
+
+async def vizual_preview(db: Session, version_id: uuid.UUID, *, turn_over: bool = False) -> dict:
     """DEV-127: the live preview a Manažér walks in the Vizuál step, as it really is.
 
     ``{"needed": bool, "state": "running" | "starting" | "stopped" | "missing" | "not_needed", "url", "reason",
@@ -15509,6 +15522,10 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     slug = _project_slug_for_version(db, version_id)
     private = _project_private_network(db, version_id)
     surfaces = _surfaces_for_version(db, version_id)
+    # DEV-505 — while the agent's turn runs it may install libraries into this frontend itself; an npm install of the
+    # preview at the same time collided with it (ENOTEMPTY). The look at the END of the turn (``turn_over``) rebuilds
+    # the preview on what the agent left and starts one that does not run — the Manažér is sent to walk it next.
+    in_turn = not turn_over and _turn_in_flight(db, version_id)
     frontends = []
     for surface in surfaces:
         found = await run_blocking(
@@ -15518,9 +15535,12 @@ async def vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
             **_preview_of(surface),
             cap=VIZUAL_PREVIEW_STATE_CAP,
         )
-        if found["state"] == "running" and not await run_blocking(
-            vizual_sandbox.preview_is_current, slug, **_preview_of(surface), cap=VIZUAL_PREVIEW_STATE_CAP
-        ):
+        if found["state"] == "running":
+            if not in_turn and not await run_blocking(
+                vizual_sandbox.preview_is_current, slug, **_preview_of(surface), cap=VIZUAL_PREVIEW_STATE_CAP
+            ):
+                found = await _rebuild_preview_on_current_libraries(slug, private, surface)
+        elif turn_over and found["state"] in ("stopped", "missing"):
             found = await _rebuild_preview_on_current_libraries(slug, private, surface)
         frontends.append({"name": surface.name, "label": surface.label, "directory": surface.directory, **found})
     down = [f for f in frontends if f["state"] != "running"]
@@ -15578,6 +15598,8 @@ async def restart_vizual_preview(db: Session, version_id: uuid.UUID) -> dict:
     # builds every one anew anyway — the preview is built once, not twice.
     if not _live_preview_needed(db, version_id):
         raise OrchestratorError("Živý náhľad sa spúšťa len v kroku Vizuál, a len keď náhľadom nie je hotový návrh.")
+    if _turn_in_flight(db, version_id):
+        raise OrchestratorError(VIZUAL_PREVIEW_WAITS_FOR_TURN)
     from backend.services import vizual_sandbox
 
     slug = _project_slug_for_version(db, version_id)
@@ -15861,7 +15883,7 @@ async def _run_vizual_round(
     # Looking at the preview builds it anew on the libraries the agent left, BEFORE the Manažér is sent to walk it.
     if mockup_rel is None:
         try:
-            await vizual_preview(db, version_id)
+            await vizual_preview(db, version_id, turn_over=True)
         except Exception:  # noqa: BLE001 — the turn's work is done; the state check of the Riadiace centrum retries
             logger.exception("vizual: checking the preview after the turn failed for %s", slug)
 
