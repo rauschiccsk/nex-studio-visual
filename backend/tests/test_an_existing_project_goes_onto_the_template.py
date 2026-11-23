@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -127,7 +128,7 @@ def test_the_project_gets_the_manifest_and_the_kit_and_keeps_everything_of_its_o
     root = project_on_disk(tmp_path)
     world = World()
 
-    assert convert(root, world) == "0.3.0"
+    assert convert(root, world) == app_template.Conversion(kit_version="0.3.0", raised=())
 
     assert json.loads((root / "frontend" / "app.manifest.json").read_text(encoding="utf-8")) == MANIFEST
     assert json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8")) == {
@@ -165,6 +166,111 @@ def test_a_newer_nex_shared_of_the_project_stays(tmp_path):
     deps = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["dependencies"]
     assert deps["nex-shared"] == "github:rauschiccsk/nex-shared#v0.30.0"
     assert next(argv for argv in world.calls if argv[0] == "npm")[-1] == KIT
+
+
+# ── DEV-504: a package older than the kit asks for is raised, and npm's own reason is said ─────────────────────────
+# 23.11.2026 NEX Inbox could not be put onto the template: npm refused — react-router-dom 6.30.6 against the kit's peer
+# „^7“ — because the conversion kept every version of the project, and said only „npm install“ with a server error.
+
+PEERS = {"react": "^19", "react-router-dom": "^7", "nex-shared": "*", "zustand": "^5"}
+OLD_ROUTER = {**PACKAGE, "dependencies": {**PACKAGE["dependencies"], "react-router-dom": "^6.28.0"}}
+SCAFFOLD_WITH_ROUTER = {
+    **SCAFFOLD_PACKAGE,
+    "dependencies": {**SCAFFOLD_PACKAGE["dependencies"], "react-router-dom": "^7.1.0"},
+}
+
+
+def kit_with_peers(peers: dict):
+    def fetch(_version, destination: Path, _run) -> None:
+        destination.mkdir(parents=True)
+        (destination / "package.json").write_text(json.dumps({"name": "nex-app-kit", "peerDependencies": peers}))
+
+    return fetch
+
+
+def test_a_package_older_than_the_kit_asks_for_is_raised_and_said(tmp_path, monkeypatch):
+    root = project_on_disk(tmp_path, package=OLD_ROUTER)
+    world = World()
+    monkeypatch.setattr(sys.modules[__name__], "SCAFFOLD_PACKAGE", SCAFFOLD_WITH_ROUTER)
+
+    done = app_template.convert_project(
+        root,
+        TemplateChoice("nsv-standard", ai=True),
+        name="NEX Inbox",
+        slug="nex-inbox",
+        auth_mode="token",
+        ports=(1, 2, 3),
+        run=world,
+        fetch_kit=kit_with_peers(PEERS),
+    )
+
+    assert done == app_template.Conversion(
+        kit_version="0.3.0", raised=(app_template.RaisedPackage("react-router-dom", "^6.28.0", "^7.1.0"),)
+    )
+    assert [str(r) for r in done.raised] == ["react-router-dom ^6.28.0 → ^7.1.0"]
+    deps = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+    assert deps["react-router-dom"] == "^7.1.0"
+    assert deps["react"] == "^19.0.0"  # the same major — the project's own version stays
+    commit = next(argv for argv in world.calls if argv[0] == "git" and argv[1] == "commit")
+    assert commit[-1] == (
+        "feat(template): onto the app template nsv-standard — its manifest and nex-app-kit v0.3.0\n\n"
+        "Raised for the kit's peers (the version adapts the code): react-router-dom ^6.28.0 → ^7.1.0"
+    )
+
+
+@pytest.mark.parametrize(
+    "own,peer,template,raised",
+    [
+        ("^6.28.0", "^7", "^7.1.0", "^7.1.0"),  # an older major takes the template's version
+        ("^6.28.0", "^7", None, "^7"),  # the template does not name it: the kit's own range
+        ("^0.4.0", "^0.5", "^0.5.2", "^0.5.2"),  # below 1.0 the minor is the breaking part
+        ("^19.0.0", "^19", "^19.1.0", None),  # the same major resolves — left as it is
+        ("^8.0.0", "^7", "^7.1.0", None),  # a newer version is never lowered
+        ("^6.30.0 || ^7.0.0", "^7", "^7.1.0", None),  # the project already allows the kit's major
+        ("github:someone/router#v6", "^7", "^7.1.0", None),  # not a version range — left alone
+        ("^6.0.0", "*", "^7.1.0", None),  # the kit takes any version
+    ],
+)
+def test_only_a_version_the_kit_cannot_take_is_raised(own, peer, template, raised):
+    project = {"dependencies": {"pkg": own}}
+    scaffold = {"dependencies": {"pkg": template}} if template else {"dependencies": {}}
+
+    package, done = app_template.raise_for_kit_peers(project, {"pkg": peer}, scaffold)
+
+    assert package["dependencies"]["pkg"] == (raised or own)
+    assert done == ([app_template.RaisedPackage("pkg", own, raised)] if raised else [])
+    assert project == {"dependencies": {"pkg": own}}  # the input stays as it was
+
+
+def test_a_package_the_project_does_not_have_is_not_added_here():
+    package, done = app_template.raise_for_kit_peers({"devDependencies": {}}, {"zustand": "^5"}, {})
+
+    assert package == {"devDependencies": {}} and done == []
+
+
+NPM_REFUSAL = """npm error code ERESOLVE
+npm error ERESOLVE unable to resolve dependency tree
+npm error While resolving: nex-inbox-frontend@0.1.0
+npm error Found: react-router-dom@6.30.6
+npm error node_modules/react-router-dom
+npm error   react-router-dom@"^6.28.0" from the root project
+npm error Could not resolve dependency:
+npm error peer react-router-dom@"^7" from nex-app-kit@0.19.1
+"""
+
+
+def test_when_npm_still_refuses_its_reason_is_said(tmp_path):
+    root = project_on_disk(tmp_path)
+    before = files(root)
+
+    with pytest.raises(AppTemplateError) as caught:
+        convert(root, World(fail="npm install", answer=NPM_REFUSAL))
+
+    assert str(caught.value) == (
+        "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install): "
+        "nex-app-kit@0.19.1 žiada react-router-dom ^7, projekt má 6.30.6"
+    )
+    assert files(root) == before
 
 
 # ── DEV-325: an older project's hook, a clean index, git's own words ────────────────────────────────────────────
@@ -219,7 +325,7 @@ def test_a_failed_commit_unstages_what_it_added_and_says_what_git_answered(tmp_p
 @pytest.mark.parametrize(
     "fail,npm_writes,sentence",
     [
-        ("npm install", "0.3.0", "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install)."),
+        ("npm install", "0.3.0", "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install): zlyhalo"),
         (None, "0.2.0", "Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install)."),
         ("git commit", "0.3.0", "Prevod na šablónu sa nepodarilo zapísať do gitu projektu: zlyhalo"),
         ("render.py", "0.3.0", "Kostru šablóny sa nepodarilo vyplniť: zlyhalo"),
@@ -277,7 +383,7 @@ def test_a_server_whose_packages_poetry_keeps_is_converted_and_left_as_it_is(tmp
     without poetry.lock, the line would break the build; the version adds the kit with Poetry (ram_sablony)."""
     root = project_on_disk(tmp_path, pyproject=POETRY_PYPROJECT)
 
-    assert convert(root, World()) == "0.3.0"
+    assert convert(root, World()).kit_version == "0.3.0"
 
     assert (root / "backend" / "pyproject.toml").read_text(encoding="utf-8") == POETRY_PYPROJECT
     assert json.loads((root / "frontend" / "app.manifest.json").read_text(encoding="utf-8")) == MANIFEST
@@ -408,7 +514,9 @@ def test_the_conversion_remembers_the_template(client, db_session):
 
     def fake_convert(target, choice, **kwargs):
         calls.append((target, choice, kwargs))
-        return "0.3.0"
+        return app_template.Conversion(
+            kit_version="0.3.0", raised=(app_template.RaisedPackage("react-router-dom", "^6.28.0", "^7.1.0"),)
+        )
 
     with patch.object(app_template, "convert_project", fake_convert):
         response = client.post(
@@ -416,7 +524,11 @@ def test_the_conversion_remembers_the_template(client, db_session):
         )
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"template": "nsv-standard", "kit_version": "0.3.0"}
+    assert response.json() == {
+        "template": "nsv-standard",
+        "kit_version": "0.3.0",
+        "raised_packages": ["react-router-dom ^6.28.0 → ^7.1.0"],
+    }
     [(target, choice, kwargs)] = calls
     assert str(target) == project.source_path
     assert choice == TemplateChoice("nsv-standard", ai=True)
@@ -445,7 +557,7 @@ def test_a_refused_or_failed_conversion_is_said_and_remembers_nothing(client, db
 
     assert (refused.status_code, refused.json()["detail"]) == (400, "Projekt už je na šablóne aplikácie.")
     assert (unknown.status_code, unknown.json()["detail"]) == (400, "Šablóna aplikácie „iny-vzhlad“ neexistuje.")
-    assert (failed.status_code, failed.json()["detail"]) == (500, "Prevod sa nepodaril.")
+    assert (failed.status_code, failed.json()["detail"]) == (409, "Prevod sa nepodaril.")
     db_session.refresh(project)
     assert project.template is None
 

@@ -117,12 +117,18 @@ export default function NewVersionPage() {
   // DEV-254: what the conversion onto the template did, said once it is done.
   const [converted, setConverted] = useState<string | null>(null);
 
-  async function handleConverted(template: string, kitVersion: string) {
+  async function handleConverted(template: string, kitVersion: string, raised: string[]) {
     if (!project) return;
     setProject({ ...project, template });
+    // DEV-504 — packages the kit cannot take were raised; the version adapts the code to them.
+    const raisedNote = raised.length
+      ? ` Kokpit pri prevode zdvihol balíky, ktoré šablóna potrebuje: ${raised.join(", ")} — kód im prispôsobí ` +
+        "Staviteľ v tejto verzii."
+      : "";
     setConverted(
       `Projekt je na šablóne aplikácie (nex-app-kit v${kitVersion}). Obrazovky do rámu šablóny presunie Staviteľ ` +
-        "v tejto verzii — Príprava to dostane ako riadnu položku rozsahu.",
+        "v tejto verzii — Príprava to dostane ako riadnu položku rozsahu." +
+        raisedNote,
     );
     // The conversion moved nex-shared and added the kit — re-read both, and the tree it committed to.
     setUpgradesKey((k) => k + 1);

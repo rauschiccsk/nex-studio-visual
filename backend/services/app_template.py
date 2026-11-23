@@ -318,6 +318,92 @@ def with_template_packages(project_package: dict, scaffold_package: dict) -> tup
     return package, resolve
 
 
+@dataclass(frozen=True)
+class RaisedPackage:
+    """DEV-504 — a frontend package the conversion raised because nex-app-kit asks for a newer one."""
+
+    name: str
+    old: str
+    new: str
+
+    def __str__(self) -> str:
+        return f"{self.name} {self.old} → {self.new}"
+
+
+@dataclass(frozen=True)
+class Conversion:
+    """What putting a project onto the template did: the kit's release and the packages it had to raise."""
+
+    kit_version: str
+    raised: tuple[RaisedPackage, ...] = ()
+
+
+def kit_peers(kit: Path) -> dict[str, str]:
+    """The packages the fetched kit release asks the app for (``peerDependencies``) — none when it says nothing."""
+    try:
+        return dict(json.loads((kit / "package.json").read_text(encoding="utf-8")).get("peerDependencies") or {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _floors(spec: str) -> list[tuple[int, ...]]:
+    """The lowest version of each alternative of an npm range (``^6.28.0 || ^7`` → [(6, 28, 0), (7, 0, 0)]); none for
+    what is not a version range (git, a path, ``*``, ``latest``)."""
+    if any(mark in spec for mark in (":", "/", "#")):
+        return []
+    floors = []
+    for alternative in spec.split("||"):
+        found = re.search(r"\d+(?:\.\d+){0,2}", alternative)
+        if found:
+            floors.append(tuple(int(x) for x in (found.group(0).split(".") + ["0", "0"])[:3]))
+    return floors
+
+
+def _breaking_part(version: tuple[int, ...]) -> tuple[int, ...]:
+    """What npm's caret keeps: the major, or below 1.0 the minor too."""
+    return version[:1] if version[0] else version[:2]
+
+
+def raise_for_kit_peers(
+    project_package: dict, peers: dict[str, str], scaffold_package: dict
+) -> tuple[dict, list[RaisedPackage]]:
+    """DEV-504 — the project's ``package.json`` with every package it has that nex-app-kit cannot take raised to the
+    template's version (the kit's own range when the template does not name it). „Cannot take“: none of the project's
+    alternatives reaches the kit's breaking part (a major; below 1.0 a minor). A newer version is never lowered, what
+    is not a version range is left alone, a package the project lacks is not added here
+    (:func:`with_template_packages`).
+    """
+    package = json.loads(json.dumps(project_package))
+    template = {**scaffold_package.get("devDependencies", {}), **scaffold_package.get("dependencies", {})}
+    raised: list[RaisedPackage] = []
+    for name, wanted in peers.items():
+        needs = _floors(wanted)
+        for section in ("dependencies", "devDependencies"):
+            own = (package.get(section) or {}).get(name)
+            if own is None or not needs:
+                continue
+            has = _floors(own)
+            if not has or max(_breaking_part(v) for v in has) >= min(_breaking_part(v) for v in needs):
+                continue
+            new = template.get(name)
+            if not new or not _floors(new) or min(_floors(new)) < min(needs):
+                new = wanted
+            package[section][name] = new
+            raised.append(RaisedPackage(name, own, new))
+    return package, raised
+
+
+def _npm_reason(result: subprocess.CompletedProcess) -> str:
+    """Why npm refused, in one line: which package the kit wants at which range and what the project has — else npm's
+    last word."""
+    text = f"{result.stderr or ''}\n{result.stdout or ''}"
+    peer = re.search(r'peer (\S+?)@"([^"]+)" from (\S+)', text)
+    found = re.search(r"Found: (\S+)@(\S+)", text)
+    if peer and found and found.group(1) == peer.group(1):
+        return f"{peer.group(3)} žiada {peer.group(1)} {peer.group(2)}, projekt má {found.group(2)}"
+    return re.sub(r"^npm (error|ERR!) ", "", _last_words(result))
+
+
 def _last_words(result: subprocess.CompletedProcess) -> str:
     """The last line git or its hook printed (stderr first) — the reason a commit was refused, short enough to show."""
     lines = [line.strip() for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines() if line.strip()]
@@ -337,7 +423,8 @@ def convert_project(
     fetch_kit: Callable[[str, Path, Runner], None] = _fetch_kit,
 ) -> str:
     """Put an existing project onto the app template — its manifest, nex-app-kit in the frontend (pin and lockfile)
-    and the server, nex-shared raised to the release's pin when older — and commit it. Returns the kit's version.
+    and the server, nex-shared raised to the release's pin when older, a package the kit cannot take raised
+    (DEV-504) — and commit it. Returns the kit's version and the raised packages.
     Every file it touched is put back when any step fails; the project's own code is never touched."""
     if choice.template not in TEMPLATES:
         raise AppTemplateError(f"Šablóna „{choice.template}“ neexistuje.")
@@ -373,16 +460,22 @@ def convert_project(
             filled = Path(tmp) / "filled"
             _render(choice.template, values, "--out", filled, Path(tmp), run, fetch_kit)
             files[MANIFEST].write_text((filled / MANIFEST).read_text(encoding="utf-8"), encoding="utf-8")
+            scaffold_package = json.loads((filled / "frontend" / "package.json").read_text(encoding="utf-8"))
             package, specs = with_template_packages(
-                json.loads(originals[files["frontend/package.json"]]),
-                json.loads((filled / "frontend" / "package.json").read_text(encoding="utf-8")),
+                json.loads(originals[files["frontend/package.json"]]), scaffold_package
             )
+            # DEV-504 — a package the kit cannot take is raised, or npm refuses the whole tree.
+            package, raised = raise_for_kit_peers(package, kit_peers(Path(tmp) / "kit"), scaffold_package)
         files["frontend/package.json"].write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", "utf-8")
         files["backend/pyproject.toml"].write_text(pyproject, encoding="utf-8")
         lock = run(
             ["npm", "install", "--package-lock-only", "--no-audit", "--no-fund", *specs], cwd=str(target / "frontend")
         )
-        if lock.returncode != 0 or nexshared.effective_version(str(target), "frontend", KIT_PACKAGE) != version:
+        if lock.returncode != 0:
+            raise AppTemplateError(
+                f"Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install): {_npm_reason(lock)}"
+            )
+        if nexshared.effective_version(str(target), "frontend", KIT_PACKAGE) != version:
             raise AppTemplateError("Frontendu sa nepodarilo pripraviť zoznam balíkov so šablónou (npm install).")
         if postscaffold.PRECOMMIT_HOOK_TEMPLATE.is_file():
             files[_HOOK].parent.mkdir(parents=True, exist_ok=True)
@@ -394,7 +487,12 @@ def convert_project(
                 "git",
                 "commit",
                 "-m",
-                f"feat(template): onto the app template {choice.template} — its manifest and nex-app-kit v{version}",
+                f"feat(template): onto the app template {choice.template} — its manifest and nex-app-kit v{version}"
+                + (
+                    "\n\nRaised for the kit's peers (the version adapts the code): " + ", ".join(map(str, raised))
+                    if raised
+                    else ""
+                ),
             ],
             cwd=str(target),
         )
@@ -416,4 +514,4 @@ def convert_project(
             raise
         raise AppTemplateError(f"Prevod na šablónu sa nepodaril: {exc}") from exc
     logger.info("Project %s put onto the app template %s (nex-app-kit v%s)", slug, choice.template, version)
-    return version
+    return Conversion(kit_version=version, raised=tuple(raised))

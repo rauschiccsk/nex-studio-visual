@@ -809,7 +809,7 @@ def convert_to_app_template(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Šablóna aplikácie „{payload.template}“ neexistuje."
         )
     try:
-        version = app_template_service.convert_project(
+        done = app_template_service.convert_project(
             Path(project.source_path),
             app_template_service.TemplateChoice(template=payload.template, ai=payload.ai),
             name=project.name,
@@ -818,10 +818,13 @@ def convert_to_app_template(
             ports=(project.backend_port or 0, project.frontend_port or 0, project.db_port or 0),
         )
     except app_template_service.AppTemplateError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        # DEV-504 — a conversion the project's state cannot take is a refusal with its reason, not a server error.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     project.template = payload.template
     db.commit()
-    return AppTemplateConversionResult(template=payload.template, kit_version=version)
+    return AppTemplateConversionResult(
+        template=payload.template, kit_version=done.kit_version, raised_packages=[str(r) for r in done.raised]
+    )
 
 
 @router.get("/{project_id}/app-kit-status", response_model=AppKitStatus)

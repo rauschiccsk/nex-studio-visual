@@ -3857,6 +3857,11 @@ export interface components {
         AppTemplateConversionResult: {
             /** Kit Version */
             kit_version: string;
+            /**
+             * Raised Packages
+             * @default []
+             */
+            raised_packages: string[];
             /** Template */
             template: string;
         };

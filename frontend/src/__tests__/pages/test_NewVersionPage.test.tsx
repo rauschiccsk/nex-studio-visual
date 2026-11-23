@@ -418,6 +418,27 @@ describe("NewVersionPage — a project built without a template is offered the c
     await waitFor(() => expect(getGitStatusApiMock).toHaveBeenCalledTimes(2));
   });
 
+  it("says which packages the conversion raised for the template (DEV-504)", async () => {
+    getAppTemplateConversionApiMock.mockResolvedValue(offer);
+    convertToAppTemplateApiMock.mockResolvedValue({
+      template: "nsv-standard",
+      kit_version: "0.19.1",
+      raised_packages: ["react-router-dom ^6.28.0 → ^7.1.0"],
+    });
+    getAppKitStatusApiMock.mockResolvedValue({ current: "0.19.1", latest: "0.19.1", behind: 0, up_to_date: true });
+
+    await renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Previesť na NSV štandard" }));
+
+    expect(
+      await screen.findByText(
+        "Projekt je na šablóne aplikácie (nex-app-kit v0.19.1). Obrazovky do rámu šablóny presunie Staviteľ v tejto " +
+          "verzii — Príprava to dostane ako riadnu položku rozsahu. Kokpit pri prevode zdvihol balíky, ktoré šablóna " +
+          "potrebuje: react-router-dom ^6.28.0 → ^7.1.0 — kód im prispôsobí Staviteľ v tejto verzii.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("is greyed out with the reason when the cockpit cannot convert now", async () => {
     getAppTemplateConversionApiMock.mockResolvedValue({
       ...offer,

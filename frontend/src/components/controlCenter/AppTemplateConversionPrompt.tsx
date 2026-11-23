@@ -19,7 +19,8 @@ export function AppTemplateConversionPrompt({
   showWhenUnavailable = true,
 }: {
   projectId: string;
-  onConverted: (template: string, kitVersion: string) => void;
+  /** DEV-504: ``raised`` — the frontend packages the conversion raised because nex-app-kit asks for newer ones. */
+  onConverted: (template: string, kitVersion: string, raised: string[]) => void;
   /** False where a greyed-out offer would only be noise (the project page without a brief in front of it). */
   showWhenUnavailable?: boolean;
 }) {
@@ -45,7 +46,7 @@ export function AppTemplateConversionPrompt({
     setError(null);
     try {
       const res = await convertToAppTemplateApi(projectId, template!.id, ai);
-      onConverted(res.template, res.kit_version);
+      onConverted(res.template, res.kit_version, res.raised_packages ?? []);
     } catch (err: unknown) {
       setError(humanizeApiError(err, "Prevod na šablónu aplikácie zlyhal"));
     } finally {

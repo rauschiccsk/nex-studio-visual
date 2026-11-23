@@ -180,6 +180,8 @@ class AppTemplateConversionRequest(BaseModel):
 class AppTemplateConversionResult(BaseModel):
     template: str
     kit_version: str
+    #: DEV-504 — frontend packages raised because nex-app-kit asks for newer ones („react-router-dom ^6.28.0 → ^7.1.0“).
+    raised_packages: list[str] = []
 
 
 class AppKitUpgradeRequest(BaseModel):
