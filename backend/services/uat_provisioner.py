@@ -3896,7 +3896,31 @@ def with_installation_identity(
         service["environment"] = kept + [f"{key}={value}" for key, value in told.items()]
     else:
         service["environment"] = {**(current or {}), **told}
-    return {**compose, "services": {**services, backend: service}}
+    # DEV-503 — any other service that asks for a key of the identity (NEX HelpDesk's worker and migrate take
+    # NEX_ENVIRONMENT by reference from a .env that never had it) gets its value in place; a service that does not ask
+    # gets nothing.
+    others = {name: _told_where_asked(svc, told) for name, svc in services.items() if name != backend}
+    return {**compose, "services": {**services, **others, backend: service}}
+
+
+def _told_where_asked(service: Any, told: dict[str, str]) -> Any:
+    """``service`` with the keys of ``told`` it declares in its ``environment`` set to their values — the same object
+    when it declares none of them."""
+    if not isinstance(service, dict):
+        return service
+    current = service.get("environment")
+    if isinstance(current, list):
+        asked = [str(item).split("=", 1)[0] for item in current]
+        if not any(key in told for key in asked):
+            return service
+        env = [f"{key}={told[key]}" if key in told else item for key, item in zip(asked, current)]
+    elif isinstance(current, dict):
+        if not any(key in told for key in current):
+            return service
+        env = {key: told.get(key, value) for key, value in current.items()}
+    else:
+        return service
+    return {**service, "environment": env}
 
 
 def render_uat_compose(compose: dict[str, Any], routing: Optional[Routing] = None) -> str:

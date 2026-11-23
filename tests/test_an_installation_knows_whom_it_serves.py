@@ -73,6 +73,93 @@ def test_without_a_customer_only_the_environment_is_told_and_without_a_backend_n
     assert P.with_installation_identity(compose, None, customer_name="ICC s.r.o.", environment="uat") is compose
 
 
+# ── DEV-503 — every service that asks for the identity gets it, not only the backend ────────────────────────────────
+# 23.11.2026 NEX HelpDesk 0.1.2 on UAT ICC: the backend knew it was the UAT, its worker did not — the worker's compose
+# takes NEX_ENVIRONMENT by reference from a .env that never had it, so every job that needs the environment failed and
+# no call would be processed. In PROD the same.
+
+WITH_A_WORKER = """
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: app
+  migrate:
+    environment:
+      NEX_ENVIRONMENT: ${NEX_ENVIRONMENT:-}
+      DATABASE_URL: postgresql://app@db/app
+  backend:
+    environment:
+      NEX_ENVIRONMENT: ${NEX_ENVIRONMENT:-}
+  worker:
+    environment:
+      NEX_ENVIRONMENT: ${NEX_ENVIRONMENT:-}
+      NEX_CUSTOMER_NAME: ${NEX_CUSTOMER_NAME:-}
+      TOOL_SECRET: ${TOOL_SECRET}
+  frontend:
+    build:
+      context: ./frontend
+"""
+
+
+def test_a_worker_that_asks_for_the_identity_gets_its_values():
+    compose = yaml.safe_load(WITH_A_WORKER)
+
+    services = P.with_installation_identity(compose, "backend", customer_name="ICC s.r.o.", environment="prod")[
+        "services"
+    ]
+
+    assert services["worker"]["environment"] == {
+        "NEX_ENVIRONMENT": "prod",
+        "NEX_CUSTOMER_NAME": "ICC s.r.o.",
+        "TOOL_SECRET": "${TOOL_SECRET}",
+    }
+    assert services["migrate"]["environment"] == {
+        "NEX_ENVIRONMENT": "prod",
+        "DATABASE_URL": "postgresql://app@db/app",
+    }
+    assert services["backend"]["environment"] == {"NEX_ENVIRONMENT": "prod", "NEX_CUSTOMER_NAME": "ICC s.r.o."}
+    assert compose["services"]["worker"]["environment"]["NEX_ENVIRONMENT"] == "${NEX_ENVIRONMENT:-}"  # input untouched
+
+
+def test_a_service_that_does_not_ask_gets_nothing():
+    compose = yaml.safe_load(WITH_A_WORKER)
+
+    services = P.with_installation_identity(compose, "backend", customer_name="ICC s.r.o.", environment="uat")[
+        "services"
+    ]
+
+    assert services["db"] == compose["services"]["db"]
+    assert services["frontend"] == compose["services"]["frontend"]
+
+
+def test_a_service_in_list_form_gets_the_values_in_place():
+    compose = {
+        "services": {
+            "api": {"environment": ["LOG_LEVEL=info"]},
+            "worker": {"environment": ["NEX_ENVIRONMENT=${NEX_ENVIRONMENT:-}", "QUEUE=calls", "NEX_LANGUAGE"]},
+        }
+    }
+
+    services = P.with_installation_identity(compose, "api", customer_name=None, environment="uat", language="hu")[
+        "services"
+    ]
+
+    assert services["worker"]["environment"] == ["NEX_ENVIRONMENT=uat", "QUEUE=calls", "NEX_LANGUAGE=hu"]
+    assert services["api"]["environment"] == ["LOG_LEVEL=info", "NEX_ENVIRONMENT=uat", "NEX_LANGUAGE=hu"]
+
+
+def test_a_key_the_cockpit_does_not_tell_keeps_its_reference():
+    compose = yaml.safe_load(WITH_A_WORKER)
+
+    worker = P.with_installation_identity(compose, "backend", customer_name=None, environment="uat")["services"][
+        "worker"
+    ]
+
+    assert worker["environment"]["NEX_ENVIRONMENT"] == "uat"
+    assert worker["environment"]["NEX_CUSTOMER_NAME"] == "${NEX_CUSTOMER_NAME:-}"
+
+
 def _git(project: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(project), *args], capture_output=True, check=True)
 

@@ -62,11 +62,13 @@ describe("FastFixTickets", () => {
   });
 
   it("a refusal from the engine stays on the page in words", async () => {
-    listTickets.mockResolvedValue([TICKET]);
+    // The tickets arrive a moment later, as under load — the start is disabled until then (23.11.2026: clicked too early).
+    listTickets.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve([TICKET]), 50)));
     postAction.mockRejectedValue(new ApiError(409, "Conflict", { detail: "Stavba tejto verzie už bola spustená." }));
     render(<FastFixTickets slug="orthodox-hermenia" version={FIX} canStart />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Spustiť rýchlu opravu" }));
+    expect(await screen.findByRole("link", { name: /DEV-489/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Spustiť rýchlu opravu" }));
 
     expect(await screen.findByText(/Stavba tejto verzie už bola spustená/)).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
