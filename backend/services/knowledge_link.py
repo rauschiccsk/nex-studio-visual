@@ -60,8 +60,8 @@ NOT_STRAIGHT = (
 )
 ANSWERED = "Prepojenie s NEX Knowledge: NEX Knowledge odpovedala {code} — aplikácia ju nečíta."
 UNREACHABLE = (
-    "Prepojenie s NEX Knowledge: z aplikácie sa na NEX Knowledge nedá dostať ({why}) — obe inštalácie musia bežať "
-    "na tom istom stroji v sieti nex-proxy-net."
+    "Prepojenie s NEX Knowledge: zo služby {service} sa na NEX Knowledge nedá dostať ({why}) — obe inštalácie musia "
+    "bežať na tom istom stroji a služba v sieti nex-proxy-net."
 )
 NOT_CHECKED = "Prepojenie s NEX Knowledge sa po nasadení nedalo overiť ({why})."
 
@@ -82,7 +82,9 @@ def _read(container: str, deploy_host: Optional[str]) -> Optional[str]:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def _backend_container(compose_path: Path, deploy_host: Optional[str]) -> Optional[str]:
+def _reading_containers(compose_path: Path, deploy_host: Optional[str]) -> list[str]:
+    """DEV-506 — the containers the read is tried from: every service that is given the address of NEX Knowledge (the
+    HelpDesk reads it in its worker), else the backend (an app that gets it another way)."""
     if deploy_host:
         text, _error = remote_instance.read_text(compose_path.parent, compose_path.name, deploy_host=deploy_host)
     else:
@@ -90,21 +92,21 @@ def _backend_container(compose_path: Path, deploy_host: Optional[str]) -> Option
     try:
         data = yaml.safe_load(text or "") or {}
     except yaml.YAMLError:
-        return None
-    for svc in (data.get("services") or {}).values() if isinstance(data, dict) else ():
-        name = str((svc or {}).get("container_name") or "") if isinstance(svc, dict) else ""
-        if name.endswith("-backend"):
-            return name
-    return None
+        return []
+    services = [svc for svc in ((data.get("services") or {}).values() if isinstance(data, dict) else ())]
+    services = [svc for svc in services if isinstance(svc, dict) and svc.get("container_name")]
+    readers = [
+        str(svc["container_name"])
+        for svc in services
+        if uat_provisioner.KNOWLEDGE_URL_ENV in uat_provisioner.declared_env_keys(svc)
+    ]
+    if readers:
+        return readers
+    return [str(svc["container_name"]) for svc in services if str(svc["container_name"]).endswith("-backend")][:1]
 
 
-def check(compose_path: Path, deploy_host: Optional[str]) -> tuple[Optional[str], list[str]]:
-    """``(what the deploy says on success, warnings)`` of one read of NEX Knowledge from the installation's backend.
-    ``(None, [])`` for an app that does not read NEX Knowledge."""
-    container = _backend_container(compose_path, deploy_host)
-    if container is None:
-        return None, []
-    outcome = _read(container, deploy_host)
+def _said(outcome: Optional[str], container: str) -> tuple[Optional[str], list[str]]:
+    """What one read in ``container`` means: ``(the success sentence, [])`` or ``(None, [why not])``."""
     if outcome is None:
         return None, [NOT_CHECKED.format(why=f"Docker v kontajneri {container} neodpovedal")]
     word, _, rest = outcome.partition(" ")
@@ -119,5 +121,18 @@ def check(compose_path: Path, deploy_host: Optional[str]) -> tuple[Optional[str]
     if word == "HTTP":
         return None, [{"401": KEY_REFUSED, "404": NOT_STRAIGHT}.get(rest, ANSWERED.format(code=rest))]
     if word == "DOWN":
-        return None, [UNREACHABLE.format(why=rest)]
+        return None, [UNREACHABLE.format(why=rest, service=container)]
     return None, [NOT_CHECKED.format(why=outcome[:80])]
+
+
+def check(compose_path: Path, deploy_host: Optional[str]) -> tuple[Optional[str], list[str]]:
+    """``(what the deploy says on success, warnings)`` of a read of NEX Knowledge from every service of the installation
+    that reads it (DEV-506; the backend for an app that gets the address another way). The first one that cannot read
+    it is said, named. ``(None, [])`` for an app that does not read NEX Knowledge."""
+    success: Optional[str] = None
+    for container in _reading_containers(compose_path, deploy_host):
+        said, warnings = _said(_read(container, deploy_host), container)
+        if warnings:
+            return None, warnings
+        success = success or said
+    return success, []

@@ -161,7 +161,10 @@ def _installation(tmp_path: Path) -> Path:
         ("HTTP 401", (None, [knowledge_link.KEY_REFUSED])),
         ("HTTP 404", (None, [knowledge_link.NOT_STRAIGHT])),
         ("HTTP 500", (None, [knowledge_link.ANSWERED.format(code="500")])),
-        ("DOWN URLError", (None, [knowledge_link.UNREACHABLE.format(why="URLError")])),
+        (
+            "DOWN URLError",
+            (None, [knowledge_link.UNREACHABLE.format(why="URLError", service="uat-icc-legal-watch-backend")]),
+        ),
     ],
 )
 def test_the_read_after_the_deploy_says_what_happened(tmp_path, monkeypatch, outcome, said) -> None:

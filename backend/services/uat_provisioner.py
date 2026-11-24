@@ -3346,6 +3346,22 @@ def _add_proxy_network(svc: dict[str, Any], network: str) -> None:
         svc["networks"] = ["default", network]
 
 
+#: DEV-506 — the settings that carry an address of another installation on the machine's network (NEX Knowledge
+#: answers only a call that came straight; the Manager is asked at its backend there). A service that has one is a
+#: client of that network, whatever its role.
+MACHINE_ADDRESS_ENVS = ("NEX_KNOWLEDGE_BASE_URL", "NEX_MANAGER_BASE_URL")
+
+
+def declared_env_keys(svc: Any) -> set[str]:
+    """The keys a service names in its ``environment`` — mapping or list (``KEY=value`` or a bare ``KEY``)."""
+    env = svc.get("environment") if isinstance(svc, dict) else None
+    if isinstance(env, dict):
+        return {str(key) for key in env}
+    if isinstance(env, list):
+        return {str(item).split("=", 1)[0] for item in env}
+    return set()
+
+
 def _networks_of(svc: dict[str, Any]) -> set[str]:
     """The compose networks a service is on — ``default`` when it names none."""
     nets = svc.get("networks")
@@ -3670,6 +3686,24 @@ def build_uat_compose(
             services[be_name]["labels"] = _merge_labels(
                 services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host, routing)
             )
+
+    # DEV-506 — every other service that is given an address on the machine's network (a worker that reads NEX
+    # Knowledge, one that asks the Manager) joins the networks its backend is on — the backend reaches those addresses
+    # (the deploy checks it). As a client only, with no route of its own; the links of DEV-306 lead it to its own
+    # installation. A redeploy keeps the networks of the installation (``vlastne_smerovanie``), so the backend's
+    # networks are the ones the installation really has — never one it does not have.
+    readers_networks = (
+        sorted(_networks_of(services[be_name]))
+        if be_name and isinstance(services.get(be_name), dict)
+        else ([] if vlastne_smerovanie else ["default", routing.network])
+    )
+    for svc_name, svc in services.items():
+        if svc_name == be_name or not isinstance(svc, dict):
+            continue
+        if declared_env_keys(svc) & set(MACHINE_ADDRESS_ENVS):
+            for network in readers_networks:
+                if network not in _networks_of(svc):
+                    _add_proxy_network(svc, network)
 
     # Optional loopback debug ports (FE base / BE base+100 / DB base+200).
     if loopback_base_port is not None:
