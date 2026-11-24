@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from backend.services import knowledge_link
+from backend.services import backend_reach, knowledge_link
 from backend.services import uat_provisioner as P
 
 NET = P.PROXY_NETWORK
@@ -31,6 +31,9 @@ SOURCE = """services:
   migrate:
     build: ./backend
     command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      NEX_KNOWLEDGE_BASE_URL: ${NEX_KNOWLEDGE_BASE_URL:-}
   backend:
     build: ./backend
     environment:
@@ -94,8 +97,16 @@ def test_a_service_that_calls_the_manager_inside_is_there_too_in_list_form(proje
 def test_a_service_that_reads_neither_stays_off_it(project) -> None:
     services = _render(project)["services"]
 
-    assert NET not in _networks(services["migrate"])
     assert NET not in _networks(services["db"])
+
+
+def test_a_step_that_runs_once_stays_off_it_though_it_has_the_address(project) -> None:
+    """24.11.2026: the migration of NEX HelpDesk has the address too (one environment for the backend's image) — on the
+    shared network, ended, it made the check of DEV-306 say six times it could not ask where a name leads."""
+    services = _render(project)["services"]
+
+    assert services["migrate"]["restart"] == "no"
+    assert NET not in _networks(services["migrate"])
 
 
 def test_on_the_machine_network_the_worker_gets_no_address_of_its_own(project) -> None:
@@ -203,7 +214,7 @@ def test_a_redeploy_of_an_installation_written_before_puts_its_reader_on_the_net
 
     services = yaml.safe_load(result.compose_path.read_text(encoding="utf-8"))["services"]
     assert _networks(services["worker"]) == ["default", NET] and _networks(services["mailer"]) == ["default", NET]
-    assert NET not in _networks(services["db"])
+    assert NET not in _networks(services["db"]) and NET not in _networks(services["migrate"])
     assert "backend" in (services["worker"].get("links") or [])
     assert P.READERS_JOINED.format(services="mailer, worker", networks=f"default, {NET}") in result.warnings
 
@@ -217,6 +228,40 @@ def test_a_redeploy_that_changes_nothing_says_nothing_of_it(tmp_path, released) 
 
 
 # ── 2. on the machine's network a reader reaches its own installation by its links (DEV-306) ───────────────────────
+
+ENDED = "uat-icc-helpdesk-migrate"
+
+
+def test_the_check_of_the_names_does_not_ask_a_step_that_has_ended(tmp_path, monkeypatch) -> None:
+    """24.11.2026, NEX HelpDesk UAT ICC on cockpit 4.172.3: the migration (put on the shared network by that version)
+    had ended; „Kokpit nevedel overiť, kam z migrate vedie meno …“ six times, for nothing to check."""
+    compose = {
+        "name": "uat-icc-helpdesk",
+        "services": {
+            "db": {"image": "postgres:16-alpine", "container_name": "uat-icc-helpdesk-db"},
+            "migrate": {"container_name": ENDED, "restart": "no", "networks": ["default", NET]},
+            "backend": {"container_name": "uat-icc-helpdesk-backend", "networks": ["default", NET]},
+            "worker": {"container_name": "uat-icc-helpdesk-worker", "networks": ["default", NET]},
+        },
+        "networks": {NET: {"external": True}},
+    }
+    linked, _ = P.links_within_installation(compose, NET)
+    path = tmp_path / "docker-compose.yml"
+    path.write_text(yaml.safe_dump(linked), encoding="utf-8")
+    own = {"uat-icc-helpdesk-backend": {"10.0.0.2"}, "uat-icc-helpdesk-worker": {"10.0.0.3"}}
+    names = {"backend": own["uat-icc-helpdesk-backend"], "worker": own["uat-icc-helpdesk-worker"]}
+    asked: list = []
+
+    def resolve(container, name, deploy_host):
+        asked.append((container, name))
+        return None if container == ENDED else names.get(name)
+
+    monkeypatch.setattr(backend_reach, "_addresses", lambda container, deploy_host: own.get(container))
+    monkeypatch.setattr(backend_reach, "_resolved", resolve)
+
+    assert backend_reach.check(path, None) == []
+    assert ("uat-icc-helpdesk-worker", "backend") in asked
+    assert not [a for a in asked if ENDED in a or "migrate" in a]
 
 
 def test_the_worker_reaches_its_own_backend_by_a_link(project) -> None:

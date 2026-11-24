@@ -94,11 +94,10 @@ def _reading_containers(compose_path: Path, deploy_host: Optional[str]) -> list[
     except yaml.YAMLError:
         return []
     services = [svc for svc in ((data.get("services") or {}).values() if isinstance(data, dict) else ())]
-    # A step that runs once (the cockpit writes it ``restart: "no"``) has ended by the time the deploy reads.
     services = [
         svc
         for svc in services
-        if isinstance(svc, dict) and svc.get("container_name") and svc.get("restart") not in ("no", False)
+        if isinstance(svc, dict) and svc.get("container_name") and not uat_provisioner.ends_after_its_run(svc)
     ]
     readers = [
         str(svc["container_name"])

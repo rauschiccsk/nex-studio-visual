@@ -65,10 +65,14 @@ def check(compose_path: Path, deploy_host: Optional[str]) -> list[str]:
         return []
     if not isinstance(compose, dict):
         return []
-    backend = uat_provisioner._find_backend(compose.get("services") or {})
+    services = compose.get("services") or {}
+    backend = uat_provisioner._find_backend(services)
     own: dict[str, Optional[set[str]]] = {}
     said = []
     for link in uat_provisioner.installation_links(compose):
+        # DEV-506 — a step that runs once has ended by now: there is no one to ask and nothing it could reach.
+        if any(uat_provisioner.ends_after_its_run(services.get(name)) for name in (link.caller, link.target)):
+            continue
         caller = uat_provisioner.container_of(compose, link.caller)
         target = uat_provisioner.container_of(compose, link.target)
         if not caller or not target:

@@ -3369,11 +3369,19 @@ READERS_JOINED = (
 )
 
 
+def ends_after_its_run(svc: Any) -> bool:
+    """DEV-506 — a service of a written installation that runs once (the cockpit writes it ``restart: "no"``, DEV-11;
+    ``no`` unquoted is YAML's false). When a deploy looks at the installation it has ended: nothing reaches it, it
+    reaches nothing, and the machine's network is no use to it."""
+    return isinstance(svc, dict) and svc.get("restart") in ("no", False)
+
+
 def readers_on_their_backends_networks(
     services: dict[str, Any], backend: Optional[str], *, without_backend: tuple[str, ...] = ()
 ) -> list[str]:
     """DEV-506 — every service other than the backend that is given an address on the machine's network (a worker that
-    reads NEX Knowledge, one that asks the Manager) joins the networks its backend is on: the backend reaches those
+    reads NEX Knowledge, one that asks the Manager) and keeps running (:func:`ends_after_its_run`) joins the networks
+    its backend is on: the backend reaches those
     addresses (the deploy checks it), and the installation has those networks — never one it does not have. As a client
     only, with no route of its own; the links of DEV-306 lead it to its own installation. ``without_backend`` are the
     networks when the installation has no backend. Changes ``services`` in place; the names of the services that joined.
@@ -3382,7 +3390,9 @@ def readers_on_their_backends_networks(
     networks = sorted(_networks_of(backend_service)) if isinstance(backend_service, dict) else list(without_backend)
     joined = []
     for name, svc in services.items():
-        if name == backend or not isinstance(svc, dict) or not declared_env_keys(svc) & set(MACHINE_ADDRESS_ENVS):
+        if name == backend or not isinstance(svc, dict) or ends_after_its_run(svc):
+            continue
+        if not declared_env_keys(svc) & set(MACHINE_ADDRESS_ENVS):
             continue
         missing = [network for network in networks if network not in _networks_of(svc)]
         for network in missing:
