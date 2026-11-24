@@ -16,6 +16,7 @@ import uuid
 from typing import Callable
 
 import httpx
+import pytest
 from jose import jwt
 
 from backend.config.settings import settings
@@ -167,9 +168,24 @@ def test_a_switched_off_operator_is_named(tmp_path, monkeypatch):
     assert warning is not None and "používateľ „rausch“ je v NEX Manageri zákazníka deaktivovaný" in warning
 
 
-def test_an_operator_the_manager_lets_in_goes_through_the_door(tmp_path, monkeypatch):
+def test_an_operator_who_must_change_the_password_first_is_named(tmp_path, monkeypatch):
+    """DEV-509 — 24.11.2026 NEX Inbox 1.12.0 on UAT MÁGERSTAV: „rausch“ had the app assigned but was to change the
+    password first; the app (nex-app-kit) refused the ticket with 403 and the deploy said „pokazený je vstup“."""
     _pair(tmp_path, monkeypatch)
-    _manager_says(monkeypatch, 200, {**IDENTITY, "has_module_access": True})
+    _manager_says(monkeypatch, 200, {**IDENTITY, "has_module_access": True, "must_change_password": True})
+
+    warning = _warning(monkeypatch, _door_must_not_be_tried)
+
+    assert warning == (
+        "Vstup do aplikácie kokpit neoveril: používateľ „rausch“ si má v NEX Manageri zákazníka najprv zmeniť heslo, "
+        "takže vstupenka na jeho meno by neprešla. Vyskúšaj vstup z NEX Managera účtom, ktorý má aplikáciu pridelenú."
+    )
+
+
+@pytest.mark.parametrize("password", [{"must_change_password": False}, {}], ids=["no-change-due", "older-manager"])
+def test_an_operator_the_manager_lets_in_goes_through_the_door(tmp_path, monkeypatch, password):
+    _pair(tmp_path, monkeypatch)
+    _manager_says(monkeypatch, 200, {**IDENTITY, "has_module_access": True, **password})
     tried: list[str] = []
 
     def door(customer, project, url, *, subject):

@@ -112,6 +112,9 @@ def operator_cannot_enter(customer_slug: str, project_slug: str, login: str) -> 
         return f"používateľ „{login}“ je v NEX Manageri zákazníka deaktivovaný"
     if answer.status_code == httpx.codes.OK and body.get("has_module_access") is False:
         return f"používateľ „{login}“ nemá v NEX Manageri zákazníka pridelenú aplikáciu"
+    # DEV-509 — the app template lets nobody in who is to change the password first (nex-app-kit: 403).
+    if answer.status_code == httpx.codes.OK and body.get("must_change_password") is True:
+        return f"používateľ „{login}“ si má v NEX Manageri zákazníka najprv zmeniť heslo"
     return None
 
 
