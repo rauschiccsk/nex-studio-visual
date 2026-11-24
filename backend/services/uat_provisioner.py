@@ -3362,6 +3362,36 @@ def declared_env_keys(svc: Any) -> set[str]:
     return set()
 
 
+#: DEV-506 — what a redeploy says when it put a reader on its backend's networks (ICCINT-104: a change is never silent).
+READERS_JOINED = (
+    "Kokpit pripojil {services} na siete backendu ({networks}) — čítajú NEX Knowledge alebo NEX Manager, ktoré "
+    "odpovedajú len na sieti stroja."
+)
+
+
+def readers_on_their_backends_networks(
+    services: dict[str, Any], backend: Optional[str], *, without_backend: tuple[str, ...] = ()
+) -> list[str]:
+    """DEV-506 — every service other than the backend that is given an address on the machine's network (a worker that
+    reads NEX Knowledge, one that asks the Manager) joins the networks its backend is on: the backend reaches those
+    addresses (the deploy checks it), and the installation has those networks — never one it does not have. As a client
+    only, with no route of its own; the links of DEV-306 lead it to its own installation. ``without_backend`` are the
+    networks when the installation has no backend. Changes ``services`` in place; the names of the services that joined.
+    """
+    backend_service = services.get(backend) if backend else None
+    networks = sorted(_networks_of(backend_service)) if isinstance(backend_service, dict) else list(without_backend)
+    joined = []
+    for name, svc in services.items():
+        if name == backend or not isinstance(svc, dict) or not declared_env_keys(svc) & set(MACHINE_ADDRESS_ENVS):
+            continue
+        missing = [network for network in networks if network not in _networks_of(svc)]
+        for network in missing:
+            _add_proxy_network(svc, network)
+        if missing:
+            joined.append(name)
+    return sorted(joined)
+
+
 def _networks_of(svc: dict[str, Any]) -> set[str]:
     """The compose networks a service is on — ``default`` when it names none."""
     nets = svc.get("networks")
@@ -3687,23 +3717,10 @@ def build_uat_compose(
                 services[be_name].get("labels"), backend_traefik_labels(name_base, be_port, host, routing)
             )
 
-    # DEV-506 — every other service that is given an address on the machine's network (a worker that reads NEX
-    # Knowledge, one that asks the Manager) joins the networks its backend is on — the backend reaches those addresses
-    # (the deploy checks it). As a client only, with no route of its own; the links of DEV-306 lead it to its own
-    # installation. A redeploy keeps the networks of the installation (``vlastne_smerovanie``), so the backend's
-    # networks are the ones the installation really has — never one it does not have.
-    readers_networks = (
-        sorted(_networks_of(services[be_name]))
-        if be_name and isinstance(services.get(be_name), dict)
-        else ([] if vlastne_smerovanie else ["default", routing.network])
+    # DEV-506 — a service that reads NEX Knowledge or asks the Manager joins its backend's networks.
+    readers_on_their_backends_networks(
+        services, be_name, without_backend=() if vlastne_smerovanie else ("default", routing.network)
     )
-    for svc_name, svc in services.items():
-        if svc_name == be_name or not isinstance(svc, dict):
-            continue
-        if declared_env_keys(svc) & set(MACHINE_ADDRESS_ENVS):
-            for network in readers_networks:
-                if network not in _networks_of(svc):
-                    _add_proxy_network(svc, network)
 
     # Optional loopback debug ports (FE base / BE base+100 / DB base+200).
     if loopback_base_port is not None:
@@ -4666,6 +4683,12 @@ def provision_uat(
             raise UndeployableImageError(
                 UNBUILDABLE.format(images=", ".join(nepostavitelne)) + " Inštalácia zostala nedotknutá."
             )
+        # DEV-506 — a redeploy bumps the running installation's compose and renders no service anew: a reader the
+        # installation was written without (before cockpit 4.172.3) joins its backend's networks here, and it is said.
+        joined = readers_on_their_backends_networks(povysene["services"], roles["backend"])
+        if joined:
+            backend_networks = sorted(_networks_of(povysene["services"][roles["backend"]]))
+            warnings.append(READERS_JOINED.format(services=", ".join(joined), networks=", ".join(backend_networks)))
         _, naviazane = links_within_installation(povysene, routing.network)
         if naviazane:
             # DEV-306 — said once, on the deploy that changed the installation (ICCINT-104: a change is never silent).

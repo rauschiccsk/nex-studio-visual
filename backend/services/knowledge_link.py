@@ -83,8 +83,8 @@ def _read(container: str, deploy_host: Optional[str]) -> Optional[str]:
 
 
 def _reading_containers(compose_path: Path, deploy_host: Optional[str]) -> list[str]:
-    """DEV-506 — the containers the read is tried from: every service that is given the address of NEX Knowledge (the
-    HelpDesk reads it in its worker), else the backend (an app that gets it another way)."""
+    """DEV-506 — the containers the read is tried from: every running service that is given the address of NEX
+    Knowledge (the HelpDesk reads it in its worker), else the backend (an app that gets it another way)."""
     if deploy_host:
         text, _error = remote_instance.read_text(compose_path.parent, compose_path.name, deploy_host=deploy_host)
     else:
@@ -94,7 +94,12 @@ def _reading_containers(compose_path: Path, deploy_host: Optional[str]) -> list[
     except yaml.YAMLError:
         return []
     services = [svc for svc in ((data.get("services") or {}).values() if isinstance(data, dict) else ())]
-    services = [svc for svc in services if isinstance(svc, dict) and svc.get("container_name")]
+    # A step that runs once (the cockpit writes it ``restart: "no"``) has ended by the time the deploy reads.
+    services = [
+        svc
+        for svc in services
+        if isinstance(svc, dict) and svc.get("container_name") and svc.get("restart") not in ("no", False)
+    ]
     readers = [
         str(svc["container_name"])
         for svc in services

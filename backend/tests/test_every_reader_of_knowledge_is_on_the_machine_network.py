@@ -10,6 +10,7 @@ left on the installation's own network (measured on UAT: backend reaches it, wor
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,65 @@ def test_a_redeploy_puts_the_reader_on_the_network_its_backend_has(project) -> N
     assert NET not in _networks(services["migrate"])
 
 
+def _git(project: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(project), *args], capture_output=True, check=True)
+
+
+@pytest.fixture
+def released(tmp_path, monkeypatch) -> Path:
+    """The project as a deploy takes it: committed and tagged with the version it deploys."""
+    monkeypatch.setattr(P, "_docker_image_exists", lambda image: True)
+    here = tmp_path / "projects" / "nex-helpdesk"
+    here.mkdir(parents=True)
+    (here / "docker-compose.yml").write_text(SOURCE, encoding="utf-8")
+    (here / ".env.example").write_text("SECRET_KEY=change-me\nNEX_KNOWLEDGE_BASE_URL=\n", encoding="utf-8")
+    _git(here.parent, "init", "-q", "-b", "main", str(here))
+    _git(here, "add", "-A")
+    _git(here, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "release 1.0.0")
+    _git(here, "tag", "v1.0.0")
+    return here
+
+
+def _deploy(tmp_path: Path):
+    return P.provision_uat(
+        "nex-helpdesk",
+        "icc",
+        projects_root=tmp_path / "projects",
+        uat_root=tmp_path / "uat",
+        customer_slug="icc",
+        app="helpdesk",
+        full_project_slug="nex-helpdesk",
+        version="1.0.0",
+    )
+
+
+def test_a_redeploy_of_an_installation_written_before_puts_its_reader_on_the_network(tmp_path, released) -> None:
+    """24.11.2026, NEX HelpDesk UAT ICC on cockpit 4.172.2: „Nasadiť znova“ kept the worker off the machine's network —
+    a redeploy bumps the running installation's compose and does not render the services anew. The deploy itself, the
+    way the deploy screen runs it, on an installation as cockpit 4.172.1 wrote it."""
+    compose_path = _deploy(tmp_path).compose_path
+    before = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    for name in ("worker", "mailer"):
+        before["services"][name].pop("networks", None)
+    compose_path.write_text(P.render_uat_compose(before), encoding="utf-8")
+
+    result = _deploy(tmp_path)
+
+    services = yaml.safe_load(result.compose_path.read_text(encoding="utf-8"))["services"]
+    assert _networks(services["worker"]) == ["default", NET] and _networks(services["mailer"]) == ["default", NET]
+    assert NET not in _networks(services["db"])
+    assert "backend" in (services["worker"].get("links") or [])
+    assert P.READERS_JOINED.format(services="mailer, worker", networks=f"default, {NET}") in result.warnings
+
+
+def test_a_redeploy_that_changes_nothing_says_nothing_of_it(tmp_path, released) -> None:
+    _deploy(tmp_path)
+
+    result = _deploy(tmp_path)
+
+    assert not [w for w in result.warnings if "NEX Knowledge alebo NEX Manager" in w]
+
+
 # ── 2. on the machine's network a reader reaches its own installation by its links (DEV-306) ───────────────────────
 
 
@@ -181,6 +241,9 @@ INSTALLED = """services:
       - NEX_KNOWLEDGE_BASE_URL=http://uat-icc-knowledge-backend:8000
   migrate:
     container_name: uat-icc-helpdesk-migrate
+    restart: "no"
+    environment:
+      NEX_KNOWLEDGE_BASE_URL: http://uat-icc-knowledge-backend:8000
 """
 
 
@@ -195,6 +258,20 @@ def test_the_read_is_tried_from_every_service_that_has_the_address(tmp_path, mon
     monkeypatch.setattr(knowledge_link, "_read", lambda container, host: asked.append(container) or "OK 1")
 
     assert knowledge_link.check(_installed(tmp_path), None) == (knowledge_link.READS.format(areas="1"), [])
+    assert asked == ["uat-icc-helpdesk-backend", "uat-icc-helpdesk-worker"]
+
+
+@pytest.mark.parametrize("restart", ['"no"', "no", "'no'"])
+def test_a_step_that_runs_once_is_not_asked_it_has_ended(tmp_path, monkeypatch, restart) -> None:
+    """24.11.2026: the read after the deploy asked the migration, which had already ended — „Docker v kontajneri
+    uat-icc-helpdesk-migrate neodpovedal“ hid what the backend and the worker said."""
+    compose = _installed(tmp_path)
+    compose.write_text(compose.read_text(encoding="utf-8").replace('restart: "no"', f"restart: {restart}"))
+    asked: list[str] = []
+    monkeypatch.setattr(knowledge_link, "_read", lambda container, host: asked.append(container) or "OK 1")
+
+    knowledge_link.check(compose, None)
+
     assert asked == ["uat-icc-helpdesk-backend", "uat-icc-helpdesk-worker"]
 
 
