@@ -68,7 +68,8 @@ pripraví zadanie a jedným kliknutím z neho vznikne projekt — alebo požiada
 7. **Po konci** sa rozhovor presunie k projektu — v jeho Poradcovi je ako prvý a pokračuje sa v ňom; v Nápadoch
    ostane *Založený ako …* / *Pridaný do …* s odkazom.
 8. **Čo Poradca v Nápadoch nesmie** — to isté ako dnes: nič nemení, nevidí ostré inštalácie, trezor, `.env`, kód
-   ani dáta iných projektov, nedostane sa na internet.
+   ani dáta iných projektov. Na internete vyhľadáva a číta stránky (DEV-430), súbor uložiť nevie — súbory, ktoré
+   projekt z internetu potrebuje, vymenuje v zadaní a stiahne ich kokpit (časť 4.9, DEV-511).
 9. **Diera kokpitu** (napríklad Web projekt na šablóne) — Poradca ju pomenuje a ponúkne tiket na kokpit
    („Založiť tiket“, ako dnes).
 
@@ -125,6 +126,18 @@ Poradca) — konzultácia je súčasť ceny projektu. Zahodený nápad: cena ost
 ### 4.8 Obrazovky
 `Sidebar.tsx` (Nápady nad Projekty), trasy `/napady` a `/napady/:ideaId`, stránka Nápadov zo spoločných častí Poradcu
 (`components/poradca/*`), tlačidlá dvoch koncov, predvyplnený `NewProjectPage`, tlačidlo na stránke Projekty.
+
+### 4.9 Podklady z internetu (DEV-511)
+25.11.2026 zadanie NEX DualBook nechalo Manažérovi stiahnuť desať súborov (schémy XSD k DPH, vzory, príručku banky)
+do `docs/reference/` — Projektant ich našiel, ale uložiť nevedel a Staviteľ internet nemá. Director: „…mám ich vložiť
+ručne čo ja robiť nebudem.“
+- Projektant ich v zadaní vymenuje v bloku `<podklady>`, riadok `cesta | adresa | opis`; riadok bez presnej adresy
+  súboru kokpit vráti Projektantovi na opravu a zadanie človeku neponúkne (`poradca/references.py`).
+- Pri „Založiť projekt“ ich kokpit stiahne sám (`reference_docs.py`): len `https` na štandardnom porte, len verejné
+  adresy (pripojí sa na overenú IP, certifikát sa overí podľa mena), každé presmerovanie overí znova, strop veľkosti
+  a času, obsah musí zodpovedať prípone. Uloží ich do `docs/reference/` so zoznamom `ZDROJE.md` a `zdroje.json`
+  a commitne len tento priečinok.
+- Stránka verzie ukáže „Podklady z internetu“ — čo prišlo, čo nie a prečo — a „Stiahnuť znova“.
 
 ## 5. Kto smie
 

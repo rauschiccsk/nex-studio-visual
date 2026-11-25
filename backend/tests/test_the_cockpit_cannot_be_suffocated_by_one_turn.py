@@ -71,6 +71,7 @@ SHELLING_MODULES = {
     "project_adoption",
     "project_ci_runner",
     "project_files",
+    "reference_docs",
     "remote_instance",
     "source_language",
     "system_setting",

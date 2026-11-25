@@ -23,9 +23,20 @@ import asyncio
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -69,7 +80,7 @@ from backend.schemas.poradca import (
     PoradcaTicketProposalRead,
     PoradcaVersionInfo,
 )
-from backend.services import claude_agent, metrics, plane_tickets, project_files
+from backend.services import claude_agent, metrics, plane_tickets, project_files, reference_docs
 from backend.services import version as version_service
 from backend.services.plane_gateway import PlaneError
 from backend.services.poradca import (
@@ -332,11 +343,13 @@ def get_idea(
 def idea_founded(
     idea_id: uuid.UUID,
     payload: IdeaFoundedCreate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_shu_or_above),
 ) -> IdeaOutcome:
     """The person founded a project from the idea's brief: its 0.1.0 gets the brief, the talk moves to it, and the
-    project gets its ticket in the DEV register. A second click returns the same — and files a ticket that failed."""
+    project gets its ticket in the DEV register. A second click returns the same — and files a ticket that failed.
+    DEV-511: the documents from the internet the brief lists are downloaded into the project after the answer."""
     idea, conversation = _idea_for(db, current_user, idea_id)
     project = authz.assert_project_id_access(db, current_user, payload.project_id)
     try:
@@ -351,6 +364,9 @@ def idea_founded(
             status.HTTP_409_CONFLICT,
             detail="Verzia 0.1.0 projektu už má iné zadanie — zadanie z nápadu ho neprepíše.",
         ) from exc
+    wanted = ideas.founding_references(db, idea)
+    if wanted and project.source_path:
+        background.add_task(reference_docs.start_once, Path(project.source_path), wanted)
     ticket_error = None
     try:
         ideas.file_project_ticket(db, plane_tickets.gateway(), current_user, idea, conversation, project)

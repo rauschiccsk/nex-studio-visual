@@ -277,6 +277,15 @@ class Settings(BaseSettings):
     poradca_attachment_max_bytes: int = 5 * 1024 * 1024
     poradca_attachments_max_count: int = 5
     poradca_attachments_max_total_bytes: int = 15 * 1024 * 1024
+    # DEV-511 — the documents from the internet a new project lists (reference_docs): one file at most, the whole
+    # download of one at most (seconds), how many redirects one may take, and who the cockpit says it is — a browser:
+    # the bank's site answered 403 to a tool and 200 to a browser (measured 25.11.2026).
+    reference_max_bytes: int = 50 * 1024 * 1024
+    reference_timeout_seconds: int = 120
+    reference_max_redirects: int = 5
+    reference_user_agent: str = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+    )
 
     # Backstop timeout (seconds) for a single headless ``claude -p`` invocation
     # driven by the F-007 orchestrator (CR-NS-018 fix-round). Since agent

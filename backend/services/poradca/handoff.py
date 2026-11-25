@@ -110,13 +110,17 @@ def held_for_answer(text: str) -> bool:
 
 def withheld(text: str) -> Optional[str]:
     """Why the answer offers nothing it prepared, or ``None`` when it offers it: it asks the person and waits for the
-    answer (DEV-264), or what the person would pass on is not Slovak (DEV-356)."""
+    answer (DEV-264), what the person would pass on is not Slovak (DEV-356), or the brief's list of documents from the
+    internet is not complete (DEV-511)."""
     if held_for_answer(text):
         return HELD_FOR_ANSWER
-    from backend.services.poradca import block_language  # it reads the blocks of this module
+    from backend.services.poradca import block_language, references  # they read the blocks of this module
 
     found = block_language.not_in_slovak(text)
-    return block_language.refusal(found) if found else None
+    if found:
+        return block_language.refusal(found)
+    problems = references.problems_in_answer(text)
+    return references.refusal(problems) if problems else None
 
 
 def extract_block(text: str, name: str) -> Optional[str]:

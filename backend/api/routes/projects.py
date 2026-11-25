@@ -30,7 +30,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -72,6 +72,8 @@ from backend.schemas.project import (
     ProjectStatus,
     ProjectType,
     ProjectUpdate,
+    ReferenceDocRead,
+    ReferenceDocsRead,
     TemplateOption,
     UpgradeBrief,
 )
@@ -84,6 +86,7 @@ from backend.services import (
     orchestrator,
     project_adoption,
     project_memory,
+    reference_docs,
     uat_provisioner,
     unsaved_work,
     vizual_sandbox,
@@ -960,6 +963,64 @@ def commit_app_kit(
             ),
         )
     return AppKitUpgradeResult(upgraded=True, target_version=version, committed=True)
+
+
+def _reference_docs(project: Project) -> ReferenceDocsRead:
+    root = Path(project.source_path) if project.source_path else None
+    if root is None:
+        return ReferenceDocsRead(running=False, items=[])
+    return ReferenceDocsRead(
+        running=reference_docs.running(root),
+        items=[
+            ReferenceDocRead(
+                path=one.path,
+                url=one.url,
+                description=one.description,
+                ok=one.ok,
+                said=one.said,
+                size=one.size,
+                fetched_at=one.fetched_at,
+            )
+            for one in reference_docs.state(root)
+        ],
+    )
+
+
+@router.get("/{project_id}/references", response_model=ReferenceDocsRead)
+def get_reference_docs(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReferenceDocsRead:
+    """DEV-511 — the documents from the internet the cockpit downloaded into the project: what came, what did not
+    and why. Empty for a project whose brief listed none."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise http_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    return _reference_docs(project)
+
+
+@router.post("/{project_id}/references/retry", response_model=ReferenceDocsRead)
+def retry_reference_docs(
+    project_id: UUID,
+    background: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReferenceDocsRead:
+    """DEV-511 — „Stiahnuť znova“: download again what did not come; what came stays. Runs after the answer."""
+    try:
+        project = project_service.get_by_id(db, project_id)
+    except ValueError as exc:
+        raise http_error(exc) from exc
+    authz.authorize_project(current_user, project)
+    answer = _reference_docs(project)
+    if not any(not one.ok for one in answer.items):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Všetky podklady sú stiahnuté.")
+    if not answer.running:
+        background.add_task(reference_docs.start, Path(project.source_path), None)
+    return answer.model_copy(update={"running": True})
 
 
 @router.get("/{project_id}/git-status")

@@ -127,6 +127,18 @@ export function commitAppKitApi(projectId: string): Promise<components["schemas"
   return api.post(`/projects/${projectId}/app-kit-commit`, {});
 }
 
+/** DEV-511: the documents from the internet the cockpit downloaded into the project's docs/reference/. */
+export type ReferenceDocs = components["schemas"]["ReferenceDocsRead"];
+
+export function getReferenceDocsApi(projectId: string): Promise<ReferenceDocs> {
+  return api.get<ReferenceDocs>(`/projects/${projectId}/references`);
+}
+
+/** DEV-511: „Stiahnuť znova“ — download again what did not come; what came stays. */
+export function retryReferenceDocsApi(projectId: string): Promise<ReferenceDocs> {
+  return api.post<ReferenceDocs>(`/projects/${projectId}/references/retry`, {});
+}
+
 /** One uncommitted entry in the project's working tree (git status --porcelain). */
 interface GitStatusFile {
   code: string;

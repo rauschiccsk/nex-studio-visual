@@ -1415,6 +1415,7 @@ export interface paths {
          * Idea Founded
          * @description The person founded a project from the idea's brief: its 0.1.0 gets the brief, the talk moves to it, and the
          *     project gets its ticket in the DEV register. A second click returns the same — and files a ticket that failed.
+         *     DEV-511: the documents from the internet the brief lists are downloaded into the project after the answer.
          */
         post: operations["idea_founded_api_v1_poradca_ideas__idea_id__founded_post"];
         delete?: never;
@@ -2237,6 +2238,47 @@ export interface paths {
          *     * **404** — projekt alebo cieľový používateľ neexistuje.
          */
         post: operations["reassign_project_api_v1_projects__project_id__reassign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Reference Docs
+         * @description DEV-511 — the documents from the internet the cockpit downloaded into the project: what came, what did not
+         *     and why. Empty for a project whose brief listed none.
+         */
+        get: operations["get_reference_docs_api_v1_projects__project_id__references_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/references/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Reference Docs
+         * @description DEV-511 — „Stiahnuť znova“: download again what did not come; what came stays. Runs after the answer.
+         */
+        post: operations["retry_reference_docs_api_v1_projects__project_id__references_retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7944,6 +7986,37 @@ export interface components {
             rate_docs?: number | string | null;
         };
         /**
+         * ReferenceDocRead
+         * @description DEV-511 — one document from the internet the project's brief lists, as the last download left it.
+         */
+        ReferenceDocRead: {
+            /** Description */
+            description: string;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Ok */
+            ok: boolean;
+            /** Path */
+            path: string;
+            /** Said */
+            said?: string | null;
+            /** Size */
+            size?: number | null;
+            /** Url */
+            url: string;
+        };
+        /**
+         * ReferenceDocsRead
+         * @description DEV-511 — the documents from the internet in ``docs/reference/`` of the project: what came, what did not and
+         *     why, and whether a download is going on now.
+         */
+        ReferenceDocsRead: {
+            /** Items */
+            items: components["schemas"]["ReferenceDocRead"][];
+            /** Running */
+            running: boolean;
+        };
+        /**
          * ReleaseNote
          * @description One version's user-facing release notes.
          *
@@ -13098,6 +13171,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["_HandoverResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reference_docs_api_v1_projects__project_id__references_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceDocsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_reference_docs_api_v1_projects__project_id__references_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceDocsRead"];
                 };
             };
             /** @description Validation Error */

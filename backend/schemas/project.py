@@ -527,3 +527,23 @@ class ProjectRead(BaseModel):
     # (not computed there). Drives the FE guard that blocks deleting a PROD-deployed project (CR-V2-027):
     # a project graduates to PROD on its first successful prod deploy and can then only be archived.
     has_prod_deploy: bool = False
+
+
+class ReferenceDocRead(BaseModel):
+    """DEV-511 — one document from the internet the project's brief lists, as the last download left it."""
+
+    path: str
+    url: str
+    description: str
+    ok: bool
+    said: Optional[str] = None
+    size: Optional[int] = None
+    fetched_at: Optional[str] = None
+
+
+class ReferenceDocsRead(BaseModel):
+    """DEV-511 — the documents from the internet in ``docs/reference/`` of the project: what came, what did not and
+    why, and whether a download is going on now."""
+
+    running: bool
+    items: list[ReferenceDocRead]

@@ -124,6 +124,8 @@ const STEP_VERBS: Record<string, string> = {
   rad: "Čakám v rade",
   // DEV-356: the answer went back to its agent — a passed-on block was not Slovak.
   jazyk: "Prepisujem po slovensky",
+  // DEV-511: the brief's list of documents from the internet went back to be completed.
+  podklady: "Dopĺňam",
 };
 
 export function stepLabel(tool: string, target: string): string {

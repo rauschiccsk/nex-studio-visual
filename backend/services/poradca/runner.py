@@ -54,7 +54,7 @@ from backend.db.session import SessionLocal
 from backend.services import app_languages, build_db, build_sandbox, project_surfaces, system_setting, usage_ledger
 from backend.services import create_project_postscaffold as postscaffold
 from backend.services.claude_agent import UsageMetadata, _usage_from
-from backend.services.poradca import attachments, block_language, sandbox
+from backend.services.poradca import attachments, block_language, references, sandbox
 from backend.services.poradca.context import known_secret_values
 from backend.services.poradca.mcp_server import McpServer
 from backend.services.poradca.secrets_filter import SecretFilter
@@ -195,6 +195,8 @@ _running: dict[UUID, _Running] = {}
 
 #: DEV-356 — the step the person sees while the answer goes back to its agent to be rewritten in Slovak.
 REWRITE_STEP = "jazyk"
+#: DEV-511 — the step the person sees while the brief's list of documents from the internet goes back to be completed.
+REFERENCES_STEP = "podklady"
 
 
 def max_concurrent(db: Session) -> int:
@@ -530,9 +532,16 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
             )
             # DEV-356: what the person passes on is Slovak — an answer whose block is not goes back once, in the same
             # session, before anyone sees it. Out of time, it is kept: then the read offers nothing of it and says why.
+            # DEV-511: so does a brief whose list of documents from the internet is not complete.
             foreign = block_language.not_in_slovak(content)
-            if foreign and deadline - time.monotonic() > 0:
-                await _record_step(entry, message_id, REWRITE_STEP, block_language.step_target(foreign))
+            incomplete = [] if foreign else references.problems_in_answer(content)
+            if (foreign or incomplete) and deadline - time.monotonic() > 0:
+                if foreign:
+                    await _record_step(entry, message_id, REWRITE_STEP, block_language.step_target(foreign))
+                    directive = block_language.rewrite_directive(foreign)
+                else:
+                    await _record_step(entry, message_id, REFERENCES_STEP, references.STEP_TARGET)
+                    directive = references.rewrite_directive(incomplete)
                 await build_sandbox.reap_container(entry.container)
                 argv = sandbox.run_argv(
                     project_slug=slug,
@@ -541,7 +550,7 @@ async def _run(message_id: UUID, conversation_id: UUID, question: str, user_id: 
                     token=token,
                     network=network,
                     call=sandbox.ClaudeCall(
-                        prompt=block_language.rewrite_directive(foreign),
+                        prompt=directive,
                         claude_session_id=session_id,
                         charter_text=None,  # the session exists now — the rewrite resumes it
                         model=model,

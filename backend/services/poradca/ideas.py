@@ -23,7 +23,7 @@ from backend.db.models.projects import Project
 from backend.services import metrics, plane_responsible, plane_tickets
 from backend.services import version as version_service
 from backend.services.plane_gateway import PlaneError, PlaneGateway
-from backend.services.poradca import handoff, runner
+from backend.services.poradca import handoff, references, runner
 
 STATE_OPEN = "open"
 STATE_BRIEF_READY = "brief_ready"
@@ -223,6 +223,14 @@ def found(db: Session, idea: Idea, conversation: PoradcaConversation, *, message
     _conclude(idea, conversation, OUTCOME_FOUNDED, project, message)
     db.flush()
     return idea
+
+
+def founding_references(db: Session, idea: Idea) -> list[references.Reference]:
+    """DEV-511 — the documents from the internet the brief the project was founded from lists (``<podklady>``);
+    ``[]`` for an idea that founded nothing or a brief without the list."""
+    message = db.get(PoradcaMessage, idea.outcome_message_id) if idea.outcome_message_id else None
+    brief = handoff.project_brief(message.content) if message is not None else None
+    return references.of_brief(brief.brief)[0] if brief is not None else []
 
 
 def file_project_ticket(

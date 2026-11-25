@@ -18,6 +18,7 @@ import { mayOperateProject } from "@/services/permissions";
 import VersionSettingsSection from "@/components/version/VersionSettingsSection";
 import FastFixTickets from "@/components/version/FastFixTickets";
 import PlannedVersionTickets from "@/components/version/PlannedVersionTickets";
+import ProjectReferences from "@/components/version/ProjectReferences";
 import CancelVersion from "@/components/version/CancelVersion";
 import { useActiveContextStore } from "@/store/activeContextStore";
 
@@ -304,6 +305,8 @@ export default function VersionDetailPage() {
               )}
               {/* DEV-498: the tickets put into the version, right where it is started — no numbers in the Zadanie. */}
               <PlannedVersionTickets slug={slug ?? ""} versionId={version.id} />
+              {/* DEV-511: the documents from the internet the cockpit downloaded for the project. */}
+              <ProjectReferences projectId={version.project_id} canRetry={mayOperateProject(user, project.created_by)} />
               <ErrorNote error={zadanieError} className="mt-2" />
               {briefClash && (
                 <BriefConflictPanel
