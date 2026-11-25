@@ -6,6 +6,7 @@ import type {
   PoradcaConversation,
   PoradcaConversationDetail,
   PoradcaProjectContext,
+  PoradcaReferencesStarted,
   PoradcaReviewConversation,
   PoradcaStatus,
   PoradcaTicketCreate,
@@ -64,6 +65,11 @@ export function askPoradcaApi(
   attachments: PoradcaImageUpload[] = [],
 ): Promise<PoradcaConversationDetail> {
   return api.post<PoradcaConversationDetail>(`/poradca/conversations/${id}/messages`, { question, attachments });
+}
+
+/** DEV-513 — „Stiahnuť do projektu“: the documents from the internet the answer lists go into the project. */
+export function addPoradcaReferencesApi(messageId: string): Promise<PoradcaReferencesStarted> {
+  return api.post<PoradcaReferencesStarted>(`/poradca/messages/${messageId}/references`, {});
 }
 
 /** What we are talking about — `null` = the whole project. */

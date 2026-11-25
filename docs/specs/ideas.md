@@ -138,6 +138,9 @@ ručne čo ja robiť nebudem.“
   a času, obsah musí zodpovedať prípone. Uloží ich do `docs/reference/` so zoznamom `ZDROJE.md` a `zdroje.json`
   a commitne len tento priečinok.
 - Stránka verzie ukáže „Podklady z internetu“ — čo prišlo, čo nie a prečo — a „Stiahnuť znova“.
+- Do založeného projektu podklad doplní Poradca projektu (DEV-513): blok `<podklady>` pod odpoveďou a tlačidlo
+  „Stiahnuť do projektu“; kokpit ho pridá k podkladom projektu. Projektant aj Poradca uvedú verejný súbor, aj keď im
+  ho web prečítať nedovolí — kokpit sťahuje ako prehliadač (25.11.2026 príručka banky pre NEX DualBook).
 
 ## 5. Kto smie
 

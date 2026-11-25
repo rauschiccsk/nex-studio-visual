@@ -361,3 +361,43 @@ def test_without_a_repository_the_documents_stay(web, tmp_path) -> None:
     (done,) = R.fetch_into(tmp_path, [XSD_REF])
 
     assert done.ok and (tmp_path / XSD_REF.path).read_bytes() == XSD
+
+
+# ── DEV-513 — documents added to a founded project ─────────────────────────────────────────────────────────────────
+
+
+def test_an_added_document_joins_what_the_project_has_and_what_came_is_not_downloaded_again(web, tmp_path) -> None:
+    pages, asked = web
+    pages["https://194.1.4.55/a/dph2025.xsd"] = _ok(XSD)
+    R.fetch_into(tmp_path, [XSD_REF])
+    pages["https://193.85.205.10/b/prirucka.pdf"] = _ok(PDF)
+    asked.clear()
+
+    done = R.add_into(tmp_path, [XSD_REF, BANK_REF])
+
+    assert [r.headers["host"] for r in asked] == ["www.unicreditbank.sk"]
+    assert [(d.path, d.ok) for d in done] == [(XSD_REF.path, True), (BANK_REF.path, True)]
+    assert R.state(tmp_path) == done
+    assert (tmp_path / BANK_REF.path).read_bytes() == PDF
+
+
+def test_an_added_document_with_another_address_is_downloaded_anew(web, tmp_path) -> None:
+    pages, asked = web
+    pages["https://194.1.4.55/a/dph2025.xsd"] = _ok(XSD)
+    pages["https://194.1.4.55/new/dph2025.xsd"] = _ok(XSD + b"<!-- new -->")
+    R.fetch_into(tmp_path, [XSD_REF])
+    asked.clear()
+    newer = Reference(XSD_REF.path, "https://ekr.financnasprava.sk/new/dph2025.xsd", XSD_REF.description)
+
+    (done,) = R.add_into(tmp_path, [newer])
+
+    assert done.ok and done.url == newer.url and len(asked) == 1
+    assert (tmp_path / XSD_REF.path).read_bytes().endswith(b"<!-- new -->")
+
+
+def test_adding_goes_through_the_one_lock_of_the_project(web, tmp_path) -> None:
+    pages, _asked = web
+    pages["https://193.85.205.10/b/prirucka.pdf"] = _ok(PDF)
+
+    assert R.start(tmp_path, [BANK_REF], adding=True) is True
+    assert [one.path for one in R.state(tmp_path)] == [BANK_REF.path]

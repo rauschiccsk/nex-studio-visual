@@ -88,6 +88,22 @@ class IdeaAdditionRead(BaseModel):
     title: str
 
 
+class PoradcaReferenceRead(BaseModel):
+    """DEV-513 — one document from the internet the Poradca offers to download into the project."""
+
+    path: str
+    url: str
+    description: str
+
+
+class PoradcaReferencesStarted(BaseModel):
+    """DEV-513 — „Stiahnuť do projektu“: whether the download started now (``False`` while one is already going on —
+    it takes the documents in its turn after the Manažér tries again) and how many documents the answer offers."""
+
+    started: bool
+    count: int
+
+
 class PoradcaMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -128,6 +144,12 @@ class PoradcaMessageRead(BaseModel):
     #: DEV-318 — the idea's two outcomes this answer offers (only in a finished answer that asks nothing).
     idea_project: Optional[IdeaProjectBriefRead] = None
     idea_addition: Optional[IdeaAdditionRead] = None
+    #: DEV-513 — a list of documents from the internet in the answer is not complete: nothing of the answer is offered,
+    #: and this is the sentence why; ``None`` when the answer has no list or a complete one.
+    incomplete_references: Optional[str] = None
+    #: DEV-513 — the documents from the internet the answer offers to download into the project („Stiahnuť do
+    #: projektu“); a list in a brief of a new project is the founding's, not this.
+    references: list[PoradcaReferenceRead] = Field(default_factory=list)
 
 
 class PoradcaAgentTicketsAttached(BaseModel):

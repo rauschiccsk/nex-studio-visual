@@ -70,6 +70,8 @@ from backend.schemas.poradca import (
     PoradcaHandedOff,
     PoradcaMessageRead,
     PoradcaProjectContext,
+    PoradcaReferenceRead,
+    PoradcaReferencesStarted,
     PoradcaRename,
     PoradcaReviewConversation,
     PoradcaScopeUpdate,
@@ -91,6 +93,7 @@ from backend.services.poradca import (
     handoff,
     ideas,
     readiness,
+    references,
     review,
     runner,
     tickets,
@@ -164,7 +167,10 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
     held = done_answer and handoff.held_for_answer(msg.content)
     # DEV-356: what the person would pass on is not Slovak — nothing of it is offered, the screen says why.
     foreign = block_language.not_in_slovak(msg.content) if done_answer and not held else []
-    offers = done_answer and not held and not foreign
+    # DEV-513: a list of documents from the internet that is not complete — nothing is offered either (DEV-511 checked
+    # it only at the founding, and the screen still showed „Založiť projekt“).
+    incomplete = references.problems_in_answer(msg.content) if done_answer and not held and not foreign else []
+    offers = done_answer and not held and not foreign and not incomplete
     # ICCINT-168: by the same price list as Costs (tokens of all kinds × Claude Code price list × ECB rate).
     cost = metrics.usage_cost(db, usage, msg.created_at) if msg.author == AUTHOR_PORADCA and usage else None
     return PoradcaMessageRead(
@@ -192,6 +198,10 @@ def _message_read(db: Session, msg: PoradcaMessage) -> PoradcaMessageRead:
         not_in_slovak=block_language.refusal(foreign) if foreign else None,
         idea_project=_idea_project(msg.content) if offers else None,
         idea_addition=_idea_addition(msg.content) if offers else None,
+        incomplete_references=references.refusal(incomplete) if incomplete else None,
+        references=[PoradcaReferenceRead(**asdict(one)) for one in references.of_answer(msg.content)[0]]
+        if offers
+        else [],
         choices=[
             PoradcaChoiceRead(card=c.card, label=c.label, status=c.status, question=c.question)
             for c in choices.choices(db, msg.content, msg.version_id)
@@ -685,6 +695,35 @@ def _answer_for(db: Session, user: User, message_id: uuid.UUID) -> PoradcaMessag
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Správa sa nenašla.")
     _conversation_for(db, user, msg.conversation_id)
     return msg
+
+
+#: DEV-513 — the answers of an idea get their documents at the founding of the project, not by this button.
+REFERENCES_NOT_IN_A_PROJECT = "Podklady sa sťahujú do projektu — nápad ich dostane pri „Založiť projekt“."
+NO_REFERENCES = "Odpoveď neponúka podklady na stiahnutie."
+
+
+@router.post("/messages/{message_id}/references", response_model=PoradcaReferencesStarted)
+def add_references(
+    message_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_shu_or_above),
+) -> PoradcaReferencesStarted:
+    """DEV-513 — „Stiahnuť do projektu“: the documents from the internet the Poradca's answer lists are downloaded into
+    the project's ``docs/reference/`` after the answer — merged with what the project has (``reference_docs``)."""
+    msg = _answer_for(db, current_user, message_id)
+    _conversation, project = _conversation_for(db, current_user, msg.conversation_id)
+    if project is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=REFERENCES_NOT_IN_A_PROJECT)
+    why = handoff.withheld(msg.content) if msg.author == AUTHOR_PORADCA and msg.status == "done" else NO_REFERENCES
+    wanted = references.of_answer(msg.content)[0] if why is None else []
+    if why or not wanted or not project.source_path:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=why or NO_REFERENCES)
+    root = Path(project.source_path)
+    started = not reference_docs.running(root)
+    if started:
+        background.add_task(reference_docs.start, root, wanted, adding=True)
+    return PoradcaReferencesStarted(started=started, count=len(wanted))
 
 
 @router.get("/messages/{message_id}/plane-ticket", response_model=PoradcaTicketDraft)

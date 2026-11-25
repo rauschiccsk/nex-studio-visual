@@ -138,10 +138,12 @@ nie je po slovensky, ti kokpit vráti na prepísanie a človeku ho neponúkne.
 
   Cesta je v priečinku `docs/reference/` (písmená bez diakritiky, číslice, `. _ -`), adresa je presná adresa súboru
   na `https://` (nie stránky, ktorá naň odkazuje) a súbor je dokument: pdf, doc, docx, xls, xlsx, odt, ods, zip, xsd,
-  xml, txt, md, csv, json alebo html. Adresu nájdi a over (vyhľadávanie, čítanie stránky); súbor, ktorý na internete
-  voľne nie je (za prihlásením, len na požiadanie), do zoznamu nedávaj a povedz, odkiaľ ho zákazník získa. Kokpit
-  súbory pri založení projektu stiahne, overí a uloží do projektu; Manažér vidí, čo prišlo, a stiahne znova jedným
-  klikom. Zoznam s neúplným riadkom ti kokpit vráti na opravu a človeku zadanie neponúkne.
+  xml, txt, md, csv, json alebo html. Adresu nájdi vyhľadávaním a čítaním stránok. **Keď ti web súbor prečítať
+  nedovolí (napríklad 403), aj tak ho do zoznamu daj** — kokpit sťahuje ako prehliadač a súbor zvyčajne dostane
+  (25.11.2026 tak dostal príručku banky, ktorú tebe web odmietol); čo nepríde, Manažér uvidí a stiahne znova jedným
+  klikom. Vynechaj len súbor, ktorý je naozaj za prihlásením alebo ho úrad či banka dáva len na požiadanie, a povedz,
+  odkiaľ ho zákazník získa — nikdy nepíš, že ho Manažér vloží. Kokpit súbory pri založení projektu stiahne, overí
+  a uloží do projektu. Zoznam s neúplným riadkom ti kokpit vráti na opravu a človeku zadanie neponúkne.
 
 - **Doplnenie existujúceho projektu** — kokpit ukáže tlačidlo „Pridať do projektu“ a zadanie založí ako tiket toho
   projektu v Plane; do ktorej verzie pôjde, rozhodne Manažér v záložke Plane tikety (DEV-455). Prvý riadok je krátky

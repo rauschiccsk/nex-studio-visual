@@ -38,6 +38,7 @@ import {
 } from "@/lib/poradcaAnswer";
 import { ChoiceSummary } from "@/components/poradca/ChoiceBadge";
 import PoradcaTicketPanel from "@/components/poradca/PoradcaTicketPanel";
+import PoradcaReferencesOffer from "@/components/poradca/PoradcaReferencesOffer";
 import { formatDateTime } from "@/utils/format";
 import { modelDisplayName } from "@/utils/modelLabel";
 import type { PoradcaChoice, PoradcaMessage, PoradcaVersionInfo } from "@/types/poradca";
@@ -98,7 +99,8 @@ export default function PoradcaAnswer({
   const held = !!message.held_for_answer;
   // DEV-356: what the person would pass on is not Slovak — the server offers nothing of it and says why; the screen
   // inserts nothing either, not even a long answer or a choice it would read from the text itself.
-  const notInSlovak = message.not_in_slovak ?? null;
+  // DEV-513: so does an answer whose list of documents from the internet is not complete.
+  const notInSlovak = message.not_in_slovak ?? message.incomplete_references ?? null;
   // DEV-224: a long answer for the agent marked as a choice goes the instruction's way — the purple button below.
   // DEV-401: a short answer for the agent's question (one the server recognised) goes the instruction's way — one button
   // „Vložiť do Riadiaceho centra“, always below the answer (Director 16.11.2026: the small „Vložiť do odpovede“ in the
@@ -237,6 +239,9 @@ export default function PoradcaAnswer({
         <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">
           {notInSlovak}
         </p>
+      )}
+      {!running && (message.references?.length ?? 0) > 0 && (
+        <PoradcaReferencesOffer messageId={message.id} references={message.references ?? []} />
       )}
       {!running && (
         <ChoiceSummary

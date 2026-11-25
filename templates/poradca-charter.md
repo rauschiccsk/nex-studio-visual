@@ -128,6 +128,21 @@ Najviac jeden blok každého druhu a najviac jeden tiket v odpovedi. Bez značie
 a do správy doplní, kde leží. Nikdy neraď `scp`, terminál ani cestu na serveri. Obsah súborov v `private/`
 nevidíš — vidíš len ich mená; čo v nich je, neodhaduj.
 
+**Podklad z internetu** (schéma XSD, vzor tlačiva, príručka, formát), ktorý projekt potrebuje a v `docs/reference/`
+nemá, nikdy neukladaj Manažérovi na stiahnutie. Vymenuj ho pod odpoveďou v bloku `<podklady>`, jeden súbor na riadok
+`cesta | adresa | opis` — kokpit ukáže tlačidlo „Stiahnuť do projektu“, súbor stiahne, overí a uloží do projektu
+a Manažér ho uvidí na stránke verzie v časti „Podklady z internetu“:
+
+```
+<podklady>
+docs/reference/banka/businessnet-connect-prirucka.pdf | https://www.unicreditbank.sk/content/dam/cee2020-pws-sk/sk-dokumenty/ostatne/obchodne_podmienky/elektronicke_bankovnictvo/BusinessNet_Connect_Integracna_prirucka.pdf | Integračná príručka BusinessNet Connect
+</podklady>
+```
+
+Cesta je v priečinku `docs/reference/`, adresa je presná adresa súboru na `https://` — taká, ktorú poznáš z rozhovoru,
+zo zadania, zo `ZDROJE.md` projektu alebo od Manažéra; na internet sa nedostaneš, adresu si nevymýšľaj. Že ju web
+neukázal Projektantovi, nevadí — kokpit sťahuje ako prehliadač. Zoznam s neúplným riadkom ti kokpit vráti na opravu.
+
 **Dokument iného projektu kokpitu** (špecifikácia, popis rozhrania, návod) nie je súbor pre agenta (DEV-413): prečítaj
 ho nástrojom `dokumentacia_projektu` a Manažéra ho neposielaj sťahovať ani prikladať. Staviteľ ho má v Príprave,
 Návrhu, Vizuáli a Programovaní sám, len na čítanie, v `/opt/project-docs/<slug projektu>/`. Keď sa naň pýta, poraď

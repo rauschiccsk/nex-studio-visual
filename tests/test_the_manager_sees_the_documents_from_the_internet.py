@@ -142,3 +142,77 @@ def test_a_brief_without_the_list_downloads_nothing(world, web):  # noqa: F811
 
     assert asked == []
     assert client.get(f"/api/v1/projects/{project.id}/references").json() == {"running": False, "items": []}
+
+
+# ── DEV-513 — a document added to a founded project through its Poradca ────────────────────────────────────────────
+
+BANK_OFFER = (
+    "Príručku banky doplním — kokpit ju stiahne aj vtedy, keď ju web neukáže mne.\n\n<podklady>\n"
+    "docs/reference/banka/businessnet-connect-prirucka.pdf | https://www.unicreditbank.sk/c/prirucka-2026.pdf | "
+    "Integračná príručka BusinessNet Connect (SK, marec 2026)\n</podklady>\n"
+)
+
+
+def _ask(client, conversation_id: str, question: str) -> dict:
+    client.post(f"/api/v1/poradca/conversations/{conversation_id}/messages", json={"question": question})
+    messages = client.get(f"/api/v1/poradca/conversations/{conversation_id}").json()["messages"]
+    return messages[-1]
+
+
+def test_the_poradca_of_the_project_adds_a_document_with_one_click(world, web):  # noqa: F811
+    pages, asked = web
+    pages["https://193.85.205.10/c/prirucka-2026.pdf"] = httpx.Response(200, content=b"%PDF-1.7\n")
+    client, project, idea, _answer = _founded(world, LISTED_BRIEF)
+    world["answers"].append(BANK_OFFER)
+    asked.clear()
+
+    answer = _ask(client, idea["conversation_id"], "Doplň príručku banky.")
+    assert answer["references"] == [
+        {
+            "path": "docs/reference/banka/businessnet-connect-prirucka.pdf",
+            "url": "https://www.unicreditbank.sk/c/prirucka-2026.pdf",
+            "description": "Integračná príručka BusinessNet Connect (SK, marec 2026)",
+        }
+    ]
+    added = client.post(f"/api/v1/poradca/messages/{answer['id']}/references")
+
+    assert added.status_code == 200, added.text
+    assert added.json() == {"started": True, "count": 1}
+    assert asked == ["www.unicreditbank.sk"]
+    root = world["root"] / project.slug
+    assert (root / "docs/reference/banka/businessnet-connect-prirucka.pdf").read_bytes() == b"%PDF-1.7\n"
+    shown = client.get(f"/api/v1/projects/{project.id}/references").json()["items"]
+    assert [(one["path"], one["ok"]) for one in shown] == [
+        ("docs/reference/dph/dph2025.xsd", True),
+        ("docs/reference/banka/prirucka.pdf", False),
+        ("docs/reference/banka/businessnet-connect-prirucka.pdf", True),
+    ]
+
+
+def test_an_idea_gets_its_documents_at_the_founding_not_by_the_button(world, web):  # noqa: F811
+    _pages, asked = web
+    idea, (answer,) = _idea_with(world, BANK_OFFER)
+    client = _client(world["db"], world["me"])
+
+    refused = client.post(f"/api/v1/poradca/messages/{answer}/references")
+
+    assert (refused.status_code, refused.json()["detail"]) == (
+        409,
+        "Podklady sa sťahujú do projektu — nápad ich dostane pri „Založiť projekt“.",
+    )
+    assert asked == []
+
+
+def test_an_answer_with_an_incomplete_list_offers_nothing_and_says_why(world, web):  # noqa: F811
+    wrong = LISTED_BRIEF.replace("https://www.unicreditbank.sk/b/prirucka.pdf", "od banky na požiadanie")
+    idea, (answer,) = _idea_with(world, wrong)
+    client = _client(world["db"], world["me"])
+
+    shown = client.get(f"/api/v1/poradca/conversations/{idea['conversation_id']}").json()["messages"][-1]
+
+    assert shown["idea_project"] is None and shown["references"] == []
+    assert shown["incomplete_references"] == (
+        "Kokpit neponúka odpoveď, ktorej zoznam podkladov z internetu nie je úplný: docs/reference/banka/prirucka.pdf: "
+        "chýba presná adresa https:// súboru — nájdi ju na internete, alebo položku vynechaj a povedz prečo. "
+        "Požiadaj o opravu zoznamu podkladov."
+    )

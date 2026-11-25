@@ -47,7 +47,7 @@ TOO_MANY = "zoznam má viac ako {max} položiek."
 STEP_TARGET = "zoznam podkladov z internetu"
 
 REFUSAL = (
-    "Kokpit neponúka zadanie, ktorého zoznam podkladov z internetu nie je úplný: {problems} "
+    "Kokpit neponúka odpoveď, ktorej zoznam podkladov z internetu nie je úplný: {problems} "
     "Požiadaj o opravu zoznamu podkladov."
 )
 
@@ -124,12 +124,27 @@ def of_brief(brief: str) -> tuple[list[Reference], list[str]]:
     return found, problems
 
 
+def _outside_the_brief(answer: str) -> str:
+    """The answer without the brief of a new project — a list there is the founding's (:func:`of_brief`)."""
+    from backend.services.poradca import handoff  # it reads the blocks of this module
+
+    block = handoff.BLOCK_IDEA_PROJECT
+    return re.sub(rf"<{block}>.*?</{block}>", "", answer or "", flags=re.S)
+
+
+def of_answer(answer: str) -> tuple[list[Reference], list[str]]:
+    """DEV-513 — the documents a project's Poradca offers to add to the project („Stiahnuť do projektu“): the list in
+    the answer itself, not in a brief of a new project."""
+    return of_brief(_outside_the_brief(answer))
+
+
 def problems_in_answer(answer: str) -> list[str]:
-    """What is wrong with the list of documents in the answer's brief of a new project — ``[]`` when there is none."""
+    """What is wrong with a list of documents in the answer — in its brief of a new project or offered on its own —
+    ``[]`` when there is none."""
     from backend.services.poradca import handoff  # it reads the blocks of this module
 
     body = handoff.extract_block(answer, handoff.BLOCK_IDEA_PROJECT)
-    return of_brief(body)[1] if body else []
+    return (of_brief(body)[1] if body else []) + of_answer(answer)[1]
 
 
 def refusal(problems: list[str]) -> str:
@@ -141,9 +156,9 @@ def rewrite_directive(problems: list[str]) -> str:
     """The turn that sends the answer back to the Projektant: what is wrong with the list."""
     listed = "\n".join(f"- {problem}" for problem in problems)
     return (
-        "[Kontrola kokpitu] Zoznam podkladov z internetu v zadaní projektu (`<podklady>`) nie je úplný — kokpit "
-        f"zadanie neponúkne:\n{listed}\n\n"
+        "[Kontrola kokpitu] Zoznam podkladov z internetu (`<podklady>`) nie je úplný — kokpit ho neponúkne:\n"
+        f"{listed}\n\n"
         "Každý riadok má tvar `cesta | adresa | opis`: cesta v priečinku docs/reference/, presná adresa https:// "
-        "súboru (nie stránky, ktorá naň odkazuje) a opis. Kokpit ich pri založení projektu stiahne sám — "
-        "Manažérovi sťahovanie neukladaj. Napíš celú odpoveď znova s opraveným zoznamom."
+        "súboru (nie stránky, ktorá naň odkazuje) a opis. Kokpit ich stiahne sám — aj keď ti ich web prečítať "
+        "nedovolí — a Manažérovi sťahovanie neukladaj. Napíš celú odpoveď znova s opraveným zoznamom."
     )

@@ -1511,6 +1511,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/poradca/messages/{message_id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add References
+         * @description DEV-513 — „Stiahnuť do projektu“: the documents from the internet the Poradca's answer lists are downloaded into
+         *     the project's ``docs/reference/`` after the answer — merged with what the project has (``reference_docs``).
+         */
+        post: operations["add_references_api_v1_poradca_messages__message_id__references_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/poradca/messages/{message_id}/stop": {
         parameters: {
             query?: never;
@@ -7015,6 +7036,8 @@ export interface components {
             id: string;
             idea_addition?: components["schemas"]["IdeaAdditionRead"] | null;
             idea_project?: components["schemas"]["IdeaProjectBriefRead"] | null;
+            /** Incomplete References */
+            incomplete_references?: string | null;
             /** Input Tokens */
             input_tokens?: number | null;
             /** Instruction */
@@ -7029,6 +7052,8 @@ export interface components {
             plane_identifier?: string | null;
             /** Plane Url */
             plane_url?: string | null;
+            /** References */
+            references?: components["schemas"]["PoradcaReferenceRead"][];
             /**
              * Status
              * @enum {string}
@@ -7051,6 +7076,29 @@ export interface components {
             project_slug: string;
             /** Versions */
             versions?: components["schemas"]["PoradcaVersionInfo"][];
+        };
+        /**
+         * PoradcaReferenceRead
+         * @description DEV-513 — one document from the internet the Poradca offers to download into the project.
+         */
+        PoradcaReferenceRead: {
+            /** Description */
+            description: string;
+            /** Path */
+            path: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * PoradcaReferencesStarted
+         * @description DEV-513 — „Stiahnuť do projektu“: whether the download started now (``False`` while one is already going on —
+         *     it takes the documents in its turn after the Manažér tries again) and how many documents the answer offers.
+         */
+        PoradcaReferencesStarted: {
+            /** Count */
+            count: number;
+            /** Started */
+            started: boolean;
         };
         /**
          * PoradcaRename
@@ -12099,6 +12147,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PoradcaTicketFounded"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_references_api_v1_poradca_messages__message_id__references_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoradcaReferencesStarted"];
                 };
             };
             /** @description Validation Error */

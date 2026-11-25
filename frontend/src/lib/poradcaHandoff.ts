@@ -196,7 +196,11 @@ export interface HandOffOffer {
 export function handOffOffer(message: PoradcaMessage): HandOffOffer {
   const choices = message.choices ?? [];
   const summary = choices.filter((c) => c.card || !isLongAnswerChoice(message.content ?? "", c.label));
-  const closed = message.status === "running" || !!message.held_for_answer || !!message.not_in_slovak;
+  const closed =
+    message.status === "running" ||
+    !!message.held_for_answer ||
+    !!message.not_in_slovak ||
+    !!message.incomplete_references;
   if (closed) return { instruction: null, answer: undefined, card: null, summary };
   return {
     instruction: message.instruction ?? longAnswer(message.content ?? ""),

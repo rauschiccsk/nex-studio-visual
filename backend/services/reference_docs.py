@@ -313,6 +313,21 @@ def fetch_into(root: Path, wanted: list[Reference]) -> list[Fetched]:
     return done
 
 
+def add_into(root: Path, wanted: list[Reference]) -> list[Fetched]:
+    """DEV-513 — documents the Poradca of a founded project adds: merged with what the project has. A document that
+    came from the same address stays as it is; a new one, a failed one or one with another address is downloaded."""
+    done = {one.path: one for one in state(root)}
+    for reference in wanted:
+        before = done.get(reference.path)
+        if before is not None and before.ok and before.url == reference.url:
+            continue
+        done[reference.path] = _fetch_one(root, reference)
+    result = list(done.values())
+    _save_state(root, result)
+    _commit(root)
+    return result
+
+
 def retry_failed(root: Path) -> list[Fetched]:
     """Download again only what did not come; what came stays as it is."""
     before = state(root)
@@ -338,15 +353,18 @@ def running(root: Path) -> bool:
     return _lock_of(root).locked()
 
 
-def start(root: Path, wanted: Optional[list[Reference]] = None) -> bool:
-    """Download for the project at *root*: *wanted*, or with ``None`` again what did not come. ``False`` when a
-    download for it is already going on (the second one would only repeat it) or the project has no folder."""
+def start(root: Path, wanted: Optional[list[Reference]] = None, *, adding: bool = False) -> bool:
+    """Download for the project at *root*: *wanted* (added to what it has with ``adding``), or with ``None`` again
+    what did not come. ``False`` when a download for it is already going on (the second one would only repeat it) or
+    the project has no folder."""
     lock = _lock_of(root)
     if not root.is_dir() or not lock.acquire(blocking=False):
         return False
     try:
         if wanted is None:
             retry_failed(root)
+        elif adding:
+            add_into(root, wanted)
         else:
             fetch_into(root, wanted)
     except Exception:  # noqa: BLE001 — a background run must say its failure in the log, never die silently

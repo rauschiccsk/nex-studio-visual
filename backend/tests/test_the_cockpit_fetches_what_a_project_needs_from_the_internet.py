@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.services.poradca import handoff, references
 
 GOOD = """\
@@ -112,7 +114,7 @@ def test_the_answer_with_a_wrong_list_offers_nothing_and_says_why() -> None:
     said = handoff.withheld(_brief(listing))
 
     assert said == (
-        "Kokpit neponúka zadanie, ktorého zoznam podkladov z internetu nie je úplný: docs/reference/kv.pdf: chýba "
+        "Kokpit neponúka odpoveď, ktorej zoznam podkladov z internetu nie je úplný: docs/reference/kv.pdf: chýba "
         "presná adresa https:// súboru — nájdi ju na internete, alebo položku vynechaj a povedz prečo. "
         "Požiadaj o opravu zoznamu podkladov."
     )
@@ -124,18 +126,49 @@ def test_the_agent_is_told_what_to_correct() -> None:
 
     directive = references.rewrite_directive(references.problems_in_answer(_brief(listing)))
 
-    assert directive.startswith("[Kontrola kokpitu] Zoznam podkladov z internetu v zadaní projektu (`<podklady>`)")
+    assert directive.startswith("[Kontrola kokpitu] Zoznam podkladov z internetu (`<podklady>`) nie je úplný")
     assert "docs/reference/kv.pdf: chýba presná adresa https:// súboru" in directive
-    assert "Kokpit ich pri založení projektu stiahne sám" in directive
+    assert "Kokpit ich stiahne sám — aj keď ti ich web prečítať nedovolí" in directive
 
 
-CHARTER = Path(__file__).resolve().parents[2] / "templates" / "poradca-ideas-charter.md"
+TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
 
 
-def test_the_projektant_is_taught_a_list_the_cockpit_takes_and_no_download_for_the_manažér() -> None:
-    charter = CHARTER.read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    ("charter", "said"),
+    [
+        ("poradca-ideas-charter.md", ["Nikdy ich neukladaj Manažérovi na stiahnutie", "aj tak ho do zoznamu daj"]),
+        ("poradca-charter.md", ["nikdy neukladaj Manažérovi na stiahnutie", "Stiahnuť do projektu"]),
+    ],
+)
+def test_both_agents_are_taught_a_list_the_cockpit_takes_and_no_download_for_the_manažér(charter, said) -> None:
+    text = (TEMPLATES / charter).read_text(encoding="utf-8")
 
-    found, problems = references.of_brief(charter)
+    found, problems = references.of_brief(text)
 
-    assert problems == [] and len(found) == 1
-    assert "Nikdy ich neukladaj Manažérovi na stiahnutie" in charter
+    assert problems == [] and len(found) == 1 and "…" not in found[0].url
+    assert all(sentence in text for sentence in said)
+
+
+# ── DEV-513 — a list offered on its own by the Poradca of a founded project ──────────────────────────────────────────
+
+BANK = (
+    "docs/reference/banka/businessnet-connect-prirucka.pdf | https://www.unicreditbank.sk/content/dam/x/Prirucka.pdf "
+    "| Integračná príručka BusinessNet Connect (SK, marec 2026)\n"
+)
+
+
+def test_a_list_offered_on_its_own_is_read_and_the_brief_s_is_not_taken_for_it() -> None:
+    offered = f"Príručku pridám.\n\n<podklady>\n{BANK}</podklady>\n"
+
+    found, problems = references.of_answer(offered)
+
+    assert problems == [] and [one.path for one in found] == ["docs/reference/banka/businessnet-connect-prirucka.pdf"]
+    assert references.of_answer(_brief(GOOD)) == ([], [])
+
+
+def test_a_wrong_list_offered_on_its_own_is_withheld_too() -> None:
+    offered = "Príručku pridám.\n\n<podklady>\ndocs/reference/banka/p.pdf | od banky | Príručka\n</podklady>\n"
+
+    assert references.problems_in_answer(offered) == [references.NO_ADDRESS.format(path="docs/reference/banka/p.pdf")]
+    assert handoff.withheld(offered).startswith("Kokpit neponúka odpoveď, ktorej zoznam podkladov z internetu")

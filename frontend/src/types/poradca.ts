@@ -6,6 +6,8 @@ import type { components } from "@/services/api/pipeline.generated";
 type S = components["schemas"];
 
 export type PoradcaMessage = S["PoradcaMessageRead"];
+/** DEV-513 — „Stiahnuť do projektu“: whether the download started and how many documents the answer offers. */
+export type PoradcaReferencesStarted = S["PoradcaReferencesStarted"];
 export type PoradcaConversation = S["PoradcaConversationRead"];
 export type PoradcaConversationDetail = S["PoradcaConversationDetail"];
 export type PoradcaStatus = S["PoradcaStatus"];
