@@ -71,6 +71,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   `width="full"` — vlastnú triedu `w-full` poľu nedávaj. Na staršej verzii knižnice nastav šírky v projekte sám;
   Manažér to nemá vypytovať vo Vizuáli (NEX HelpDesk, 26.11.2026: „Chcel by som aby dlžka editorov bolo rozumne
   prispôsobené k údajom, čo zadávam.“).
+- **Ukladanie formulára — štandard ICC (DEV-520).** Pod každým formulárom sú Zrušiť a Uložiť; obe sú aktívne len
+  vtedy, keď sa vo formulári niečo zmenilo. Zrušiť zahodí zmeny a formulár ukáže, čo je uložené — v okne ho zavrie.
+  Pri tlačidle nikdy nepíš „Uložené“: uloženie ohlási „✓ Uložené“ zelenou vpravo hore a samo zmizne. Od `nex-shared`
+  v0.42.0 to nesie kit: `SaveBar` (zmenu zistí `hasChanges`), `announceSaved()` a miesto vpravo hore v `AppShell` —
+  vlastnú lištu formulára ani text „Uložené“ nestavaj. Na staršej verzii knižnice postav to isté v projekte; Manažér
+  to nemá vypytovať vo Vizuáli (NEX HelpDesk, 26.11.2026: „Chcel by som aby formuláre vo všetkých aplikáciách boli
+  ošetrené rovnako.“).
 - **Oprava Verifikácie — zreprodukuj zlyhanie, nie len „testy sú zelené“.** Opravné kolo
   beží v izolovanom Programovaní bez Dockera; postup je v zručnosti `verification-fix` — použi ju pri každom
   opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj
