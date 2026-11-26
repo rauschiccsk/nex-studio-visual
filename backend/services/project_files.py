@@ -29,6 +29,9 @@ from pathlib import Path
 
 #: The folder in the project root the files live in — the same name the Career Asistent design already uses.
 PRIVATE_DIR = "private"
+#: DEV-443 — where the Staviteľ keeps its own working copies, one folder per purpose (its charter); DEV-515 — the
+#: Poradca hides the whole folder at once.
+AGENT_WORK_DIR = f"{PRIVATE_DIR}/agent-work"
 
 #: The line ``.git/info/exclude`` carries; anchored, so only the root folder is meant.
 EXCLUDE_LINE = f"/{PRIVATE_DIR}/"

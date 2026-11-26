@@ -46,7 +46,7 @@ from uuid import UUID, uuid4
 
 from backend.config.settings import settings
 from backend.services import build_db, build_sandbox, sandbox_paths, secret_files
-from backend.services.project_files import PRIVATE_DIR
+from backend.services.project_files import AGENT_WORK_DIR, PRIVATE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -244,9 +244,13 @@ def overlay_paths(project_dir: str) -> list[str]:
         PoradcaUnavailable: more overlays than :data:`MAX_OVERLAYS`.
     """
     found: list[str] = []
+    counted = {"private": 0, "secret": 0, "link": 0}
+    agent_work = os.path.join(project_dir, AGENT_WORK_DIR)
     for dirpath, dirnames, filenames in os.walk(project_dir, followlinks=False):
         if dirpath == project_dir and ".git" in dirnames:
             dirnames.remove(".git")
+        # DEV-515: the Staviteľ's working copies are hidden as one empty folder (run_argv), never one by one.
+        dirnames[:] = [name for name in dirnames if os.path.join(dirpath, name) != agent_work]
         for name in filenames:
             full = os.path.join(dirpath, name)
             try:
@@ -266,11 +270,14 @@ def overlay_paths(project_dir: str) -> list[str]:
                         f"znak ({rel!r}) — také meno sa nedá bezpečne prekryť. Premenuj ho, potom sa Poradca spustí."
                     )
                 found.append(rel)
-                if len(found) > MAX_OVERLAYS:
-                    raise PoradcaUnavailable(
-                        f"{_LABEL}: projekt má viac než {MAX_OVERLAYS} súborov na prekrytie (tajomstvá alebo "
-                        "pevné odkazy) — to nie je bežný projekt; over ho skôr, než sa Poradca spustí"
-                    )
+                kind = "private" if attached else "secret" if _SECRET_FILE_RE.match(name) else "link"
+                counted[kind] += 1
+    if len(found) > MAX_OVERLAYS:
+        raise PoradcaUnavailable(
+            f"{_LABEL}: projekt má viac než {MAX_OVERLAYS} súborov, ktoré Poradca musí skryť (v private/: "
+            f"{counted['private']}, s menom tajomstva: {counted['secret']}, s pevným odkazom: {counted['link']}) — "
+            "zmaž v Riadiacom centre prílohy, ktoré agent už nepotrebuje, potom sa Poradca spustí"
+        )
     return sorted(found)
 
 
@@ -483,6 +490,11 @@ def run_argv(
     ]
     if os.path.isdir(os.path.join(host_dir, ".git")):
         argv += ["--mount", f"type=tmpfs,destination={container_dir}/.git,tmpfs-mode=0555"]
+    # DEV-515: the Staviteľ's working copies (DEV-443) — neither the Manažér's attachments nor anything for the Poradca.
+    if os.path.isdir(os.path.join(host_dir, AGENT_WORK_DIR)) and not os.path.islink(
+        os.path.join(host_dir, AGENT_WORK_DIR)
+    ):
+        argv += ["--mount", f"type=tmpfs,destination={container_dir}/{AGENT_WORK_DIR},tmpfs-mode=0555"]
     for rel in overlays:
         # DEV-177: a settings template is overlaid with its copy without values, every other secret file with nothing.
         source = templates.get(rel, str(empty_file()))
