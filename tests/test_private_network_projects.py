@@ -319,6 +319,9 @@ def _preview(monkeypatch, tmp_path, *, running_host):
     monkeypatch.setattr(
         vizual_sandbox, "_running_dependencies", lambda name: vizual_sandbox.dependencies_fingerprint(tmp_path)
     )
+    monkeypatch.setattr(
+        vizual_sandbox, "_running_config", lambda name: vizual_sandbox.PREVIEW_CONFIG_VERSION
+    )  # DEV-521
     monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: calls.append(("rm", name)))
     monkeypatch.setattr(vizual_sandbox, "_ensure_node_modules", lambda path, slug: None)
     monkeypatch.setattr(vizual_sandbox, "_write_override_config", lambda path: path)

@@ -98,6 +98,8 @@ def _sandbox(monkeypatch, tmp_path, *, started_with):
         vizual_sandbox, "_running_public_host", lambda name: vizual_sandbox.public_host("nex-knowledge")
     )
     monkeypatch.setattr(vizual_sandbox, "_running_dependencies", lambda name: started_with)
+    # DEV-521: started by this cockpit — with its current preview config.
+    monkeypatch.setattr(vizual_sandbox, "_running_config", lambda name: vizual_sandbox.PREVIEW_CONFIG_VERSION)
     monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: calls.append(("rm", name)))
     monkeypatch.setattr(vizual_sandbox, "_ensure_node_modules", lambda path, slug: None)
     monkeypatch.setattr(vizual_sandbox, "_write_override_config", lambda path: path)
@@ -141,6 +143,9 @@ def test_two_looks_at_once_build_the_preview_once(monkeypatch, tmp_path) -> None
         vizual_sandbox, "_running_public_host", lambda name: vizual_sandbox.public_host("nex-knowledge")
     )
     monkeypatch.setattr(vizual_sandbox, "_running_dependencies", lambda name: world["started_with"])
+    monkeypatch.setattr(
+        vizual_sandbox, "_running_config", lambda name: vizual_sandbox.PREVIEW_CONFIG_VERSION
+    )  # DEV-521
     monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: None)
     monkeypatch.setattr(vizual_sandbox, "_ensure_node_modules", lambda path, slug: None)
     monkeypatch.setattr(vizual_sandbox, "_write_override_config", lambda path: path)

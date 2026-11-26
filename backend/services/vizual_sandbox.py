@@ -141,6 +141,10 @@ _DOCKER_CALL_TIMEOUT = 60
 #: current one is built anew wherever the cockpit starts it (:func:`spin_up`) or looks at it
 #: (:func:`preview_is_current`).
 DEPENDENCIES_LABEL = "nex-studio.vizual.dependencies"
+#: DEV-521: the version of the cockpit's own preview config (:func:`_render_override_config`) a preview was started
+#: with. Vite reads its config once, when it starts — a preview started before the cockpit changed it keeps the old one,
+#: so one on another version is built anew exactly like one on other libraries.
+CONFIG_LABEL = "nex-studio.vizual.config"
 #: What the fingerprint is read from — the lock file names the exact libraries; package.json where there is none.
 _DEPENDENCY_FILES = ("package-lock.json", "package.json")
 
@@ -239,6 +243,50 @@ def _traefik_labels(slug: str, *, private: bool = False, directory: str = MAIN_F
 # ---------------------------------------------------------------------------
 
 
+def msw_worker_plugin_source() -> str:
+    """DEV-521: the preview's Vite plugin that serves MSW's worker (``/mockServiceWorker.js``) from installed ``msw``.
+
+    The preview harness starts MSW (the mock server) before the app renders, and MSW registers its worker from
+    ``/mockServiceWorker.js``. That file lived in the project (``public/``, written by msw's install script) — and
+    26.11.2026 the Staviteľ of orthodox-register deleted it twice as a generated leftover: Vite answered the address
+    with index.html, MSW refused it („unsupported MIME type ('text/html')“) and the Manažér saw a black screen. Served
+    from the library the preview bundles, the worker is always there and always of the same version as
+    ``msw/browser``. A frontend without ``msw`` falls through to Vite (``next``) — as before.
+    """
+    return (
+        'import { readFileSync } from "node:fs";\n'
+        'import { createRequire } from "node:module";\n'
+        'import { dirname, join } from "node:path";\n'
+        "\n"
+        "function mswWorker() {\n"
+        "  const require = createRequire(import.meta.url);\n"
+        "  const workerPath = () => {\n"
+        "    try {\n"
+        '      return require.resolve("msw/mockServiceWorker.js");\n'
+        "    } catch {\n"
+        '      return join(dirname(require.resolve("msw/package.json")), "lib", "mockServiceWorker.js");\n'
+        "    }\n"
+        "  };\n"
+        "  return {\n"
+        '    name: "nex-vizual-msw-worker",\n'
+        "    configureServer(server) {\n"
+        '      server.middlewares.use("/mockServiceWorker.js", (_req, res, next) => {\n'
+        "        let body;\n"
+        "        try {\n"
+        "          body = readFileSync(workerPath());\n"
+        "        } catch {\n"
+        "          return next();\n"
+        "        }\n"
+        '        res.setHeader("Content-Type", "text/javascript; charset=utf-8");\n'
+        '        res.setHeader("Cache-Control", "no-cache");\n'
+        "        res.end(body);\n"
+        "      });\n"
+        "    },\n"
+        "  };\n"
+        "}\n"
+    )
+
+
 def _render_override_config() -> str:
     """The tiny Vite config override that makes HMR work through the Traefik proxy.
 
@@ -263,8 +311,7 @@ def _render_override_config() -> str:
     """
     return (
         'import { defineConfig, mergeConfig } from "vite";\n'
-        'import baseConfigExport from "./vite.config.ts";\n'
-        "\n"
+        'import baseConfigExport from "./vite.config.ts";\n' + msw_worker_plugin_source() + "\n"
         'const publicHost = process.env.VIZUAL_PUBLIC_HOST ?? "localhost";\n'
         'const hmrProtocol = process.env.VIZUAL_HMR_PROTOCOL ?? "wss";\n'
         'const hmrClientPort = Number(process.env.VIZUAL_HMR_CLIENT_PORT ?? "443");\n'
@@ -284,9 +331,14 @@ def _render_override_config() -> str:
         "    },\n"
         f'    cacheDir: "{VITE_CACHE_DIR}",\n'
         '    optimizeDeps: { include: ["msw", "msw/browser"] },\n'
+        "    plugins: [mswWorker()],\n"
         "  });\n"
         "});\n"
     )
+
+
+#: DEV-521: the version of the preview config above — on the preview's label (:data:`CONFIG_LABEL`).
+PREVIEW_CONFIG_VERSION = hashlib.sha256(_render_override_config().encode()).hexdigest()[:12]
 
 
 def _git_exclude_override(frontend_host_path: Path) -> None:
@@ -441,6 +493,7 @@ def build_run_argv(
     if dependencies is None:
         dependencies = dependencies_fingerprint(frontend_host_path)
     argv += ["--label", f"{DEPENDENCIES_LABEL}={dependencies}"]
+    argv += ["--label", f"{CONFIG_LABEL}={PREVIEW_CONFIG_VERSION}"]
     for scratch in _VITE_SCRATCH_DIRS:
         # Writable RAM scratch shadowing Vite's node_modules cache/temp — keeps the host node_modules
         # pristine AND immune to pre-existing root-owned scratch dirs (see _VITE_SCRATCH_DIRS).
@@ -531,9 +584,19 @@ def _running_public_host(name: str) -> Optional[str]:
 def _running_dependencies(name: str) -> Optional[str]:
     """DEV-241: the fingerprint a preview was started with (``""`` for one started before the label existed), or
     ``None`` when docker cannot be asked (never raises)."""
+    return _running_label(name, DEPENDENCIES_LABEL)
+
+
+def _running_config(name: str) -> Optional[str]:
+    """DEV-521: the version of the cockpit's preview config a preview was started with (``""`` for one started before
+    the label existed), or ``None`` when docker cannot be asked (never raises)."""
+    return _running_label(name, CONFIG_LABEL)
+
+
+def _running_label(name: str, label: str) -> Optional[str]:
     try:
         proc = subprocess.run(
-            ["docker", "inspect", "-f", f'{{{{index .Config.Labels "{DEPENDENCIES_LABEL}"}}}}', name],
+            ["docker", "inspect", "-f", f'{{{{index .Config.Labels "{label}"}}}}', name],
             capture_output=True,
             text=True,
             timeout=_DOCKER_CALL_TIMEOUT,
@@ -659,10 +722,15 @@ def _spin_up_locked(
     # DEV-419: ``fresh`` — the Manažér asked for the preview anew („Spustiť náhľad znova“): a running one is replaced,
     # whatever it looks like from outside; he presses the button exactly when it does not work.
     if not fresh and state["running"] and _running_public_host(name) == host:
-        if _running_dependencies(name) == dependencies_fingerprint(frontend_host_path):
+        if _running_dependencies(name) == dependencies_fingerprint(frontend_host_path) and (
+            _running_config(name) == PREVIEW_CONFIG_VERSION
+        ):
             logger.info("vizual sandbox: %s already running — reusing", name)
             return public_url(slug, private=private, directory=directory)
-        logger.info("vizual sandbox: %s runs on other libraries than its frontend has now — building it anew", name)
+        logger.info(
+            "vizual sandbox: %s runs on other libraries or an older preview config of the cockpit — building it anew",
+            name,
+        )
     if state["exists"]:
         # A stopped/crashed leftover, one still answering under the other zone's name (DEV-42: a preview of a
         # private project must not keep its public name), or one bundling old libraries (DEV-241) — recreate clean.
@@ -794,9 +862,13 @@ def preview_is_current(slug: str, *, directory: str = MAIN_FRONTEND) -> bool:
         frontend_host_path = _resolve_frontend_path(slug, None, directory)
     except (ValueError, FileNotFoundError):
         return True
-    started_with = _running_dependencies(container_name(slug, directory))
+    name = container_name(slug, directory)
+    started_with = _running_dependencies(name)
     if started_with is None:
         return True
+    config = _running_config(name)  # DEV-521 — the cockpit's preview config it started with
+    if config is not None and config != PREVIEW_CONFIG_VERSION:
+        return False
     return started_with == dependencies_fingerprint(frontend_host_path)
 
 
