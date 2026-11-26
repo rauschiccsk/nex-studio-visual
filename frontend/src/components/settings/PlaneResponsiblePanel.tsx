@@ -71,7 +71,7 @@ export default function PlaneResponsiblePanel() {
         </p>
       )}
       {accounts.length > 0 && (
-        <table className="w-full text-xs">
+        <table className="w-full text-xs sm:w-auto">
           <tbody>
             {accounts.map((account) => (
               <tr key={account.id} className="border-b border-[var(--color-border-default)]">
@@ -85,7 +85,7 @@ export default function PlaneResponsiblePanel() {
                     value={account.chosen ?? ""}
                     disabled={saving !== null}
                     onChange={(e) => void choose(account, e.target.value)}
-                    className="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text-primary)]"
+                    className="w-full sm:w-auto sm:max-w-md rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1 text-[var(--color-text-primary)]"
                   >
                     <option value="">{byNameLabel(account)}</option>
                     {people.map((person) => (

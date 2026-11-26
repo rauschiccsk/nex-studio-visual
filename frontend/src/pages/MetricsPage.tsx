@@ -824,7 +824,7 @@ export default function MetricsPage() {
                 onChange={(e) => setOccurredOn(e.target.value)}
                 required
                 max={today}
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                className="mt-1 w-40 rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               />
             </label>
             <label className="block text-xs md:col-span-2">
@@ -845,7 +845,7 @@ export default function MetricsPage() {
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                className="mt-1 w-full sm:w-auto sm:max-w-md rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               >
                 {modelOptions.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -863,7 +863,7 @@ export default function MetricsPage() {
                 value={inputTokens}
                 onChange={(e) => setInputTokens(e.target.value)}
                 required
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                className="mt-1 w-32 rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               />
             </label>
             <label className="block text-xs">
@@ -875,7 +875,7 @@ export default function MetricsPage() {
                 value={outputTokens}
                 onChange={(e) => setOutputTokens(e.target.value)}
                 required
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                className="mt-1 w-32 rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               />
             </label>
             <label className="block text-xs md:col-span-3">
@@ -883,7 +883,7 @@ export default function MetricsPage() {
               <select
                 value={formVersionId}
                 onChange={(e) => setFormVersionId(e.target.value)}
-                className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                className="mt-1 w-full sm:w-auto sm:max-w-md rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
               >
                 <option value="">celý projekt</option>
                 {metrics.by_version.map((v) => (

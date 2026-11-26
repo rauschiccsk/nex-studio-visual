@@ -406,7 +406,7 @@ export default function CustomersPage() {
                 <select
                   value={prodHost}
                   onChange={(e) => setProdHost(e.target.value)}
-                  className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                  className="mt-1 w-full sm:w-auto sm:max-w-md rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
                 >
                   {machines.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -426,7 +426,7 @@ export default function CustomersPage() {
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
-                  className="mt-1 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                  className="mt-1 w-full sm:w-auto sm:max-w-md rounded border border-[var(--color-border-default)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
                 >
                   <option value="">Hlavný jazyk aplikácie ({appLanguages[0]?.label})</option>
                   {appLanguages.map((l) => (

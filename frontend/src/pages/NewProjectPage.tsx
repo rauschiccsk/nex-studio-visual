@@ -688,7 +688,7 @@ export default function NewProjectPage() {
                   id="np-owner"
                   value={ownerId}
                   onChange={(e) => setOwnerId(e.target.value)}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
+                  className="w-full sm:w-auto sm:max-w-md bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-primary-500"
                 >
                   {/* No "— žiadny —" option. Picking it did not mean "no notifications": the service
                       enforces an invariant that a project ALWAYS has a recipient (CR-NS-074) and

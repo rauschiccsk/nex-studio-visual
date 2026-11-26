@@ -62,12 +62,12 @@ export default function BatchReviewPanel() {
       {accounts.length > 0 && (
         <ul className="divide-y divide-[var(--color-border-default)] text-xs">
           {accounts.map((account) => (
-            <li key={account.id} className="flex items-center justify-between py-1.5">
-              <span className="text-[var(--color-text-primary)]">
+            <li key={account.id} className="flex items-center gap-4 py-1.5">
+              <span className="min-w-0 sm:w-72 sm:shrink-0 text-[var(--color-text-primary)]">
                 {account.username}
                 {account.name && <span className="text-[var(--color-text-muted)]"> · {account.name}</span>}
               </span>
-              <label className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+              <label className="flex shrink-0 items-center gap-2 text-[var(--color-text-secondary)]">
                 <input
                   type="checkbox"
                   checked={account.on}

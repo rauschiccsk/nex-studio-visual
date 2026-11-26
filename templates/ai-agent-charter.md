@@ -63,6 +63,14 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   obrazovku stav cez `KitPage` (namiesto `<Page>`), tabuľku cez `KitTable`, zoznam pole–hodnota cez `KitFields` —
   vlastné nestavaj. Na staršej verzii kitu či bez šablóny postav to isté v projekte; Manažér to nemá vypytovať vo
   Vizuáli (NEX DualBook 0.1.0, 26.11.2026: „…pre všetky nové projekty a ne riešiť ich osobitne“).
+- **Šírka poľa podľa údaja — štandard ICC (DEV-518).** Pole je také široké ako údaj, ktorý sa doň zadáva: čas úzky,
+  dátum, číslo, suma a telefón o niečo širšie, kód a meno stredne, celú šírku dostane len dlhý text (poznámka, adresa,
+  opis); výber je široký ako jeho možnosti, na telefóne vyplní svoje miesto. Zaškrtávacie políčko stojí hneď pri
+  svojom popise, nikdy na opačnom konci riadku; v zozname nastavení stojí popis v stĺpci rozumnej šírky a políčko či
+  výber hneď za ním. Od `nex-shared` v0.41.2 to nesie kit: `Input` a `Select` dostanú šírku podľa typu, dlhý text
+  `width="full"` — vlastnú triedu `w-full` poľu nedávaj. Na staršej verzii knižnice nastav šírky v projekte sám;
+  Manažér to nemá vypytovať vo Vizuáli (NEX HelpDesk, 26.11.2026: „Chcel by som aby dlžka editorov bolo rozumne
+  prispôsobené k údajom, čo zadávam.“).
 - **Oprava Verifikácie — zreprodukuj zlyhanie, nie len „testy sú zelené“.** Opravné kolo
   beží v izolovanom Programovaní bez Dockera; postup je v zručnosti `verification-fix` — použi ju pri každom
   opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj

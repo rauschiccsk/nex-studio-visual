@@ -665,7 +665,7 @@ export default function KnowledgeBasePage() {
                       <select
                         value={newCategory}
                         onChange={(e) => setNewCategory(e.target.value)}
-                        className="w-full px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"
+                        className="w-full sm:w-auto sm:max-w-md px-3 py-2 bg-[var(--color-surface)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-focus)]"
                       >
                         {categories.map((c) => (
                           <option key={c} value={c}>

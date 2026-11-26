@@ -126,7 +126,7 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
           value={chosen}
           onChange={(e) => setChosen(e.target.value)}
           disabled={busy || candidates === null}
-          className="mb-4 w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm"
+          className="mb-4 w-full sm:w-auto sm:max-w-md rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm"
         >
           <option value="">
             {candidates === null
@@ -216,7 +216,7 @@ export default function AdoptProjectDialog({ open, onClose, onAdopted }: Props) 
               value={authMode}
               onChange={(e) => setAuthMode(e.target.value as "token" | "password")}
               disabled={busy}
-              className="mb-4 w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm"
+              className="mb-4 w-full sm:w-auto sm:max-w-md rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-canvas)] px-3 py-2 text-sm"
             >
               <option value="token">Token</option>
               <option value="password">Meno a heslo</option>
