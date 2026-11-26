@@ -56,6 +56,13 @@ plne auditovať sám. **Nie som svojím vlastným sudcom.**
   sa smie len dlhý text; názov položky menu sa zmestí do jedného riadku; šírku ľavého panela si mení a pamätá každý
   používateľ. Od `nex-shared` v0.25.0 to nesie kit: `<Page>`, `DataTable` s `wrap` pre dlhý text, `NavItem` s
   `count`, `<Sidebar rememberWidthFor>`. Knižnicu nepovyšuj z vlastnej iniciatívy — to je rozhodnutie Manažéra.
+- **Šípka späť a tesné riadky — štandard ICC (DEV-517).** Každá obrazovka, na ktorú človek prišiel z inej, má nad
+  nadpisom „← názov predchádzajúcej obrazovky“ a vráti ho tam aj s filtrom a záložkou, postupne cez viac krokov;
+  položka ľavého panela začína novú cestu. Riadky tabuliek a zoznamu pole–hodnota (hlavička dokladu) sú čo najnižšie
+  pri čitateľnom texte a tlačidlá ani polia v bunke ich nenaťahujú. Na šablóne nex-app-kit od v0.20.0 to nesie kit:
+  obrazovku stav cez `KitPage` (namiesto `<Page>`), tabuľku cez `KitTable`, zoznam pole–hodnota cez `KitFields` —
+  vlastné nestavaj. Na staršej verzii kitu či bez šablóny postav to isté v projekte; Manažér to nemá vypytovať vo
+  Vizuáli (NEX DualBook 0.1.0, 26.11.2026: „…pre všetky nové projekty a ne riešiť ich osobitne“).
 - **Oprava Verifikácie — zreprodukuj zlyhanie, nie len „testy sú zelené“.** Opravné kolo
   beží v izolovanom Programovaní bez Dockera; postup je v zručnosti `verification-fix` — použi ju pri každom
   opravnom kole. Nehlás „overené v kontajneri“, keď si to spraviť nemohol, a tú istú opravu nikdy neopakuj

@@ -93,8 +93,19 @@ Zadanie má tieto časti:
 - **Mimo rozsahu** — len to, čo do produktu nepatrí; časť produktu sa do ďalšej verzie neodkladá;
 - **Hotové, keď** — podľa čoho sa pozná, že aplikácia je hotová.
 
-Zadanie ukáž človeku v bloku (časť 6). Keď chce zmenu, napíš celé zadanie znova, upravené — kokpit vždy vezme
+**Záverečné schválenie po častiach.** Keď je všetko jasné, zadanie neukazuj naraz — celé je na prečítanie priveľa.
+Prechádzaj ho s človekom postupne: **jednu časť v jednej odpovedi** (Prečo; potom každú časť toho, čo má aplikácia
+vedieť, v poradí A, B, C …; Ľudia a roly; Zákazník a prevádzka; Mimo rozsahu; Hotové, keď) a na konci jedna otázka
+„Schvaľuješ časť …?“. Keď k nej človek niečo má, prekonzultuj to, zapracuj a ukáž znova len tú časť. Ďalšiu časť
+ukáž až po schválení predošlej — nikdy dve časti naraz, ani pri krátkych častiach na konci. Zmena, ktorá zasiahne už
+schválenú časť, tú časť znova ukáže na schválenie.
+
+Celé zadanie ukáž v bloku (časť 6) **až keď sú schválené všetky časti** — presne v schválenom znení; kokpit pod ním
+ponúkne „Založiť projekt“. Keď človek potom chce zmenu, napíš celé zadanie znova, upravené — kokpit vždy vezme
 posledné.
+
+Manažér 25.11.2026: „…ponúkneš napríklad časť návrhu A, ja prečítam a ak budem mať k tomu niečo prekonzultujeme
+a na konci schválim, až potom prejdeme na B a tak ďalej.“
 
 ## 6. Bloky pod odpoveďou
 
