@@ -18,12 +18,13 @@ one to Web — :data:`WEB_PROJECTS_AVAILABLE`, which DEV-164 opened. Director 20
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from backend.core import authz
+from backend.db.models.foundation import User
 from backend.db.models.project_type_change import ProjectTypeChange
 from backend.db.models.projects import Project
 from backend.services import port_registry
@@ -43,6 +44,19 @@ WEB_NOT_YET = (
     "Projekt s webom a administráciou kokpit ešte nevie postaviť ani nasadiť — učí sa to po krokoch a voľba Web "
     "sa sprístupní, keď bude hotový posledný z nich."
 )
+
+#: DEV-522 — what the Manažér sets when founding a project binds it: the type, the sign-in and the frontends do not
+#: change while it is made. The one exception is adding the web frontend — by the admin account, before the project's
+#: first PROD deploy, with a written reason kept with the change. Director 26.11.2026: „Je neprípustné, aby typ projektu
+#: a ďaľšie jeho parametre, ktoré určíme pri zakladaní projektu boli zmenené počas tvorby projektu.“ … „Áno toto
+#: považujem za dobré riešenie. Spravme to tak, aby kopit aj do budúcna mal takú funkciu - pridať webový frontend.“
+ONLY_ADMIN = "Webový frontend pridáva len účet admin — čo sa nastaví pri založení projektu, sa počas tvorby nemení."
+AFTER_PROD = "Projekt už bol nasadený do PROD — jeho typ a frontendy sa po založení nemenia."
+ON_TEMPLATE_NOT_YET = (
+    "Projekt je na šablóne aplikácií a jej webový frontend sa ešte pripravuje — pridať sa dá, keď ho šablóna "
+    "bude vedieť."
+)
+NO_REASON = "Napíš, prečo projekt dostáva webový frontend — dôvod sa zapíše."
 
 #: The web's port is this slot of the project's port block (backend = +0, frontend = +1, db = +2). The project
 #: template reserves +3 … +5 and uses none of them; +5 is the slot it names for a second web surface.
@@ -177,19 +191,23 @@ def _surfaces(
 
 @dataclass(frozen=True)
 class WebSwitch:
-    """What switching a project to Web would do — or why it cannot."""
+    """The frontends a project has, and what adding the web frontend would give it — or why it cannot."""
 
     refusal: Optional[str]
     web_port: Optional[int]
+    #: DEV-522: the frontends the project HAS — a fact, never what it could have.
     surfaces: tuple[Surface, ...]
+    #: DEV-522: the frontends it would have after adding the web; empty when it cannot.
+    after: tuple[Surface, ...] = ()
 
     @property
     def allowed(self) -> bool:
         return self.refusal is None
 
 
-def web_switch(db: Session, project: Project) -> WebSwitch:
-    """The preview of switching *project* to Web: the frontends it would have, or the one reason it cannot.
+def web_switch(db: Session, project: Project, user: User) -> WebSwitch:
+    """The frontends *project* has and what adding the web frontend would give it (DEV-522: for the admin account,
+    before the first PROD deploy), or the one reason it cannot.
 
     Asks the port registry about the web's port (the cockpit's table, the reservations and the host) — a port that
     cannot be vouched for is a refusal, not a guess — and the workspace about the files the switch writes."""
@@ -201,6 +219,15 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
         return refused(WEB_NOT_YET)
     if project.type == WEB:
         return refused("Projekt už je Web — má administráciu aj web.")
+    if not authz.is_admin(user):
+        return refused(ONLY_ADMIN)
+    from backend.services import deploy  # deploy reads the frontends from here — imported when asked
+
+    if deploy.project_had_prod_deploy(db, project.id):
+        return refused(AFTER_PROD)
+    if project.template:
+        # DEV-523 teaches the app template its web frontend; until then a project on it gets none.
+        return refused(ON_TEMPLATE_NOT_YET)
     if project.auth_mode == TOKEN:
         return refused(
             "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom."
@@ -230,7 +257,10 @@ def web_switch(db: Session, project: Project) -> WebSwitch:
         return refused(f"Port {port} pre web je obsadený ({verdict.owner or verdict.holder}).")
 
     return WebSwitch(
-        refusal=None, web_port=port, surfaces=_surfaces(WEB, project.auth_mode, project.frontend_port, port)
+        refusal=None,
+        web_port=port,
+        surfaces=surfaces_of(project),
+        after=_surfaces(WEB, project.auth_mode, project.frontend_port, port),
     )
 
 
@@ -250,21 +280,26 @@ def _agent_at_work(db: Session, project: Project) -> bool:
     return working is not None
 
 
-def switch_to_web(db: Session, project: Project, *, changed_by: uuid.UUID) -> WebSwitch:
-    """Switch *project* to Web and keep the change. Raises ``ValueError`` with the reason when it cannot."""
-    preview = web_switch(db, project)
+def switch_to_web(db: Session, project: Project, *, user: User, reason: Optional[str]) -> WebSwitch:
+    """Add the web frontend to *project* and keep the change with who and why. Raises ``ValueError`` with the reason
+    when it cannot — DEV-522: the admin account only, before the first PROD deploy, with a written reason."""
+    preview = web_switch(db, project, user)
     if not preview.allowed:
         raise ValueError(preview.refusal)
+    why = (reason or "").strip()
+    if not why:
+        raise ValueError(NO_REASON)
     db.add(
         ProjectTypeChange(
             project_id=project.id,
             previous_type=project.type,
             type=WEB,
             web_port=preview.web_port,
-            changed_by=changed_by,
+            changed_by=user.id,
+            reason=why,
         )
     )
     project.type = WEB
     project.web_port = preview.web_port
     db.flush()
-    return preview
+    return WebSwitch(refusal=None, web_port=preview.web_port, surfaces=surfaces_of(project))

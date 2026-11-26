@@ -201,16 +201,34 @@ def test_closed_web_cannot_be_switched_to(client, db_session, web_closed):
 
 # --- switching a project to Web --------------------------------------------------------------------------------------
 
+#: DEV-522 — adding the web frontend: the admin account, before the first PROD deploy, with a written reason.
+REASON = "Projekt potrebuje verejný web s prihlásením e-mailom."
+
+
+def _admin(db) -> User:
+    found = db.execute(select(User).where(User.username == "admin")).scalar_one_or_none()
+    if found:
+        return found
+    admin = User(username="admin", email="admin@t.sk", password_hash="x", role="ri")
+    db.add(admin)
+    db.flush()
+    return admin
+
 
 def test_the_preview_shows_both_frontends_and_changes_nothing(client, db_session, web_open):
     owner = _user(db_session)
     project = _project(db_session, owner)
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
 
     assert (preview["allowed"], preview["refusal"], preview["web_port"]) == (True, None, BASE + 5)
+    # DEV-522: the frontends it HAS, and those it would have after the admin adds the web.
     assert [(s["name"], s["directory"], s["port"], s["login"], s["address_suffix"]) for s in preview["surfaces"]] == [
+        ("app", "frontend", BASE + 1, "username", ""),
+    ]
+    assert [(s["name"], s["directory"], s["port"], s["login"], s["address_suffix"]) for s in preview["after"]] == [
         ("admin", "frontend", BASE + 1, "username", "-admin"),
         ("web", "web", BASE + 5, "email", ""),
     ]
@@ -221,11 +239,12 @@ def test_the_preview_shows_both_frontends_and_changes_nothing(client, db_session
 def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_session, web_open, monkeypatch):
     owner = _user(db_session)
     project = _project(db_session, owner)
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
     # DEV-161: what the switch writes into the workspace has its own tests (test_a_web_project_has_its_public_web).
     monkeypatch.setattr(web_workspace, "add_web", lambda _db, _project: [])
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": REASON})
 
     assert answer.status_code == 200, answer.text
     db_session.refresh(project)
@@ -237,7 +256,7 @@ def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_sessi
         "standard",
         "web",
         BASE + 5,
-        owner.id,
+        admin.id,
     )
     assert [s.name for s in ps.surfaces_of(project)] == ["admin", "web"]
 
@@ -256,10 +275,11 @@ def test_the_switch_gives_the_web_its_port_and_keeps_the_change(client, db_sessi
 def test_a_project_that_cannot_be_web_says_why(client, db_session, web_open, setup, refusal):
     owner = _user(db_session)
     project = _project(db_session, owner, **setup)
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": REASON})
 
     assert (preview["allowed"], preview["refusal"]) == (False, refusal)
     assert (answer.status_code, answer.json()["detail"]) == (409, refusal)
@@ -270,7 +290,8 @@ def test_a_project_without_a_port_block_says_so(client, db_session, web_open):
     project = _project(db_session, owner)
     project.backend_port = project.frontend_port = project.db_port = None
     db_session.flush()
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
 
@@ -281,9 +302,10 @@ def test_a_web_port_held_by_someone_else_is_refused_by_name(client, db_session, 
     owner = _user(db_session)
     project = _project(db_session, owner)
     host_ports[BASE + 5] = "stary-kontajner"
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": REASON})
 
     assert (answer.status_code, answer.json()["detail"]) == (
         409,
@@ -302,7 +324,8 @@ def test_a_host_that_cannot_be_asked_is_a_refusal_not_a_guess(client, db_session
 
     monkeypatch.setattr(port_registry, "_docker_published_ports", _no_docker)
     port_registry.invalidate_host_port_cache()
-    _as(db_session, owner)
+    admin = _admin(db_session)
+    _as(db_session, admin)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
 

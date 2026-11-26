@@ -2405,14 +2405,16 @@ export interface paths {
         };
         /**
          * Preview Web Switch
-         * @description What switching the project to Web would give it, or why it cannot — nothing changes. A host that cannot be
-         *     asked about the web's port is a refusal, never a guess (port_registry answers ``unknown``).
+         * @description The frontends the project has, and what adding the web frontend would give it or why it cannot — nothing
+         *     changes. A host that cannot be asked about the web's port is a refusal, never a guess (port_registry answers
+         *     ``unknown``).
          */
         get: operations["preview_web_switch_api_v1_projects__project_id__web_switch_get"];
         put?: never;
         /**
          * Switch To Web
-         * @description Switch the project to Web — accepted exactly when the preview allows it; the change is kept.
+         * @description Add the web frontend — accepted exactly when the preview allows it and a reason is written; the change is kept
+         *     with who and why.
          */
         post: operations["switch_to_web_api_v1_projects__project_id__web_switch_post"];
         delete?: never;
@@ -9288,10 +9290,23 @@ export interface components {
             url?: string | null;
         };
         /**
+         * WebAddRequest
+         * @description DEV-522: adding the web frontend needs the reason — it is kept with the change.
+         */
+        WebAddRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
          * WebSwitchRead
-         * @description What switching the project to Web gives it — or the one reason it cannot (``refusal``).
+         * @description The frontends the project has, and what adding the web frontend gives it — or the one reason it cannot.
          */
         WebSwitchRead: {
+            /**
+             * After
+             * @default []
+             */
+            after: components["schemas"]["SurfaceRead"][];
             /** Allowed */
             allowed: boolean;
             /** Refusal */
@@ -13495,7 +13510,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WebAddRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

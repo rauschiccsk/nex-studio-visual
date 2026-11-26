@@ -1,9 +1,11 @@
-"""DEV-160 — ``/api/v1/projects/{project_id}/web-switch``: switching a Štandardný project to Web (administration +
-public web) with a preview first."""
+"""DEV-160 — ``/api/v1/projects/{project_id}/web-switch``: the frontends of a project, and adding the web frontend
+(administration + public web) with a preview first — DEV-522: by the admin account, before the first PROD deploy, with a
+written reason."""
 
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,7 +17,7 @@ from backend.core.security import get_current_user
 from backend.db.models.foundation import User
 from backend.db.models.projects import Project
 from backend.db.session import get_db
-from backend.schemas.project_surfaces import SurfaceRead, WebSwitchRead
+from backend.schemas.project_surfaces import SurfaceRead, WebAddRequest, WebSwitchRead
 from backend.services import project_surfaces, web_workspace
 from backend.services.workspace_owner import chown_workspace
 
@@ -28,6 +30,7 @@ def _read(found: project_surfaces.WebSwitch) -> WebSwitchRead:
         refusal=found.refusal,
         web_port=found.web_port,
         surfaces=[SurfaceRead(**asdict(surface)) for surface in found.surfaces],
+        after=[SurfaceRead(**asdict(surface)) for surface in found.after],
     )
 
 
@@ -37,19 +40,22 @@ def preview_web_switch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WebSwitchRead:
-    """What switching the project to Web would give it, or why it cannot — nothing changes. A host that cannot be
-    asked about the web's port is a refusal, never a guess (port_registry answers ``unknown``)."""
+    """The frontends the project has, and what adding the web frontend would give it or why it cannot — nothing
+    changes. A host that cannot be asked about the web's port is a refusal, never a guess (port_registry answers
+    ``unknown``)."""
     project = authz.assert_project_id_access(db, current_user, project_id)
-    return _read(project_surfaces.web_switch(db, project))
+    return _read(project_surfaces.web_switch(db, project, current_user))
 
 
 @router.post("/projects/{project_id}/web-switch", response_model=WebSwitchRead)
 def switch_to_web(
     project_id: UUID,
+    payload: Optional[WebAddRequest] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WebSwitchRead:
-    """Switch the project to Web — accepted exactly when the preview allows it; the change is kept."""
+    """Add the web frontend — accepted exactly when the preview allows it and a reason is written; the change is kept
+    with who and why."""
     project = authz.assert_project_id_access(db, current_user, project_id)
     # DEV-161: one switch per project at a time — a second click waits here and then reads „už je Web“.
     db.execute(select(Project).where(Project.id == project.id).with_for_update())
@@ -58,7 +64,9 @@ def switch_to_web(
     # calls Štandardný.
     switch = db.begin_nested()
     try:
-        done = project_surfaces.switch_to_web(db, project, changed_by=current_user.id)
+        done = project_surfaces.switch_to_web(
+            db, project, user=current_user, reason=payload.reason if payload else None
+        )
         warnings = web_workspace.add_web(db, project)
     except (ValueError, web_workspace.WebWorkspaceError) as exc:
         switch.rollback()

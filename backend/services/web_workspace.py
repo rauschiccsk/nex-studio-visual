@@ -108,7 +108,7 @@ def unsaved_work(project: Project) -> Optional[str]:
     shown = ", ".join(entry["path"] for entry in tree["files"][:5]) + (" …" if tree["dirty_count"] > 5 else "")
     return (
         f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
-        "projektu, potom prepni projekt na Web."
+        "projektu, potom pridaj projektu webový frontend."
     )
 
 

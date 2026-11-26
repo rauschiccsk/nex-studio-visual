@@ -498,7 +498,7 @@ export default function ProjectDetailPage() {
         onUpgraded={() => setLibraryReload((n) => n + 1)}
       />
 
-      {/* DEV-164: a Štandardný project can become a Web project (administration + public web); a Web one names both. */}
+      {/* DEV-522: the frontends the project has, as a fact; the admin account alone may add the web frontend (DEV-164). */}
       {mayOperateProject(user, project.created_by) && (project.type === "standard" || project.type === "web") && (
         <WebSwitchPanel
           projectId={project.id}

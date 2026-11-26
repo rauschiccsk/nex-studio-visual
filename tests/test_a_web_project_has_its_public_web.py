@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+from sqlalchemy import select
 
 from backend.core.security import get_current_user
 from backend.db.models.foundation import User
@@ -393,7 +394,8 @@ def test_the_status_route_names_the_frontends_the_way_the_manazer_knows_them(cli
     project = _project(db_session, owner, project_type="web", source_path=tmp_path)
     _seed(tmp_path, "frontend", "0.19.0")
     _seed(tmp_path, "web", "0.19.0")
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
     with (
         patch.object(nexshared, "list_remote_tags", return_value=["0.19.0"]),
@@ -451,6 +453,16 @@ def _workspace(tmp_path: Path) -> tuple[Path, Path]:
     return ws, origin
 
 
+def _admin(db) -> User:
+    found = db.execute(select(User).where(User.username == "admin")).scalar_one_or_none()
+    if found:
+        return found
+    admin = User(username="admin", email="admin@t.sk", password_hash="x", role="ri")
+    db.add(admin)
+    db.flush()
+    return admin
+
+
 @pytest.fixture
 def web_open(monkeypatch):
     monkeypatch.setattr(ps, "WEB_PROJECTS_AVAILABLE", True)
@@ -464,10 +476,11 @@ def test_the_switch_gives_the_workspace_its_web_its_ci_and_the_new_check_in_one_
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
     monkeypatch.setattr("backend.api.routes.project_surfaces.chown_workspace", lambda _path: None)
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert answer.status_code == 200, answer.text
     assert answer.json()["warnings"] == []
@@ -494,9 +507,10 @@ def test_a_web_the_template_cannot_build_leaves_the_project_as_it_was(client, db
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert answer.status_code == 409
     assert re.match(r"Web sa do projektu nepodarilo pridať: ERROR: web-skeleton", answer.json()["detail"])
@@ -514,9 +528,10 @@ def test_a_web_that_was_already_there_is_never_removed(client, db_session, tmp_p
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert answer.status_code == 409
     assert answer.json()["detail"] == _unsaved_in("web/")
@@ -528,14 +543,17 @@ def _switch(client, db_session, tmp_path, ws: Path, script_body: str = FAKE_ADD_
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
-    return project, client.post(f"/api/v1/projects/{project.id}/web-switch")
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
+    return project, client.post(
+        f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."}
+    )
 
 
 def _unsaved_in(shown: str) -> str:
     return (
         f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
-        "projektu, potom prepni projekt na Web."
+        "projektu, potom pridaj projektu webový frontend."
     )
 
 
@@ -556,10 +574,11 @@ def test_unsaved_work_elsewhere_neither_stops_the_switch_nor_rides_along(
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert (preview["allowed"], preview["refusal"]) == (True, None)
     assert answer.status_code == 200, answer.text
@@ -595,10 +614,11 @@ def test_unsaved_work_in_what_the_switch_writes_stops_it_and_the_preview_says_so
     system_setting_service.upsert(db_session, "template_init_script_path", str(script))
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=ws)
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert (preview["allowed"], preview["refusal"]) == (False, _unsaved_in(shown))
     assert (answer.status_code, answer.json()["detail"]) == (409, _unsaved_in(shown))
@@ -628,10 +648,11 @@ def test_a_workspace_that_is_no_git_repository_is_refused_by_the_preview_as_by_t
     (tmp_path / "ws").mkdir()
     owner = _user(db_session)
     project = _project(db_session, owner, source_path=tmp_path / "ws")
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     refusal = "Priečinok projektu nie je čitateľný git repozitár, web sa doňho nedá pridať."
     assert (preview["allowed"], preview["refusal"]) == (False, refusal)
@@ -716,9 +737,10 @@ def test_a_project_an_agent_works_on_is_not_switched(client, db_session, tmp_pat
         )
     )
     db_session.flush()
-    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, owner.id)
+    admin = _admin(db_session)  # DEV-522: the admin account adds the web frontend
+    app.dependency_overrides[get_current_user] = lambda: db_session.get(User, admin.id)
 
-    answer = client.post(f"/api/v1/projects/{project.id}/web-switch")
+    answer = client.post(f"/api/v1/projects/{project.id}/web-switch", json={"reason": "Projekt potrebuje verejný web."})
 
     assert answer.status_code == 409
     assert (

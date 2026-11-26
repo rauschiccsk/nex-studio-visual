@@ -27,9 +27,10 @@ export function getWebSwitchApi(projectId: string): Promise<WebSwitch> {
   return api.get<WebSwitch>(`/projects/${projectId}/web-switch`);
 }
 
-/** Switch the project to Web: its workspace gets the public web (web/), its CI and checks; the change is kept. */
-export function switchToWebApi(projectId: string): Promise<WebSwitch> {
-  return api.post<WebSwitch>(`/projects/${projectId}/web-switch`);
+/** Add the web frontend (DEV-522: the admin account, before the first PROD deploy, with a reason that is kept): the
+ *  workspace gets the public web (web/), its CI and checks. */
+export function switchToWebApi(projectId: string, reason: string): Promise<WebSwitch> {
+  return api.post<WebSwitch>(`/projects/${projectId}/web-switch`, { reason });
 }
 
 export function getProjectApi(projectId: string): Promise<ProjectRead> {

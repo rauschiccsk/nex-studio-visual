@@ -22,11 +22,20 @@ class SurfaceRead(BaseModel):
 
 
 class WebSwitchRead(BaseModel):
-    """What switching the project to Web gives it — or the one reason it cannot (``refusal``)."""
+    """The frontends the project has, and what adding the web frontend gives it — or the one reason it cannot."""
 
     allowed: bool
     refusal: Optional[str] = None
     web_port: Optional[int] = None
+    #: DEV-522: the frontends the project HAS.
     surfaces: list[SurfaceRead]
+    #: DEV-522: the frontends it would have after adding the web — empty when it cannot.
+    after: list[SurfaceRead] = []
     #: DEV-161: after a switch — what finished only partly in the project's workspace (Slovak, for the Manažér).
     warnings: list[str] = []
+
+
+class WebAddRequest(BaseModel):
+    """DEV-522: adding the web frontend needs the reason — it is kept with the change."""
+
+    reason: Optional[str] = None

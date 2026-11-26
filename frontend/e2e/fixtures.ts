@@ -1201,12 +1201,13 @@ export function registerFixtures(): void {
       "Uprac kód, ktorý nikto nepoužíva — kontrola kokpitu ho našla v projekte z minulých verzií (1):\n" +
       "- funkciu generate_temp_password (backend/app/core/security.py:45) nikto nevolá",
   });
-  // DEV-164: the panel „Projekt s webom“ — NEX Inbox signs in by token, so the cockpit names why it cannot switch.
+  // DEV-522: the panel „Frontendy projektu“ — NEX Inbox signs in by token; adding the web is the admin's alone.
   answer("get", "/api/v1/projects/{project_id}/web-switch", {
     allowed: false,
     refusal:
       "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom.",
     web_port: null,
+    after: [],
     surfaces: [
       {
         name: "app",
