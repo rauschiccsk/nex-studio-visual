@@ -27,6 +27,7 @@ import { ResizeHandle, useWideScreen } from "nex-shared";
 import { useActiveContextStore } from "@/store/activeContextStore";
 import { useUserLayoutStore } from "@/store/userLayoutStore";
 import { usePipelineWs } from "@/hooks/usePipelineWs";
+import { toUpload } from "@/lib/poradcaAttachments";
 import {
   relayPipelineMessageApi,
   postPipelineActionApi,
@@ -105,7 +106,7 @@ export default function ControlCenterPage() {
   const planLimit = wide ? layout?.limits.plan_width : undefined;
   const planWidth = planLimit ? (planDragged ?? layout?.plan_width ?? planLimit.default) : undefined;
 
-  async function handleSend(text: string): Promise<{ deferred: boolean }> {
+  async function handleSend(text: string, images: File[] = []): Promise<{ deferred: boolean }> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
     // DEV-351: a version that has not started is started by „Spustiť tvorbu špecifikácie“ (StartBuildBar) — never by a
     // message. The first message used to start it as a conversation, without the five phases (a mode no build ever
@@ -113,14 +114,17 @@ export default function ControlCenterPage() {
     if (!board?.state) throw new Error("Verzia ešte nebeží — spusti tvorbu špecifikácie tlačidlom vyššie.");
     // Pipeline already exists → the SOLE mutating call is the single-writer relay (Model B): the engine, not
     // this page, writes the turn (enqueued behind an in-flight turn when ``deferred``).
-    const res = await relayPipelineMessageApi(versionId, text);
+    // DEV-534: the screenshots pasted into the message go with it, as Poradca's do.
+    const res = await relayPipelineMessageApi(versionId, text, await Promise.all(images.map(toUpload)));
     return { deferred: res.deferred };
   }
 
   // DEV-297: „Uprav“ from the conversation box — the engine's ``uprav`` with the text as its comment.
-  async function handleUprav(comment: string): Promise<void> {
+  async function handleUprav(comment: string, images: File[] = []): Promise<void> {
     if (!versionId) throw new Error("Najprv vyber verziu (pin v Projektoch).");
-    setBoard(await postPipelineActionApi(versionId, { action: "uprav", payload: { comment } }));
+    const uploads = await Promise.all(images.map(toUpload));
+    const payload = uploads.length ? { comment, images: uploads } : { comment };
+    setBoard(await postPipelineActionApi(versionId, { action: "uprav", payload }));
   }
 
   // --- Render guards (salvaged from the retired AI Agent tab) ---

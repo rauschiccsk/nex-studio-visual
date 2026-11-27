@@ -247,7 +247,7 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
     expect(screen.getByRole("button", { name: "Uprav" })).toHaveAttribute("data-primary", "false");
     fireEvent.keyDown(box, { key: "Enter" });
 
-    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Koľko úloh má plán?"));
+    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Koľko úloh má plán?", []));
     expect(h.postPipelineActionApi).not.toHaveBeenCalled();
   });
 
@@ -261,6 +261,6 @@ describe("Poradca's instruction goes out as „Uprav“ — the main button and 
     expect(screen.getByRole("button", { name: "Poslať" })).toHaveAttribute("data-primary", "true");
     fireEvent.keyDown(box, { key: "Enter" });
 
-    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Ďakujem, ešte otázka."));
+    await waitFor(() => expect(h.relayPipelineMessageApi).toHaveBeenCalledWith(VERSION, "Ďakujem, ešte otázka.", []));
   });
 });

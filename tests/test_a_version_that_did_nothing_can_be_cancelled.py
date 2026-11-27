@@ -175,6 +175,23 @@ def test_a_regular_version_that_never_started_is_cancelled_too(client, setup, pl
     assert _comments(plane, "x11")[-1] == _back_to_todo(project, "2.0.0")
 
 
+def test_a_cancelled_version_takes_the_screenshots_of_its_conversation(
+    client, setup, plane, db_session, monkeypatch, tmp_path
+):
+    """DEV-534 — what the Manažér pasted into its conversation goes with it; another version's stays."""
+    from backend.config.settings import settings
+
+    monkeypatch.setattr(settings, "conversation_images_dir", str(tmp_path / "shots"))
+    user, project = setup
+    version = _regular(db_session, project)
+    (tmp_path / "shots" / project.slug / str(version)).mkdir(parents=True)
+    (tmp_path / "shots" / project.slug / "ina-verzia").mkdir()
+
+    assert _cancel(client, user, version).status_code == 200
+
+    assert sorted(p.name for p in (tmp_path / "shots" / project.slug).iterdir()) == ["ina-verzia"]
+
+
 def test_a_started_fast_fix_still_in_priprava_goes_away_with_its_tasks(client, setup, plane, db_session):
     user, project = setup
     fix = _found_fix(client, user, project)

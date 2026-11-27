@@ -17,7 +17,8 @@ import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
 import type { InputOwner } from "@/components/controlCenter/blockRecovery";
 import AttachFileButton from "@/components/controlCenter/AttachFileButton";
-import { usePasteAndDropUpload } from "@/components/controlCenter/usePasteAndDropUpload";
+import PendingAttachmentChips from "@/components/common/PendingAttachmentChips";
+import { useScreenshots } from "@/components/controlCenter/useScreenshots";
 import { withAttachedLine } from "@/components/controlCenter/privateFiles";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
@@ -80,7 +81,8 @@ function writeUpravIntent(versionId: string | null | undefined, on: boolean): vo
 
 interface Props {
   /** Relay the text through the engine; resolves to whether it was ENQUEUED behind an in-flight turn. */
-  onRelay: (text: string) => Promise<{ deferred: boolean }>;
+  /** DEV-534: ``images`` — the screenshots pasted into the message; they go with it, as Poradca's do. */
+  onRelay: (text: string, images: File[]) => Promise<{ deferred: boolean }>;
   disabled?: boolean;
   /** The build is blocked on a framework_issue (a NEX-Studio bug) — lock the composer + show the "technical
    *  team is on it" banner; the Manažér cannot chat their way out of it (ReportAgainBar owns the one move). */
@@ -102,7 +104,7 @@ interface Props {
   /** DEV-297: the board offers „Uprav“ and no other control sends it (`composerOffersRevise`) — this box carries it. */
   offersUprav?: boolean;
   /** Send the text as „Uprav“ (``uprav`` with the text as its comment). */
-  onUprav?: (comment: string) => Promise<void>;
+  onUprav?: (comment: string, images: File[]) => Promise<void>;
   /** DEV-373: the button's name as the cockpit names it for this state (the board's ``action_labels.uprav``) — the
    *  page passes it with ``offersUprav``; the box has no word of its own for it. */
   upravLabel?: string;
@@ -148,15 +150,9 @@ function ConversationComposer({
     setText,
     restored,
   });
-  // DEV-527: a screenshot by Ctrl+V or dropped on the row goes the way of „Priložiť súbor“.
-  const attachFiles = usePasteAndDropUpload({
-    versionId,
-    disabled: locked || sending,
-    onAttached: (lines) => {
-      dismissPoradca();
-      setText(withAttachedLine(text, lines));
-    },
-  });
+  // DEV-534: screenshots pasted or dropped — small previews above the field, sent with the message (not before the
+  // early return below: a hook that sometimes does not run is one React forbids).
+  const screenshots = useScreenshots(versionId, locked || sending);
 
   // DEV-298: the box holds Poradca's instruction — it stays his instruction when he edits it, until it goes out.
   const [upravIntent, setUpravIntent] = useState<boolean>(() => readUpravIntent(versionId));
@@ -189,7 +185,8 @@ function ConversationComposer({
     setError(null);
     setHint(null);
     try {
-      const { deferred } = await onRelay(trimmed);
+      const { deferred } = await onRelay(trimmed, screenshots.files);
+      screenshots.clear();
       clearDraft();
       dismissPoradca();
       // `deferred` ⇒ a turn was in flight; the message is queued and lands at the next boundary.
@@ -209,7 +206,8 @@ function ConversationComposer({
     setError(null);
     setHint(null);
     try {
-      await onUprav(trimmed);
+      await onUprav(trimmed, screenshots.files);
+      screenshots.clear();
       clearDraft();
       dismissPoradca();
     } catch (e: unknown) {
@@ -286,13 +284,19 @@ function ConversationComposer({
           {primaryUprav ? UPRAV_INSTRUCTION_HINT : UPRAV_HINT}
         </p>
       )}
+      {screenshots.refused && (
+        <p role="status" className="mb-1 text-[11px] text-[var(--color-state-warning-fg)]">
+          {screenshots.refused}
+        </p>
+      )}
+      <PendingAttachmentChips attachments={screenshots.shots} onRemove={screenshots.remove} disabled={sending} />
       <div
-        {...attachFiles.dropProps}
-        className={`flex items-end gap-2 rounded-lg ${attachFiles.dragging ? "ring-2 ring-[var(--color-accent-primary)]" : ""}`}
+        {...screenshots.dropProps}
+        className={`flex items-end gap-2 rounded-lg ${screenshots.dragging ? "ring-2 ring-[var(--color-accent-primary)]" : ""}`}
       >
         <textarea
           data-draft="rozhovor"
-          onPaste={attachFiles.onPaste}
+          onPaste={screenshots.onPaste}
           lang="sk"
           spellCheck={true}
           ref={growRef}
@@ -310,8 +314,8 @@ function ConversationComposer({
               : notStarted
                 ? "Verzia ešte nebeží — spusti tvorbu špecifikácie tlačidlom vyššie."
                 : atVizual
-                  ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok)"
-                  : "Napíš Staviteľovi… (Enter odošle, Shift+Enter nový riadok)"
+                  ? "Napíš požiadavku na zmenu vizuálu… (Enter odošle, Shift+Enter nový riadok, Ctrl+V vloží snímku)"
+                  : "Napíš Staviteľovi… (Enter odošle, Shift+Enter nový riadok, Ctrl+V vloží snímku)"
           }
           className="min-h-[2.5rem] flex-1 resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-canvas)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-primary)] focus:outline-none disabled:opacity-50"
         />
@@ -320,7 +324,6 @@ function ConversationComposer({
           <AttachFileButton
             versionId={versionId}
             disabled={locked || sending}
-            uploader={attachFiles.uploader}
             onAttached={(line) => {
               dismissPoradca();
               setText(withAttachedLine(text, line));

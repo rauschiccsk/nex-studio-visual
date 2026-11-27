@@ -1333,6 +1333,13 @@ export function registerFixtures(): void {
       },
     ],
   });
+  // DEV-534: what the conversation box takes — screenshots pasted as in Nápady, Poradca's limits, images only.
+  answer("get", "/api/v1/pipeline/{version_id}/screenshot-limits", {
+    attachment_max_bytes: 5_242_880,
+    attachments_max_count: 5,
+    attachments_max_total_bytes: 15_728_640,
+    attachment_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  });
   // DEV-120: the „Plane tikety" tab — one ticket a version solves, one free.
   // DEV-122, DEV-455: an open ticket goes into a version or starts a fast fix — the layout check opens the fast fix.
   answer("get", "/api/v1/projects/{slug}/plane-tickets", {

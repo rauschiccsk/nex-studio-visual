@@ -4,6 +4,7 @@
 // mirror backend/schemas/pipeline.py exactly.
 
 import api from "../api";
+import type { ScreenshotUpload } from "./screenshots";
 import type { components } from "./pipeline.generated";
 
 // ── stage / actor / status enums (GENERATED — single source of truth, v0.7.0 R2) ─────────────
@@ -344,9 +345,11 @@ export function rejectDedoProposalApi(versionId: string, messageId: string): Pro
 export function relayPipelineMessageApi(
   versionId: string,
   text: string,
+  images: ScreenshotUpload[] = [],
 ): Promise<PipelineRelayResponse> {
-  return api.post<PipelineRelayResponse>(`/pipeline/${versionId}/relay`, { text });
+  return api.post<PipelineRelayResponse>(`/pipeline/${versionId}/relay`, { text, images });
 }
+
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 

@@ -332,6 +332,11 @@ def _guard_prod_db_isolation(test_engine):
     _orig_project_docs_dir = settings.project_docs_dir
     settings.project_docs_dir = os.path.join(tempfile.gettempdir(), f"test-project-docs-absent-{os.getpid()}")
 
+    # 9. DEV-534: the screenshots of the conversations — on ANDROS the LIVE cockpit's folder; a finished build in a
+    #    test removes its version's folder there. A test process has its own; a test of the screenshots its tmp_path.
+    _orig_conversation_images_dir = settings.conversation_images_dir
+    settings.conversation_images_dir = tempfile.mkdtemp(prefix="test-conversation-images-")
+
     yield
 
     # Restore process-global state exactly as we found it.
@@ -342,6 +347,8 @@ def _guard_prod_db_isolation(test_engine):
     shutil.rmtree(_build_sandbox._CLAUDE_HOME_DIR, ignore_errors=True)
     _build_sandbox._CLAUDE_HOME_DIR = _orig_claude_home
     settings.project_docs_dir = _orig_project_docs_dir
+    shutil.rmtree(settings.conversation_images_dir, ignore_errors=True)
+    settings.conversation_images_dir = _orig_conversation_images_dir
     db_session_module.SessionLocal.configure(bind=original_engine)
     db_session_module.engine = original_engine
 

@@ -253,6 +253,11 @@ class Settings(BaseSettings):
     # (``backend/services/project_docs.py``): mounted into the cockpit's backend in the PROD compose at THE SAME path,
     # like ``poradca_data_dir``, because the sandbox's ``--mount`` source is resolved by docker on the host.
     project_docs_dir: str = "/opt/data/nex-studio-visual/project-docs"
+    # DEV-534 — screenshots the Manažér pastes into the conversation with the Staviteľ, one folder per project and
+    # version (``backend/services/conversation_images.py``): never in the project, deleted when the version is done or
+    # cancelled. Mounted into the cockpit's backend in the PROD compose at THE SAME path, like ``project_docs_dir``,
+    # because a sandboxed build turn gets its project's folder read-only and docker resolves the source on the host.
+    conversation_images_dir: str = "/opt/data/nex-studio-visual/conversation-images"
 
     # DEV-166: how much build cache a deploy target keeps after a deploy (GB) — the cleanup removes only what is above
     # it, least recently used first, so the next build of an unchanged project does not start from nothing. Sized for

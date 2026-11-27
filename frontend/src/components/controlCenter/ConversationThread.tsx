@@ -22,6 +22,17 @@ import PipelineActivityFeed from "../cockpit/PipelineActivityFeed";
 import VizualChecklistBlock from "./VizualChecklistBlock";
 import { vizualChecklistOf } from "./vizualChecklist";
 import { ROLE_LABELS } from "../cockpit/labels";
+import QuestionAttachments from "@/components/poradca/QuestionAttachments";
+import { getScreenshotApi } from "@/services/api/screenshots";
+import type { PoradcaMessage } from "@/types/poradca";
+
+type Screenshot = NonNullable<PoradcaMessage["attachments"]>[number];
+
+/** DEV-534 — the screenshots the Manažér pasted into this message, pinned to it by the cockpit (``payload.images``). */
+function screenshotsOf(payload: unknown): Screenshot[] {
+  const images = (payload as { images?: unknown } | null)?.images;
+  return Array.isArray(images) ? (images as Screenshot[]) : [];
+}
 
 // The Manažér's own messages align right (like an outgoing chat); everyone else aligns left.
 function isOperator(author: PipelineParticipant): boolean {
@@ -199,6 +210,14 @@ function ConversationThread({ messages, activity, working, versionId }: Props) {
                     className="prose prose-sm dark:prose-invert max-w-none text-sm text-[var(--color-text-primary)]"
                   />
                   {!checklistFirst && checklistBlock}
+                  {versionId && screenshotsOf(m.payload).length > 0 && (
+                    // DEV-534: as in Nápady — the small previews at the message, the whole image on click.
+                    <QuestionAttachments
+                      conversationId={versionId}
+                      attachments={screenshotsOf(m.payload)}
+                      load={(id) => getScreenshotApi(versionId, id)}
+                    />
+                  )}
                   {question.trim() && (
                     <div className="mt-2 rounded-md border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/5 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">

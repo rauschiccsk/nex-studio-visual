@@ -81,6 +81,7 @@ from backend.schemas.version import VersionCreate
 from backend.services import app_kit as app_kit_service
 from backend.services import (
     app_languages,
+    conversation_images,
     delivery_statement,
     library_upgrades,
     orchestrator,
@@ -1699,6 +1700,8 @@ def delete_project(
     # DEV-109: the project's preview — container vizual-<slug> and the route its labels give Traefik — would
     # otherwise keep serving a deleted project's frontend. Best-effort and logged, like every cleanup around it.
     # DEV-162: the preview of every frontend of the project — a Web project's web has one of its own.
+    # DEV-534: the screenshots pasted into its conversations.
+    conversation_images.remove_project(slug)
     for directory in preview_directories:
         try:
             vizual_sandbox.teardown(slug, directory=directory)

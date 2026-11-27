@@ -11,9 +11,10 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Check, FileText, Loader2, Paperclip, Send, X } from "lucide-react";
+import { Check, Loader2, Paperclip, Send } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
+import PendingAttachmentChips from "@/components/common/PendingAttachmentChips";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { RESTORED_DRAFT_LABEL, useDraft } from "@/hooks/useDraft";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
@@ -217,38 +218,7 @@ export default function PoradcaComposer({
           {refused}
         </p>
       )}
-      {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-attachments">
-          {attachments.map((a) => (
-            <div
-              key={a.key}
-              className="relative overflow-hidden rounded border border-[var(--color-border-default)]"
-            >
-              {a.url ? (
-                <img
-                  src={a.url}
-                  alt={a.file.name}
-                  className="h-16 max-w-[8rem] object-cover"
-                />
-              ) : (
-                <span className="flex h-16 max-w-[12rem] items-center gap-1.5 py-1 pl-2 pr-6 text-xs text-[var(--color-text-secondary)]">
-                  <FileText className="h-4 w-4 flex-shrink-0" aria-hidden />
-                  <span className="break-all">{a.file.name}</span>
-                </span>
-              )}
-              <button
-                type="button"
-                aria-label={`Odobrať ${a.file.name}`}
-                onClick={() => detach(a.key)}
-                disabled={sending}
-                className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <PendingAttachmentChips attachments={attachments} onRemove={detach} disabled={sending} />
       <div className="flex items-end gap-2">
         {canAttach && (
           <>

@@ -105,7 +105,8 @@ describe("ControlCenterPage — conversation cold-start send handler (STEP 1)", 
     render(<ControlCenterPage />);
     fireEvent.click(screen.getByRole("button", { name: "send" }));
 
-    await waitFor(() => expect(relayPipelineMessageApi).toHaveBeenCalledWith("v-1", SEND_TEXT));
+    // DEV-534: the message carries its screenshots — here none.
+    await waitFor(() => expect(relayPipelineMessageApi).toHaveBeenCalledWith("v-1", SEND_TEXT, []));
     // A live pipeline must NOT re-run start.
     expect(postPipelineActionApi).not.toHaveBeenCalled();
   });

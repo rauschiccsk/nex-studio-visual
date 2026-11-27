@@ -6,8 +6,7 @@ import { formatShortDateTime } from "@/utils/format";
 export const ATTACH_LABEL = "Priložiť súbor";
 export const ATTACHING_LABEL = "Nahrávam…";
 export const ATTACH_HINT =
-  "Súbor sa uloží do projektu, do priečinka private/ — git ho nevidí. Do správy sa doplní, kde ho Staviteľ nájde. " +
-  "Snímku obrazovky vložíš aj cez Ctrl+V do poľa alebo ju sem pretiahneš.";
+  "Súbor sa uloží do projektu, do priečinka private/ — git ho nevidí. Do správy sa doplní, kde ho Staviteľ nájde.";
 /** DEV-446 — what the Manažér attached; Director 20.11.2026: „tam majú byť prílohy, ktoré som zadal ja“. */
 export const ATTACHMENTS_TITLE = "Prílohy";
 /** DEV-446 — what the Staviteľ put into private/ itself, apart from the attachments and folded by default. */

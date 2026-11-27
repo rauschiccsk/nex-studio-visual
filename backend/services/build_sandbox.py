@@ -839,6 +839,7 @@ def build_run_argv(
             copy, or a malformed claude argv.
     """
     container_project_dir, host_project_dir = _host_project_dir(project_slug)
+    from backend.services import conversation_images  # local — through Poradca's attachments it reaches claude_agent
     from backend.services import project_docs as project_docs_service  # local — it imports claude_agent lazily too
 
     if project_docs is not None and not project_docs_service.is_snapshot(project_docs):
@@ -916,6 +917,9 @@ def build_run_argv(
             "--mount",
             f"type=bind,source={project_docs},target={project_docs_service.CONTAINER_DIR},readonly",
         ]
+    # DEV-534: the screenshots the Manažér pasted into the conversation — the project's own, READ-ONLY, at the path the
+    # turn's note names. Only when there are any (``--mount`` refuses an absent source).
+    argv += conversation_images.mount_args(project_slug)
     argv += [
         # The claude binary the image does not bundle — read-only: run it, never replace it.
         "--mount",

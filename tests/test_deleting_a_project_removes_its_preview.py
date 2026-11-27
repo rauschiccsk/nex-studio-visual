@@ -40,6 +40,22 @@ def test_deleting_a_project_removes_its_preview(router_client, creator, monkeypa
     assert removed == [f"vizual-{project['slug']}"]
 
 
+def test_deleting_a_project_removes_the_screenshots_of_its_conversations(router_client, creator, monkeypatch, tmp_path):  # noqa: F811
+    """DEV-534 — what the Manažér pasted to explain the versions goes with the project; another project's stays."""
+    from backend.config.settings import settings
+
+    monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: None)
+    monkeypatch.setattr(vizual_sandbox, "_inspect_state", lambda name: {"running": False})
+    monkeypatch.setattr(settings, "conversation_images_dir", str(tmp_path / "shots"))
+    project = _create(router_client, creator)
+    (tmp_path / "shots" / project["slug"] / "verzia").mkdir(parents=True)
+    (tmp_path / "shots" / "iny-projekt").mkdir()
+
+    assert router_client.delete(f"/api/v1/projects/{project['id']}").status_code == 200
+
+    assert sorted(p.name for p in (tmp_path / "shots").iterdir()) == ["iny-projekt"]
+
+
 def test_a_preview_that_survives_the_removal_is_written_to_the_log(router_client, creator, monkeypatch, caplog):  # noqa: F811
     monkeypatch.setattr(vizual_sandbox, "_force_remove", lambda name: None)
     monkeypatch.setattr(vizual_sandbox, "_inspect_state", lambda name: {"running": True})

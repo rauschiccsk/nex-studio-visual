@@ -384,6 +384,13 @@ class PipelineActionRequest(BaseModel):
     payload: Optional[dict[str, Any]] = None
 
 
+class ScreenshotUpload(BaseModel):
+    """DEV-534 — one screenshot as the screen sends it: its name and the content in base64, like Poradca's (DEV-52)."""
+
+    name: str = ""
+    data: str
+
+
 class PipelineRelayRequest(BaseModel):
     """Body for ``POST /pipeline/{version_id}/relay`` (CR-V2-015) — a Manažér message typed in the
     read-only AI Agent tab.
@@ -394,6 +401,18 @@ class PipelineRelayRequest(BaseModel):
     """
 
     text: str = Field(..., min_length=1, description="The Manažér's message to relay to the Staviteľ.")
+    images: list[ScreenshotUpload] = Field(
+        default_factory=list, description="DEV-534 — screenshots pasted into the message (base64), shown in the thread."
+    )
+
+
+class ScreenshotLimits(BaseModel):
+    """DEV-534 — what the conversation box takes: Poradca's limits, images only (one check: attachments.accept)."""
+
+    attachment_max_bytes: int
+    attachments_max_count: int
+    attachments_max_total_bytes: int
+    attachment_types: list[str]
 
 
 class PipelineRelayResponse(BaseModel):

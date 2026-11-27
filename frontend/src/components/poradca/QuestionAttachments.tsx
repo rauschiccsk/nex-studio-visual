@@ -19,9 +19,12 @@ const OPENED_URL_MS = 60_000;
 export default function QuestionAttachments({
   conversationId,
   attachments,
+  load,
 }: {
   conversationId: string;
   attachments: Attachment[];
+  /** DEV-534: where a screenshot is fetched from when it is not a Poradca conversation's (the Staviteľ's thread). */
+  load?: (attachmentId: string) => Promise<Blob>;
 }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [failed, setFailed] = useState<Record<string, boolean>>({});
@@ -35,7 +38,7 @@ export default function QuestionAttachments({
     let alive = true;
     const made: string[] = [];
     for (const a of images) {
-      getPoradcaAttachmentApi(conversationId, a.id)
+      (load ?? ((id: string) => getPoradcaAttachmentApi(conversationId, id)))(a.id)
         .then((blob) => {
           if (!alive) return;
           const url = URL.createObjectURL(blob);

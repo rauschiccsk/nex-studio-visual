@@ -956,7 +956,9 @@ export interface paths {
         put?: never;
         /**
          * Post Action
-         * @description Apply a Director action; broadcast the resulting state + new messages.
+         * @description Apply a Director action; broadcast the resulting state + new messages. DEV-534: screenshots pasted into the
+         *     message (``payload.images``, Uprav) are taken off the payload, stored and pinned to the message the action
+         *     writes.
          */
         post: operations["post_action_api_v1_pipeline__version_id__action_post"];
         delete?: never;
@@ -1175,6 +1177,46 @@ export interface paths {
          *     settled it dispatches immediately as an ``ask``/``answer`` turn and we schedule the background run.
          */
         post: operations["post_relay_api_v1_pipeline__version_id__relay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/screenshot-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Screenshot Limits
+         * @description DEV-534 — what the conversation box takes: Poradca's limits (one decision), images only.
+         */
+        get: operations["get_screenshot_limits_api_v1_pipeline__version_id__screenshot_limits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline/{version_id}/screenshots/{image_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Screenshot
+         * @description DEV-534 — one screenshot pinned to a message of this version, to whoever may read the conversation.
+         */
+        get: operations["get_screenshot_api_v1_pipeline__version_id__screenshots__image_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6636,6 +6678,11 @@ export interface components {
          */
         PipelineRelayRequest: {
             /**
+             * Images
+             * @description DEV-534 — screenshots pasted into the message (base64), shown in the thread.
+             */
+            images?: components["schemas"]["ScreenshotUpload"][];
+            /**
              * Text
              * @description The Manažér's message to relay to the Staviteľ.
              */
@@ -8099,6 +8146,33 @@ export interface components {
             escaped?: number | null;
             /** Findings */
             findings: number;
+        };
+        /**
+         * ScreenshotLimits
+         * @description DEV-534 — what the conversation box takes: Poradca's limits, images only (one check: attachments.accept).
+         */
+        ScreenshotLimits: {
+            /** Attachment Max Bytes */
+            attachment_max_bytes: number;
+            /** Attachment Types */
+            attachment_types: string[];
+            /** Attachments Max Count */
+            attachments_max_count: number;
+            /** Attachments Max Total Bytes */
+            attachments_max_total_bytes: number;
+        };
+        /**
+         * ScreenshotUpload
+         * @description DEV-534 — one screenshot as the screen sends it: its name and the content in base64, like Poradca's (DEV-52).
+         */
+        ScreenshotUpload: {
+            /** Data */
+            data: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
         };
         /**
          * SelfProfileUpdate
@@ -11537,6 +11611,67 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PipelineRelayResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_screenshot_limits_api_v1_pipeline__version_id__screenshot_limits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotLimits"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_screenshot_api_v1_pipeline__version_id__screenshots__image_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

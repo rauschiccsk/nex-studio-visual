@@ -21,10 +21,11 @@ import uuid
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.config.settings import settings
 from backend.core import authz
 from backend.core.errors import ConflictError, NotFoundError
 from backend.core.security import require_shu_or_above, verify_ws_token
@@ -47,6 +48,7 @@ from backend.schemas.pipeline import (
     PipelineMessageRead,
     PipelineRelayRequest,
     PipelineRelayResponse,
+    ScreenshotLimits,
     VizualPreviewRead,
 )
 from backend.services import action_labels as action_labels_service
@@ -54,12 +56,14 @@ from backend.services import (
     batch_review,
     ci_status,
     claude_agent,
+    conversation_images,
     orchestrator,
     pipeline_runner,
 )
 from backend.services import dedo_message as dedo_message_service
 from backend.services.orchestrator import OrchestratorError
 from backend.services.pipeline_ws import registry
+from backend.services.poradca.attachments import AttachmentRefused
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline"])
@@ -539,6 +543,7 @@ async def _apply_and_publish(
     *,
     on_applied: Optional[Callable[[PipelineState], None]] = None,
     acting_user: Optional[User] = None,
+    screenshots: Optional[list[dict[str, Any]]] = None,
 ) -> PipelineState:
     """Run one Manažér action and publish its consequences — the ONE path an action takes to the engine.
 
@@ -563,15 +568,18 @@ async def _apply_and_publish(
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
     }
+    slug, stored = _stored_screenshots(db, version_id, screenshots or [])
     try:
         state = await orchestrator.apply_action(
             db, version_id=version_id, action=action, payload=payload, acting_user=acting_user
         )
     except OrchestratorError as exc:
         db.rollback()
+        conversation_images.discard(slug, version_id, stored)
         raise _map_orch_error(db, version_id, exc) from exc
     if on_applied is not None:
         on_applied(state)
+    _pin_screenshots(db, version_id, pre_ids, slug, stored)
     db.commit()
     db.refresh(state)
 
@@ -608,10 +616,74 @@ async def post_action(
     current_user: User = Depends(require_shu_or_above),
     db: Session = Depends(get_db),
 ) -> PipelineBoardRead:
-    """Apply a Director action; broadcast the resulting state + new messages."""
+    """Apply a Director action; broadcast the resulting state + new messages. DEV-534: screenshots pasted into the
+    message (``payload.images``, Uprav) are taken off the payload, stored and pinned to the message the action
+    writes."""
     authz.assert_version_access(db, current_user, version_id)
-    await _apply_and_publish(db, version_id, payload.action, payload.payload, acting_user=current_user)
+    action_payload = payload.payload
+    uploads: list[dict[str, Any]] = []
+    if action_payload is not None and "images" in action_payload:
+        action_payload = dict(action_payload)
+        uploads = list(action_payload.pop("images") or [])
+    await _apply_and_publish(
+        db, version_id, payload.action, action_payload, acting_user=current_user, screenshots=uploads
+    )
     return _board(db, version_id)
+
+
+def _stored_screenshots(
+    db: Session, version_id: uuid.UUID, uploads: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]]:
+    """DEV-534 — the message's screenshots checked and stored before the action runs, with the project they lie
+    under; a refusal says why, in a sentence for the Manažér, and nothing is sent."""
+    if not uploads:
+        return "", []
+    slug = conversation_images.slug_of(db, version_id)
+    try:
+        return slug, conversation_images.store(db, version_id, conversation_images.accept(uploads))
+    except AttachmentRefused as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def _pin_screenshots(
+    db: Session, version_id: uuid.UUID, before: set[uuid.UUID], slug: str, stored: list[dict[str, Any]]
+) -> None:
+    """DEV-534 — pin them to the Manažér's message the action wrote; one that wrote none takes none."""
+    if stored and not conversation_images.pin(db, version_id, before, stored):
+        logger.warning("screenshots of version %s: the action wrote no message of the Manažér — discarded", version_id)
+        conversation_images.discard(slug, version_id, stored)
+
+
+@router.get("/{version_id}/screenshot-limits", response_model=ScreenshotLimits)
+def get_screenshot_limits(
+    version_id: uuid.UUID,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> ScreenshotLimits:
+    """DEV-534 — what the conversation box takes: Poradca's limits (one decision), images only."""
+    authz.assert_version_access(db, current_user, version_id)
+    return ScreenshotLimits(
+        attachment_max_bytes=settings.poradca_attachment_max_bytes,
+        attachments_max_count=settings.poradca_attachments_max_count,
+        attachments_max_total_bytes=settings.poradca_attachments_max_total_bytes,
+        attachment_types=list(conversation_images.IMAGE_TYPES),
+    )
+
+
+@router.get("/{version_id}/screenshots/{image_id}", response_class=FileResponse)
+def get_screenshot(
+    version_id: uuid.UUID,
+    image_id: str,
+    current_user: User = Depends(require_shu_or_above),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """DEV-534 — one screenshot pinned to a message of this version, to whoever may read the conversation."""
+    authz.assert_version_access(db, current_user, version_id)
+    found = conversation_images.find(db, version_id, image_id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snímka už nie je — verzia je dokončená.")
+    path, meta = found
+    return FileResponse(path, media_type=meta["mime"])
 
 
 def _proposal_he_decided_about(
@@ -794,11 +866,14 @@ async def post_relay(
     pre_ids = {
         row for row in db.execute(select(PipelineMessage.id).where(PipelineMessage.version_id == version_id)).scalars()
     }
+    slug, stored = _stored_screenshots(db, version_id, [one.model_dump() for one in payload.images])
     try:
         result = await orchestrator.relay_manazer_message(db, version_id=version_id, text=payload.text)
     except OrchestratorError as exc:
         db.rollback()
+        conversation_images.discard(slug, version_id, stored)
         raise _map_orch_error(db, version_id, exc) from exc
+    _pin_screenshots(db, version_id, pre_ids, slug, stored)
     db.commit()
     db.refresh(result.state)
 

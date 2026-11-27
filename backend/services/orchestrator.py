@@ -77,6 +77,7 @@ from backend.services import (
     ci_status,
     claude_agent,
     cockpit_commit,
+    conversation_images,
     database_schema,
     dead_code,
     dedo_escalation,
@@ -5411,6 +5412,11 @@ async def invoke_agent(
     # instead of guessing/translating (Opus emitted stage='preparation' → 'unknown stage' ParseFailure).
     # The single chokepoint every dispatch + every parse-retry re-emit passes through, so the re-emit also
     # carries the exact `stage` and can actually recover.
+    # DEV-534: screenshots the Manažér pasted into the conversation, not shown to the Staviteľ yet — said once.
+    if role == AI_AGENT_ROLE:
+        note = conversation_images.prompt_note(db, version_id)
+        if note:
+            prompt = f"{prompt}\n\n{note}"
     prompt = f"{prompt}\n\n{_status_block_instruction(stage)}"
     # CR-V2-038: tell the AI Agent which model to spawn its dynamic helpers on (the helper model can't be a
     # CLI flag — the spawning agent picks it). Owner's Nastavenia choice; Haiku default. Only the AI Agent
@@ -14740,6 +14746,8 @@ def _settle_build_done(db: Session, state: PipelineState, next_action: str) -> N
     state.next_action = next_action
     version_service.mark_done(db, state.version_id)
     db.flush()
+    # DEV-534: the screenshots of the conversation served to explain the version — done, they are not needed.
+    conversation_images.remove_version(conversation_images.slug_of(db, state.version_id), state.version_id)
 
 
 def _settle_phase_boundary(db: Session, state: PipelineState) -> bool:

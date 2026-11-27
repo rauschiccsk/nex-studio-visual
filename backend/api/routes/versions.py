@@ -71,6 +71,7 @@ from backend.schemas.version import (
 )
 from backend.services import (
     build_forecast,
+    conversation_images,
     metrics,
     pipeline_metrics,
     pipeline_runner,
@@ -266,12 +267,15 @@ async def cancel_version(
             status_code=status.HTTP_409_CONFLICT,
             detail=version_cancel.CANCEL_AGENT_WORKING.format(number=version.version_number),
         )
+    slug = conversation_images.slug_of(db, version_id)
     try:
         cancelled = version_cancel.cancel(db, version_id)
     except version_cancel.CancelRefused as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.commit()
+    # DEV-534: the screenshots pasted into its conversation go with it.
+    conversation_images.remove_version(slug, version_id)
     try:
         plane_warning = await run_blocking(
             version_cancel.give_tickets_back,
