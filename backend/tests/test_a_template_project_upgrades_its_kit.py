@@ -303,6 +303,94 @@ def test_one_commit_carries_both_sides(tmp_path, monkeypatch):
     assert sorted(show[5:]) == ["backend/pyproject.toml", "frontend/package-lock.json", "frontend/package.json"]
 
 
+# ── DEV-526: a Web project's web/ moves with the frame ───────────────────────────────────────────────────────────
+
+
+def seed_web(root: Path, frame: str = "0.3.0", shared: str = "0.28.0") -> Path:
+    """A Web project on the template: web/ is built from the filled frontend, so it pins the kit the same way."""
+    seed(root, frame=frame, shared=shared)
+    (root / "web").mkdir()
+    (root / "web" / "package.json").write_text((root / "frontend" / "package.json").read_text(encoding="utf-8"))
+    (root / "web" / "package-lock.json").write_text(_lock(frame, shared), encoding="utf-8")
+    return root
+
+
+def web_files(root: Path) -> dict[str, str]:
+    return {
+        **files(root),
+        **{rel: (root / rel).read_text(encoding="utf-8") for rel in ("web/package.json", "web/package-lock.json")},
+    }
+
+
+def test_every_frontend_on_the_template_is_found_the_frame_first(tmp_path):
+    seed_web(tmp_path)
+    (tmp_path / "docs-site").mkdir()
+    (tmp_path / "docs-site" / "package.json").write_text(json.dumps({"dependencies": {"astro": "^5"}}))
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "package.json").write_text("{")
+
+    assert app_kit.kit_frontends(tmp_path) == ("frontend", "web")
+
+
+def test_an_upgrade_moves_the_web_with_the_frame(tmp_path, monkeypatch):
+    root = seed_web(tmp_path)
+    asked = npm_resolves_to(monkeypatch, "0.5.0")
+
+    assert upgrade(root)
+
+    web = json.loads((root / "web" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+    assert web == {
+        "@tailwindcss/typography": "^0.5",
+        "nex-app-kit": "github:rauschiccsk/nex-app-kit#v0.5.0",
+        "nex-shared": "github:rauschiccsk/nex-shared#v0.29.0",
+    }
+    assert len(asked) == 2
+    assert nexshared.effective_version(str(root), "web", "nex-app-kit") == "0.5.0"
+
+
+def test_a_web_lock_that_does_not_follow_puts_every_file_back(tmp_path, monkeypatch):
+    root = seed_web(tmp_path)
+    before = web_files(root)
+
+    def resolve(frontend_dir: Path, *_specs: str, **_kwargs) -> bool:
+        version = "0.3.0" if frontend_dir.name == "web" else "0.5.0"
+        (frontend_dir / "package-lock.json").write_text(_lock(version, "0.29.0"), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(nexshared, "resolve_lockfile", resolve)
+    problem = app_kit.upgrade_problem(str(root), "0.5.0", "nsv-standard", scaffold_package=release("0.5.0"))
+
+    assert problem == "zámok priečinka web/ ukazuje nex-app-kit 0.3.0 namiesto 0.5.0"
+    assert web_files(root) == before
+
+
+def test_one_commit_carries_the_web_too(tmp_path, monkeypatch):
+    root = seed_web(tmp_path)
+    git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "init"], check=True)
+    for var in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(var, "t")
+    for var in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(var, "t@t")
+    npm_resolves_to(monkeypatch, "0.5.0")
+    assert upgrade(root)
+
+    assert app_kit.commit_upgrade(str(root), "0.5.0") is True
+
+    show = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-only", "--format=%s", "HEAD"], capture_output=True, text=True
+    ).stdout.split()
+    assert sorted(show[5:]) == [
+        "backend/pyproject.toml",
+        "frontend/package-lock.json",
+        "frontend/package.json",
+        "web/package-lock.json",
+        "web/package.json",
+    ]
+
+
 # ── the routes ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 

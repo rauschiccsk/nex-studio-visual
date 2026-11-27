@@ -259,6 +259,24 @@ def fetch_scaffold_package(template: str, version: str) -> Optional[dict]:
     return None if any("{{" in str(spec) for spec in specs) else package
 
 
+def kit_frontends(root: Path) -> tuple[str, ...]:
+    """DEV-526 — every frontend of the project that stands on the template: ``frontend/`` first, then each other folder
+    whose package.json depends on the kit (a Web project's ``web/``). Found, not listed — a frontend added later moves
+    with the rest. 27.11.2026 orthodox-register: the upgrade moved ``frontend/`` alone and would have left the web on
+    the old frame."""
+    found = [FRONTEND]
+    for child in sorted(root.iterdir()) if root.is_dir() else []:
+        if child.name == FRONTEND or not (child / "package.json").is_file():
+            continue
+        try:
+            dependencies = json.loads((child / "package.json").read_text(encoding="utf-8")).get("dependencies") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        if app_template.KIT_PACKAGE in dependencies:
+            found.append(child.name)
+    return tuple(found)
+
+
 def upgrade_problem(
     source_path: str,
     target_version: str,
@@ -281,10 +299,13 @@ def upgrade_problem(
     root = Path(source_path)
     pkg, lock, server = root / FRONTEND / "package.json", root / FRONTEND / "package-lock.json", root / SERVER_PIN_FILE
     poetry_lock, requirements = root / POETRY_LOCK_FILE, root / REQUIREMENTS_FILE
+    # DEV-526: the project's other frontends on the template move in the same step — or none of them does.
+    others = [name for name in kit_frontends(root) if name != FRONTEND]
+    other_files = [root / name / rel for name in others for rel in ("package.json", "package-lock.json")]
     try:
         originals = {
             path: path.read_text(encoding="utf-8") if path.is_file() else None
-            for path in (pkg, lock, server, poetry_lock, requirements)
+            for path in (pkg, lock, server, poetry_lock, requirements, *other_files)
         }
     except OSError:
         return "súbory projektu sa nedajú prečítať"
@@ -317,18 +338,29 @@ def upgrade_problem(
     if release is None:
         return f"verziu šablóny {target_version} sa nepodarilo stiahnuť z GitHubu — skús to o chvíľu znova"
     package, specs = app_template.with_template_packages(project_package, release)
+    moved = {
+        name: app_template.with_template_packages(json.loads(originals[root / name / "package.json"]), release)
+        for name in others
+    }
     pkg.write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    for name, (other_package, _specs) in moved.items():
+        (root / name / "package.json").write_text(
+            json.dumps(other_package, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
     server.write_text(new_server, encoding="utf-8")
     if new_requirements is not None:
         requirements.write_text(new_requirements, encoding="utf-8")
-    wanted = {
-        name: _PIN_VERSION_RE.search(spec).group(1)
-        for name in (app_template.KIT_PACKAGE, nexshared.PACKAGE)
-        for spec in specs
-        if spec.startswith(nexshared.git_dependency(name, ""))
-    }
-    problem = _frontend_lock_problem(root, source_path, specs, wanted) or (
-        _server_lock_problem(root, poetry_lock, target_version) if poetry else None
+    problem = (
+        _frontend_lock_problem(root, source_path, specs, _wanted(specs))
+        or next(
+            (
+                found
+                for name, (_package, other_specs) in moved.items()
+                if (found := _frontend_lock_problem(root, source_path, other_specs, _wanted(other_specs), name))
+            ),
+            None,
+        )
+        or (_server_lock_problem(root, poetry_lock, target_version) if poetry else None)
     )
     if problem is None:
         return None
@@ -340,14 +372,27 @@ def upgrade_problem(
     return problem
 
 
-def _frontend_lock_problem(root: Path, source_path: str, specs: list[str], wanted: dict[str, str]) -> Optional[str]:
-    """Why the frontend's lockfile did not follow the upgrade, or ``None`` when it did."""
-    if not nexshared.resolve_lockfile(root / FRONTEND, *specs):
-        return "zámok frontendu (npm) sa nepodarilo prepočítať"
+def _wanted(specs: list[str]) -> dict[str, str]:
+    """The kit's and nex-shared's versions the rewritten pins ask for."""
+    return {
+        name: _PIN_VERSION_RE.search(spec).group(1)
+        for name in (app_template.KIT_PACKAGE, nexshared.PACKAGE)
+        for spec in specs
+        if spec.startswith(nexshared.git_dependency(name, ""))
+    }
+
+
+def _frontend_lock_problem(
+    root: Path, source_path: str, specs: list[str], wanted: dict[str, str], directory: str = FRONTEND
+) -> Optional[str]:
+    """Why a frontend's lockfile did not follow the upgrade, or ``None`` when it did (DEV-526: any of them)."""
+    whose = "frontendu" if directory == FRONTEND else f"priečinka {directory}/"
+    if not nexshared.resolve_lockfile(root / directory, *specs):
+        return f"zámok {whose} (npm) sa nepodarilo prepočítať"
     for name, version in wanted.items():
-        locked = nexshared.effective_version(source_path, FRONTEND, name)
+        locked = nexshared.effective_version(source_path, directory, name)
         if locked != version:
-            return f"zámok frontendu ukazuje {name} {locked or 'bez verzie'} namiesto {version}"
+            return f"zámok {whose} ukazuje {name} {locked or 'bez verzie'} namiesto {version}"
     return None
 
 
@@ -362,11 +407,12 @@ def _server_lock_problem(root: Path, poetry_lock: Path, target_version: str) -> 
 
 
 def commit_upgrade(source_path: str, target_version: str) -> bool:
-    """One commit of both sides — the frame's pin and lockfile, the server's pin."""
+    """One commit of both sides — the frame's pin and lockfile (DEV-526: of every frontend on the template), the
+    server's pin."""
     return nexshared.commit_pin_upgrade(
         source_path,
         target_version,
-        directories=(FRONTEND,),
+        directories=kit_frontends(Path(source_path)),
         package=app_template.KIT_PACKAGE,
         # DEV-383: a poetry project's lock goes in the same commit — it is what its build installs; DEV-353: and so does
         # requirements.txt, which a server's image may be built from.
