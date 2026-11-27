@@ -114,7 +114,8 @@ export default function NewProjectPage() {
   const [templates, setTemplates] = useState<NonNullable<ProjectCreatePresets["templates"]>>([]);
   const [template, setTemplate] = useState("");
   const [ai, setAi] = useState(false);
-  const chosenTemplate = type === "standard" ? template : "";
+  // DEV-523: the template has a web too — a Web project takes it as a Štandardný one does.
+  const chosenTemplate = template;
   // DEV-395: the languages the app speaks — offered with a template (its texts live in the catalogs of languages).
   const [languageOptions, setLanguageOptions] = useState<LanguageOption[]>([]);
   const [languages, setLanguages] = useState<string[]>(["sk"]);
@@ -508,7 +509,6 @@ export default function NewProjectPage() {
                       key={t.id}
                       type="button"
                       onClick={() => setTemplate(t.id)}
-                      disabled={type !== "standard"}
                       aria-pressed={chosenTemplate === t.id}
                       className={`p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         chosenTemplate === t.id
@@ -523,7 +523,6 @@ export default function NewProjectPage() {
                   <button
                     type="button"
                     onClick={() => setTemplate("")}
-                    disabled={type !== "standard"}
                     aria-pressed={chosenTemplate === ""}
                     className={`p-3 rounded-lg border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         chosenTemplate === ""
@@ -535,11 +534,6 @@ export default function NewProjectPage() {
                     <div className="text-[10px] opacity-70 mt-0.5">Agent postaví celú aplikáciu sám, aj ľavý panel a Nastavenia.</div>
                   </button>
                 </div>
-                {type !== "standard" && (
-                  <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
-                    Šablóna je zatiaľ len pre štandardný projekt — Web projekt sa zakladá bez nej.
-                  </p>
-                )}
                 {chosenTemplate && languageOptions.length > 0 && (
                   <div className="mt-3">
                     <div className="text-sm font-medium text-[var(--color-text-secondary)] mb-2">Jazyky aplikácie</div>

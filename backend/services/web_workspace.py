@@ -17,8 +17,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from backend.db.models.projects import Project
+from backend.services import app_template, git_state, template_bootstrap
 from backend.services import create_project_postscaffold as postscaffold
-from backend.services import git_state, template_bootstrap
 from backend.services.project_surfaces import WEB_DIRECTORY
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,21 @@ def add_web(db: Session, project: Project) -> list[str]:
         # Only a web/ this attempt creates may be removed after a failure — one that was there before is not ours.
         existed = web.exists()
         try:
-            template_bootstrap.add_web_skeleton(db, project)
-        except template_bootstrap.TemplateBootstrapError as exc:
+            if project.template:
+                # DEV-523: a project on the app template gets the template's web — and its frontend and server move
+                # to the release that brings the web's accounts (app_template.add_web_files puts all back on failure).
+                app_template.add_web_files(
+                    target,
+                    template=project.template,
+                    name=project.name,
+                    slug=project.slug,
+                    auth_mode=project.auth_mode,
+                    ports=(project.backend_port or 0, project.frontend_port or 0, project.db_port or 0),
+                    web_port=project.web_port or 0,
+                )
+            else:
+                template_bootstrap.add_web_skeleton(db, project)
+        except (template_bootstrap.TemplateBootstrapError, app_template.AppTemplateError) as exc:
             if project.source_path and not existed and web.is_dir():
                 shutil.rmtree(web, ignore_errors=True)
                 logger.info("removed the partial web/ of slug=%s after a failed add", project.slug)
@@ -82,6 +95,9 @@ def switch_paths(target: Path) -> list[str]:
     ``CLAUDE.md``, the web's CI where the project has CI at all, the check for every frontend where the project has
     the pre-commit check."""
     paths = [WEB_DIRECTORY, CLAUDE_MD]
+    # DEV-523: on the app template the web moves the manifest, the packages, the server and compose too.
+    if (target / app_template.MANIFEST).is_file():
+        paths += list(app_template.WEB_TEMPLATE_FILES)
     if (target / ".github" / "workflows" / "ci.yml").is_file():
         paths.append(str(postscaffold.WEB_WORKFLOW))
     if (target / postscaffold.PRECOMMIT_HOOK).is_file():

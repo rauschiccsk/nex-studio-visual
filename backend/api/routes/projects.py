@@ -128,7 +128,7 @@ router = APIRouter(
 
 #: Manager-facing names for the three port fields. The wire names (``backend_port``) are ours, not his:
 #: an error he is expected to act on must name the field the way the screen labels it.
-_FIELD_SK = {"backend_port": "Backend", "frontend_port": "Frontend", "db_port": "Databáza"}
+_FIELD_SK = {"backend_port": "Backend", "frontend_port": "Frontend", "db_port": "Databáza", "web_port": "Web"}
 
 
 def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, project_id: UUID | None = None) -> None:
@@ -147,6 +147,8 @@ def _validate_ports(db: Session, payload: ProjectCreate | ProjectUpdate, *, proj
         ("backend_port", payload.backend_port),
         ("frontend_port", payload.frontend_port),
         ("db_port", payload.db_port),
+        # DEV-523: the web's port a Web project gets at founding — checked as the other ports are.
+        ("web_port", project_surfaces_service.web_port_for(getattr(payload, "type", None) or "", payload.backend_port)),
     ]
 
     # Same-row uniqueness — no two non-NULL port columns may share a value.
@@ -1365,6 +1367,8 @@ def create_project(
                     slug=project.slug,
                     auth_mode=project.auth_mode,
                     ports=(project.backend_port or 0, project.frontend_port or 0, project.db_port or 0),
+                    # DEV-523: a Web project on the template — its web from the template too.
+                    web_port=project.web_port if project.type == "web" else None,
                 )
             except app_template_service.AppTemplateError as exc:
                 db.rollback()

@@ -156,7 +156,8 @@ def test_the_reason_is_required_and_kept_with_who(client, db_session):
     )
 
 
-def test_a_project_on_the_app_template_waits_for_the_templates_web(client, db_session):
+def test_a_project_on_the_app_template_may_get_the_templates_web(client, db_session):
+    """DEV-523 — the template has a web now: a project on it is offered the web like any other."""
     project = _project(db_session, _user(db_session))
     project.template = "nsv-standard"
     db_session.flush()
@@ -164,7 +165,7 @@ def test_a_project_on_the_app_template_waits_for_the_templates_web(client, db_se
 
     preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
 
-    assert (preview["allowed"], preview["refusal"]) == (False, ps.ON_TEMPLATE_NOT_YET)
+    assert (preview["allowed"], preview["refusal"]) == (True, None)
 
 
 def test_nothing_else_changes_a_projects_type_or_sign_in_after_founding() -> None:

@@ -503,6 +503,7 @@ export default function ProjectDetailPage() {
         <WebSwitchPanel
           projectId={project.id}
           isWeb={project.type === "web"}
+          onTemplate={Boolean(project.template)}
           onSwitched={() => void getProjectApi(project.id).then(setProject)}
         />
       )}

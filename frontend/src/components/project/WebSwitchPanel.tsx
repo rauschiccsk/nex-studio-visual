@@ -44,11 +44,13 @@ interface Props {
   projectId: string;
   /** The project is Web already — it has both frontends; nothing is offered. */
   isWeb: boolean;
+  /** DEV-523: on the app template — the web comes from it, and the project moves to its newest release. */
+  onTemplate?: boolean;
   /** Called after the web frontend was added — the page reads the project again. */
   onSwitched: () => void;
 }
 
-export default function WebSwitchPanel({ projectId, isWeb, onSwitched }: Props) {
+export default function WebSwitchPanel({ projectId, isWeb, onTemplate = false, onSwitched }: Props) {
   const admin = isAdminAccount(useAuthStore((s) => s.user));
   const [preview, setPreview] = useState<WebSwitch | null>(null);
   const [reason, setReason] = useState("");
@@ -104,6 +106,13 @@ export default function WebSwitchPanel({ projectId, isWeb, onSwitched }: Props) 
             len účet admin, kým projekt nebol nasadený do PROD, a dôvod sa zapíše. Projekt potom bude mať:
           </p>
           <Frontends surfaces={preview.after} />
+          {onTemplate && (
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+              Web príde zo šablóny aplikácií — s prihlásením e-mailom a žiadosťou o registráciu, ktorú schvaľuje správca
+              v Nastaveniach. Administrácia aj server projektu pritom prejdú na najnovšiu verziu šablóny, lebo web
+              potrebuje jej server.
+            </p>
+          )}
           <label className="mt-3 block text-sm text-[var(--color-text-secondary)]">
             Dôvod
             <textarea

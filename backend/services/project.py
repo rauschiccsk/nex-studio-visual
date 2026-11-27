@@ -63,6 +63,7 @@ from backend.schemas.project import (
     ProjectType,
     ProjectUpdate,
 )
+from backend.services import project_surfaces
 from backend.services import system_setting as system_setting_service
 
 #: The project's ports — held in the port ledger (the projects table).
@@ -233,6 +234,9 @@ def create(db: Session, data: ProjectCreate) -> Project:
         backend_port=data.backend_port,
         frontend_port=data.frontend_port,
         db_port=data.db_port,
+        # DEV-523: a Web project gets its web's port from its block — the database requires one (ck_projects_web_port),
+        # and founding gave none: a Web project could not be founded at all, only switched to.
+        web_port=project_surfaces.web_port_for(data.type, data.backend_port),
         repo_url=data.repo_url,
         source_path=source_path,
         kb_path=kb_path,

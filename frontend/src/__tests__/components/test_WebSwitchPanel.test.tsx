@@ -130,4 +130,21 @@ describe("WebSwitchPanel — Frontendy projektu (DEV-522)", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByText(/sa pridať nedá/)).not.toBeInTheDocument();
   });
+
+  it("on the app template the admin reads that the web comes from it and the project moves to its newest release", async () => {
+    as("admin");
+    vi.mocked(getWebSwitchApi).mockResolvedValue({ allowed: true, refusal: null, web_port: 10245, surfaces: APP, after: BOTH, warnings: [] });
+    render(<WebSwitchPanel projectId="p-1" isWeb={false} onTemplate onSwitched={vi.fn()} />);
+
+    expect(await screen.findByText(/Administrácia aj server projektu pritom prejdú na najnovšiu verziu šablóny/)).toBeInTheDocument();
+  });
+
+  it("without the template nothing is said about it", async () => {
+    as("admin");
+    vi.mocked(getWebSwitchApi).mockResolvedValue({ allowed: true, refusal: null, web_port: 10245, surfaces: APP, after: BOTH, warnings: [] });
+    render(<WebSwitchPanel projectId="p-1" isWeb={false} onSwitched={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "Pridať webový frontend" });
+    expect(screen.queryByText(/najnovšiu verziu šablóny/)).not.toBeInTheDocument();
+  });
 });

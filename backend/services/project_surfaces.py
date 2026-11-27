@@ -52,15 +52,21 @@ WEB_NOT_YET = (
 #: považujem za dobré riešenie. Spravme to tak, aby kopit aj do budúcna mal takú funkciu - pridať webový frontend.“
 ONLY_ADMIN = "Webový frontend pridáva len účet admin — čo sa nastaví pri založení projektu, sa počas tvorby nemení."
 AFTER_PROD = "Projekt už bol nasadený do PROD — jeho typ a frontendy sa po založení nemenia."
-ON_TEMPLATE_NOT_YET = (
-    "Projekt je na šablóne aplikácií a jej webový frontend sa ešte pripravuje — pridať sa dá, keď ho šablóna "
-    "bude vedieť."
-)
 NO_REASON = "Napíš, prečo projekt dostáva webový frontend — dôvod sa zapíše."
 
 #: The web's port is this slot of the project's port block (backend = +0, frontend = +1, db = +2). The project
 #: template reserves +3 … +5 and uses none of them; +5 is the slot it names for a second web surface.
 WEB_PORT_OFFSET = 5
+
+
+def web_port_for(project_type: str, backend_port: Optional[int]) -> Optional[int]:
+    """The web's port of a project of *project_type* on *backend_port*'s block — ``None`` for a project with no web.
+    DEV-523: founding a Web project gives it this port, as adding the web frontend does."""
+    if project_type != WEB or backend_port is None:
+        return None
+    return backend_port + WEB_PORT_OFFSET
+
+
 #: The public web's directory in a Web project (DEV-161: built from the template's ``web-skeleton/``).
 WEB_DIRECTORY = "web"
 
@@ -225,9 +231,6 @@ def web_switch(db: Session, project: Project, user: User) -> WebSwitch:
 
     if deploy.project_had_prod_deploy(db, project.id):
         return refused(AFTER_PROD)
-    if project.template:
-        # DEV-523 teaches the app template its web frontend; until then a project on it gets none.
-        return refused(ON_TEMPLATE_NOT_YET)
     if project.auth_mode == TOKEN:
         return refused(
             "Projekt sa prihlasuje tokenom. Web projekt sa prihlasuje heslom — administrácia menom, web e-mailom."
@@ -244,7 +247,7 @@ def web_switch(db: Session, project: Project, user: User) -> WebSwitch:
     if unsaved:
         return refused(unsaved)
 
-    port = project.backend_port + WEB_PORT_OFFSET
+    port = web_port_for(WEB, project.backend_port)
     try:
         verdict = port_registry.describe_port_availability(
             db, port, str(project.id), for_project=(project.slug, project.name)

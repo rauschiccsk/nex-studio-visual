@@ -95,7 +95,22 @@ def test_a_project_on_a_template_remembers_it_and_gets_its_frame(client, manager
         "slug": "nex-ukazka",
         "auth_mode": "token",
         "ports": (10190, 10191, 10192),
+        "web_port": None,
     }
+
+
+def test_a_web_project_on_a_template_gets_its_web_from_the_template_too(client, manager, db_session):
+    """DEV-523 — the template has a web: a Web project on it is founded with the administration and the web from it,
+    on the project's web port."""
+    recorder = Recorder()
+    with patch.object(app_template, "apply_template", recorder):
+        response = client.post("/api/v1/projects", json=payload(manager, type="web", auth_mode="password", ai=False))
+
+    assert response.status_code == 201, response.text
+    assert (response.json()["type"], response.json()["template"]) == ("web", "nsv-standard")
+    [(_target, _choice, kwargs)] = recorder.calls
+    # The web's port comes from the project's block (+5), as when the web frontend is added later.
+    assert kwargs["web_port"] == response.json()["web_port"] == 10190 + 5
 
 
 def test_a_project_without_a_template_founds_as_before(client, manager):
@@ -151,7 +166,6 @@ def test_the_agents_of_a_project_on_a_template_get_its_rules(client, manager):
     "changes,sentence",
     [
         ({"template": "iny-vzhlad"}, "Šablóna aplikácie „iny-vzhlad“ neexistuje — sú tieto: „nsv-standard“."),
-        ({"type": "web"}, "Šablóna aplikácie je zatiaľ len pre bežný projekt — Web projekt sa zakladá bez nej."),
         ({"template": None, "ai": True}, "AI agentov v šablóne si vyber spolu so šablónou aplikácie."),
     ],
 )

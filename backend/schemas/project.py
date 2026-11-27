@@ -366,8 +366,7 @@ class ProjectCreate(BaseModel):
 
     @model_validator(mode="after")
     def _template_fits_the_project(self) -> "ProjectCreate":
-        if self.template is not None and self.type != "standard":
-            raise ValueError("Šablóna aplikácie je zatiaľ len pre bežný projekt — Web projekt sa zakladá bez nej.")
+        # DEV-523: the template has a web too — a Web project on it gets the administration and the web from it.
         if self.ai and self.template is None:
             raise ValueError("AI agentov v šablóne si vyber spolu so šablónou aplikácie.")
         from backend.services import app_languages

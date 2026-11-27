@@ -30,6 +30,7 @@ vi.mock("@/store/authStore", () => ({
 import NewProjectPage from "@/pages/NewProjectPage";
 
 const DESCRIPTION = "Ľavý panel, prihlásenie, Nastavenia a server ako v NSV — agent stavia len obrazovky aplikácie.";
+// Until DEV-523 the form said this and founded a Web project without the template; the template has a web now.
 const WEB_ONLY_WITHOUT = "Šablóna je zatiaľ len pre štandardný projekt — Web projekt sa zakladá bez nej.";
 
 function presets(withTemplates = true) {
@@ -114,19 +115,17 @@ describe("DEV-253 — „Šablóna aplikácie“ when founding a project", () =>
     expect(await create()).toMatchObject({ template: null, ai: false });
   });
 
-  it("a Web project is founded without a template, and the form says why", async () => {
+  it("a Web project takes the template as a Štandardný one does (DEV-523)", async () => {
     api.getProjectCreatePresetsApi.mockResolvedValue(presets());
     renderForm();
     await waitFor(() => expect(web()).toBeEnabled());
 
     fireEvent.click(web());
 
-    expect(screen.getByText(WEB_ONLY_WITHOUT)).toBeInTheDocument();
-    expect(nsv()).toBeDisabled();
-    expect(nsv()).toHaveAttribute("aria-pressed", "false");
-    expect(none()).toHaveAttribute("aria-pressed", "true");
-    expect(aiBox()).not.toBeInTheDocument();
-    expect(await create()).toMatchObject({ type: "web", template: null, ai: false });
+    expect(screen.queryByText(WEB_ONLY_WITHOUT)).not.toBeInTheDocument();
+    expect(nsv()).toBeEnabled();
+    expect(nsv()).toHaveAttribute("aria-pressed", "true");
+    expect(await create()).toMatchObject({ type: "web", template: "nsv-standard" });
   });
 
   it("back on Štandardný, the template chosen before is chosen again", async () => {

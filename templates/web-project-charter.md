@@ -5,6 +5,13 @@ Projekt má jeden backend a dva frontendy (tabuľka „Frontendy“ v `CLAUDE.md
 commitom v jeho priečinku, skúšky, vernosť schválenému Vizuálu (Audítor porovná `git diff <Vizuál> -- frontend/ web/`).
 Web má vlastné CI `.github/workflows/web.yml`. Pri každej obrazovke v Návrhu a v Pláne povedz, do ktorého patrí.
 
+**Na šablóne aplikácií (nex-app-kit od v0.23.0, DEV-523) dáva web šablóna — nestavaj ho.** Kontá webu, prihlásenie
+e-mailom, žiadosť o registráciu a jej schválenie správcom (Nastavenia → Kontá webu) sú šablóny: server `/web/auth/*` a
+`/web-accounts` (KONTRAKT.md → Web), vo `web/` rám `WebApp` z `nex-app-kit`. Registrácia je žiadosť, ktorú schvaľuje
+správca — nie samoregistrácia. Obrazovky webu pridávaš ako `<Route>` do `WebApp` (prvá stránka je `home`), prihlásené
+konto a rozhranie dáva `useWebAccount()`; vlastné cesty servera pre web sa pýtajú `kit.web_account` (ako administrácia
+`kit.current_user`). Body o verejnosti nižšie platia len pre projekt bez šablóny.
+
 **Dve skupiny používateľov — oddelené účty, prihlásenia aj relácie:**
 - Zamestnanci: `POST /api/v1/auth/login {username, password}`, `/auth/me`, `/auth/logout`. **Prvý správca sa
   zakladá menom**: v `.env.example` `# @customer required: „Meno prvého správcu“`, heslo `# @customer-secret

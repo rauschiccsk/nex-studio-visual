@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -114,6 +115,7 @@ def scaffold_values(
     ports: tuple[int, int, int],
     version: str,
     languages: tuple[str, ...] = ("sk",),
+    web_port: int | None = None,
 ) -> dict:
     backend_port, frontend_port, db_port = ports
     # DEV-395: only a multilingual app names its languages — a kit release before 0.14.1 does not know the key, and a
@@ -132,6 +134,8 @@ def scaffold_values(
         "kit_frontend": nexshared.git_dependency(KIT_PACKAGE, version),
         "kit_server": kit_server_dependency(version),
         **told,
+        # DEV-523: a Web project on the template — its web (web/) beside the administration, on the web's port.
+        **({"web": True, "web_port": web_port} if web_port is not None else {}),
     }
 
 
@@ -154,16 +158,26 @@ def _render(
     tmp: Path,
     run: Runner,
     fetch_kit: Callable[[str, Path, Runner], None],
+    extra: tuple[str, ...] = (),
 ) -> None:
     """Fill *template*'s scaffold of the kit release in *values* — ``--into`` a founded project, ``--out`` a fresh
-    folder — with the release's own renderer (the one its CI fills the scaffold with)."""
+    folder; *extra* e.g. ``--add-web`` (DEV-523) — with the release's own renderer (the one its CI fills it with)."""
     version = values["kit_frontend"].rsplit("#v", 1)[1]
     kit = tmp / "kit"
     fetch_kit(version, kit, run)
     values_file = tmp / "values.json"
     values_file.write_text(json.dumps(values), encoding="utf-8")
     filled = run(
-        ["python3", str(kit / "scaffold" / "render.py"), template, "--values", str(values_file), mode, str(destination)]
+        [
+            "python3",
+            str(kit / "scaffold" / "render.py"),
+            template,
+            "--values",
+            str(values_file),
+            mode,
+            str(destination),
+            *extra,
+        ]
     )
     if filled.returncode != 0:
         raise AppTemplateError(
@@ -179,11 +193,13 @@ def apply_template(
     slug: str,
     auth_mode: str,
     ports: tuple[int, int, int],
+    web_port: int | None = None,
     run: Runner = _run,
     fetch_kit: Callable[[str, Path, Runner], None] = _fetch_kit,
 ) -> str | None:
-    """Fill the template over the project init.sh founded and commit it. Returns the kit's version, or ``None`` when
-    there is no checkout on disk (dry-run / disabled bootstrap — like the charters, nothing to fill)."""
+    """Fill the template over the project init.sh founded and commit it — a Web project (DEV-523) with its web too.
+    Returns the kit's version, or ``None`` when there is no checkout on disk (dry-run / disabled bootstrap — like the
+    charters, nothing to fill)."""
     if choice.template not in TEMPLATES:
         raise AppTemplateError(f"Šablóna „{choice.template}“ neexistuje.")
     if not (target / ".git").is_dir():
@@ -198,13 +214,16 @@ def apply_template(
         ports=ports,
         version=version,
         languages=choice.languages,
+        web_port=web_port,
     )
     with tempfile.TemporaryDirectory(prefix="nex-app-kit-") as tmp:
         _render(choice.template, values, "--into", target, Path(tmp), run, fetch_kit)
-    lock = run(["npm", "install", "--package-lock-only", "--no-audit", "--no-fund"], cwd=str(target / "frontend"))
-    if lock.returncode != 0:
-        raise AppTemplateError("Frontendu šablóny sa nepodarilo pripraviť zoznam balíkov (npm install).")
-    paths = ["frontend", "backend", "docker-compose.yml", "docs/AKO_ZACAT.md", ".env.example"]
+    frontends = ["frontend", *(["web"] if web_port is not None else [])]
+    for frontend in frontends:
+        lock = run(["npm", "install", "--package-lock-only", "--no-audit", "--no-fund"], cwd=str(target / frontend))
+        if lock.returncode != 0:
+            raise AppTemplateError("Frontendu šablóny sa nepodarilo pripraviť zoznam balíkov (npm install).")
+    paths = [*frontends, "backend", "docker-compose.yml", "docs/AKO_ZACAT.md", ".env.example"]
     added = run(["git", "add", "--all", "--", *paths], cwd=str(target))
     committed = run(
         [
@@ -278,6 +297,17 @@ def has_installation(db, project_id) -> bool:
         )
     ).first()
     return deployed is not None
+
+
+_KIT_SERVER_LINE_RE = re.compile(r'^(?P<indent>[ \t]*)"nex-app-kit @ [^"]*",?[ \t]*$', re.MULTILINE)
+
+
+def with_kit_server(pyproject_text: str, dependency: str) -> str | None:
+    """``backend/pyproject.toml`` on the kit server *dependency*: the project's own nex-app-kit line replaced, or the
+    line added (:func:`with_server_dependency`); ``None`` when the file has no list the cockpit can write into."""
+    if _KIT_SERVER_LINE_RE.search(pyproject_text):
+        return _KIT_SERVER_LINE_RE.sub(lambda m: f'{m["indent"]}"{dependency}",', pyproject_text, count=1)
+    return with_server_dependency(pyproject_text, dependency)
 
 
 def with_server_dependency(pyproject_text: str, dependency: str) -> str | None:
@@ -515,3 +545,96 @@ def convert_project(
         raise AppTemplateError(f"Prevod na šablónu sa nepodaril: {exc}") from exc
     logger.info("Project %s put onto the app template %s (nex-app-kit v%s)", slug, choice.template, version)
     return Conversion(kit_version=version, raised=tuple(raised))
+
+
+# ── DEV-523: the web frontend of a project already on the template ──────────────────────────────
+#: What adding the web writes into a project on the template besides ``web/`` — the manifest says the app has a web,
+#: the frontend and the server move to the kit release that brings the web, compose gets the web's service.
+WEB_TEMPLATE_FILES = (
+    MANIFEST,
+    "frontend/package.json",
+    "frontend/package-lock.json",
+    "backend/pyproject.toml",
+    "docker-compose.yml",
+)
+
+
+def add_web_files(
+    target: Path,
+    *,
+    template: str,
+    name: str,
+    slug: str,
+    auth_mode: str,
+    ports: tuple[int, int, int],
+    web_port: int,
+    run: Runner = _run,
+    fetch_kit: Callable[[str, Path, Runner], None] = _fetch_kit,
+) -> str:
+    """Give a project on the template its web (``web/``) — the kit release's own ``render.py --add-web`` — and move its
+    frontend (nex-app-kit, nex-shared at least the release's) and its server to that release: the web signs in on the
+    server's web accounts, which the release brings. Nothing is committed here (the caller commits ``web/`` and
+    :data:`WEB_TEMPLATE_FILES`); when a step fails, ``web/`` goes and every file is put back. Returns the release."""
+    if template not in TEMPLATES:
+        raise AppTemplateError(f"Šablóna „{template}“ neexistuje.")
+    if not (target / MANIFEST).is_file():
+        raise AppTemplateError(f"Projekt nemá manifest šablóny ({MANIFEST}) — webový frontend šablóny nemá kam pridať.")
+    if (target / "web").exists():
+        raise AppTemplateError("Projekt už má priečinok web/ — webový frontend sa nepridá druhý raz.")
+    # The project's manifest is the app as it is now — its AI, languages, name and initials, whatever changed since.
+    own = json.loads((target / MANIFEST).read_text(encoding="utf-8"))
+    ai = bool(own.get("ai"))
+    languages = tuple(own.get("languages") or ("sk",))
+    version = latest_kit_version(run)
+    values = scaffold_values(
+        name=name,
+        slug=slug,
+        auth_mode=auth_mode,
+        ai=ai,
+        ports=ports,
+        version=version,
+        languages=languages,
+        web_port=web_port,
+    )
+    files = {rel: target / rel for rel in WEB_TEMPLATE_FILES}
+    originals = {path: path.read_text(encoding="utf-8") if path.is_file() else None for path in files.values()}
+    try:
+        with tempfile.TemporaryDirectory(prefix="nex-app-kit-") as tmp:
+            _render(template, values, "--into", target, Path(tmp), run, fetch_kit, extra=("--add-web",))
+            # The web's manifest names the app exactly as the administration's does (its test compares them).
+            same_app = {k: own[k] for k in ("template", "name", "initials", "auth", "languages") if k in own}
+            (target / "web" / "app.manifest.json").write_text(
+                json.dumps({**same_app, "web": True}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            scaffold_package = json.loads((target / "web" / "package.json").read_text(encoding="utf-8"))
+            package, specs = with_template_packages(
+                json.loads(originals[files["frontend/package.json"]] or "{}"), scaffold_package
+            )
+            package, _raised = raise_for_kit_peers(package, kit_peers(Path(tmp) / "kit"), scaffold_package)
+        files["frontend/package.json"].write_text(json.dumps(package, indent=2, ensure_ascii=False) + "\n", "utf-8")
+        pyproject = originals[files["backend/pyproject.toml"]]
+        if pyproject is not None:
+            files["backend/pyproject.toml"].write_text(
+                with_kit_server(pyproject, values["kit_server"]) or pyproject, encoding="utf-8"
+            )
+        for frontend, extra_specs in (("frontend", specs), ("web", [])):
+            lock = run(
+                ["npm", "install", "--package-lock-only", "--no-audit", "--no-fund", *extra_specs],
+                cwd=str(target / frontend),
+            )
+            if lock.returncode != 0:
+                raise AppTemplateError(
+                    f"Webový frontend: zoznam balíkov sa nepodarilo pripraviť (npm install): {_npm_reason(lock)}"
+                )
+    except (AppTemplateError, OSError, ValueError) as exc:
+        shutil.rmtree(target / "web", ignore_errors=True)
+        for path, original in originals.items():
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(original, encoding="utf-8")
+        if isinstance(exc, AppTemplateError):
+            raise
+        raise AppTemplateError(f"Webový frontend šablóny sa nepodarilo pridať: {exc}") from exc
+    logger.info("Web frontend of the template %s (nex-app-kit v%s) added to %s", template, version, slug)
+    return version
