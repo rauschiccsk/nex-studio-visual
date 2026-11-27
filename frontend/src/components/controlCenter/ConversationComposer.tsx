@@ -17,6 +17,7 @@ import { usePoradcaHandoff } from "@/hooks/usePoradcaHandoff";
 import { FROM_PORADCA_LABEL, draftCameFromPoradca, handOffInstruction } from "@/lib/poradcaHandoff";
 import type { InputOwner } from "@/components/controlCenter/blockRecovery";
 import AttachFileButton from "@/components/controlCenter/AttachFileButton";
+import { usePasteAndDropUpload } from "@/components/controlCenter/usePasteAndDropUpload";
 import { withAttachedLine } from "@/components/controlCenter/privateFiles";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 
@@ -147,6 +148,15 @@ function ConversationComposer({
     setText,
     restored,
   });
+  // DEV-527: a screenshot by Ctrl+V or dropped on the row goes the way of „Priložiť súbor“.
+  const attachFiles = usePasteAndDropUpload({
+    versionId,
+    disabled: locked || sending,
+    onAttached: (lines) => {
+      dismissPoradca();
+      setText(withAttachedLine(text, lines));
+    },
+  });
 
   // DEV-298: the box holds Poradca's instruction — it stays his instruction when he edits it, until it goes out.
   const [upravIntent, setUpravIntent] = useState<boolean>(() => readUpravIntent(versionId));
@@ -276,9 +286,13 @@ function ConversationComposer({
           {primaryUprav ? UPRAV_INSTRUCTION_HINT : UPRAV_HINT}
         </p>
       )}
-      <div className="flex items-end gap-2">
+      <div
+        {...attachFiles.dropProps}
+        className={`flex items-end gap-2 rounded-lg ${attachFiles.dragging ? "ring-2 ring-[var(--color-accent-primary)]" : ""}`}
+      >
         <textarea
           data-draft="rozhovor"
+          onPaste={attachFiles.onPaste}
           lang="sk"
           spellCheck={true}
           ref={growRef}
@@ -306,6 +320,7 @@ function ConversationComposer({
           <AttachFileButton
             versionId={versionId}
             disabled={locked || sending}
+            uploader={attachFiles.uploader}
             onAttached={(line) => {
               dismissPoradca();
               setText(withAttachedLine(text, line));

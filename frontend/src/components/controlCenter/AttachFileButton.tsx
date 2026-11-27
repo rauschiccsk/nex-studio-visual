@@ -5,40 +5,28 @@
 // click: the backend stores the file in the project's `private/` (git never sees it) and returns the line that
 // says where it lies; this button puts that line into the message being written, so the agent gets the path
 // with the Manažér's own words. Used in the answer box and in the conversation — one wording, one behaviour.
+// DEV-527: the box may hand it its upload (`uploader`), so a pasted or dropped screenshot goes the same way.
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Loader2, Paperclip } from "lucide-react";
 
-import { uploadPrivateFileApi } from "@/services/api/projectFiles";
-import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import { ATTACH_HINT, ATTACH_LABEL, ATTACHING_LABEL } from "./privateFiles";
+import { usePrivateUpload, type PrivateUpload } from "./usePasteAndDropUpload";
 
 interface Props {
   versionId: string;
-  /** Receives the line for the message — where the agent finds the file. */
-  onAttached: (line: string) => void;
+  /** Receives the lines for the message — where the agent finds the files. */
+  onAttached: (lines: string) => void;
   disabled?: boolean;
+  /** DEV-527: the box's own upload (paste, drop) — the button then shows its progress and its error too. */
+  uploader?: PrivateUpload;
 }
 
-export default function AttachFileButton({ versionId, onAttached, disabled }: Props) {
+export default function AttachFileButton({ versionId, onAttached, disabled, uploader }: Props) {
   const input = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<HumanError | null>(null);
-
-  async function upload(file: File) {
-    setError(null);
-    setUploading(true);
-    try {
-      const stored = await uploadPrivateFileApi(versionId, file);
-      onAttached(stored.answer_line);
-    } catch (err: unknown) {
-      setError(humanizeApiError(err, "Súbor sa nepodarilo priložiť"));
-    } finally {
-      setUploading(false);
-      if (input.current) input.current.value = "";
-    }
-  }
+  const own = usePrivateUpload(versionId, onAttached);
+  const { upload, uploading, error, note } = uploader ?? own;
 
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
@@ -49,7 +37,7 @@ export default function AttachFileButton({ versionId, onAttached, disabled }: Pr
         data-testid="attach-file-input"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) void upload(file);
+          if (file) void upload([file]).finally(() => input.current && (input.current.value = ""));
         }}
       />
       <button
@@ -67,6 +55,7 @@ export default function AttachFileButton({ versionId, onAttached, disabled }: Pr
         {uploading ? ATTACHING_LABEL : ATTACH_LABEL}
       </button>
       <ErrorNote error={error} />
+      {note && <p className="max-w-xs text-right text-[11px] text-[var(--color-text-muted)]">{note}</p>}
     </div>
   );
 }

@@ -43,6 +43,7 @@ import {
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import AttachFileButton from "@/components/controlCenter/AttachFileButton";
+import { usePasteAndDropUpload } from "@/components/controlCenter/usePasteAndDropUpload";
 import { withAttachedLine } from "@/components/controlCenter/privateFiles";
 
 interface Props {
@@ -74,6 +75,15 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
     text,
     setText,
     restored,
+  });
+  // DEV-527: a screenshot by Ctrl+V or dropped on the row goes the way of „Priložiť súbor“ — before the early return.
+  const attachFiles = usePasteAndDropUpload({
+    versionId,
+    disabled: submitting,
+    onAttached: (lines) => {
+      dismissPoradca();
+      setText(withAttachedLine(text, lines));
+    },
   });
 
   const state = board?.state ?? null;
@@ -168,9 +178,13 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
         {fromPoradca && (
           <p className="text-[11px] font-medium text-[var(--color-accent-primary)]">{FROM_PORADCA_LABEL}</p>
         )}
-        <div className="flex items-center gap-2">
+        <div
+          {...attachFiles.dropProps}
+          className={`flex items-center gap-2 rounded-lg ${attachFiles.dragging ? "ring-2 ring-[var(--color-accent-primary)]" : ""}`}
+        >
           <textarea
             data-draft="odpoved"
+            onPaste={attachFiles.onPaste}
             lang="sk"
             spellCheck={true}
             ref={growRef}
@@ -203,6 +217,7 @@ export default function BlockRecoveryBar({ board, versionId, onBoard }: Props) {
           <AttachFileButton
             versionId={versionId}
             disabled={submitting}
+            uploader={attachFiles.uploader}
             onAttached={(line) => {
               dismissPoradca();
               setText(withAttachedLine(text, line));
