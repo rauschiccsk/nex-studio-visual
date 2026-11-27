@@ -9313,6 +9313,10 @@ export interface components {
             refusal?: string | null;
             /** Surfaces */
             surfaces: components["schemas"]["SurfaceRead"][];
+            /** Unsaved Work */
+            unsaved_work?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Warnings
              * @default []

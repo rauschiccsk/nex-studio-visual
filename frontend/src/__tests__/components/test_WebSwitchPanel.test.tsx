@@ -10,10 +10,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import WebSwitchPanel from "@/components/project/WebSwitchPanel";
-import { getWebSwitchApi, switchToWebApi, type WebSwitch } from "@/services/api/projects";
+import { commitGitApi, getGitStatusApi, getWebSwitchApi, switchToWebApi, type WebSwitch } from "@/services/api/projects";
 import { useAuthStore } from "@/store/authStore";
 
-vi.mock("@/services/api/projects", () => ({ getWebSwitchApi: vi.fn(), switchToWebApi: vi.fn() }));
+vi.mock("@/services/api/projects", () => ({
+  getWebSwitchApi: vi.fn(),
+  switchToWebApi: vi.fn(),
+  commitGitApi: vi.fn(),
+  discardGitApi: vi.fn(),
+  getGitStatusApi: vi.fn(),
+}));
 
 const APP: WebSwitch["surfaces"] = [
   { name: "app", label: "Aplikácia", directory: "frontend", service: "frontend", port: 10241, login: "username", address_suffix: "" },
@@ -146,5 +152,42 @@ describe("WebSwitchPanel — Frontendy projektu (DEV-522)", () => {
 
     await screen.findByRole("button", { name: "Pridať webový frontend" });
     expect(screen.queryByText(/najnovšiu verziu šablóny/)).not.toBeInTheDocument();
+  });
+
+  it("unsaved work that stops the add is saved right there, and then the add is offered (DEV-524)", async () => {
+    as("admin");
+    const sentence =
+      "V tom, čo pridanie webového frontendu zapisuje, sú neuložené zmeny (frontend/app.manifest.json) — ulož ich alebo zahoď tu, potom pridaj projektu webový frontend.";
+    const unsaved = { clean: false, dirty_count: 1, files: [{ path: "frontend/app.manifest.json", status: "M" }], truncated: false };
+    vi.mocked(getWebSwitchApi)
+      .mockResolvedValueOnce({ allowed: false, refusal: sentence, web_port: null, surfaces: APP, after: [], unsaved_work: unsaved, warnings: [] })
+      .mockResolvedValueOnce({ allowed: true, refusal: null, web_port: 10245, surfaces: APP, after: BOTH, unsaved_work: null, warnings: [] });
+    vi.mocked(commitGitApi).mockResolvedValue({ ok: true } as never);
+    vi.mocked(getGitStatusApi).mockResolvedValue({ clean: true, dirty_count: 0, files: [], truncated: false } as never);
+    render(<WebSwitchPanel projectId="p-1" isWeb={false} onTemplate onSwitched={vi.fn()} />);
+
+    expect(await screen.findByText(`Webový frontend sa pridať nedá: ${sentence}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Uložiť ich" }));
+
+    expect(await screen.findByRole("button", { name: "Pridať webový frontend" })).toBeInTheDocument();
+    expect(commitGitApi).toHaveBeenCalledWith("p-1");
+    expect(getWebSwitchApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("another refusal offers nothing to save", async () => {
+    as("admin");
+    vi.mocked(getWebSwitchApi).mockResolvedValue({
+      allowed: false,
+      refusal: "Projekt už bol nasadený do PROD — jeho typ a frontendy sa po založení nemenia.",
+      web_port: null,
+      surfaces: APP,
+      after: [],
+      unsaved_work: null,
+      warnings: [],
+    });
+    render(<WebSwitchPanel projectId="p-1" isWeb={false} onSwitched={vi.fn()} />);
+
+    await screen.findByText(/sa pridať nedá/);
+    expect(screen.queryByRole("button", { name: "Uložiť ich" })).not.toBeInTheDocument();
   });
 });

@@ -31,6 +31,7 @@ def _read(found: project_surfaces.WebSwitch) -> WebSwitchRead:
         web_port=found.web_port,
         surfaces=[SurfaceRead(**asdict(surface)) for surface in found.surfaces],
         after=[SurfaceRead(**asdict(surface)) for surface in found.after],
+        unsaved_work=found.unsaved_work,
     )
 
 

@@ -205,6 +205,9 @@ class WebSwitch:
     surfaces: tuple[Surface, ...]
     #: DEV-522: the frontends it would have after adding the web; empty when it cannot.
     after: tuple[Surface, ...] = ()
+    #: DEV-524: what is unsaved when that is the refusal — the answer of ``/git-status`` — so the panel offers
+    #: Uložiť / Zahodiť where the admin is; ``None`` for any other refusal.
+    unsaved_work: Optional[dict] = None
 
     @property
     def allowed(self) -> bool:
@@ -245,7 +248,13 @@ def web_switch(db: Session, project: Project, user: User) -> WebSwitch:
 
     unsaved = web_workspace.unsaved_work(project)
     if unsaved:
-        return refused(unsaved)
+        from backend.services import unsaved_work
+
+        try:
+            found = unsaved_work.status(project.source_path)
+        except (ValueError, OSError):
+            found = None
+        return WebSwitch(refusal=unsaved, web_port=None, surfaces=surfaces_of(project), unsaved_work=found)
 
     port = web_port_for(WEB, project.backend_port)
     try:

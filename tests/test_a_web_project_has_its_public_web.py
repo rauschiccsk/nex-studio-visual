@@ -552,8 +552,8 @@ def _switch(client, db_session, tmp_path, ws: Path, script_body: str = FAKE_ADD_
 
 def _unsaved_in(shown: str) -> str:
     return (
-        f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
-        "projektu, potom pridaj projektu webový frontend."
+        f"V tom, čo pridanie webového frontendu zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď tu, "
+        "potom pridaj projektu webový frontend."
     )
 
 

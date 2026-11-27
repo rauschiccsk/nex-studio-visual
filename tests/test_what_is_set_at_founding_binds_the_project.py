@@ -181,3 +181,38 @@ def test_nothing_else_changes_a_projects_type_or_sign_in_after_founding() -> Non
     )
     assert [place.rsplit(":", 1)[0] for place in found] == ["services/project_surfaces.py"], found
     assert sum(1 for _ in BACKEND.rglob("*.py")) > 100  # it read the backend, not an empty folder
+
+
+def test_unsaved_work_is_said_with_what_is_unsaved_so_the_admin_saves_it_there(client, db_session, monkeypatch):
+    """DEV-524 — orthodox-register 27.11.2026: the add stopped on the unsaved Vizuál and sent the admin to the page of a
+    new version. The preview says it in words of adding the web, and carries what is unsaved — the same answer as
+    ``/git-status`` — so the panel offers Uložiť / Zahodiť where the admin is."""
+    from backend.services import unsaved_work
+
+    project = _project(db_session, _user(db_session))
+    project.source_path = "/opt/projects/orthodox-register"
+    db_session.flush()
+    found = {
+        "clean": False,
+        "dirty_count": 3,
+        "files": [{"path": "frontend/app.manifest.json", "status": "M"}],
+        "truncated": False,
+    }
+    sentence = web_workspace.unsaved_sentence(["frontend/app.manifest.json", "frontend/package.json"])
+    monkeypatch.setattr(web_workspace, "unsaved_work", lambda _p: sentence)
+    monkeypatch.setattr(unsaved_work, "status", lambda _path: found)
+    _as(db_session, _admin(db_session))
+
+    preview = client.get(f"/api/v1/projects/{project.id}/web-switch").json()
+
+    assert (preview["allowed"], preview["refusal"], preview["unsaved_work"]) == (False, sentence, found)
+    assert "prepnutie" not in sentence and "stránke novej verzie" not in sentence
+    assert sentence.startswith("V tom, čo pridanie webového frontendu zapisuje, sú neuložené zmeny (")
+
+
+def test_a_refusal_for_anything_else_carries_no_unsaved_work(client, db_session):
+    owner = _user(db_session)
+    project = _project(db_session, owner)
+    _as(db_session, owner)
+
+    assert client.get(f"/api/v1/projects/{project.id}/web-switch").json()["unsaved_work"] is None

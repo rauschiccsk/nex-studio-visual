@@ -31,6 +31,8 @@ class WebSwitchRead(BaseModel):
     surfaces: list[SurfaceRead]
     #: DEV-522: the frontends it would have after adding the web — empty when it cannot.
     after: list[SurfaceRead] = []
+    #: DEV-524: what is unsaved when that is the refusal (the answer of ``/git-status``); ``None`` otherwise.
+    unsaved_work: Optional[dict] = None
     #: DEV-161: after a switch — what finished only partly in the project's workspace (Slovak, for the Manažér).
     warnings: list[str] = []
 

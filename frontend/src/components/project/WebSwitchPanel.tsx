@@ -14,8 +14,9 @@ import { useEffect, useState } from "react";
 import { Globe, Loader2 } from "lucide-react";
 
 import ErrorNote from "@/components/common/ErrorNote";
+import UnsavedWorkPanel from "@/components/controlCenter/UnsavedWorkPanel";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
-import { getWebSwitchApi, switchToWebApi, type WebSwitch } from "@/services/api/projects";
+import { getWebSwitchApi, switchToWebApi, type GitStatus, type WebSwitch } from "@/services/api/projects";
 import { isAdminAccount } from "@/services/permissions";
 import { useAuthStore } from "@/store/authStore";
 
@@ -57,6 +58,8 @@ export default function WebSwitchPanel({ projectId, isWeb, onTemplate = false, o
   const [adding, setAdding] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<HumanError | null>(null);
+  // DEV-524: asked again once unsaved work blocking the add is saved or discarded.
+  const [asked, setAsked] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +69,7 @@ export default function WebSwitchPanel({ projectId, isWeb, onTemplate = false, o
     return () => {
       cancelled = true;
     };
-  }, [projectId, isWeb]);
+  }, [projectId, isWeb, asked]);
 
   const addWeb = async () => {
     setAdding(true);
@@ -97,6 +100,19 @@ export default function WebSwitchPanel({ projectId, isWeb, onTemplate = false, o
         <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
           Webový frontend sa pridať nedá: {preview.refusal}
         </p>
+      )}
+      {preview && admin && !isWeb && !preview.allowed && preview.unsaved_work && (
+        <div className="mt-2">
+          <UnsavedWorkPanel
+            refusal={{
+              message: preview.refusal ?? "",
+              projectId,
+              status: preview.unsaved_work as unknown as GitStatus,
+            }}
+            resolvedText="Neuložené zmeny sú vyriešené — webový frontend sa teraz dá pridať."
+            onResolved={() => setAsked((n) => n + 1)}
+          />
+        </div>
       )}
       {preview?.allowed && admin && !isWeb && (
         <div className="mt-3 rounded-lg border border-[var(--color-border-default)] p-3">

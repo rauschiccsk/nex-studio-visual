@@ -15,7 +15,15 @@ import type { UnsavedWorkRefusal } from "./unsavedWork";
 
 const NOTE = "rounded-lg border border-[var(--color-state-error-bg)] bg-[var(--color-state-error-bg)] px-3 py-2";
 
-export default function UnsavedWorkPanel({ refusal }: { refusal: UnsavedWorkRefusal }) {
+interface Props {
+  refusal: UnsavedWorkRefusal;
+  /** DEV-524: the sentence once the work is saved or discarded — by default the one of founding a version. */
+  resolvedText?: string;
+  /** DEV-524: called once the work is saved or discarded — the screen asks again (adding the web frontend). */
+  onResolved?: () => void;
+}
+
+export default function UnsavedWorkPanel({ refusal, resolvedText, onResolved }: Props) {
   const [status, setStatus] = useState(refusal.status);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<HumanError | null>(null);
@@ -27,7 +35,7 @@ export default function UnsavedWorkPanel({ refusal }: { refusal: UnsavedWorkRefu
   if (resolved) {
     return (
       <p role="status" className="text-xs text-[var(--color-state-success-fg)]">
-        Neuložené zmeny sú vyriešené — klikni znova a verzia sa založí.
+        {resolvedText ?? "Neuložené zmeny sú vyriešené — klikni znova a verzia sa založí."}
       </p>
     );
   }
@@ -44,6 +52,7 @@ export default function UnsavedWorkPanel({ refusal }: { refusal: UnsavedWorkRefu
       const fresh = await getGitStatusApi(refusal.projectId);
       if (fresh.clean) {
         setResolved(true);
+        onResolved?.();
         return;
       }
       setStatus(fresh);

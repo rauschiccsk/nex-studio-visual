@@ -121,10 +121,16 @@ def unsaved_work(project: Project) -> Optional[str]:
         return NOT_A_REPOSITORY
     if tree["clean"]:
         return None
-    shown = ", ".join(entry["path"] for entry in tree["files"][:5]) + (" …" if tree["dirty_count"] > 5 else "")
+    return unsaved_sentence([entry["path"] for entry in tree["files"]], tree["dirty_count"])
+
+
+def unsaved_sentence(paths: list[str], count: int | None = None) -> str:
+    """DEV-524 — the sentence of unsaved work in what adding the web writes; the panel offers Uložiť / Zahodiť under it.
+    It used to speak of „prepnutie“ and send the admin to the page of a new version."""
+    shown = ", ".join(paths[:5]) + (" …" if (count if count is not None else len(paths)) > 5 else "")
     return (
-        f"V tom, čo prepnutie zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď na stránke novej verzie "
-        "projektu, potom pridaj projektu webový frontend."
+        f"V tom, čo pridanie webového frontendu zapisuje, sú neuložené zmeny ({shown}) — ulož ich alebo zahoď tu, "
+        "potom pridaj projektu webový frontend."
     )
 
 
