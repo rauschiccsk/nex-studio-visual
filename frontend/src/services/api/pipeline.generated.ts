@@ -2233,6 +2233,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Guide
+         * @description Whether the app has Sprievodca on and whether it can be switched now — nothing changes.
+         */
+        get: operations["read_guide_api_v1_projects__project_id__guide_get"];
+        /**
+         * Switch Guide
+         * @description Turn Sprievodca on or off — the manifest is written and committed; 409 with the reason when it cannot be now.
+         */
+        put: operations["switch_guide_api_v1_projects__project_id__guide_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/nexshared-status": {
         parameters: {
             query?: never;
@@ -5915,6 +5939,35 @@ export interface components {
              * @description The repository URL that was not found.
              */
             repo_url: string;
+        };
+        /**
+         * GuideSwitchRead
+         * @description DEV-536 — Sprievodca of the project's app: whether it is on and whether it can be switched now.
+         */
+        GuideSwitchRead: {
+            /** Applies */
+            applies: boolean;
+            /** Kit Version */
+            kit_version?: string | null;
+            /** Needed */
+            needed: string;
+            /** On */
+            on: boolean;
+            /** Refusal */
+            refusal?: string | null;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /**
+         * GuideSwitchRequest
+         * @description DEV-536 — turn Sprievodca on or off.
+         */
+        GuideSwitchRequest: {
+            /** On */
+            on: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -13299,6 +13352,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_guide_api_v1_projects__project_id__guide_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuideSwitchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_guide_api_v1_projects__project_id__guide_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuideSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuideSwitchRead"];
                 };
             };
             /** @description Validation Error */

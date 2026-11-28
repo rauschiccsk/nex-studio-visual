@@ -65,6 +65,7 @@ from backend.schemas.feat import FeatCreate
 from backend.schemas.task import TaskCreate
 from backend.services import (
     action_labels,
+    app_guide,
     app_languages,
     app_template,
     back_to_priprava,
@@ -1773,6 +1774,15 @@ def _check_template_frame_standard(proj_root: Path) -> Optional[str]:
     return "; ".join(problems) or None
 
 
+def _check_guide_standard(proj_root: Path) -> Optional[str]:
+    """DEV-536: aplikácia na šablóne so zapnutým Sprievodcom (nex-app-kit 0.24.0+) má úplný katalóg krokov. Projekt bez
+    šablóny, s vypnutým Sprievodcom alebo na staršej šablóne nemá čo dopĺňať."""
+    if not (Path(proj_root) / app_guide.MANIFEST).is_file():
+        return None
+    problems = check_guide_catalog(Path(proj_root), app_languages.kit_version(str(proj_root)))
+    return "; ".join(problems) or None
+
+
 #: Povinné celoICC štandardy, ktoré MUSIA byť v rozsahu verzie od Prípravy — nie objavené pri vydaní.
 #:
 #: ICCINT-125. Brána vydania zostáva ako POSLEDNÁ POISTKA a nezoslabuje sa: sonda funguje správne a
@@ -1806,6 +1816,21 @@ ICC_STANDARDS: tuple[IccStandard, ...] = (
             "SettingDefinition — postup je v zručnosti sablona-aplikacie. Kokpit pred Overením overí, že rám je celý."
         ),
         check=_check_template_frame_standard,
+    ),
+    IccStandard(
+        key="sprievodca",
+        name="Sprievodca v aplikácii",
+        scope_sentence=(
+            "Sprievodca — aplikácia stojí na šablóne so Sprievodcom (nex-app-kit 0.24.0+, „Ako urobiť“ a vedenie krok "
+            "za krokom, kliká vždy človek), ale jej katalóg krokov nie je úplný. Je to RIADNA POLOŽKA tejto verzie: "
+            "Špecifikácia má časť „Ciele používateľov“ — čo chce človek v aplikácii urobiť, každý cieľ s krokmi cez "
+            "obrazovky a tlačidlá, ako ich uvidí —, Návrh z nich spraví kroky katalógu a Vizuál aj Programovanie ich "
+            "dajú do aplikácie: katalóg vo frontend/src/guide.ts (export const guide: GuideCatalog, app.ts ho dáva "
+            "rámu), každá dôležitá akcia má krok, každá obrazovka z ľavého panela aspoň jeden, tlačidlo kroku nesie "
+            "{...guideTarget(id)} a kontroly isDone/isAvailable sa pýtajú rozhrania aplikácie — postup je v zručnosti "
+            "sablona-aplikacie. Kokpit pred Overením overí, že katalóg je úplný."
+        ),
+        check=_check_guide_standard,
     ),
 )
 
@@ -10147,6 +10172,153 @@ def check_template_frame(proj_root: Path, template: str) -> list[str]:
     return list(dict.fromkeys(problems))  # a path answered by GET and POST is one sentence
 
 
+# ── DEV-536: Sprievodca's catalog of steps ───────────────────────────────────────────────────────────────────────────
+# An app on nex-app-kit 0.24.0+ has Sprievodca unless its manifest says "guide": false; it guides only through the
+# app's catalog of steps (frontend/src/guide.ts). Director 28.11.2026: the cockpit adds the layer to the app — so a
+# catalog that lacks a screen, a step whose button is nowhere, or a button pointing at no step is said before anything
+# is built for Overenie, one sentence each.
+
+_GUIDE_STEP_ID_RE = re.compile(r"""\bid\s*:\s*["']([^"']+)["']""")
+_GUIDE_TARGET_RE = re.compile(r"""\btarget\s*:\s*["']([^"']+)["']""")
+#: A step's screen written as text: ``path: () => "/areas"``, ``path: (s) => `/areas/${s}` `` — its literal start.
+_GUIDE_PATH_RE = re.compile(r"""\bpath\s*:\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*[`"']([^`"'$]*)""")
+_GUIDE_MARKER_RE = re.compile(r"""guideTarget\(\s*["']([^"']+)["']\s*\)|data-guide\s*=\s*\{?\s*["']([^"']+)["']""")
+_GUIDE_EXPORT_RE = re.compile(r"""\bexport\s+const\s+guide\b""")
+_GUIDE_HANDED_RE = re.compile(r"""defineApp\s*\([^;]*\bguide\b""", re.DOTALL)
+
+
+def _object_spans(text: str) -> list[tuple[int, int]]:
+    """The ``{ … }`` spans of a TS source (strings and template literals skipped), innermost first."""
+    spans, stack, quote, i = [], [], "", 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'`":
+            quote = ch
+        elif ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            spans.append((stack.pop(), i + 1))
+        i += 1
+    return spans
+
+
+def _top_level(text: str, span: tuple[int, int], spans: list[tuple[int, int]]) -> str:
+    """The text of the object *span* with every object nested in it blanked — only its own keys stay."""
+    start, end = span
+    chars = list(text[start + 1 : end - 1])
+    for inner_start, inner_end in spans:
+        if start < inner_start and inner_end < end:
+            for k in range(inner_start - start - 1, inner_end - start - 1):
+                chars[k] = " "
+    return "".join(chars)
+
+
+def _guide_steps(source: str) -> list[dict[str, Optional[str]]]:
+    """The steps of a catalog source: every object with a quoted ``id`` and an ``isDone`` of its own."""
+    spans = _object_spans(source)
+    steps = []
+    for span in sorted(spans):
+        own = _top_level(source, span, spans)
+        found = _GUIDE_STEP_ID_RE.search(own)
+        if not found or not re.search(r"\bisDone\b", own):
+            continue
+        target = _GUIDE_TARGET_RE.search(own)
+        path = _GUIDE_PATH_RE.search(own)
+        steps.append(
+            {
+                "id": found.group(1),
+                "target": target.group(1) if target else None,
+                "path": path.group(1) if path else None,
+            }
+        )
+    return steps
+
+
+def _screen_of(path: str) -> str:
+    """A screen's address without its trailing slash (``/areas/`` → ``/areas``; ``/`` stays)."""
+    return path.rstrip("/") or "/"
+
+
+def check_guide_catalog(proj_root: Path, kit_version: Optional[str]) -> list[str]:
+    """DEV-536 (STATIC, pure) — what is wrong with Sprievodca's catalog of steps in an app on the template, one Slovak
+    sentence per problem; ``[]`` when it is whole, when Sprievodca is off (``"guide": false``) or when the app builds
+    with a release of nex-app-kit that has no Sprievodca (*kit_version* below 0.24.0)."""
+    root = Path(proj_root)
+    try:
+        manifest = app_guide.read_manifest(root)
+    except (OSError, ValueError):
+        return []  # the frame check says what is wrong with the manifest
+    if not app_guide.is_on(manifest) or not app_guide.kit_knows_guide(kit_version):
+        return []
+    catalog_path = root / app_guide.CATALOG_FILE
+    try:
+        catalog = _strip_ts_comments(catalog_path.read_text(encoding="utf-8"))
+    except OSError:
+        return [
+            f"chýba katalóg krokov Sprievodcu — {app_guide.CATALOG_FILE} s `export const guide: GuideCatalog` "
+            "(zručnosť sablona-aplikacie)"
+        ]
+    problems: list[str] = []
+    if not _GUIDE_EXPORT_RE.search(catalog):
+        problems.append(
+            f"{app_guide.CATALOG_FILE} nevydáva katalóg — `export const guide: GuideCatalog = {{ steps: [...] }}`"
+        )
+    frontend = [(p, _strip_ts_comments(t)) for p, t in _sources(root / "frontend" / "src", ("*.tsx", "*.ts"))]
+    app_source = next((body for p, body in frontend if p == root / "frontend" / "src" / "app.ts"), "")
+    if not _GUIDE_HANDED_RE.search(app_source):
+        problems.append("frontend/src/app.ts nedáva katalóg rámu — `defineApp(data, { …, guide })`")
+    steps = _guide_steps(catalog)
+    if not steps:
+        problems.append(
+            f"katalóg krokov Sprievodcu ({app_guide.CATALOG_FILE}) nemá ani jeden krok — každá dôležitá akcia "
+            "aplikácie má svoj krok"
+        )
+        return problems
+    markers = {
+        found
+        for path, body in frontend
+        if path != catalog_path
+        for pair in _GUIDE_MARKER_RE.findall(body)
+        for found in pair
+        if found
+    }
+    ids = [step["id"] for step in steps]
+    for duplicate in sorted({i for i in ids if ids.count(i) > 1}):
+        problems.append(f"krok Sprievodcu „{duplicate}“ je v katalógu dvakrát")
+    wanted = set()
+    for step in steps:
+        button = step["target"] or step["id"]
+        wanted.add(button)
+        if button not in markers:
+            problems.append(
+                f'krok Sprievodcu „{step["id"]}“ nemá tlačidlo — žiadny prvok s {{...guideTarget("{button}")}} '
+                "vo frontend/src"
+            )
+        if step["path"] is None:
+            problems.append(
+                f'krok Sprievodcu „{step["id"]}“ nepíše adresu obrazovky ako text — `path: () => "/…"` alebo '
+                "`path: (s) => `/…/${s}``"
+            )
+    for stray in sorted(markers - wanted):
+        problems.append(f'tlačidlo s guideTarget("{stray}") ukazuje na krok, ktorý katalóg nemá')
+    screens = {_screen_of(step["path"]) for step in steps if step["path"] is not None}
+    for entry in manifest.get("nav") or []:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            continue
+        screen = _screen_of(entry["path"])
+        if not any(s == screen or s.startswith(screen.rstrip("/") + "/") for s in screens):
+            problems.append(
+                f"obrazovka „{entry.get('label', screen)}“ ({screen}) z ľavého panela nemá v katalógu Sprievodcu "
+                "ani jeden krok"
+            )
+    return problems
+
+
 def _bare_version(version_number: str) -> str:
     """Version number without a leading ``v`` — the normalisation the served list + the completing version are
     both compared under (``"v1.0.0"`` and ``"1.0.0"`` → ``"1.0.0"``)."""
@@ -10294,6 +10466,21 @@ def _smoke_compose_target(
                 compose,
                 uat_provisioner.identify_service_roles(services),
                 (False, "Rám šablóny aplikácie nie je celý: " + "; ".join(problems) + "."),
+            )
+        # DEV-536: Sprievodca, when on, guides through a whole catalog of steps — said before anything is built.
+        root = claude_agent.PROJECTS_ROOT / project_slug
+        guide_problems = check_guide_catalog(root, app_languages.kit_version(str(root)))
+        if guide_problems:
+            logger.warning("smoke FAIL (slug=%s) — Sprievodca's catalog is not whole: %s", project_slug, guide_problems)
+            return (
+                compose,
+                uat_provisioner.identify_service_roles(services),
+                (
+                    False,
+                    "Katalóg krokov Sprievodcu nie je úplný: "
+                    + "; ".join(guide_problems)
+                    + ". Pri špeciálnej aplikácii sa Sprievodca dá vypnúť na stránke projektu.",
+                ),
             )
     # DEV-163: a Web project has a service for every frontend (the charter's contract: `frontend` and `web`). One
     # that is missing is said by its name before anything is built — the web would otherwise be skipped silently.

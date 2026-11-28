@@ -1,11 +1,11 @@
 ---
 name: sablona-aplikacie
-description: Projekt na šablóne aplikácie (nex-app-kit) — kam pridať obrazovku, položku menu, nastavenie, cestu servera, tabuľku, rolu agenta a odpovede náhľadu bez zmeny rámu. Použi pri každej obrazovke či funkcii takého projektu.
+description: Projekt na šablóne aplikácie (nex-app-kit) — kam pridať obrazovku, položku menu, nastavenie, cestu servera, tabuľku, rolu agenta, krok Sprievodcu a odpovede náhľadu bez zmeny rámu. Použi pri každej obrazovke či funkcii takého projektu.
 ---
 
 # Šablóna aplikácie — pridávam len svoje
 
-Rám (ľavý panel, prihlásenie, Ako začať, Aktualizácie, Nastavenia, štandardné rozhranie servera, tabuľky `kit_*`)
+Rám (ľavý panel, prihlásenie, Ako začať či Ako urobiť so Sprievodcom, Aktualizácie, Nastavenia, štandardné rozhranie servera, tabuľky `kit_*`)
 je z balíka nex-app-kit. Aplikácia ho **používa**, nemení. Čo sa smie meniť, je len v krokoch nižšie; všetko ostatné
 vo `frontend/src/App.tsx`, `frontend/src/main.tsx`, `frontend/src/preview/`, `backend/app/kit.py`, `backend/app/main.py`
 a `docker-compose.yml` ostáva v tvare z kostry.
@@ -23,6 +23,52 @@ a `docker-compose.yml` ostáva v tvare z kostry.
    skrytej obrazovky chráni aj tak server.
 5. Stránka volá server klientom z `nex-shared`:
    `createApiClient({ baseUrl: "", apiPrefix: "/api/v1", getToken: () => null })` — relácia je cookie, ide sama.
+6. Obrazovka dostane krok Sprievodcu (sekcia nižšie) — aspoň jeden, a každá jej dôležitá akcia svoj.
+
+## Krok Sprievodcu (nex-app-kit od 0.24.0)
+Sprievodca vedie človeka k cieľu len cez kroky katalógu vo `frontend/src/guide.ts`; kliká vždy človek. Kroky vychádzajú
+z časti „Ciele používateľov“ Špecifikácie.
+1. Krok do katalógu — texty sú kľúče textov aplikácie (`src/locales`), `id` malé písmená, číslice, bodky:
+   ```ts
+   import type { GuideCatalog } from "nex-app-kit";
+   import { api } from "./api";
+
+   export const guide: GuideCatalog = {
+     steps: [
+       {
+         id: "area.create",
+         title: "guide.area.create.title",    // „Založiť oblasť“
+         hint: "guide.area.create.hint",      // jedna veta: „Kliknite Nová oblasť, zadajte názov a uložte.“
+         screen: "guide.area.create.screen",  // „Oblasti“
+         path: () => "/areas",
+         isDone: async () => (await api.areas()).length > 0,
+       },
+       {
+         id: "area.upload",
+         title: "guide.area.upload.title",
+         hint: "guide.area.upload.hint",
+         screen: "guide.area.upload.screen",
+         subject: "area",                     // krok na jednom objekte — Sprievodca vyberie ktorom
+         requires: ["area.create"],
+         path: (id) => `/areas/${id}`,
+         isAvailable: async (id) => Boolean(id),
+         isDone: async (id) => (await api.areaFiles(id!)).length > 0,
+       },
+     ],
+     subjects: { area: { list: async () => (await api.areas()).map((a) => ({ id: a.id, label: a.name })) } },
+   };
+   ```
+2. Tlačidlo kroku na obrazovke: `<Button {...guideTarget("area.create")}>` (`guideTarget` z `nex-app-kit`); iný prvok
+   než `id` kroku menuje `target: "<data-guide>"`.
+3. `path` píš priamo ako text (`() => "/areas"`, `` (id) => `/areas/${id}` ``) — kontrola ho inak nevidí. `isDone`
+   a `isAvailable` sa pýtajú rozhrania aplikácie (nie stavu obrazovky) a odpovedajú do 5 s.
+4. Kľúč `guide` v `frontend/app.manifest.json` nepíšeš — Sprievodcu vypína kokpit na stránke projektu.
+
+**Kontrola katalógu (pred Overením, keď je Sprievodca zapnutý)** — každý problém jednou vetou, oprav všetky naraz:
+`frontend/src/guide.ts` je a vydáva `guide`; `app.ts` ho dáva v `defineApp`; katalóg má aspoň jeden krok a žiadne `id`
+dvakrát; každý krok má tlačidlo s `guideTarget` (alebo `data-guide`) vo `frontend/src` a adresu ako text; žiadne
+tlačidlo neukazuje na krok, ktorý katalóg nemá; každá obrazovka z ľavého panela (`nav`) má krok, ktorého adresa je
+ona alebo pod ňou.
 
 ## Vlastné nastavenie (Nastavenia → Systém)
 1. `backend/app/kit.py`: `SETTINGS = [SettingDefinition(key="search_limit", default="20", value_type="int",

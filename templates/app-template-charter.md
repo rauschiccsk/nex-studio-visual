@@ -26,3 +26,13 @@ povie, prečo nemusí: `Copy of server data: none — …` či `Copy of server d
 dôvodom za pomlčkou. Obrazovka si nedrží vlastnú kópiu údaja, ktorý ukazuje aj iná obrazovka.
 Stráž `frontend/src/test/shared-copies.test.ts` nevypínaš ani neobchádzaš. Audítor: zmena na jednej obrazovke, po
 ktorej iná ukazuje starý údaj, kým sa stránka neobnoví, je **FAIL**.
+
+**Sprievodca (nex-app-kit od 0.24.0; DEV-536)** — „Ako urobiť“ a vedenie krok za krokom sú rámu; aplikácia mu dáva
+**katalóg krokov** vo `frontend/src/guide.ts` (`export const guide: GuideCatalog`, `app.ts` ho dáva rámu v
+`defineApp(data, { …, guide })`). Kliká vždy človek; Sprievodca vedie len cez kroky katalógu. Špecifikácia má časť
+**„Ciele používateľov“** — čo chce človek v aplikácii urobiť —, a z nej sú kroky: **každá dôležitá akcia má krok, každá
+obrazovka z ľavého panela aspoň jeden**, tlačidlo kroku nesie `{...guideTarget("<id>")}` a kontroly `isDone`
+a `isAvailable` sa pýtajú rozhrania aplikácie (postup a vzor v zručnosti `sablona-aplikacie`). Nová obrazovka či akcia
+prichádza aj s krokom. Kľúč `guide` v manifeste mení len kokpit (vypínač na stránke projektu) — nepíšeš ho. Kokpit pred
+Overením overí, že katalóg je úplný; Audítor: obrazovka alebo dôležitá akcia bez kroku, či krok, ktorého `isDone`
+nespozná hotovú vec, je **FAIL**.

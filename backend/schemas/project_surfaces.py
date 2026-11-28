@@ -41,3 +41,24 @@ class WebAddRequest(BaseModel):
     """DEV-522: adding the web frontend needs the reason — it is kept with the change."""
 
     reason: Optional[str] = None
+
+
+class GuideSwitchRead(BaseModel):
+    """DEV-536 — Sprievodca of the project's app: whether it is on and whether it can be switched now."""
+
+    #: The project is on the app template — only there the app has Sprievodca.
+    applies: bool
+    on: bool
+    #: Why it cannot be switched now; ``None`` = it can.
+    refusal: Optional[str] = None
+    #: The release of nex-app-kit the project builds with, and the one Sprievodca needs.
+    kit_version: Optional[str] = None
+    needed: str
+    #: After a switch — what finished only partly (a push that did not go through).
+    warnings: list[str] = []
+
+
+class GuideSwitchRequest(BaseModel):
+    """DEV-536 — turn Sprievodca on or off."""
+
+    on: bool

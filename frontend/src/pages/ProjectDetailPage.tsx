@@ -25,6 +25,7 @@ import { useAuthStore } from "@/store/authStore";
 import { humanizeApiError, type HumanError } from "@/services/apiError";
 import ErrorNote from "@/components/common/ErrorNote";
 import ProjectSettingsSection from "@/components/project/ProjectSettingsSection";
+import GuideSwitchPanel from "@/components/project/GuideSwitchPanel";
 import WebSwitchPanel from "@/components/project/WebSwitchPanel";
 import type { ProjectRead, UserRead } from "@/types";
 import type { Version } from "@/types/version";
@@ -506,6 +507,11 @@ export default function ProjectDetailPage() {
           onTemplate={Boolean(project.template)}
           onSwitched={() => void getProjectApi(project.id).then(setProject)}
         />
+      )}
+
+      {/* DEV-536: Sprievodca of an app on the template — on by default, switched off only for a special app. */}
+      {project.template && (
+        <GuideSwitchPanel projectId={project.id} canEdit={mayOperateProject(user, project.created_by)} />
       )}
 
       {/* DEV-156: code nobody uses that earlier versions left behind — Verifikácia stops the new; the old is offered here. */}
